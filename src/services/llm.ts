@@ -4,6 +4,12 @@ import './providers.ts'
 // opencode 를 감싸는 서비스 — 위층(세션·UI)은 이 ctx.llm 키만 알고 opencode 를 직접 모른다.
 // 나중에 엔진을 바꾸더라도 이 서비스만 교체하면 된다 (Cordis: 서비스는 키로 찾는다).
 
+declare module 'cordis' {
+  interface Context {
+    llm: LlmService
+  }
+}
+
 export interface ChatResult {
   ok: boolean
   text?: string

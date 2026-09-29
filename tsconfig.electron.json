@@ -1,15 +1,15 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
+    "module": "ES2022",
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx"
+    "rewriteRelativeImportExtensions": true,
+    "outDir": "dist-electron",
+    "rootDir": "."
   },
-  "include": ["src", "shared", "electron", "renderer"]
+  "include": ["electron", "src/services", "shared"]
 }
