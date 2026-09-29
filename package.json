@@ -1,0 +1,18 @@
+{
+  "name": "litecode",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "폐쇄망 원클릭 code assistant — opencode 를 엔진으로, Cordis 를 플러그인 뼈대로 쓴다",
+  "scripts": {
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "cordis": "^4.0.0-rc.10"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.6.0"
+  }
+}
