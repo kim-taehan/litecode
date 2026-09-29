@@ -26,8 +26,10 @@ function bootstrap(ctx: Context): void {
   })
 
   ipcMain.handle(Channel.LIST_PROVIDERS, async () => ctx.providers.all())
-  ipcMain.handle(Channel.SEND_MESSAGE, async (_event, providerId: string, modelId: string, prompt: string) =>
-    ctx.llm.chat(providerId, modelId, prompt),
+  ipcMain.handle(
+    Channel.SEND_MESSAGE,
+    async (_event, providerId: string, modelId: string, prompt: string, sessionId?: string) =>
+      ctx.llm.chat(providerId, modelId, prompt, sessionId),
   )
 }
 bootstrap.inject = ['providers', 'llm']

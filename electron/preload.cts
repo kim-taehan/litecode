@@ -11,8 +11,8 @@ const Channel = {
 
 const bridge: LitecodeBridge = {
   listProviders: () => ipcRenderer.invoke(Channel.LIST_PROVIDERS),
-  sendMessage: (providerId, modelId, prompt) =>
-    ipcRenderer.invoke(Channel.SEND_MESSAGE, providerId, modelId, prompt),
+  sendMessage: (providerId, modelId, prompt, sessionId) =>
+    ipcRenderer.invoke(Channel.SEND_MESSAGE, providerId, modelId, prompt, sessionId),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

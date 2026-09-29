@@ -8,6 +8,8 @@ interface ChatMessage {
 
 interface Session {
   id: string
+  /** opencode 세션 id — 첫 메시지를 보낼 때 생기고, 그 뒤로는 계속 재사용한다 */
+  opencodeSessionId?: string
   title: string
   messages: ChatMessage[]
 }
@@ -52,9 +54,10 @@ export function App() {
       messages: [...session.messages, { role: 'user', text: prompt }],
     }))
 
-    const result = await window.litecode.sendMessage(provider.id, model.id, prompt)
+    const result = await window.litecode.sendMessage(provider.id, model.id, prompt, active.opencodeSessionId)
     updateActive((session) => ({
       ...session,
+      opencodeSessionId: result.sessionId ?? session.opencodeSessionId,
       messages: [
         ...session.messages,
         { role: 'assistant', text: result.ok ? (result.text ?? '') : `⚠️ ${result.error}` },

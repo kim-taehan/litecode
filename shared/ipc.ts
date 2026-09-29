@@ -14,7 +14,8 @@ export const Channel = {
 
 export interface LitecodeBridge {
   listProviders(): Promise<ProviderConfig[]>
-  sendMessage(providerId: string, modelId: string, prompt: string): Promise<ChatResult>
+  /** sessionId 를 안 주면 opencode 세션을 새로 만든다 — 결과의 sessionId 를 다음 호출에 넘긴다 */
+  sendMessage(providerId: string, modelId: string, prompt: string, sessionId?: string): Promise<ChatResult>
 }
 
 declare global {
