@@ -1,7 +1,9 @@
 node_modules/
-dist/
+/dist/
 dist-electron/
 *.log
 .DS_Store
 _workspace/
 _workspace_*/
+build/vendor/
+release/

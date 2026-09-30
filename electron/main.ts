@@ -5,6 +5,7 @@ import { Context } from 'cordis'
 import { ProviderRegistry, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService } from '../src/services/llm.ts'
 import { EngineService } from '../src/services/engine.ts'
+import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { Channel } from '../shared/ipc.ts'
 import { canSealKeys } from './keyStorage.ts'
@@ -48,6 +49,8 @@ ctx.plugin(EngineService, {
   configDir: path.join(userData, 'opencode'),
   db: path.join(userData, 'opencode.db'),
   pidFile: path.join(userData, 'opencode-server.json'),
+  // 설치본에는 opencode·rg 가 실려 있다 (electron-builder.yml extraResources). 개발 실행의 resourcesPath 는 electron 배포물 자리라 넘기지 않는다
+  bundled: app.isPackaged ? bundledPaths(process.resourcesPath) : undefined,
 })
 ctx.plugin(LlmService)
 ctx.plugin(ProjectsService, { file: path.join(userData, 'projects.json') })
@@ -127,7 +130,8 @@ function createWindow(): void {
   if (devServerUrl) {
     void win.loadURL(devServerUrl)
   } else {
-    void win.loadFile(path.join(__dirname, '../dist/renderer/index.html'))
+    // __dirname 은 dist-electron/electron — vite 는 <root>/dist/renderer 에 쓴다 (설치본에선 app.asar 안의 같은 자리)
+    void win.loadFile(path.join(__dirname, '../../dist/renderer/index.html'))
   }
 }
 

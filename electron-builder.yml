@@ -1,0 +1,46 @@
+# electron-builder 설정 — 폐쇄망 PC 에 설치본 하나로 들어가게 opencode·rg 를 싣는다 (closed-code/desktop 설정을 옮겼다).
+# 코드 서명·공증은 없다. mac 은 build/afterPack.cjs 가 ad-hoc 서명만 건다.
+# Electron 바이너리는 ~/Library/Caches/electron 의 electron-v33.4.11-<os>-<arch>.zip 을 쓴다 (이 머신은 electron 다운로드가 막혀 있다).
+appId: com.litecode.desktop
+productName: litecode
+
+directories:
+  output: release
+  buildResources: build
+
+afterPack: build/afterPack.cjs
+
+# 컴파일된 메인(dist-electron) + 렌더러 번들(dist/renderer) + 매니페스트. 런타임 의존성(cordis 등)은 electron-builder 가 넣는다
+files:
+  - dist-electron/**/*
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+asar: true
+
+# 받는 것은 scripts/fetch-opencode.mjs (build/vendor/ 는 gitignore). 런타임 자리는 src/services/opencodeBinary.ts bundledPaths:
+#   mac  Contents/Resources/opencode/opencode · Contents/Resources/rg/rg
+#   win  resources/opencode/opencode.exe      · resources/rg/rg.exe
+# `${platform}` 이 아니라 `${os}` 다 — `${platform}` 은 빌드하는 머신 값이라 맥에서 --win 을 말면 darwin 이 박힌다 (closed-code 실측).
+# `${arch}` 는 아키마다 다시 펼쳐져 각 산출물에 자기 것만 실린다.
+extraResources:
+  - from: build/vendor/opencode/${os}-${arch}
+    to: opencode
+  - from: build/vendor/rg/${os}-${arch}
+    to: rg
+
+mac:
+  target:
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  # 신원 서명은 건너뛴다(인증서 없음) — afterPack 이 ad-hoc 서명을 건다
+  identity: null
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+artifactName: litecode-${os}-${arch}.${ext}

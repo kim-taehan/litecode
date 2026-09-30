@@ -156,6 +156,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | `src/services/engine.ts` | **`ctx.engine` — 앱이 opencode 서버 하나를 직접 띄운다** (2a, 2026-09-30). `OPENCODE_CONFIG_DIR`(키 없는 opencode.json 생성)·`OPENCODE_DB`·실행마다 랜덤 비밀번호·`OPENCODE_DISABLE_MODELS_FETCH=1`. **진짜 키는 opencode 에 없다** — `keyProxy.ts`(127.0.0.1, 실행마다 랜덤 토큰)가 붙여 저장된 baseURL 로 스트리밍 전달. 키에 헤더 불가 문자가 있으면 저장 거부. provider 저장·삭제 → 재시작. 앱 종료 시 끄고, 이전 실행이 남긴 것은 PID 기록(명령줄+시작 시각 일치)으로 거둔다. 사용자 :4096 에 붙는 길(`OPENCODE_URL`)은 없어졌다 |
 | `src/services/llm.ts` | Basic 인증으로 opencode 호출. 세션 생성(모델 명시·카탈로그 대기·폴더 확인) → SSE → `admittedSeq` 이하 재생분 버리기. 재시작·크래시로 끊긴 턴은 "중단됨". **매 턴 `api.url` 대조** — 프로젝트 opencode.json 이 provider 주소를 바꾸면 거부 (키 유출 방지). 남은 공백: SSE 타임아웃 없음, 전송 실패 시 unhandled rejection |
 | `electron/` + `renderer/` | Electron 앱. 사이드바(프로젝트 전환·새 대화·세션 목록) + 채팅창. IPC 로 위 서비스에 연결됨 |
+| 패키징 (2b) | electron-builder. `scripts/fetch-opencode.mjs` 가 opencode 1.18.18(npm 레지스트리, sha512)·ripgrep 15.1.0(sha256)을 `build/vendor/` 에 받고(레포 제외), `extraResources` 로 `Resources/opencode`·`Resources/rg` 에 싣는다. 앱은 `OPENCODE_BIN` > 동봉 > PATH 순으로 찾고, 동봉 rg 폴더를 opencode PATH 맨 앞에 둔다(폐쇄망 grep 300초 멈춤 방지). mac ad-hoc 서명만 — **공증 없음, 다른 Mac 에서 내려받은 zip 의 격리(quarantine) 동작은 미검증**. vite `base: './'` (설치본 file:// 에서 assets 경로) |
 | 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. 설정한 provider 로 실제 대화된다(ctx.engine 이 opencode 에 넘김, 2a). 바이너리 동봉·패키징은 2b |
 | 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). 실물 테스트가 착지 기준이다 |
 | 세션 영속화 | 없음. 새로고침하면 대화 목록이 다 날아감 (React state 뿐) |
@@ -169,6 +170,9 @@ npm run dev        # vite 개발 서버 + electron 을 같이 띄운다
 npm run typecheck
 npm test           # 단위 테스트
 npm run test:live  # 실물 테스트 — opencode 가 PATH 에 있어야 한다 (이 머신: ~/.bun/bin, 또는 OPENCODE_BIN)
+npm run dist:mac   # 설치본(mac arm64·x64 zip) — opencode 1.18.18·ripgrep 을 받아(체크섬 대조) Resources 에 싣는다. 결과는 release/
+npm run dist:win   # Windows 설치본 (이 머신에서 빌드는 되지만 실행은 미검증)
+npm run test:dist  # 설치본 스모크 — 빈 PATH·격리 HOME 으로 .app 을 띄워 동봉 opencode·rg 로 대화·grep 확인. 빌드는 안 한다(먼저 dist:mac)
 npm run spike       # electron 없이 src/index.ts 만 돌려보는 최소 확인용
 ```
 

@@ -12,6 +12,8 @@ import type { AddressInfo } from 'node:net'
 // - 마지막 메시지가 도구 결과(role: tool)면 `tool: <그 결과>` 를 텍스트로 스트리밍한다
 // - 마지막 user 메시지에 `[bash:<cmd>]` 가 있으면 bash 도구 호출(command=<cmd>)을 낸다 — opencode 가 도구를 실행하고
 //   결과를 붙여 다시 부르면 위 규칙으로 끝난다. `[bash:pwd]` 로 세션의 작업 디렉터리를 답에서 읽는다 (01_probe 규칙)
+// - 마지막 user 메시지에 `[call:<도구 이름> <json 인자>]` 가 있으면 그 도구 호출을 낸다 — bash 밖의 도구(grep 등)를 부른다.
+//   예: `[call:grep {"pattern":"needle"}]`. 끝나는 것은 bash 와 같다 (01b_offline 제안)
 // - 그 밖에는 `echo: <마지막 user 메시지>` 를 두 조각으로 나눠 스트리밍한다
 // - `GET /requests` 는 지금까지 받은 chat/completions 요청 수를 JSON 으로 준다 — 테스트 프로세스는
 //   globalSetup 과 달라 requestCount() 를 직접 못 부르므로 HTTP 로 연다. 마지막 `/v1/models` 요청의 Authorization
@@ -88,8 +90,10 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       }
       const last = messages[messages.length - 1]
       const command = /\[bash:([^\]]+)\]/.exec(text)?.[1]
-      if (last?.role !== 'tool' && command) {
-        const call = { index: 0, id: `call_${++toolCalls}`, type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command, description: 'fake' }) } }
+      const named = /\[call:(\w+) (\{.*\})\]/.exec(text)
+      const tool = named ? { name: named[1]!, arguments: named[2]! } : command && { name: 'bash', arguments: JSON.stringify({ command, description: 'fake' }) }
+      if (last?.role !== 'tool' && tool) {
+        const call = { index: 0, id: `call_${++toolCalls}`, type: 'function', function: tool }
         res.writeHead(200, { 'content-type': 'text/event-stream' })
         res.write(chunk({ role: 'assistant', tool_calls: [call] }))
         res.write(chunk({}, 'tool_calls'))

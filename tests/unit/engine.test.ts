@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { engineConfig, engineEnv, isOurServer } from '../../src/services/engine.ts'
-import { findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
+import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
 
 const provider = (id: string, baseURL = `http://${id}.local/v1`): ProviderConfig => ({
@@ -39,13 +39,49 @@ describe('engineEnv — opencode 자식 프로세스 env', () => {
       OPENCODE_DISABLE_MODELS_FETCH: '1',
     })
   })
+
+  // 01b_offline: rg 가 PATH 에 없으면 grep·glob 도구가 github 에서 받으려 한다 — 폐쇄망에선 실패하거나 ~300초 멈춘다
+  it('동봉 rg 폴더가 있으면 PATH 맨 앞에 붙인다', () => {
+    const env = engineEnv({ PATH: `/usr/bin${path.delimiter}/bin` }, { configDir: '/c', db: '/d.db', password: 'pw', rgDir: '/app/Resources/rg' })
+    expect(env['PATH']).toBe(['/app/Resources/rg', '/usr/bin', '/bin'].join(path.delimiter))
+    expect(engineEnv({}, { configDir: '/c', db: '/d.db', password: 'pw', rgDir: '/r' })['PATH']).toBe('/r')
+  })
+
+  it('Windows 식 이름(Path)도 같은 키에 붙인다 — PATH 가 둘이 되지 않게', () => {
+    const env = engineEnv({ Path: 'C:\\Windows' }, { configDir: '/c', db: '/d.db', password: 'pw', rgDir: 'C:\\app\\rg' })
+    expect(env['Path']).toBe(['C:\\app\\rg', 'C:\\Windows'].join(path.delimiter))
+    expect(env['PATH']).toBeUndefined()
+  })
 })
 
-describe('findOpencodeBinary — OPENCODE_BIN > PATH > 알려진 자리', () => {
-  const env = (extra: NodeJS.ProcessEnv) => ({ HOME: '/home/u', PATH: '/p1:/p2', ...extra })
+describe('bundledPaths — 설치본에 실린 opencode·rg 자리 (electron-builder extraResources)', () => {
+  it('mac 은 Resources/opencode/opencode 와 Resources/rg, win 은 .exe', () => {
+    expect(bundledPaths('/A.app/Contents/Resources', 'darwin')).toEqual({
+      opencode: path.join('/A.app/Contents/Resources', 'opencode', 'opencode'),
+      rgDir: path.join('/A.app/Contents/Resources', 'rg'),
+    })
+    expect(bundledPaths('/app/resources', 'win32').opencode).toBe(path.join('/app/resources', 'opencode', 'opencode.exe'))
+  })
+})
 
-  it('OPENCODE_BIN 이 실행 가능하면 그것을 쓴다', () => {
-    expect(findOpencodeBinary(env({ OPENCODE_BIN: '/x/opencode' }), () => true).path).toBe('/x/opencode')
+describe('findOpencodeBinary — OPENCODE_BIN > 동봉 > PATH > 알려진 자리', () => {
+  const env = (extra: NodeJS.ProcessEnv) => ({ HOME: '/home/u', PATH: '/p1:/p2', ...extra })
+  const bundled = '/A.app/Contents/Resources/opencode/opencode'
+
+  it('OPENCODE_BIN 이 실행 가능하면 그것을 쓴다 — 동봉보다 앞', () => {
+    expect(findOpencodeBinary(env({ OPENCODE_BIN: '/x/opencode' }), () => true, bundled).path).toBe('/x/opencode')
+  })
+
+  it('동봉이 있으면 PATH 보다 앞선다 — 검증한 버전으로 고정', () => {
+    const found = findOpencodeBinary(env({ OPENCODE_BIN: '/nope' }), (file) => file !== '/nope', bundled)
+    expect(found.path).toBe(bundled)
+    expect(found.searched).toEqual(['/nope (OPENCODE_BIN)', `${bundled} (동봉)`])
+  })
+
+  it('동봉이 실행 불가면 PATH 로 넘어가고, 본 자리에 동봉을 남긴다', () => {
+    const found = findOpencodeBinary(env({}), (file) => file === path.join('/p2', 'opencode'), bundled)
+    expect(found.path).toBe('/p2/opencode')
+    expect(found.searched[0]).toBe(`${bundled} (동봉)`)
   })
 
   it('PATH 를 앞에서부터 보고, 없으면 알려진 자리(~/.bun/bin 등)를 본다 — GUI 앱의 빈 PATH', () => {

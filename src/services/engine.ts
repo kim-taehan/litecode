@@ -52,6 +52,8 @@ export interface EngineOptions {
   pidFile: string
   /** 자식에 물려줄 환경 (기본 process.env) */
   env?: NodeJS.ProcessEnv
+  /** 설치본에 실린 opencode·rg (opencodeBinary.ts bundledPaths). 개발 실행에는 없다 */
+  bundled?: { opencode: string; rgDir: string }
 }
 
 interface RunningServer extends EngineConnection {
@@ -88,7 +90,7 @@ export function engineConfig(providers: ProviderConfig[], proxy: Pick<KeyProxy, 
 }
 
 /** opencode 자식 프로세스 env — 진짜 키는 없다 (키 프록시) */
-export function engineEnv(base: NodeJS.ProcessEnv, opts: { configDir: string; db: string; password: string }): NodeJS.ProcessEnv {
+export function engineEnv(base: NodeJS.ProcessEnv, opts: { configDir: string; db: string; password: string; rgDir?: string }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...base,
     OPENCODE_CONFIG_DIR: opts.configDir,
@@ -98,6 +100,12 @@ export function engineEnv(base: NodeJS.ProcessEnv, opts: { configDir: string; db
     OPENCODE_DISABLE_MODELS_FETCH: '1',
   }
   delete env['OPENCODE_SERVER_USERNAME'] // Basic 사용자명은 기본값 opencode 로 고정한다
+  if (opts.rgDir) {
+    // grep·glob 도구는 rg 를 PATH 에서 찾고, 없으면 github 에서 받으려 한다 — 폐쇄망에선 실패하거나 ~300초 멈춘다 (01b_offline 실측).
+    // 동봉 rg 를 맨 앞에 둔다. Windows 는 이름이 Path 일 수 있다 — 있는 키에 붙여야 PATH 가 둘이 되지 않는다
+    const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH'
+    env[key] = [opts.rgDir, ...(env[key] ? [env[key]] : [])].join(path.delimiter)
+  }
   return env
 }
 
@@ -163,7 +171,7 @@ export class EngineService extends Service {
 
   private async launch(onExit: () => void): Promise<RunningServer> {
     const base = this.opts.env ?? process.env
-    const lookup = findOpencodeBinary(base)
+    const lookup = findOpencodeBinary(base, undefined, this.opts.bundled?.opencode)
     if (!lookup.path) throw new Error(notFoundMessage(lookup))
     const bin = lookup.path
 
@@ -178,7 +186,7 @@ export class EngineService extends Service {
 
     const password = randomBytes(24).toString('base64url')
     const port = await freePort()
-    const env = engineEnv(base, { configDir: this.opts.configDir, db: this.opts.db, password })
+    const env = engineEnv(base, { configDir: this.opts.configDir, db: this.opts.db, password, rgDir: this.opts.bundled?.rgDir })
 
     const args = ['serve', '--hostname', '127.0.0.1', '--port', String(port), '--pure']
     const child = spawn(bin, args, {

@@ -3,7 +3,8 @@ import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 // opencode 실행 파일을 찾는다 — closed-code/desktop `electron/opencode/binary.ts` 의 순서를 따른다.
-// 순서: `OPENCODE_BIN` > (앱에 동봉 — 2b 에서 추가) > PATH > 알려진 설치 자리.
+// 순서: `OPENCODE_BIN` > 앱에 동봉 > PATH > 알려진 설치 자리. 동봉이 PATH 를 이긴다 — 실측한 버전(1.18.18)으로 고정한다.
+// 동봉은 설치본에만 있다 — 개발(`npm run dev`)에서 resourcesPath 는 electron 배포물 자리라, 부르는 쪽(main.ts)이 app.isPackaged 일 때만 넘긴다.
 //
 // macOS 에서 Finder·Dock 으로 띄운 앱은 셸 PATH 를 못 받는다 (`/usr/bin:/bin:/usr/sbin:/sbin` 뿐, closed-code 실측) —
 // 터미널에서 `opencode` 가 보여도 앱에서는 안 보이므로 알려진 자리를 직접 뒤진다.
@@ -16,6 +17,14 @@ export interface BinaryLookup {
   path?: string
   /** 본 자리 전부 */
   searched: string[]
+}
+
+/** 설치본에 실린 opencode·rg 자리 (electron-builder.yml `extraResources` 의 `to` 와 같아야 한다) */
+export function bundledPaths(resourcesPath: string, platform: NodeJS.Platform = process.platform): { opencode: string; rgDir: string } {
+  return {
+    opencode: join(resourcesPath, 'opencode', platform === 'win32' ? 'opencode.exe' : 'opencode'),
+    rgDir: join(resourcesPath, 'rg'),
+  }
 }
 
 function knownDirs(home: string): string[] {
@@ -31,12 +40,20 @@ function isExecutable(file: string): boolean {
   }
 }
 
-export function findOpencodeBinary(env: NodeJS.ProcessEnv = process.env, executable: (file: string) => boolean = isExecutable): BinaryLookup {
+export function findOpencodeBinary(
+  env: NodeJS.ProcessEnv = process.env,
+  executable: (file: string) => boolean = isExecutable,
+  bundled?: string,
+): BinaryLookup {
   const searched: string[] = []
   const explicit = env['OPENCODE_BIN']?.trim()
   if (explicit) {
     searched.push(`${explicit} (OPENCODE_BIN)`)
     if (executable(explicit)) return { path: explicit, searched }
+  }
+  if (bundled) {
+    searched.push(`${bundled} (동봉)`)
+    if (executable(bundled)) return { path: bundled, searched }
   }
 
   const fromPath = (env['PATH'] ?? '').split(delimiter).filter((dir) => dir.trim() !== '')
