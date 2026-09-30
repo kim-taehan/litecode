@@ -7,12 +7,22 @@ import type { LitecodeBridge } from '../shared/ipc.ts'
 const Channel = {
   LIST_PROVIDERS: 'providers:list',
   SEND_MESSAGE: 'chat:send',
+  LIST_PROJECTS: 'projects:list',
+  OPEN_PROJECT: 'projects:open',
+  PICK_PROJECT_FOLDER: 'projects:pick-folder',
+  SET_PROJECT_FAVORITE: 'projects:set-favorite',
+  REMOVE_PROJECT: 'projects:remove',
 } as const
 
 const bridge: LitecodeBridge = {
   listProviders: () => ipcRenderer.invoke(Channel.LIST_PROVIDERS),
-  sendMessage: (providerId, modelId, prompt, sessionId) =>
-    ipcRenderer.invoke(Channel.SEND_MESSAGE, providerId, modelId, prompt, sessionId),
+  sendMessage: (providerId, modelId, directory, prompt, sessionId) =>
+    ipcRenderer.invoke(Channel.SEND_MESSAGE, providerId, modelId, directory, prompt, sessionId),
+  listProjects: () => ipcRenderer.invoke(Channel.LIST_PROJECTS),
+  openProject: (directory) => ipcRenderer.invoke(Channel.OPEN_PROJECT, directory),
+  pickProjectFolder: () => ipcRenderer.invoke(Channel.PICK_PROJECT_FOLDER),
+  setProjectFavorite: (directory, favorite) => ipcRenderer.invoke(Channel.SET_PROJECT_FAVORITE, directory, favorite),
+  removeProject: (directory) => ipcRenderer.invoke(Channel.REMOVE_PROJECT, directory),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)
