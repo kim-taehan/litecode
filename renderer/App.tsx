@@ -87,6 +87,35 @@ function stopMarquee(row: HTMLElement): void {
   path.removeAttribute('data-clipped')
 }
 
+// 사이드바 폭·숨김 — dsh ui-layout 의 범위(264~420px)를 따른다. 기본값은 승인 시안의 272px.
+// 창마다의 편의 설정이라 localStorage 에 둔다(못 읽으면 기본값 — 사생활 모드·접근 막힘에도 화면은 뜬다)
+const SIDEBAR_MIN = 264
+const SIDEBAR_MAX = 420
+const SIDEBAR_DEFAULT = 272
+const LAYOUT_KEY = 'litecode.sidebar'
+
+function clampSidebar(px: number): number {
+  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)))
+}
+
+function readLayout(): { width: number; hidden: boolean } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') as { width?: unknown; hidden?: unknown }
+    return { width: typeof saved.width === 'number' ? clampSidebar(saved.width) : SIDEBAR_DEFAULT, hidden: saved.hidden === true }
+  } catch {
+    return { width: SIDEBAR_DEFAULT, hidden: false }
+  }
+}
+
+function SidebarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M7.5 4V16" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
 type HoverCardContent = { title: string; detail?: string }
 
 /** 잘린 행에 500ms 머물면 행 오른쪽 8px 에 전체 내용 카드 (dsh ui-primitives HoverCard). 흘러가는 글자도 함께 켜고 끈다 */
@@ -140,6 +169,15 @@ export function App() {
   const switchRef = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState('')
   const sessionHover = useHoverCard()
+  const [layout, setLayout] = useState(readLayout)
+  const drag = useRef<{ x: number; width: number }>(undefined)
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout))
+    } catch {
+      // 못 쓰면 이번 실행 동안만 기억한다
+    }
+  }, [layout])
   const listRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLButtonElement>(null)
@@ -255,7 +293,23 @@ export function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ width: layout.width, display: layout.hidden ? 'none' : undefined }}>
+        <div
+          className="sidebar__resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="사이드바 폭"
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId)
+            drag.current = { x: event.clientX, width: layout.width }
+          }}
+          onPointerMove={(event) => {
+            const start = drag.current
+            if (start) setLayout((now) => ({ ...now, width: clampSidebar(start.width + event.clientX - start.x) }))
+          }}
+          onPointerUp={() => (drag.current = undefined)}
+          onPointerCancel={() => (drag.current = undefined)}
+        />
         <div className="sidebar__project">
           <button
             type="button"
@@ -336,7 +390,16 @@ export function App() {
         </div>
       </aside>
 
-      <main className="main">
+      <main className={`main${layout.hidden ? ' main--full' : ''}`}>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-label={layout.hidden ? '사이드바 보이기' : '사이드바 숨기기'}
+          title={layout.hidden ? '사이드바 보이기' : '사이드바 숨기기'}
+          onClick={() => setLayout((now) => ({ ...now, hidden: !now.hidden }))}
+        >
+          <SidebarIcon />
+        </button>
         {projects && !project && (
           <div className="open-guide">
             {openError && (

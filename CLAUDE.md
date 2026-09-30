@@ -123,6 +123,11 @@ Electron 렌더러 (React)          Electron 메인 프로세스
     opencode.json 뿐이다. `OPENCODE_CONFIG_CONTENT`·`OPENCODE_CONFIG` 로 넣은 provider 는 레거시 `GET /config` 에만 보이고 턴은
     `prompted` 에서 **조용히 멈춘다**. → 앱은 `OPENCODE_CONFIG_DIR=<userData>/opencode` 에 opencode.json 을 생성해 넘긴다
     (opencode 가 그 폴더에 npm 설치를 백그라운드로 한다 — **폐쇄망에서 실패하면 어떻게 되는지 미확인**)
+  - ⚠️ **opencode 는 자기 env 를 프로젝트 플러그인(`.opencode/plugin/*.js`)·bash 도구에 넘긴다** — env 로 넘긴 키·서버 비밀번호가
+    폴더 코드와 프롬프트 인젝션에 샌다 (QA 재현 2026-09-30, `--pure` 로 못 막음). **그래서 진짜 키는 opencode 에 주지 않고 메인 프로세스
+    로컬 프록시가 붙인다** (opencode 엔 프록시 주소 + 랜덤 토큰만). **받아들인 잔여 위험:** 서버 비밀번호는 여전히 opencode env 에
+    있어 폴더 코드가 토큰을 얻어 프록시를 **쓸** 수는 있다(키 값은 못 빼 감, 프록시는 저장된 주소로만). opencode 가 원래 그 폴더에서
+    AI 에게 코드를 실행시키는 도구라 막을 수 없는 부분이다. 플러그인 로드는 /api/model 후 0.2~0.5초 비동기. 아래 env 방식은 "키를 넘기는 법" 실측으로만 남긴다
   - **키**는 provider 의 `"env": ["LITECODE_KEY_n"]` + 자식 프로세스 env 로만. `{env:X}`·`{file:…}` 는 치환 안 되고 **문자 그대로
     헤더에 실린다**. `PUT /auth/{id}` 키는 안 쓰인다
   - 레거시 `GET /provider`·`/config/providers` 는 풀린 키를 돌려준다 → 앱이 띄우는 opencode 에는 **항상
@@ -132,6 +137,11 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   - **세션 폴더의 opencode.json 이 앱 provider 의 baseURL 까지 덮어 앱 키가 그리로 간다** (재현됨,
     `OPENCODE_DISABLE_PROJECT_CONFIG` 로 못 막음). `/api/model?location[directory]=` 의 `api.url` 로 덮였는지 보고 거부한다
   - 세션 저장소는 `OPENCODE_DB=<절대 경로>` 로 사용자 opencode 와 가른다. `XDG_CONFIG_HOME` 은 bash·git 이 물려받으므로 바꾸지 않는다
+  - **폐쇄망** (실측 2026-09-30, `_workspace/01b_offline.md`): 대화는 네트워크 없이 된다 — `@ai-sdk/openai-compatible` 은 바이너리에
+    내장, CONFIG_DIR npm 설치(`@opencode-ai/plugin`)는 레거시 `GET /config` 를 부를 때만 일어나고 실패해도 턴은 된다(그래서 레거시
+    엔드포인트를 부르지 않는다). models.dev 없이도 우리 provider 는 1초 안에 카탈로그에 뜬다 → `OPENCODE_DISABLE_MODELS_FETCH=1`.
+    **grep·glob 도구는 첫 사용 때 github 에서 ripgrep 을 받으려 하고, 패킷을 버리는 망에선 ~300초 멈춘다** → ripgrep 을 동봉해
+    opencode 자식 PATH 앞에 둔다(2b). 개발 머신에서 오프라인을 재현하려면 HOME 도 비워야 한다(`~/.npm` 캐시가 설치를 채워 준다)
   - 동봉: closed-code `scripts/fetch-opencode.mjs`(npm 레지스트리 플랫폼별 패키지, sha512) · `electron-builder.yml` extraResources ·
     `binary.ts` 거의 그대로. 버전은 **1.18.18 고정** (latest 는 1.18.33 — 올리기 전에 위 실측을 다시)
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
@@ -143,9 +153,10 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | 조각 | 상태 |
 |---|---|
 | `src/services/providers.ts` | provider 설정(이름·baseURL·프로토콜·모델 카탈로그) 관리 — dsh Settings > Models 화면과 같은 모양 |
-| `src/services/llm.ts` | opencode 세션 생성(모델 명시 + 카탈로그에 모델이 뜰 때까지 대기) → SSE 구독 → 프롬프트 전송 → `admittedSeq` 이하 재생분을 버리고 텍스트 수집. 실물 테스트로 고정됨 (2026-09-30). **남은 공백:** SSE 타임아웃 없음(SSE 로 안 오는 실패는 영원히 대기), 전송 실패 시 unhandled rejection, 재시작 직후 이어가는 세션은 모델 확인 안 함 |
+| `src/services/engine.ts` | **`ctx.engine` — 앱이 opencode 서버 하나를 직접 띄운다** (2a, 2026-09-30). `OPENCODE_CONFIG_DIR`(키 없는 opencode.json 생성)·`OPENCODE_DB`·실행마다 랜덤 비밀번호·`OPENCODE_DISABLE_MODELS_FETCH=1`. **진짜 키는 opencode 에 없다** — `keyProxy.ts`(127.0.0.1, 실행마다 랜덤 토큰)가 붙여 저장된 baseURL 로 스트리밍 전달. 키에 헤더 불가 문자가 있으면 저장 거부. provider 저장·삭제 → 재시작. 앱 종료 시 끄고, 이전 실행이 남긴 것은 PID 기록(명령줄+시작 시각 일치)으로 거둔다. 사용자 :4096 에 붙는 길(`OPENCODE_URL`)은 없어졌다 |
+| `src/services/llm.ts` | Basic 인증으로 opencode 호출. 세션 생성(모델 명시·카탈로그 대기·폴더 확인) → SSE → `admittedSeq` 이하 재생분 버리기. 재시작·크래시로 끊긴 턴은 "중단됨". **매 턴 `api.url` 대조** — 프로젝트 opencode.json 이 provider 주소를 바꾸면 거부 (키 유출 방지). 남은 공백: SSE 타임아웃 없음, 전송 실패 시 unhandled rejection |
 | `electron/` + `renderer/` | Electron 앱. 사이드바(프로젝트 전환·새 대화·세션 목록) + 채팅창. IPC 로 위 서비스에 연결됨 |
-| 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. **아직 opencode 에 안 넘긴다** — 추가한 provider 로는 대화 불가(2단계: 앱이 동봉 opencode 를 띄워 설정 전달, 실측 중) |
+| 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. 설정한 provider 로 실제 대화된다(ctx.engine 이 opencode 에 넘김, 2a). 바이너리 동봉·패키징은 2b |
 | 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). 실물 테스트가 착지 기준이다 |
 | 세션 영속화 | 없음. 새로고침하면 대화 목록이 다 날아감 (React state 뿐) |
 | 프로젝트 전환 | 시안대로 구현 (2026-09-30). 사이드바 전환 버튼 + 팝오버(검색·즐겨찾기·최근·폴더 열기), 목록에서 빼기(폴더는 안 지움), 이름 바꾸기(보이는 이름만), 잘린 경로·대화 제목은 마우스를 올리면 흘러가며 보이고 옆 카드에 전체 내용(dsh 방식), 앱을 켜면 마지막 프로젝트. 목록은 `ctx.projects`(userData `projects.json`). 대화는 프로젝트별로 메모리에만 — **대화 영속화는 아직 없다** |
@@ -185,3 +196,5 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-09-30 | 화면 디자인은 deepseek-harness `packages/client/ui-*` 를 주 참조처로 — 화면↔패키지 대응표, 시안과의 우선순위 | agents/litecode-dev, agents/boundary-qa, skills/litecode-build, skills/opencode-probe | 사용자 지시 |
 | 2026-09-30 | "지우는 것도 자기가 만든 것만" 규칙 — 임시 폴더는 기록한 경로만 삭제 | agents/boundary-qa, agents/litecode-dev, skills/live-test | QA 가 추측으로 리더 데모의 임시 폴더를 지움 |
 | 2026-09-30 | 한 라운드에는 사용자 요청만 — QA 참고는 따로 모아 보고 | skills/litecode-build | 사용자 "너무 오래 걸린다" |
+| 2026-09-30 | QA 는 `차단` 재현 스크립트를 `_workspace/qa-repro/` 에 남긴다 | agents/boundary-qa | 프로브를 지워 구현자가 재현 못 함 |
+| 2026-09-30 | 테스트 창을 화면에 띄우지 않는다 (`LITECODE_TEST_HIDDEN=1`) — 에이전트·스크립트도 따른다 | skills/live-test | 사용자 "테스트 중 다른 일을 못 하겠다" |

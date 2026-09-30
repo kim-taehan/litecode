@@ -1,7 +1,9 @@
 import { Context, Service } from 'cordis'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import './providers.ts'
+import { normalizeBaseURL } from './providers.ts'
+import type { EngineConnection } from './engine.ts'
+import './engine.ts'
 
 // opencode 를 감싸는 서비스 — 위층(세션·UI)은 이 ctx.llm 키만 알고 opencode 를 직접 모른다.
 // 나중에 엔진을 바꾸더라도 이 서비스만 교체하면 된다 (Cordis: 서비스는 키로 찾는다).
@@ -14,6 +16,9 @@ import './providers.ts'
 // 텍스트는 session.next.text.ended 의 data.text 에 완성된 조각으로 온다(델타 아님).
 // 턴 종료는 session.next.step.ended(finish !== 'tool-calls') 또는
 // session.next.step.failed.
+//
+// opencode 서버는 ctx.engine 이 띄우고 관리한다 — 여기서는 주소·인증(connection())만 받아 모든 요청에 싣는다.
+// 서버가 재시작·크래시로 끝나면 진행 중 턴은 끝 이벤트 없이 사라진다(01_probe Q3) → connection().closed 를 보고 "중단됨" 으로 끝낸다.
 //
 // 작업 디렉터리: 한 opencode 서버에서 세션마다 location.directory 를 준다 — 도구 cwd·시스템 프롬프트의 작업 디렉터리·
 // 그 폴더의 AGENTS.md·opencode.json 이 전부 그 폴더 기준이 되고, 동시에 돌려도 안 섞인다 (2026-09-30 실측,
@@ -32,35 +37,35 @@ export interface ChatResult {
   error?: string
 }
 
-export interface LlmServiceOptions {
-  opencodeUrl: string
-}
-
 interface OpencodeEventEnvelope {
   type: string
   durable?: { seq?: number }
   data: Record<string, unknown>
 }
 
+interface CatalogModel {
+  id: string
+  providerID: string
+  api?: { url?: string }
+}
+
 export const MODEL_CATALOG_TIMEOUT_MS = 10_000
+export const INTERRUPTED = '중단됨 — 엔진(opencode)이 재시작되거나 끝나서 답을 끝까지 받지 못했습니다. 다시 보내 주세요'
 
 export class LlmService extends Service {
-  static readonly inject = ['providers']
+  static readonly inject = ['providers', 'engine']
 
-  constructor(
-    ctx: Context,
-    private opts: LlmServiceOptions,
-  ) {
+  constructor(ctx: Context) {
     super(ctx, 'llm')
   }
 
   // model 을 꼭 명시한다 — {} 로 보내면 opencode 가 opencode.json 의 model 을 무시하고 models.dev 카탈로그의
   // 외부 provider(실측: nano-gpt/...)로 세션을 만들 때가 있다 (2026-09-30 실측, 5회 중 2~5회).
   // 우리 provider/모델 id 를 opencode 의 providerID/모델 id 로 그대로 쓴다 — 매핑 설정 화면이 생기면 이 자리만 바꾼다.
-  private async createSession(providerId: string, modelId: string, directory: string): Promise<string> {
-    const res = await fetch(`${this.opts.opencodeUrl}/api/session`, {
+  private async createSession(conn: EngineConnection, providerId: string, modelId: string, directory: string): Promise<string> {
+    const res = await fetch(`${conn.url}/api/session`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { ...conn.headers, 'content-type': 'application/json' },
       body: JSON.stringify({ model: { providerID: providerId, id: modelId }, location: { directory } }),
     })
     if (!res.ok) throw new Error(`세션 생성 실패 (${res.status})`)
@@ -78,50 +83,61 @@ export class LlmService extends Service {
   //   **찾는 모델이 나올 때까지** 다시 묻는다. 이 머신에서 설정 반영까지 0.7~1.1초(5회 기동).
   // - 없는 providerID/모델이어도 세션 생성은 200 으로 성공하고 같은 식으로 멈춘다 — 기한까지 안 나오면 없다고 본다.
   //   기한은 실측 최대의 ~10배. 느린 머신의 콜드 스타트에서 있는 모델을 거절하는 쪽이 설정 오류를 늦게 알리는 쪽보다 나쁘다.
-  // - 새 세션을 만들 때만 확인한다. 이어가는 턴에는 조회하지 않는다.
+  // - 이어가는 턴도 매번 확인한다 (리더 결정 2026-09-30): 설정 적용으로 opencode 가 재시작되면 카탈로그가 다시 지연 로드되고,
+  //   폴더 opencode.json 도 다시 읽혀 주소가 바뀌었을 수 있다 (아래 주소 대조).
   // - 카탈로그는 디렉터리별이다(전역 설정 + 그 폴더의 opencode.json) — 세션을 만들 폴더의 카탈로그를 본다.
-  private async waitForModel(providerId: string, modelId: string, directory: string): Promise<boolean> {
+  private async waitForModel(conn: EngineConnection, providerId: string, modelId: string, directory: string): Promise<CatalogModel | undefined> {
     const deadline = Date.now() + MODEL_CATALOG_TIMEOUT_MS
     while (true) {
-      const models = await this.listModels(directory)
-      if (models.some((model) => model.providerID === providerId && model.id === modelId)) return true
-      if (Date.now() >= deadline) return false
+      const models = await this.listModels(conn, directory)
+      const found = models.find((model) => model.providerID === providerId && model.id === modelId)
+      if (found) return found
+      if (Date.now() >= deadline) return undefined
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
   }
 
   // 쿼리 이름은 `location[directory]` (deepObject). 틀린 이름(`?directory=`)이면 opencode 는 200 에 서버 cwd 의
   // 카탈로그를 조용히 준다 (2026-09-30 실측) — llm.live.test.ts 의 "폴더에만 있는 모델" 시나리오가 이것을 지킨다.
-  private async listModels(directory: string): Promise<{ id: string; providerID: string }[]> {
+  private async listModels(conn: EngineConnection, directory: string): Promise<CatalogModel[]> {
     const query = new URLSearchParams({ 'location[directory]': directory })
-    const res = await fetch(`${this.opts.opencodeUrl}/api/model?${query}`)
+    const res = await fetch(`${conn.url}/api/model?${query}`, { headers: conn.headers })
     if (!res.ok) throw new Error(`모델 목록 조회 실패 (${res.status})`)
-    return ((await res.json()) as { data: { id: string; providerID: string }[] }).data
+    return ((await res.json()) as { data: CatalogModel[] }).data
   }
 
   /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더·모델을 따른다
-   *  (prompt 본문에는 model·location 필드가 없다). */
+   *  (prompt 본문에는 model·location 필드가 없다) — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다). */
   async chat(providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: `provider ${providerId} 없음` }
 
+    let conn: EngineConnection | undefined
+    let id = sessionId
     try {
-      let id = sessionId
-      if (!id) {
-        const workdir = await realDirectory(directory)
-        if (!workdir) return { ok: false, error: `작업 디렉터리가 없다: ${directory}` }
-        if (!(await this.waitForModel(providerId, modelId, workdir))) {
-          return { ok: false, error: `opencode 에 모델 ${providerId}/${modelId} 없음` }
-        }
-        id = await this.createSession(providerId, modelId, workdir)
+      conn = await this.ctx.engine.connection()
+      // 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 본다 — 이어가는 세션도 directory(그 대화의 프로젝트)로 본다
+      const workdir = await realDirectory(directory)
+      if (!workdir) return { ok: false, sessionId: id, error: `작업 디렉터리가 없다: ${directory}` }
+      const model = await this.waitForModel(conn, providerId, modelId, workdir)
+      if (!model) return { ok: false, sessionId: id, error: `opencode 에 모델 ${providerId}/${modelId} 없음` }
+      // 세션 폴더의 opencode.json 은 우리 provider 의 baseURL 까지 덮는다 — 그러면 프롬프트(와 프록시 토큰)가 그 주소로 간다.
+      // OPENCODE_DISABLE_PROJECT_CONFIG 로는 못 막는다 — 대신 그 폴더 카탈로그의 api.url 에 덮인 주소가 보인다 (01_probe Q4, 5/5).
+      // 우리가 적은 주소는 키 프록시 주소다 (engine.ts)
+      if (normalizeBaseURL(model.api?.url ?? '') !== normalizeBaseURL(conn.providerBaseURL(providerId))) {
+        return { ok: false, sessionId: id, error: `이 프로젝트의 opencode.json 이 provider 주소를 바꿉니다 (${model.api?.url}) — 대화 내용이 그 주소로 갈 수 있어 보내지 않았습니다` }
       }
+      id ??= await this.createSession(conn, providerId, modelId, workdir)
 
       let admitted!: (seq: number) => void
-      const events = this.subscribe(id, new Promise<number>((resolve) => (admitted = resolve)))
-      const admit = await fetch(`${this.opts.opencodeUrl}/api/session/${id}/prompt`, {
+      const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)))
+      const admit = await fetch(`${conn.url}/api/session/${id}/prompt`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...conn.headers, 'content-type': 'application/json' },
         body: JSON.stringify({ prompt: { text: prompt } }),
+      }).catch((error: unknown) => {
+        events.stop()
+        throw error
       })
       if (!admit.ok) {
         events.stop()
@@ -132,7 +148,8 @@ export class LlmService extends Service {
       const result = await events.result
       return { ok: result.ok, sessionId: id, text: result.text, error: result.error }
     } catch (error) {
-      return { ok: false, sessionId, error: `opencode 연결 실패: ${(error as Error).message}` }
+      if (conn?.closed.aborted) return { ok: false, sessionId: id, error: INTERRUPTED }
+      return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
     }
   }
 
@@ -142,11 +159,16 @@ export class LlmService extends Service {
    *  이전 턴의 step.ended 를 보고 이전 답을 돌려준다. `?after=<seq>` 로 자를 수 있지만 구독을 먼저 걸어야 해서
    *  그 시점엔 이번 턴의 seq 를 모른다. 그래서 프롬프트 응답의 admittedSeq(= 이번 턴 prompt.admitted 의 seq)가
    *  올 때까지 프레임 처리를 미루고, durable.seq 가 그 이하인 이벤트는 버린다. */
-  private subscribe(sessionId: string, admittedSeq: Promise<number>): { result: Promise<{ ok: boolean; text: string; error?: string }>; stop: () => void } {
+  private subscribe(
+    conn: EngineConnection,
+    sessionId: string,
+    admittedSeq: Promise<number>,
+  ): { result: Promise<{ ok: boolean; text: string; error?: string }>; stop: () => void } {
     const controller = new AbortController()
     const result = (async () => {
-      const res = await fetch(`${this.opts.opencodeUrl}/api/session/${sessionId}/event`, {
-        signal: controller.signal,
+      const res = await fetch(`${conn.url}/api/session/${sessionId}/event`, {
+        headers: conn.headers,
+        signal: AbortSignal.any([controller.signal, conn.closed]), // 서버가 끝나면 읽기를 바로 멈춘다
       })
       if (!res.ok || !res.body) throw new Error(`이벤트 구독 실패 (${res.status})`)
 
@@ -157,8 +179,12 @@ export class LlmService extends Service {
 
       try {
         while (true) {
-          const { value, done } = await reader.read()
-          if (done) return { ok: false, text: texts.join(''), error: '이벤트 스트림이 조용히 끊김' }
+          const read = await reader.read().catch((error: unknown) => {
+            if (controller.signal.aborted) throw error // 우리가 멈췄다 (stop)
+            return undefined // 연결이 잘렸다 (undici: "terminated")
+          })
+          if (!read || read.done) return { ok: false, text: texts.join(''), error: await interruption(conn.closed) }
+          const { value } = read
           buffer += decoder.decode(value, { stream: true })
 
           let frameEnd: number
@@ -173,6 +199,7 @@ export class LlmService extends Service {
         void reader.cancel().catch(() => {})
       }
     })()
+    result.catch(() => {}) // stop() 뒤의 거절은 기다리는 쪽이 없다 — 처리 안 된 거절로 남기지 않는다
 
     return { result, stop: () => controller.abort() }
   }
@@ -204,6 +231,18 @@ export class LlmService extends Service {
     }
     return undefined
   }
+}
+
+/** 끝 이벤트 없이 스트림이 끊겼을 때의 사유. 서버가 끝나면 소켓이 exit 보다 먼저 닫혀(실측 2026-09-30, 앱 실물 테스트에서
+ *  "terminated" 가 먼저 왔다) closed 가 아직 안 걸렸을 수 있다 — 잠깐 기다려 원인을 가린다. 어느 쪽이든 턴은 "중단됨" 이다 */
+async function interruption(closed: AbortSignal): Promise<string> {
+  if (!closed.aborted) {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2_000)
+      closed.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true })
+    })
+  }
+  return closed.aborted ? INTERRUPTED : '중단됨 — 이벤트 스트림이 끊겼습니다. 다시 보내 주세요'
 }
 
 /** 폴더면 realpath 를, 아니면(없는 경로·파일·상대 경로) undefined 를 준다.

@@ -3,12 +3,14 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
-import { ProviderRegistry } from '../../src/services/providers.ts'
+import { ProviderRegistry, type ProviderConfig } from '../../src/services/providers.ts'
 import { LlmService, MODEL_CATALOG_TIMEOUT_MS } from '../../src/services/llm.ts'
-import { startOpencode, type OpencodeServer } from './support/opencodeServer.ts'
+import { EngineService } from '../../src/services/engine.ts'
+import { engineOptions } from './support/opencodeServer.ts'
 
 // 서비스 계층 실물 테스트 — ctx.llm 이 진짜 opencode 와 세션 생성 → SSE → 프롬프트 → 턴 종료를
 // 끝까지 도는지 본다. opencode 이벤트 모양이 바뀌면 여기서 먼저 깨진다.
+// opencode 는 ctx.engine 이 띄운다 (제품과 같은 길 — 생성한 opencode.json·비밀번호·키 env).
 
 let services: Context
 const fibers: { dispose(): Promise<void> }[] = []
@@ -17,24 +19,36 @@ let root: string
 /** 폴더 자체가 관심사가 아닌 테스트가 쓰는 작업 디렉터리 */
 let work: string
 
+/** 가짜 LLM 에 닿는 provider — ctx.engine 이 이것으로 opencode.json 을 만든다 */
+const fakeProvider = (): ProviderConfig => ({
+  id: 'fake',
+  displayName: 'Fake',
+  baseURL: `${inject('fakeLlmUrl')}/v1`,
+  protocol: 'openai-chat-completions',
+  models: [{ id: 'echo', displayName: 'Echo' }],
+})
+
+/** 새 컨텍스트에 providers·engine·llm 을 올린다. state 아래에 엔진 상태(설정 폴더·DB·PID)와 격리 XDG 를 둔다 */
+async function startServices(state: string, providers: ProviderConfig[], fibersOut: { dispose(): Promise<void> }[]): Promise<Context> {
+  const ctx = new Context()
+  fibersOut.push(ctx.plugin(ProviderRegistry, { defaults: providers }))
+  fibersOut.push(ctx.plugin(EngineService, engineOptions(state)))
+  fibersOut.push(ctx.plugin(LlmService))
+  return new Promise<Context>((resolve) => ctx.inject(['providers', 'engine', 'llm'], (ready) => resolve(ready)))
+}
+
 beforeAll(async () => {
   root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'litecode-llm-')))
   work = path.join(root, 'work')
   await fs.mkdir(work)
-  const ctx = new Context()
-  fibers.push(ctx.plugin(ProviderRegistry))
-  fibers.push(ctx.plugin(LlmService, { opencodeUrl: inject('opencodeUrl') }))
-  services = await new Promise<Context>((resolve) => ctx.inject(['providers', 'llm'], (ready) => resolve(ready)))
-  // id 는 opencode.json(support/opencodeServer.ts) 의 providerID/모델 id 와 같아야 한다 —
-  // ctx.llm 이 그대로 opencode 에 넘긴다.
-  services.providers.register({
-    id: 'fake',
-    displayName: 'Fake',
-    baseURL: 'unused',
-    protocol: 'openai-chat-completions',
-    models: [{ id: 'echo', displayName: 'Echo' }],
-  })
+  services = await startServices(path.join(root, 'state'), [fakeProvider()], fibers)
 })
+
+/** 앱이 띄운 opencode 에 직접 묻는다 (인증 포함) — 결과 확인용 */
+async function opencodeGet(pathAndQuery: string): Promise<Response> {
+  const conn = await services.engine.connection()
+  return fetch(`${conn.url}${pathAndQuery}`, { headers: conn.headers })
+}
 
 async function fakeLlmRequests(): Promise<number> {
   const res = await fetch(`${inject('fakeLlmUrl')}/requests`)
@@ -98,7 +112,7 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
   }
 
   async function opencodeSession(id: string): Promise<{ location: { directory: string } }> {
-    const res = await fetch(`${inject('opencodeUrl')}/api/session/${id}`)
+    const res = await opencodeGet(`/api/session/${id}`)
     expect(res.status).toBe(200)
     return ((await res.json()) as { data: { location: { directory: string } } }).data
   }
@@ -141,42 +155,22 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toContain(missing)
     expect(result.sessionId).toBeUndefined()
-    const listed = await fetch(`${inject('opencodeUrl')}/api/session?directory=${encodeURIComponent(missing)}&limit=10`)
+    const listed = await opencodeGet(`/api/session?directory=${encodeURIComponent(missing)}&limit=10`)
     expect(((await listed.json()) as { data: unknown[] }).data).toHaveLength(0)
   })
 
   // 카탈로그는 디렉터리별이다(01_probe Q2). 쿼리 이름이 틀리면 opencode 는 200 에 서버 cwd 카탈로그를 준다 —
-  // 그 카탈로그에는 이 폴더에만 있는 provider 가 없으므로 "모델 없음" 으로 실패해 헛초록이 안 난다.
+  // 그 카탈로그에는 이 폴더에만 있는 모델이 없으므로 "모델 없음" 으로 실패해 헛초록이 안 난다.
+  // 폴더 설정은 우리 provider 에 모델만 더한다 — 주소는 그대로 키 프록시라 주소 대조를 통과한다 (폴더가 자기 provider 를 정의해
+  // 우리 id 로 쓰면 주소가 달라 거부된다 — 그건 engine.live.test.ts 의 덮어쓰기 시나리오)
   it('그 폴더의 opencode.json 에만 있는 모델로 턴이 돈다 (카탈로그를 세션 폴더 기준으로 본다)', async () => {
     const dir = await folder('folder-provider')
     await fs.writeFile(
       path.join(dir, 'opencode.json'),
-      JSON.stringify({
-        $schema: 'https://opencode.ai/config.json',
-        provider: {
-          'folder-only': {
-            npm: '@ai-sdk/openai-compatible',
-            name: 'Folder only',
-            options: { baseURL: `${inject('fakeLlmUrl')}/v1`, apiKey: 'fake' },
-            models: { echo: { name: 'Echo' } },
-          },
-        },
-        enabled_providers: ['fake', 'gateway-local', 'folder-only'],
-      }),
+      JSON.stringify({ $schema: 'https://opencode.ai/config.json', provider: { fake: { models: { 'folder-echo': { name: 'Folder echo' } } } } }),
     )
-    const unregister = services.providers.register({
-      id: 'folder-only',
-      displayName: 'Folder only',
-      baseURL: 'unused',
-      protocol: 'openai-chat-completions',
-      models: [{ id: 'echo', displayName: 'Echo' }],
-    })
 
-    try {
-      expect(await services.llm.chat('folder-only', 'echo', dir, '폴더 모델')).toMatchObject({ ok: true, text: 'echo: 폴더 모델' })
-    } finally {
-      unregister()
-    }
+    expect(await services.llm.chat('fake', 'folder-echo', dir, '폴더 모델')).toMatchObject({ ok: true, text: 'echo: 폴더 모델' })
   }, MODEL_CATALOG_TIMEOUT_MS + 10_000)
 })
 
@@ -187,32 +181,20 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
 // 이 테스트는 가운데 목록을 **확률적으로만** 거친다 — QA 실측에서 "빈 → 빈 → 설정 반영" 으로 건너뛴 경우가 있었고,
 // "비어 있지 않으면 멈춤" 으로 되돌린 코드를 3회 돌리면 빨강 2회였다. 초록 한 번이 회귀 없음의 증명은 아니다.
 describe('ctx.llm ↔ 막 뜬 opencode (카탈로그 로드 중)', () => {
-  let fresh: OpencodeServer
   let freshServices: Context
   const freshFibers: { dispose(): Promise<void> }[] = []
 
   beforeAll(async () => {
-    fresh = await startOpencode(`${inject('fakeLlmUrl')}/v1`)
-    const ctx = new Context()
-    freshFibers.push(ctx.plugin(ProviderRegistry))
-    freshFibers.push(ctx.plugin(LlmService, { opencodeUrl: fresh.url }))
-    freshServices = await new Promise<Context>((resolve) => ctx.inject(['providers', 'llm'], (ready) => resolve(ready)))
-    freshServices.providers.register({
-      id: 'fake',
-      displayName: 'Fake',
-      baseURL: 'unused',
-      protocol: 'openai-chat-completions',
-      models: [{ id: 'echo', displayName: 'Echo' }],
-    })
+    freshServices = await startServices(path.join(root, 'fresh-state'), [fakeProvider()], freshFibers)
   })
 
   afterAll(async () => {
     for (const fiber of freshFibers.reverse()) await fiber.dispose()
-    await fresh?.stop()
   })
 
   it('다른 호출자가 카탈로그 로드를 먼저 일으켜도 설정의 모델이 나올 때까지 기다려 턴을 돈다', async () => {
-    const first = (await (await fetch(`${fresh.url}/api/model`)).json()) as { data: unknown[] }
+    const fresh = await freshServices.engine.connection()
+    const first = (await (await fetch(`${fresh.url}/api/model`, { headers: fresh.headers })).json()) as { data: unknown[] }
     expect(first.data).toHaveLength(0) // 로드를 일으킨 첫 조회 — 이 직후가 가운데 목록 구간이다
 
     expect(await freshServices.llm.chat('fake', 'echo', work, '로드 중')).toMatchObject({ ok: true, text: 'echo: 로드 중' })

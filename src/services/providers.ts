@@ -63,6 +63,10 @@ declare module 'cordis' {
   interface Context {
     providers: ProviderRegistry
   }
+  interface Events {
+    /** save·remove 로 설정이 바뀌었다 — ctx.engine 이 opencode 를 다시 띄운다 */
+    'providers/changed'(): void
+  }
 }
 
 export class ProviderRegistry extends Service {
@@ -107,6 +111,9 @@ export class ProviderRegistry extends Service {
     if (models.length === 0 || models.some((model) => !model.id)) throw new Error('모델을 하나 이상, id 와 함께 입력하세요')
     if (new Set(models.map((model) => model.id)).size !== models.length) throw new Error('모델 id 가 겹칩니다')
     const apiKey = input.apiKey?.trim()
+    // 키는 키 프록시가 Authorization 헤더로 싣는다 — 헤더에 못 쓰는 문자(줄바꿈·제어 문자·U+200B 같은 보이지 않는 문자·비ASCII)는
+    // 붙여넣기 실수이고, 저장되면 요청마다 실패한다 (03_qa 2차). 메시지에 키 값은 넣지 않는다
+    if (apiKey && !/^[\x20-\x7e]+$/.test(apiKey)) throw new Error('키에 쓸 수 없는 문자가 섞였습니다 (붙여넣기 확인)')
     const cipher = this.opts.cipher
     if (apiKey && !cipher?.available()) throw new Error('이 환경에서는 API 키를 안전하게 저장할 수 없습니다 (OS 암호화 저장소 사용 불가)')
 
@@ -119,6 +126,7 @@ export class ProviderRegistry extends Service {
     this.entries.set(id, { id, displayName, baseURL, protocol: input.protocol, models, custom: existing ? existing.custom : true })
     if (apiKey) this.keys[id] = cipher!.encrypt(apiKey).toString('base64')
     this.persist()
+    this.ctx.emit('providers/changed')
     return this.list()
   }
 
@@ -126,6 +134,7 @@ export class ProviderRegistry extends Service {
     this.entries.delete(id)
     delete this.keys[id]
     this.persist()
+    this.ctx.emit('providers/changed')
     return this.list()
   }
 
@@ -147,6 +156,11 @@ export class ProviderRegistry extends Service {
       .map((model) => ({ id: model.id, displayName: typeof model.name === 'string' ? model.name : model.id }))
   }
 
+  /** 복호화한 키 — ctx.engine 이 opencode 자식 프로세스 env 에만 싣는다. 화면·파일·로그로 내보내지 않는다 */
+  apiKey(id: string): string | undefined {
+    return this.storedKey(id)
+  }
+
   private storedKey(id?: string): string | undefined {
     const sealed = id ? this.keys[id] : undefined
     return sealed && this.opts.cipher ? this.opts.cipher.decrypt(Buffer.from(sealed, 'base64')) : undefined
@@ -159,7 +173,7 @@ export class ProviderRegistry extends Service {
 }
 
 /** 앞뒤 공백·끝 슬래시만 뗀다 — 저장 키를 실어도 되는 주소인지 비교할 때와 요청 주소에 같이 쓴다 */
-function normalizeBaseURL(value: string): string {
+export function normalizeBaseURL(value: string): string {
   return value.trim().replace(/\/+$/, '')
 }
 

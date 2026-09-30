@@ -78,6 +78,22 @@ describe('ProviderRegistry', () => {
     expect(providers.list()[0]!.displayName).toBe('Gateway')
   })
 
+  // 03_qa 2차: 헤더에 못 쓰는 문자가 든 키는 키 프록시의 http.request 가 동기로 던져 메인 프로세스를 흔든다 — 저장부터 막는다
+  it('헤더에 쓸 수 없는 문자(줄바꿈·제어 문자·보이지 않는 문자·비ASCII)가 든 키는 거부하고, 메시지에 키가 없으며 아무것도 안 바뀐다', async () => {
+    const providers = await registry(files)
+    for (const bad of ['sk-abc\ndef', 'sk-abc\u0007def', 'sk-abc\u200bdef', 'sk-키값', 'sk-abc\u00a0def']) {
+      let message = ''
+      try {
+        providers.save({ ...config, id: 'gw', displayName: 'X', apiKey: bad })
+      } catch (error) {
+        message = (error as Error).message
+      }
+      expect(message).toContain('키에 쓸 수 없는 문자가 섞였습니다')
+      expect(message).not.toContain('abc')
+    }
+    expect(providers.list()[0]).toMatchObject({ displayName: 'Gateway', hasKey: false })
+  })
+
   it('잘못된 입력은 거부한다 — 빈 이름, http(s) 가 아닌 주소, 모델 없음, 겹치는 모델 id', async () => {
     const providers = await registry(files)
     expect(() => providers.save({ ...config, displayName: ' ' })).toThrow('표시 이름')
@@ -100,6 +116,20 @@ describe('ProviderRegistry', () => {
     providers.save({ ...config, id: 'gw', baseURL: 'http://elsewhere/v1', apiKey: 'sk-2' })
     expect(providers.get('gw')!.baseURL).toBe('http://elsewhere/v1')
     expect(await fs.readFile(files.keysFile!, 'utf8')).toContain(JSON.stringify(reversing.encrypt('sk-2').toString('base64')))
+  })
+
+  // ctx.engine 이 이 알림으로 opencode 를 다시 띄운다 (설정 변경 = 재시작, 01_probe Q3)
+  it('저장·삭제하면 providers/changed 를 알리고, 거부된 저장은 알리지 않는다', async () => {
+    const ctx = new Context()
+    ctx.plugin(ProviderRegistry, files)
+    const ready = await new Promise<Context>((resolve) => ctx.inject(['providers'], (context) => resolve(context)))
+    let changes = 0
+    ctx.on('providers/changed', () => void changes++)
+
+    ready.providers.save({ ...config, id: 'gw', apiKey: 'k' })
+    expect(() => ready.providers.save({ ...config, id: 'gw', displayName: '' })).toThrow()
+    ready.providers.remove('gw')
+    expect(changes).toBe(2)
   })
 
   it('삭제하면 목록과 키에서 모두 빠진다', async () => {
