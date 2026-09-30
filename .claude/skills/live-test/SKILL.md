@@ -22,24 +22,28 @@ opencode 가 다른 곳에 있으면 `OPENCODE_BIN=/path/to/opencode npm run tes
 
 ## 실물 테스트가 띄우는 것
 
-`tests/live/globalSetup.ts` 가 한 번 띄우고 끝나면 끈다.
+**opencode 는 공유하지 않는다 — 제품처럼 앱(또는 `ctx.engine`)이 스스로 띄운다** (2a, 2026-09-30).
+`tests/live/globalSetup.ts` 는 가짜 LLM 하나만 띄운다.
 
 ```
-[진짜 Electron 창] ─IPC─ [진짜 메인+ctx.llm] ─HTTP/SSE─ [진짜 opencode] ─HTTP─ [가짜 LLM]
-   playwright 가 조작        dist-electron 을 매번 tsc     빈 포트·임시 XDG        tests/live/support/fakeLlm.ts
+[진짜 Electron 창] ─IPC─ [진짜 메인: ctx.engine·ctx.llm] ─HTTP/SSE+Basic─ [앱이 띄운 진짜 opencode] ─HTTP─ [가짜 LLM]
+   playwright 가 조작        dist-electron 을 매번 tsc           OPENCODE_BIN 으로 바이너리만 알려 줌   tests/live/support/fakeLlm.ts
 ```
 
 - **가짜는 LLM 하나뿐이다.** 사내 게이트웨이가 없는 곳에서도 턴을 끝까지 돌리려는 것. 응답은 결정적이다:
   - 보통: `echo: <마지막 user 메시지>` 를 두 조각으로 스트리밍
-  - 메시지에 `[fail]` 이 있으면: HTTP 500 → opencode 가 `session.next.step.failed` 를 낸다
-  - 새 시나리오(도구 호출 등)가 필요하면 **fakeLlm 에 규칙을 더한다.** opencode 를 흉내 내는 가짜는 만들지 않는다
-- **opencode 격리** (`support/opencodeServer.ts`):
-  - 빈 포트 — 사용자가 쓰는 opencode(:4096) 와 안 부딪힌다
-  - `XDG_CONFIG_HOME/DATA/STATE` 를 임시 폴더로 — 전역 설정의 진짜 게이트웨이 키를 안 읽고, 세션 기록을 사용자 저장소에 안 남긴다. 캐시(`XDG_CACHE_HOME`)는 그대로 둬서 provider 패키지를 매번 받지 않는다 — 대가로 테스트가 사용자의 `~/.cache/opencode/models.json` 을 갱신할 수 있다 (opencode 를 평소에 띄울 때와 같은 갱신이라 받아들인 것)
-  - cwd 는 임시 프로젝트 폴더 — 그 안의 `opencode.json` 이 가짜 LLM 을 기본 모델로 지정한다
-  - 끌 때는 **자기가 띄운 child 만** 끈다
-- **앱** (`app.live.test.ts`): `tsc -p tsconfig.electron.json` → vite dev 서버(빈 포트) → `_electron.launch` 에
-  `LITECODE_DEV_SERVER_URL`·`OPENCODE_URL` 을 넘긴다
+  - `[fail]` → HTTP 500 (opencode 가 `session.next.step.failed`), `[slow]` → 30초 미룸(재시작·중단 시나리오용),
+    `[bash:<cmd>]` → bash 도구 호출(작업 폴더 확인용)
+  - `GET /requests` → 받은 요청 수와 마지막 Authorization(`chatAuth`) — 키가 제대로 갔는지·엉뚱한 곳에 안 갔는지 확인
+  - 새 시나리오가 필요하면 **fakeLlm 에 규칙을 더한다.** opencode 를 흉내 내는 가짜는 만들지 않는다
+- **서비스 테스트**(`engine.live`·`llm.live`): `EngineService` 로 opencode 를 띄운다. **앱 테스트**(`app.live`): 앱이 띄운다
+  - **테스트 창은 화면에 띄우지 않는다** — `LITECODE_TEST_HIDDEN=1` 이면 main 이 `show:false`·Dock 숨김(그려지기는 하고 타이머도 안 느려짐).
+    사용자가 테스트 중에 다른 일을 못 한다는 요청(2026-09-30). 앱을 직접 띄워 확인하는 스크립트·에이전트도 이 변수를 넘긴다
+  - 앱에는 `OPENCODE_BIN`, `isolatedEnv(tmp)`(XDG_* 를 임시 폴더로 — 사용자 전역 설정의 진짜 키를 못 보게),
+    `LITECODE_GATEWAY_URL=<가짜 LLM>`(기본 provider), `--user-data-dir=<임시>`, `--use-mock-keychain` 만 넘긴다
+  - 캐시(`XDG_CACHE_HOME`)는 그대로 — provider 패키지를 매번 받지 않게. 대가로 사용자의 `~/.cache/opencode/models.json` 이 갱신될 수 있다
+  - **`OPENCODE_URL` 은 없어졌다** — 외부 opencode 에 붙는 길은 제품·테스트 어디에도 없다
+- 앱 테스트는 `tsc -p tsconfig.electron.json` → vite dev 서버(빈 포트) → `_electron.launch`
 
 ## 어느 층에 테스트를 쓰나
 
@@ -58,7 +62,7 @@ opencode 가 다른 곳에 있으면 `OPENCODE_BIN=/path/to/opencode npm run tes
 - 기대값은 가짜 LLM 규칙에서 **계산 가능한 값**으로 쓴다 (`'echo: 안녕'`). "뭔가 왔다" 수준의 단언은 결함을 못 잡는다
 - 화면 대기는 `expect.poll(() => locator.textContent({ timeout: 1_000 }), { timeout: 30_000 })` 모양 —
   vitest 의 `expect` 에는 playwright 의 자동 대기 매처(`toHaveText`)가 없다
-- 테스트끼리 스택(opencode 하나)을 공유한다. 세션은 테스트마다 새로 만들어 서로 안 섞이게 한다
+- 앱 테스트는 한 파일 안에서 **앞 테스트가 만든 상태(열린 프로젝트 등)에 기댄다** — 하나만 골라 돌리면 상관없는 실패가 난다. 결함을 좁힐 땐 파일 전체를 돌린다
 - 새 파일은 `*.live.test.ts` 로 끝나야 수집된다
 
 ## 실패 판독
