@@ -317,6 +317,10 @@ button {
   background: none;
   font-size: 13px;
   color: #4a4640;
+}
+
+.session-item__title {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -460,4 +464,57 @@ button {
 .composer__send:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* 마우스를 올리면 흘러가는 잘린 글자(경로·대화 제목) — 흘러간 쪽·남은 쪽 끝을 페이드 (dsh ui-workspace 세션 행) */
+.marquee[data-scrolled] {
+  text-overflow: clip;
+  mask-image: linear-gradient(to right, transparent, #000 12px);
+}
+
+.marquee[data-clipped] {
+  mask-image: linear-gradient(to left, transparent, #000 12px);
+}
+
+.marquee[data-scrolled][data-clipped] {
+  mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+}
+
+/* 글자가 잘린 행 옆의 전체 내용 카드 (dsh ui-primitives HoverCard) */
+.hover-card {
+  position: fixed;
+  z-index: 100;
+  width: 244px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #2c2c2e;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  pointer-events: none;
+}
+
+.hover-card__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.hover-card__path {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b8b8bd;
+  word-break: break-all;
+}
+
+/* 그 자리 이름 바꾸기 — 행 하나를 채우는 입력칸 (검색 입력과 같은 테두리) */
+.project-item__rename {
+  flex-grow: 1;
+  min-width: 0;
+  margin: 4px 6px;
+  padding: 7px 10px;
+  border: 1px solid #c97a4a;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  color: #1f1d1a;
 }

@@ -6,7 +6,8 @@ import path from 'node:path'
 // 최근 프로젝트 목록 — 프로젝트 = 폴더. 재시작해도 남도록 작은 JSON 파일 하나에 둔다 (앱에서는 userData 아래).
 // 목록 맨 앞이 마지막으로 연 프로젝트다 — 앱을 켜면 그것을 연다.
 // 즐겨찾기는 같은 목록 안의 표시(favorites)다 — 순서는 최근 순 그대로, 화면이 즐겨찾기/최근 두 묶음으로 나눈다.
-// 목록에서 빼기(remove)는 파일 속 목록만 고친다. 사용자 폴더는 절대 건드리지 않는다.
+// 목록에서 빼기(remove)·이름 바꾸기(rename)는 파일 속 목록만 고친다. 사용자 폴더는 절대 건드리지 않는다
+// (이름은 화면에 보이는 별명일 뿐 — 디스크의 폴더 이름은 그대로).
 //
 // 식별자는 fs.realpath 한 절대 경로 하나로 통일한다. opencode 는 세션 디렉터리를 realpath·끝 슬래시 정규화 없이
 // 문자열 그대로 저장·비교한다 (2026-09-30 실측, _workspace/01_probe.md Q3) — 목록 키와 ctx.llm 에 넘기는 값이
@@ -21,7 +22,7 @@ declare module 'cordis' {
 export interface Project {
   /** realpath 한 절대 경로 — 식별자이자 작업 디렉터리 */
   path: string
-  /** 폴더 이름 */
+  /** 화면에 보이는 이름 — 붙인 별명, 없으면 폴더 이름 */
   name: string
   /** 홈 아래면 `~/…` 로 줄인 경로 (화면 표시용) */
   displayPath: string
@@ -32,6 +33,8 @@ interface Stored {
   /** 최근에 연 순서 (맨 앞이 마지막) — 즐겨찾기 포함 모든 프로젝트 */
   recent: string[]
   favorites: string[]
+  /** path → 사용자가 붙인 이름 */
+  names: Record<string, string>
 }
 
 export interface ProjectsServiceOptions {
@@ -60,15 +63,16 @@ export class ProjectsService extends Service {
     const real = await fs.realpath(dir)
     if (!(await fs.stat(real)).isDirectory()) throw new Error(`폴더가 아니다: ${dir}`)
 
-    const stored = await this.update(({ recent, favorites }) => ({ recent: [real, ...recent.filter((entry) => entry !== real)], favorites }))
+    const stored = await this.update((current) => ({ ...current, recent: [real, ...current.recent.filter((entry) => entry !== real)] }))
     return toProjects(stored).find((project) => project.path === real)!
   }
 
   /** dir 은 목록의 path 그대로 (지워진 폴더일 수 있어 realpath 하지 않는다) */
   async setFavorite(dir: string, favorite: boolean): Promise<Project[]> {
     return toProjects(
-      await this.update(({ recent, favorites }) => ({
+      await this.update(({ recent, favorites, names }) => ({
         recent,
+        names,
         favorites: favorite ? [...favorites.filter((entry) => entry !== dir), dir] : favorites.filter((entry) => entry !== dir),
       })),
     )
@@ -77,10 +81,19 @@ export class ProjectsService extends Service {
   /** 목록·즐겨찾기에서만 뺀다 — 폴더는 디스크에 그대로. dir 은 목록의 path 그대로 */
   async remove(dir: string): Promise<Project[]> {
     return toProjects(
-      await this.update(({ recent, favorites }) => ({
+      await this.update(({ recent, favorites, names }) => ({
         recent: recent.filter((entry) => entry !== dir),
         favorites: favorites.filter((entry) => entry !== dir),
+        names: without(names, dir),
       })),
+    )
+  }
+
+  /** 보이는 이름만 바꾼다(폴더는 그대로). 빈 이름이면 폴더 이름으로 되돌린다. dir 은 목록의 path 그대로 */
+  async rename(dir: string, name: string): Promise<Project[]> {
+    const trimmed = name.trim()
+    return toProjects(
+      await this.update((current) => ({ ...current, names: trimmed ? { ...current.names, [dir]: trimmed } : without(current.names, dir) })),
     )
   }
 
@@ -102,9 +115,14 @@ export class ProjectsService extends Service {
     try {
       const parsed = JSON.parse(await fs.readFile(this.opts.file, 'utf8')) as Partial<Record<keyof Stored, unknown>> | null
       const recent = strings(parsed?.recent)
-      return { recent, favorites: strings(parsed?.favorites).filter((entry) => recent.includes(entry)) }
+      const names = Object.fromEntries(
+        Object.entries(typeof parsed?.names === 'object' && parsed.names ? parsed.names : {}).filter(
+          (entry): entry is [string, string] => recent.includes(entry[0]) && typeof entry[1] === 'string',
+        ),
+      )
+      return { recent, favorites: strings(parsed?.favorites).filter((entry) => recent.includes(entry)), names }
     } catch {
-      return { recent: [], favorites: [] }
+      return { recent: [], favorites: [], names: {} }
     }
   }
 }
@@ -113,11 +131,15 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? value : []
 }
 
-function toProjects({ recent, favorites }: Stored): Project[] {
+function without(names: Record<string, string>, dir: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(names).filter(([entry]) => entry !== dir))
+}
+
+function toProjects({ recent, favorites, names }: Stored): Project[] {
   const home = os.homedir()
   return recent.map((dir) => ({
     path: dir,
-    name: path.basename(dir),
+    name: names[dir] ?? path.basename(dir),
     displayPath: dir === home || dir.startsWith(`${home}${path.sep}`) ? `~${dir.slice(home.length)}` : dir,
     favorite: favorites.includes(dir),
   }))

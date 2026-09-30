@@ -41,6 +41,7 @@ function bootstrap(ctx: Context): void {
     ctx.projects.setFavorite(directory, favorite),
   )
   ipcMain.handle(Channel.REMOVE_PROJECT, async (_event, directory: string) => ctx.projects.remove(directory))
+  ipcMain.handle(Channel.RENAME_PROJECT, async (_event, directory: string, name: string) => ctx.projects.rename(directory, name))
   ipcMain.handle(Channel.PICK_PROJECT_FOLDER, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options = { properties: ['openDirectory' as const] }

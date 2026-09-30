@@ -12,6 +12,7 @@ const Channel = {
   PICK_PROJECT_FOLDER: 'projects:pick-folder',
   SET_PROJECT_FAVORITE: 'projects:set-favorite',
   REMOVE_PROJECT: 'projects:remove',
+  RENAME_PROJECT: 'projects:rename',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -23,6 +24,7 @@ const bridge: LitecodeBridge = {
   pickProjectFolder: () => ipcRenderer.invoke(Channel.PICK_PROJECT_FOLDER),
   setProjectFavorite: (directory, favorite) => ipcRenderer.invoke(Channel.SET_PROJECT_FAVORITE, directory, favorite),
   removeProject: (directory) => ipcRenderer.invoke(Channel.REMOVE_PROJECT, directory),
+  renameProject: (directory, name) => ipcRenderer.invoke(Channel.RENAME_PROJECT, directory, name),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

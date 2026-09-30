@@ -17,6 +17,7 @@ export const Channel = {
   PICK_PROJECT_FOLDER: 'projects:pick-folder',
   SET_PROJECT_FAVORITE: 'projects:set-favorite',
   REMOVE_PROJECT: 'projects:remove',
+  RENAME_PROJECT: 'projects:rename',
 } as const
 
 export interface LitecodeBridge {
@@ -33,6 +34,8 @@ export interface LitecodeBridge {
   setProjectFavorite(directory: string, favorite: boolean): Promise<Project[]>
   /** 목록에서만 뺀다(폴더는 그대로) — 바뀐 목록을 준다 */
   removeProject(directory: string): Promise<Project[]>
+  /** 보이는 이름만 바꾼다 (폴더 이름은 그대로). 빈 이름이면 폴더 이름으로 */
+  renameProject(directory: string, name: string): Promise<Project[]>
 }
 
 declare global {

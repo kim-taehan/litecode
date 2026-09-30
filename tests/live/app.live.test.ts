@@ -98,8 +98,14 @@ const isDirectory = (dir: string) => fs.stat(dir).then((stat) => stat.isDirector
 const currentName = () => switcher().locator('.project-switch__name').textContent({ timeout: 1_000 })
 
 /** 팝오버에서 최근 프로젝트를 골라 전환이 화면에 반영될 때까지 기다린다 (전환은 IPC 왕복이라 비동기) */
+/** 팝오버를 연다 — 이전 동작으로 닫히는 중인 팝오버가 아직 떠 있을 때 전환 버튼을 누르면 도리어 닫혀 버린다(간헐 실패의 원인) */
+async function openPopover(): Promise<void> {
+  if (!(await popover().isVisible())) await switcher().click()
+  await popover().waitFor({ timeout: 5_000 })
+}
+
 async function switchTo(name: string): Promise<void> {
-  await switcher().click()
+  await openPopover()
   await popover().locator('.project-item', { hasText: name }).click()
   await expect.poll(currentName, { timeout: 10_000 }).toBe(name)
 }
@@ -168,7 +174,7 @@ describe('앱 ↔ 실물 opencode', () => {
     expect(alphaTitles).toEqual(['화면에서 안녕', '[bash:pwd]'])
 
     await pickFolderNextTime(beta)
-    await switcher().click()
+    await openPopover()
     await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('beta-app')
     expect(await popover().count()).toBe(0)
@@ -212,7 +218,7 @@ describe('앱 ↔ 실물 opencode', () => {
   })
 
   it('팝오버의 최근 목록은 현재 프로젝트를 표시하고, 검색 입력으로 걸러진다', async () => {
-    await switcher().click()
+    await openPopover()
     expect(await popoverNames()).toEqual(['beta-app', 'alpha-app'])
     expect(await popover().locator('.project-item--active .project-item__name').textContent()).toBe('beta-app')
 
@@ -228,7 +234,7 @@ describe('앱 ↔ 실물 opencode', () => {
     await page.keyboard.press('Escape')
     expect(await popover().count()).toBe(0)
 
-    await switcher().click()
+    await openPopover()
     expect(await popover().count()).toBe(1)
     await page.locator('.main__messages').click()
     expect(await popover().count()).toBe(0)
@@ -236,7 +242,7 @@ describe('앱 ↔ 실물 opencode', () => {
 
   // dsh ui-primitives Menu: ↑/↓ 로 행을 돌고(끝에서 처음으로), 고르거나 Esc 로 닫으면 포커스가 전환 버튼으로 돌아온다
   it('팝오버는 키보드로 걷고 고를 수 있고, 닫히면 포커스가 전환 버튼으로 돌아온다', async () => {
-    await switcher().click()
+    await openPopover()
     expect(await focused()).toBe('프로젝트 검색…')
 
     await page.keyboard.press('ArrowDown')
@@ -256,7 +262,7 @@ describe('앱 ↔ 실물 opencode', () => {
     expect(await popover().count()).toBe(0)
     expect(await focused()).toContain('alpha-app') // 전환 버튼
 
-    await switcher().click()
+    await openPopover()
     await page.keyboard.press('Escape')
     expect(await popover().count()).toBe(0)
     expect(await focused()).toContain('alpha-app')
@@ -269,10 +275,10 @@ describe('앱 ↔ 실물 opencode', () => {
     await launch()
 
     await expect.poll(currentName, { timeout: 10_000 }).toBe('beta-app')
-    await switcher().click()
+    await openPopover()
     expect(await popoverNames()).toEqual(['beta-app', 'alpha-app'])
     // 저장이 사용자 앱 데이터가 아니라 이 테스트의 userData 에 됐는지
-    expect(JSON.parse(await fs.readFile(path.join(userData, 'projects.json'), 'utf8'))).toEqual({ recent: [beta, alpha], favorites: [] })
+    expect(JSON.parse(await fs.readFile(path.join(userData, 'projects.json'), 'utf8'))).toEqual({ recent: [beta, alpha], favorites: [], names: {} })
     await page.keyboard.press('Escape')
   })
 
@@ -281,13 +287,13 @@ describe('앱 ↔ 실물 opencode', () => {
     const gamma = path.join(tmp, 'gamma-app')
     await fs.mkdir(gamma)
     await pickFolderNextTime(gamma)
-    await switcher().click()
+    await openPopover()
     await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('gamma-app')
     await switchTo('beta-app')
     await fs.rm(gamma, { recursive: true })
 
-    await switcher().click()
+    await openPopover()
     await popover().locator('.project-item', { hasText: 'gamma-app' }).click()
 
     await expect.poll(() => popover().getByRole('alert').textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain(gamma)
@@ -297,7 +303,7 @@ describe('앱 ↔ 실물 opencode', () => {
   // 성공 기준 7 — dsh ui-workspace 의 pin: 고정한 것은 앞 묶음에, 원래 자리에는 중복 없이
   it('즐겨찾기한 프로젝트는 즐겨찾기 묶음에만 있고, 검색은 두 묶음에 걸리며, 재시작해도 남는다', async () => {
     await page.keyboard.press('Escape') // 앞 테스트가 열어 둔 팝오버
-    await switcher().click()
+    await openPopover()
     await row('alpha-app').hover()
     await row('alpha-app').getByRole('button', { name: '즐겨찾기에 추가', exact: true }).click()
 
@@ -312,7 +318,7 @@ describe('앱 ↔ 실물 opencode', () => {
     await app.close()
     await launch()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('beta-app')
-    await switcher().click()
+    await openPopover()
     expect(await groupNames('즐겨찾기')).toEqual(['alpha-app'])
     expect(await groupNames('최근')).toEqual(['beta-app', 'gamma-app'])
     await row('alpha-app').hover() // ☆·× 는 hover·포커스 때만 보인다
@@ -325,10 +331,11 @@ describe('앱 ↔ 실물 opencode', () => {
     await row('gamma-app').getByRole('button', { name: '목록에서 빼기', exact: true }).click()
     await expect.poll(popoverNames, { timeout: 5_000 }).toEqual(['alpha-app', 'beta-app'])
 
-    // 키보드: ↓ 로 alpha 행 → Tab 으로 ★ → Tab 으로 × → Enter
+    // 키보드: ↓ 로 alpha 행 → Tab 으로 ✎ → Tab 으로 ★ → Tab 으로 × → Enter
     await popover().getByPlaceholder('프로젝트 검색…').focus()
     await page.keyboard.press('ArrowDown')
     expect(await focused()).toContain('alpha-app')
+    await page.keyboard.press('Tab')
     await page.keyboard.press('Tab')
     await page.keyboard.press('Tab')
     expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('목록에서 빼기')
@@ -338,7 +345,7 @@ describe('앱 ↔ 실물 opencode', () => {
     expect(await currentName()).toBe('beta-app')
     expect(await isDirectory(alpha)).toBe(true)
     expect(await fs.readFile(path.join(alpha, 'keep.txt'), 'utf8')).toBe('keep')
-    expect(JSON.parse(await fs.readFile(path.join(userData, 'projects.json'), 'utf8'))).toEqual({ recent: [beta], favorites: [] })
+    expect(JSON.parse(await fs.readFile(path.join(userData, 'projects.json'), 'utf8'))).toEqual({ recent: [beta], favorites: [], names: {} })
   })
 
   // 성공 기준 9 — 현재 프로젝트를 빼면 다음 프로젝트로, 없으면 첫 실행 안내로. 뺀 프로젝트의 메모리 속 대화는 버린다
@@ -348,7 +355,7 @@ describe('앱 ↔ 실물 opencode', () => {
     await expect.poll(currentName, { timeout: 10_000 }).toBe('alpha-app')
     expect(await sessionTitles()).toEqual(['새 대화']) // 빼기 전의 A 대화는 버려졌다
 
-    await switcher().click()
+    await openPopover()
     await row('alpha-app').hover()
     await row('alpha-app').getByRole('button', { name: '목록에서 빼기', exact: true }).click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('beta-app')
@@ -373,11 +380,11 @@ describe('앱 ↔ 실물 opencode', () => {
     await page.locator('.open-guide').getByRole('button', { name: '폴더 열기…' }).click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('davis-code')
     await pickFolderNextTime(frontend)
-    await switcher().click()
+    await openPopover()
     await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('davis-frontend')
 
-    await switcher().click()
+    await openPopover()
     const badge = (name: string) => row(name).locator('.project-switch__badge')
     expect(await badge('davis-code').textContent()).toBe('DC')
     expect(await badge('davis-frontend').textContent()).toBe('DF')
@@ -399,10 +406,82 @@ describe('앱 ↔ 실물 opencode', () => {
     expect(await page.getByPlaceholder('메시지를 입력하세요…').count()).toBe(0)
     expect(await currentName()).toBe('프로젝트 없음')
 
-    await switcher().click()
+    await openPopover()
     expect(await popoverNames()).toEqual(['davis-frontend', 'davis-code'])
     await row('davis-frontend').hover()
     await row('davis-frontend').getByRole('button', { name: '목록에서 빼기', exact: true }).click()
     await expect.poll(popoverNames, { timeout: 5_000 }).toEqual(['davis-code'])
+  })
+
+  // 이름 아래에 경로가 이미 보이므로 다 보이면 아무것도 안 띄운다. 잘린 경로는 dsh ui-workspace 처럼 마우스를 올리면
+  // 흘러가며 끝을 보이고, 머물면 옆 카드에 전체 경로를 띄운다 (dsh ui-primitives HoverCard)
+  it('잘린 경로는 마우스를 올리면 흘러가며 끝을 보이고 옆 카드에 전체 경로가 뜬다 — 다 보이는 경로는 그대로', async () => {
+    const short = '/private/tmp' // 실제 경로가 짧아 팝오버에서 안 잘린다
+    const long = path.join(tmp, 'a-very-long-directory-name-to-overflow', 'another-deeply-nested-folder', 'zz-long-leaf')
+    await fs.mkdir(long, { recursive: true })
+    await page.keyboard.press('Escape')
+    for (const dir of [short, long]) {
+      await pickFolderNextTime(dir)
+      await openPopover()
+      await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
+      await expect.poll(currentName, { timeout: 10_000 }).toBe(path.basename(dir))
+    }
+
+    await openPopover()
+    const card = () => page.locator('.hover-card')
+    const scrolled = (name: string) => row(name).locator('.project-switch__path').evaluate((el) => el.scrollLeft)
+    expect(await row('zz-long-leaf').locator('.project-item__main').getAttribute('title')).toBeNull()
+
+    await row('zz-long-leaf').locator('.project-item__main').hover()
+    await expect.poll(() => scrolled('zz-long-leaf'), { timeout: 5_000 }).toBeGreaterThan(0)
+    await expect.poll(() => card().textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain(long)
+
+    await row('tmp').locator('.project-item__main').hover()
+    await page.waitForTimeout(800) // 카드가 뜨는 머묾(500ms)을 넘겨도
+    expect(await card().count()).toBe(0)
+    expect(await scrolled('tmp')).toBe(0)
+    expect(await scrolled('zz-long-leaf')).toBe(0) // 떠난 행은 제자리로
+    await page.keyboard.press('Escape')
+  })
+
+  it('대화 목록도 잘린 제목은 흘러가며 보이고 옆 카드에 전체 제목이 뜬다', async () => {
+    // 제목은 첫 메시지 앞 24자 — 공백 없는 한글 24자는 목록 폭(약 231px)을 넘는다
+    const title = '가나다라마바사아자차카타파하가나다라마바사아자차카타파하'
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await send(title)
+    const item = page.locator('.session-item', { hasText: title.slice(0, 10) })
+    const shown = title.slice(0, 24) // 대화 제목은 첫 메시지 앞 24자
+
+    await item.hover()
+    await expect.poll(() => item.locator('.marquee').evaluate((el) => el.scrollLeft), { timeout: 5_000 }).toBeGreaterThan(0)
+    await expect.poll(() => page.locator('.hover-card').textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain(shown)
+    expect(await page.locator('.hover-card').textContent()).toContain('메시지 2개')
+
+    await page.locator('.main__header').hover()
+    await expect.poll(() => page.locator('.hover-card').count(), { timeout: 2_000 }).toBe(0)
+  })
+
+  it('✎ 로 보이는 이름만 바꾼다 — Enter 저장·Esc 취소·재시작 후에도 남고, 폴더 이름은 그대로', async () => {
+    await openPopover()
+    const leaf = row('zz-long-leaf')
+    await leaf.hover()
+    await leaf.getByRole('button', { name: '이름 바꾸기' }).click()
+    const input = popover().getByRole('textbox', { name: '프로젝트 이름' })
+    await input.fill('긴 경로 프로젝트')
+    await input.press('Escape') // 취소 — 팝오버는 열린 채
+    expect(await popover().count()).toBe(1)
+    expect(await popoverNames()).toContain('zz-long-leaf')
+
+    await leaf.hover()
+    await leaf.getByRole('button', { name: '이름 바꾸기' }).click()
+    await input.fill('긴 경로 프로젝트')
+    await input.press('Enter')
+    await expect.poll(popoverNames, { timeout: 5_000 }).toContain('긴 경로 프로젝트')
+    expect(await currentName()).toBe('긴 경로 프로젝트') // 열려 있는 프로젝트라 전환 버튼도 바뀐다
+
+    await app.close()
+    await launch()
+    await expect.poll(currentName, { timeout: 10_000 }).toBe('긴 경로 프로젝트')
+    expect(await fs.readdir(path.dirname(path.join(tmp, 'a-very-long-directory-name-to-overflow', 'another-deeply-nested-folder', 'zz-long-leaf')))).toContain('zz-long-leaf')
   })
 })

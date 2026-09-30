@@ -166,4 +166,27 @@ describe('ProjectsService', () => {
 
     expect(await service.open(await folder('alpha'))).toMatchObject({ displayPath: '~/alpha' })
   })
+
+  it('rename 은 보이는 이름만 바꾸고 재시작해도 남는다 — 폴더 이름·경로는 그대로', async () => {
+    const alpha = await folder('alpha')
+    await (await projects()).open(alpha)
+
+    const renamed = await (await projects()).rename(alpha, '  내 프로젝트  ')
+    expect(renamed.find((project) => project.path === alpha)?.name).toBe('내 프로젝트')
+    expect((await (await projects()).list())[0]).toMatchObject({ path: alpha, name: '내 프로젝트' })
+    expect(await fs.stat(alpha).then((stat) => stat.isDirectory())).toBe(true)
+  })
+
+  it('빈 이름으로 rename 하면 폴더 이름으로 돌아가고, remove 하면 붙인 이름도 사라진다', async () => {
+    const service = await projects()
+    const alpha = await folder('alpha')
+    await service.open(alpha)
+    await service.rename(alpha, '별명')
+
+    expect((await service.rename(alpha, '   '))[0]?.name).toBe('alpha')
+    await service.rename(alpha, '별명')
+    await service.remove(alpha)
+    await service.open(alpha)
+    expect((await service.list())[0]?.name).toBe('alpha')
+  })
 })

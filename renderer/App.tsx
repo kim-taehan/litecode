@@ -38,6 +38,90 @@ function Badge({ project }: { project: Project }) {
 
 const cannotOpen = (dir: string) => `폴더를 열 수 없습니다: ${dir}`
 
+// 잘린 경로를 보여주는 방식은 dsh ui-workspace 의 세션 행을 따른다: 마우스를 올리면 잘린 글자가 일정한 속도로 흘러가
+// 끝부분을 보이고(양 끝은 페이드), 떼면 한 번에 제자리로. 거의 안 잘린 것(8px 이하)은 흔들림으로 보여 움직이지 않는다.
+const MARQUEE_MIN_PX = 8
+const MARQUEE_PX_PER_MS = 0.03
+const marqueeFrames = new WeakMap<HTMLElement, number>()
+
+/** 행 안에서 흘러갈 글자 — `.marquee` 를 붙인 한 줄짜리 요소 */
+function pathOf(row: HTMLElement): HTMLElement | null {
+  return row.querySelector<HTMLElement>('.marquee')
+}
+
+function isClipped(row: HTMLElement): boolean {
+  const path = pathOf(row)
+  return !!path && path.scrollWidth - path.clientWidth > MARQUEE_MIN_PX
+}
+
+function placePath(path: HTMLElement, left: number, range: number): void {
+  path.scrollLeft = left
+  path.toggleAttribute('data-scrolled', left > 0)
+  path.toggleAttribute('data-clipped', left < range)
+}
+
+function startMarquee(row: HTMLElement): void {
+  const path = pathOf(row)
+  if (!path || !isClipped(row)) return
+  const range = path.scrollWidth - path.clientWidth
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return placePath(path, range, range)
+  cancelAnimationFrame(marqueeFrames.get(path) ?? 0)
+  let previous: number | undefined
+  let position = 0
+  const step = (now: number): void => {
+    position += previous === undefined ? 0 : (now - previous) * MARQUEE_PX_PER_MS
+    previous = now
+    placePath(path, Math.min(position, range), range)
+    if (position < range) marqueeFrames.set(path, requestAnimationFrame(step))
+  }
+  marqueeFrames.set(path, requestAnimationFrame(step))
+}
+
+function stopMarquee(row: HTMLElement): void {
+  const path = pathOf(row)
+  if (!path) return
+  cancelAnimationFrame(marqueeFrames.get(path) ?? 0)
+  path.scrollLeft = 0
+  path.removeAttribute('data-scrolled')
+  path.removeAttribute('data-clipped')
+}
+
+type HoverCardContent = { title: string; detail?: string }
+
+/** 잘린 행에 500ms 머물면 행 오른쪽 8px 에 전체 내용 카드 (dsh ui-primitives HoverCard). 흘러가는 글자도 함께 켜고 끈다 */
+function useHoverCard() {
+  const [card, setCard] = useState<HoverCardContent & { top: number; left: number }>()
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  return {
+    card,
+    enter(row: HTMLElement, content: HoverCardContent): void {
+      startMarquee(row)
+      clearTimeout(timer.current)
+      if (!isClipped(row)) return
+      timer.current = setTimeout(() => {
+        const rect = row.getBoundingClientRect()
+        setCard({ ...content, top: rect.top, left: rect.right + 8 })
+      }, 500)
+    },
+    leave(row: HTMLElement): void {
+      stopMarquee(row)
+      clearTimeout(timer.current)
+      setCard(undefined)
+    },
+  }
+}
+
+function HoverCard({ card }: { card?: HoverCardContent & { top: number; left: number } }) {
+  if (!card) return null
+  return (
+    <div className="hover-card" role="tooltip" style={{ top: card.top, left: card.left }}>
+      <div className="hover-card__name">{card.title}</div>
+      {card.detail && <div className="hover-card__path">{card.detail}</div>}
+    </div>
+  )
+}
+
 export function App() {
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   /** 최근 프로젝트(즐겨찾기 포함, 최근 순). 불러오기 전에는 undefined */
@@ -54,6 +138,7 @@ export function App() {
   const [openError, setOpenError] = useState<string>()
   const switchRef = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState('')
+  const sessionHover = useHoverCard()
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -173,9 +258,9 @@ export function App() {
             onClick={() => (projects?.length === 0 ? void openFolder() : setSwitching((open) => !open))}
           >
             {project && <Badge project={project} />}
-            <span className="project-switch__text" title={project?.path}>
+            <span className="project-switch__text" onMouseEnter={(event) => startMarquee(event.currentTarget)} onMouseLeave={(event) => stopMarquee(event.currentTarget)}>
               <span className="project-switch__name">{project?.name ?? '프로젝트 없음'}</span>
-              {project && <span className="project-switch__path">{project.displayPath}</span>}
+              {project && <span className="project-switch__path marquee">{project.displayPath}</span>}
             </span>
             <span className="project-switch__caret">▾</span>
           </button>
@@ -189,6 +274,7 @@ export function App() {
               onOpenFolder={() => void openFolder()}
               onToggleFavorite={(target) => void toggleFavorite(target)}
               onRemove={remove}
+              onRename={async (target, name) => setProjects(await window.litecode.renameProject(target.path, name))}
               onClose={closeSwitcher}
             />
           )}
@@ -219,11 +305,19 @@ export function App() {
               type="button"
               className={`session-item${session.id === active?.id ? ' session-item--active' : ''}`}
               onClick={() => setActiveIds((current) => ({ ...current, [session.project]: session.id }))}
+              onMouseEnter={(event) =>
+                sessionHover.enter(event.currentTarget, {
+                  title: session.title,
+                  detail: session.pending ? '답을 기다리는 중' : `메시지 ${session.messages.length}개`,
+                })
+              }
+              onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
             >
-              {session.title}
+              <span className="session-item__title marquee">{session.title}</span>
             </button>
           ))}
         </div>
+        <HoverCard card={sessionHover.card} />
 
         <div className="sidebar__status">
           <span className={`status-dot${providers.length > 0 ? ' status-dot--ok' : ''}`} />
@@ -295,6 +389,8 @@ interface ProjectPopoverProps {
   onOpenFolder(): void
   onToggleFavorite(project: Project): void
   onRemove(project: Project): Promise<void>
+  /** 보이는 이름만 바꾼다 (폴더는 그대로). 빈 이름이면 폴더 이름으로 */
+  onRename(project: Project, name: string): Promise<void>
   /** returnFocus: 키보드(Esc)로 닫았으면 true — 포커스를 전환 버튼으로 돌려준다 */
   onClose(returnFocus: boolean): void
 }
@@ -305,10 +401,13 @@ interface ProjectPopoverProps {
  *  다른 창이 포커스를 가져가면 실물 테스트 도중 팝오버가 닫혀 실패했다, 2026-09-30.) 목록이 길면 목록만 스크롤하고
  *  "폴더 열기" 는 아래에 고정한다. 행의 ☆·× 는 dsh ui-workspace 의 행 hover 버튼처럼 hover·포커스 때만 보인다
  *  (화살표는 행끼리만 걷고, 행 안의 버튼은 Tab 으로 닿는다). */
-function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onClose }: ProjectPopoverProps) {
+function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose }: ProjectPopoverProps) {
   const [query, setQuery] = useState('')
+  // 이름 바꾸는 중인 행 — dsh ui-workspace 처럼 그 자리에서 입력칸으로 바뀐다. Enter·바깥으로 나가면 저장, Esc 는 취소
+  const [editing, setEditing] = useState<string>()
   const ref = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const hover = useHoverCard()
 
   useEffect(() => {
     function onMouseDown(event: MouseEvent): void {
@@ -368,20 +467,59 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                 <div className="project-popover__label">{group.name}</div>
                 {group.items.map((project) => (
                   <div key={project.path} className={`project-item${project.path === current ? ' project-item--active' : ''}`}>
-                    <button type="button" className="project-item__main" title={project.path} disabled={busy} onClick={() => onPick(project)}>
+                    {editing === project.path ? (
+                      <input
+                        className="project-item__rename"
+                        aria-label="프로젝트 이름"
+                        defaultValue={project.name}
+                        autoFocus
+                        onFocus={(event) => event.currentTarget.select()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') event.currentTarget.blur()
+                          if (event.key === 'Escape') {
+                            event.stopPropagation() // 팝오버까지 닫지 않는다
+                            setEditing(undefined)
+                          }
+                        }}
+                        onBlur={(event) => {
+                          if (editing !== project.path) return
+                          setEditing(undefined)
+                          void onRename(project, event.currentTarget.value).then(() => searchRef.current?.focus())
+                        }}
+                      />
+                    ) : (
+                    <button
+                      type="button"
+                      className="project-item__main"
+                      disabled={busy}
+                      onMouseEnter={(event) => hover.enter(event.currentTarget, { title: project.name, detail: project.path })}
+                      onMouseLeave={(event) => hover.leave(event.currentTarget)}
+                      onClick={() => onPick(project)}
+                    >
                       <Badge project={project} />
                       <span className="project-switch__text">
                         <span className="project-item__name">{project.name}</span>
-                        <span className="project-switch__path">{project.displayPath}</span>
+                        <span className="project-switch__path marquee">{project.displayPath}</span>
                       </span>
                       {project.path === current && <span className="project-item__dot" />}
                     </button>
+                    )}
                     {project.favorite && (
                       <span className="project-item__marker" aria-hidden="true">
                         ★
                       </span>
                     )}
                     <span className="project-item__actions">
+                      <button
+                        type="button"
+                        className="project-item__action"
+                        aria-label="이름 바꾸기"
+                        title="이름 바꾸기 (폴더 이름은 그대로)"
+                        disabled={busy}
+                        onClick={() => setEditing(project.path)}
+                      >
+                        ✎
+                      </button>
                       <button
                         type="button"
                         className="project-item__action"
@@ -420,6 +558,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
       <button type="button" className="project-popover__open" disabled={busy} onClick={onOpenFolder}>
         ＋ 폴더 열기…
       </button>
+      <HoverCard card={hover.card} />
     </div>
   )
 }
