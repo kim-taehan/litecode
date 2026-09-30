@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Project, ProviderConfig } from '../shared/ipc.ts'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { Project, ProviderSummary } from '../shared/ipc.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
+import { SettingsModal } from './Settings.tsx'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -123,7 +124,7 @@ function HoverCard({ card }: { card?: HoverCardContent & { top: number; left: nu
 }
 
 export function App() {
-  const [providers, setProviders] = useState<ProviderConfig[]>([])
+  const [providers, setProviders] = useState<ProviderSummary[]>([])
   /** 최근 프로젝트(즐겨찾기 포함, 최근 순). 불러오기 전에는 undefined */
   const [projects, setProjects] = useState<Project[]>()
   /** 현재 프로젝트 경로 — 없으면 첫 실행 안내 */
@@ -140,6 +141,13 @@ export function App() {
   const [draft, setDraft] = useState('')
   const sessionHover = useHoverCard()
   const listRef = useRef<HTMLDivElement>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsRef = useRef<HTMLButtonElement>(null)
+  // 닫으면 포커스를 설정 버튼으로 돌려준다. 모달의 Esc 구독이 매 렌더 다시 걸리지 않게 참조를 고정한다
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    settingsRef.current?.focus()
+  }, [])
 
   useEffect(() => {
     void window.litecode.listProviders().then(setProviders)
@@ -287,8 +295,10 @@ export function App() {
             disabled={!project}
             onClick={() => {
               if (!project) return
-              const session = newSession(project.path)
-              setSessions((sessionsNow) => [session, ...sessionsNow])
+              // 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace) — 이미 있으면 새로 만들지 않고 그리로 간다
+              const blank = sessions.find((session) => session.project === project.path && session.messages.length === 0)
+              const session = blank ?? newSession(project.path)
+              if (!blank) setSessions((sessionsNow) => [session, ...sessionsNow])
               setActiveIds((current) => ({ ...current, [project.path]: session.id }))
             }}
           >
@@ -319,9 +329,10 @@ export function App() {
         </div>
         <HoverCard card={sessionHover.card} />
 
-        <div className="sidebar__status">
-          <span className={`status-dot${providers.length > 0 ? ' status-dot--ok' : ''}`} />
-          {providers.length > 0 ? `${provider?.displayName} 연결됨` : '연결 확인 중…'}
+        <div className="sidebar__foot">
+          <button type="button" className="settings-trigger" ref={settingsRef} onClick={() => setSettingsOpen(true)}>
+            ⚙ 설정
+          </button>
         </div>
       </aside>
 
@@ -366,7 +377,7 @@ export function App() {
                 }}
               />
               <div className="composer__row">
-                <span className="composer__model">{model?.displayName ?? '모델 불러오는 중…'}</span>
+                <span className="composer__model" title={provider?.displayName}>{model?.displayName ?? '모델 불러오는 중…'}</span>
                 <button type="button" className="composer__send" onClick={() => void send()} disabled={active.pending}>
                   보내기
                 </button>
@@ -375,6 +386,7 @@ export function App() {
           </>
         )}
       </main>
+      {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
     </div>
   )
 }

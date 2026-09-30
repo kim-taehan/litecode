@@ -1,35 +1,58 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
-import { ProviderRegistry } from '../src/services/providers.ts'
+import { ProviderRegistry, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService } from '../src/services/llm.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { Channel } from '../shared/ipc.ts'
+import { canSealKeys } from './keyStorage.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Cordis 컨텍스트는 메인 프로세스에 하나만 둔다 — 렌더러는 IPC 로만 닿는다.
 const ctx = new Context()
-ctx.plugin(ProviderRegistry)
-ctx.plugin(LlmService, { opencodeUrl: process.env.OPENCODE_URL ?? 'http://127.0.0.1:4096' })
 // userData 는 --user-data-dir 스위치를 따른다 (실물 테스트가 이걸로 격리한다).
-ctx.plugin(ProjectsService, { file: path.join(app.getPath('userData'), 'projects.json') })
+const userData = app.getPath('userData')
+ctx.plugin(ProviderRegistry, {
+  file: path.join(userData, 'providers.json'),
+  keysFile: path.join(userData, 'provider-keys.json'),
+  // safeStorage 는 app ready 뒤에만 쓸 수 있다 — 키 저장은 설정 화면에서만 일어나므로 그때는 늘 ready 다.
+  // macOS 는 Keychain, 쓸 수 없는 환경(키링 없는 Linux 의 basic_text 포함 — keyStorage.ts)이면 서비스가 키 저장을 거부한다.
+  cipher: {
+    available: () =>
+      canSealKeys(
+        process.platform,
+        safeStorage.isEncryptionAvailable(),
+        process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined,
+      ),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    decrypt: (sealed) => safeStorage.decryptString(sealed),
+  },
+  // 첫 실행 기본값 — 이후로는 providers.json 이 정본이다.
+  defaults: [
+    {
+      // id 는 opencode providerID 와 같아야 한다 (ctx.llm 이 그대로 넘긴다) — 사용자 opencode.json 의 이름.
+      id: 'gateway-local',
+      displayName: 'Internal LiteLLM Gateway',
+      baseURL: process.env.LITECODE_GATEWAY_URL ?? 'http://127.0.0.1:8080/v1',
+      protocol: 'openai-chat-completions',
+      models: [{ id: 'qwen3.8-27b', displayName: 'Qwen3.8 27B' }],
+    },
+  ],
+})
+ctx.plugin(LlmService, { opencodeUrl: process.env.OPENCODE_URL ?? 'http://127.0.0.1:4096' })
+ctx.plugin(ProjectsService, { file: path.join(userData, 'projects.json') })
 
 // 서비스는 비동기로 마운트된다 — ctx.providers 를 바로 쓰지 않고, inject 로
 // 선언한 플러그인 안에서만 접근한다 (Cordis 원칙: 순서는 inject 로 표현한다).
 function bootstrap(ctx: Context): void {
-  // 개발 중 확인용 기본 provider. 실제 설정 화면이 생기면 이 자리를 대체한다.
-  ctx.providers.register({
-    // id 는 opencode providerID 와 같아야 한다 (ctx.llm 이 그대로 넘긴다) — 사용자 opencode.json 의 이름.
-    id: 'gateway-local',
-    displayName: 'Internal LiteLLM Gateway',
-    baseURL: process.env.LITECODE_GATEWAY_URL ?? 'http://127.0.0.1:8080/v1',
-    protocol: 'openai-chat-completions',
-    models: [{ id: 'qwen3.8-27b', displayName: 'Qwen3.8 27B' }],
-  })
-
-  ipcMain.handle(Channel.LIST_PROVIDERS, async () => ctx.providers.all())
+  ipcMain.handle(Channel.LIST_PROVIDERS, async () => ctx.providers.list())
+  ipcMain.handle(Channel.SAVE_PROVIDER, async (_event, input: ProviderInput) => ctx.providers.save(input))
+  ipcMain.handle(Channel.REMOVE_PROVIDER, async (_event, id: string) => ctx.providers.remove(id))
+  ipcMain.handle(Channel.FETCH_PROVIDER_MODELS, async (_event, draft: { id?: string; baseURL: string; apiKey?: string }) =>
+    ctx.providers.fetchAvailableModels(draft),
+  )
   ipcMain.handle(
     Channel.SEND_MESSAGE,
     async (_event, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string) =>

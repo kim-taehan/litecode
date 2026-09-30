@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs/promises'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +9,7 @@ import { _electron as electron, type ElectronApplication, type Page } from 'play
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { freePort } from './support/opencodeServer.ts'
+import { FAKE_MODELS } from './support/fakeLlm.ts'
 import { badgeColor } from '../../renderer/badge.ts'
 
 // 앱 실물 테스트 — 진짜 Electron 창을 띄워 사람처럼 입력하고, 답이 화면에 뜨는지 본다.
@@ -32,12 +35,14 @@ let beta: string
 
 async function launch(): Promise<void> {
   app = await electron.launch({
-    args: ['.', `--user-data-dir=${userData}`],
+    // --use-mock-keychain: safeStorage 가 사용자 로그인 Keychain 대신 Chromium 의 가짜 키체인으로 암호화한다 — 테스트가
+    // 사용자 Keychain 에 항목을 만들거나 접근 허락 창을 띄우지 않게 (암호화 자체는 그대로 돈다)
+    args: ['.', `--user-data-dir=${userData}`, '--use-mock-keychain'],
     cwd: root,
     env: { ...process.env, LITECODE_DEV_SERVER_URL: devServerUrl, OPENCODE_URL: inject('opencodeUrl') },
   })
   page = await app.firstWindow()
-  await page.getByText('연결됨').waitFor()
+  await page.getByRole('button', { name: '⚙ 설정' }).waitFor()
 }
 
 beforeAll(async () => {
@@ -485,3 +490,179 @@ describe('앱 ↔ 실물 opencode', () => {
     expect(await fs.readdir(path.dirname(path.join(tmp, 'a-very-long-directory-name-to-overflow', 'another-deeply-nested-folder', 'zz-long-leaf')))).toContain('zz-long-leaf')
   })
 })
+
+// 설정 > 모델 (00_request 성공 기준 1~6). 화면은 dsh ui-settings-models 를 따른다.
+describe('설정 > 모델', () => {
+  const SECRET = 'sk-live-SECRET-4242'
+  const settingsButton = () => page.getByRole('button', { name: '⚙ 설정' })
+  const dialog = () => page.getByRole('dialog', { name: '설정' })
+  const card = (name: string) => dialog().locator('.provider-card', { has: page.locator('.provider-card__name', { hasText: name }) })
+  const cardNames = () => dialog().locator('.provider-card__name').allTextContents()
+  const field = (label: string) => dialog().getByLabel(label, { exact: true })
+  const modelIds = () => dialog().locator('.model-row input[aria-label^="모델 id"]').evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))
+  const fakeLlm = async () => (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { modelsAuth?: string }
+
+  async function openSettings(): Promise<void> {
+    if (!(await dialog().isVisible())) await settingsButton().click()
+    await dialog().waitFor({ timeout: 5_000 })
+  }
+
+  /** userData 아래 모든 파일에서 needle 을 찾는다 (Chromium 이 만든 파일 포함) */
+  async function filesContaining(dir: string, needle: string): Promise<string[]> {
+    const found: string[] = []
+    for (const entry of await fs.readdir(dir, { withFileTypes: true, recursive: true })) {
+      if (!entry.isFile()) continue
+      const file = path.join(entry.parentPath, entry.name)
+      const bytes = await fs.readFile(file).catch(() => Buffer.alloc(0))
+      if (bytes.includes(needle) || bytes.includes(Buffer.from(needle, 'utf16le'))) found.push(file)
+    }
+    return found
+  }
+
+  it('사이드바 하단의 ⚙ 설정은 모델 페이지로 모달을 열고, × 와 Esc 로 닫힌다', async () => {
+    expect(await page.getByText('연결됨').count()).toBe(0)
+    await settingsButton().click()
+    await dialog().waitFor({ timeout: 5_000 })
+    expect(await dialog().getByRole('button', { name: '모델', exact: true }).getAttribute('aria-current')).toBe('page')
+    expect(await cardNames()).toEqual(['Internal LiteLLM Gateway'])
+
+    await dialog().getByRole('button', { name: '닫기' }).click()
+    await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+    await openSettings()
+    await page.keyboard.press('Escape')
+    await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+  })
+
+  it('provider 를 추가하면 재시작해도 남고, 키는 화면·userData 어디에도 평문으로 없다', async () => {
+    await openSettings()
+    await dialog().getByRole('button', { name: '+ provider 추가' }).click()
+    await field('표시 이름').fill('Team Relay')
+    expect(await field('id').inputValue()).toBe('team-relay')
+    expect(await field('id').getAttribute('readonly')).not.toBeNull()
+    await field('API 키').fill(SECRET)
+    await field('Base URL').fill(`${inject('fakeLlmUrl')}/v1`)
+    for (const [index, [id, name]] of [['m-one', 'One'], ['m-two', 'Two']].entries()) {
+      await dialog().getByRole('button', { name: '+ 모델 추가' }).click()
+      await field(`모델 id ${index + 1}`).fill(id!)
+      await field(`모델 이름 ${index + 1}`).fill(name!)
+    }
+    await dialog().getByRole('button', { name: '적용' }).click()
+    await expect.poll(cardNames, { timeout: 5_000 }).toEqual(['Internal LiteLLM Gateway', 'Team Relay'])
+    expect(await card('Team Relay').textContent()).toContain('Custom')
+    expect(await card('Internal LiteLLM Gateway').textContent()).not.toContain('Custom')
+
+    await app.close()
+    await launch()
+    await openSettings()
+    await expect.poll(cardNames, { timeout: 5_000 }).toEqual(['Internal LiteLLM Gateway', 'Team Relay'])
+    await card('Team Relay').getByRole('button', { name: '편집' }).click()
+    expect(await modelIds()).toEqual(['m-one', 'm-two'])
+    expect(await field('API 키').inputValue()).toBe('') // 쓰기 전용 — 저장된 값은 안 보인다
+    expect(await field('API 키').getAttribute('placeholder')).toContain('설정됨')
+    expect(await page.content()).not.toContain(SECRET)
+
+    const stored = await fs.readFile(path.join(userData, 'providers.json'), 'utf8')
+    expect(JSON.parse(stored).map((provider: { id: string }) => provider.id)).toEqual(['gateway-local', 'team-relay'])
+    expect(Object.keys(JSON.parse(await fs.readFile(path.join(userData, 'provider-keys.json'), 'utf8')))).toEqual(['team-relay'])
+    expect(await filesContaining(userData, SECRET)).toEqual([])
+  })
+
+  it('"사용 가능한 모델 가져오기" 는 저장된 키로 가짜 LLM 의 /v1/models 목록을 채우고, 취소하면 아무것도 안 바뀐다', async () => {
+    await openSettings()
+    if (!(await field('Base URL').isVisible())) await card('Team Relay').getByRole('button', { name: '편집' }).click()
+    await dialog().getByRole('button', { name: '사용 가능한 모델 가져오기' }).click()
+    await expect.poll(modelIds, { timeout: 5_000 }).toEqual(['m-one', 'm-two', ...FAKE_MODELS])
+    expect((await fakeLlm()).modelsAuth).toBe(`Bearer ${SECRET}`) // 암호화해 둔 키가 메인 프로세스에서 풀려 게이트웨이로 갔다
+    await field('표시 이름').fill('바뀌면 안 됨')
+
+    await dialog().getByRole('button', { name: '취소' }).click()
+    expect(await cardNames()).toEqual(['Internal LiteLLM Gateway', 'Team Relay'])
+    await card('Team Relay').getByRole('button', { name: '편집' }).click()
+    expect(await modelIds()).toEqual(['m-one', 'm-two'])
+    await dialog().getByRole('button', { name: '취소' }).click()
+  })
+
+  // 03_qa 차단: 주소만 바꾸고 키 칸을 비운 채 가져오면 저장된 키가 새 주소로 새던 결함 — 요청 자체가 없어야 한다
+  it('편집에서 Base URL 을 다른 서버로 바꾸고 가져오면 저장된 키를 보내지 않고 키를 다시 입력하라고 한다', async () => {
+    const seen: (string | undefined)[] = []
+    const other = http.createServer((req, res) => {
+      seen.push(req.headers.authorization)
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'leaked' }] }))
+    })
+    await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve))
+    try {
+      await openSettings()
+      await card('Team Relay').getByRole('button', { name: '편집' }).click()
+      await field('Base URL').fill(`http://127.0.0.1:${(other.address() as AddressInfo).port}/v1`)
+      await dialog().getByRole('button', { name: '사용 가능한 모델 가져오기' }).click()
+
+      await expect.poll(() => dialog().getByRole('alert').textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain('키를 다시 입력하세요')
+      expect(seen).toEqual([])
+      expect(await modelIds()).toEqual(['m-one', 'm-two'])
+      await dialog().getByRole('button', { name: '취소' }).click()
+    } finally {
+      await new Promise<void>((resolve) => other.close(() => resolve()))
+    }
+  })
+
+  // 03_qa 1차 재확인 · 리더 결정: 주소를 바꿔 저장하려면 키를 다시 넣어야 한다
+  it('저장 키가 있는 provider 의 Base URL 만 바꿔 적용하면 경고하고, 재시작해도 이전 주소다', async () => {
+    const original = `${inject('fakeLlmUrl')}/v1`
+    await openSettings()
+    await card('Team Relay').getByRole('button', { name: '편집' }).click()
+    await field('Base URL').fill('http://127.0.0.1:9/v1')
+    await dialog().getByRole('button', { name: '적용' }).click()
+
+    await expect.poll(() => dialog().getByRole('alert').textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain('키를 다시 입력하세요')
+    expect(await field('Base URL').inputValue()).toBe('http://127.0.0.1:9/v1') // 편집 카드는 열린 채
+
+    await app.close()
+    await launch()
+    await openSettings()
+    await card('Team Relay').getByRole('button', { name: '편집' }).click()
+    expect(await field('Base URL').inputValue()).toBe(original)
+    await dialog().getByRole('button', { name: '취소' }).click()
+  })
+
+  it('삭제는 확인을 한 번 더 받고 목록·파일에서 뺀다', async () => {
+    await openSettings()
+    await card('Team Relay').getByRole('button', { name: '삭제', exact: true }).click()
+    expect(await cardNames()).toEqual(['Internal LiteLLM Gateway', 'Team Relay']) // 아직 확인 전
+    await card('Team Relay').getByRole('button', { name: '삭제 확인' }).click()
+
+    await expect.poll(cardNames, { timeout: 5_000 }).toEqual(['Internal LiteLLM Gateway'])
+    expect(await fs.readFile(path.join(userData, 'providers.json'), 'utf8')).not.toContain('team-relay')
+    expect(await fs.readFile(path.join(userData, 'provider-keys.json'), 'utf8')).toBe('{}')
+  })
+
+  it('입력창의 모델 표시는 설정의 provider·모델을 따른다', async () => {
+    await page.keyboard.press('Escape')
+    const composerModel = () => page.locator('.composer__model').textContent({ timeout: 1_000 })
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe('Qwen3.8 27B')
+
+    await openSettings()
+    await card('Internal LiteLLM Gateway').getByRole('button', { name: '편집' }).click()
+    await field('모델 이름 1').fill('Qwen 사내')
+    await dialog().getByRole('button', { name: '적용' }).click()
+    await expect.poll(() => field('Base URL').count(), { timeout: 5_000 }).toBe(0)
+    await page.keyboard.press('Escape')
+
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe('Qwen 사내')
+    expect(await send('설정 뒤에도')).toBe('echo: 설정 뒤에도') // id 는 그대로라 대화는 계속 돈다
+  })
+
+  // dsh ui-workspace: 빈 "새 대화" 는 첫 메시지 전까지 한 줄만 — 누를 때마다 빈 대화가 쌓이지 않는다
+  it('+ 새 대화 를 여러 번 눌러도 빈 대화는 하나뿐이고, 메시지를 보낸 뒤에야 새로 생긴다', async () => {
+    const blanks = async () => (await sessionTitles()).filter((title) => title === '새 대화').length
+    const newChat = page.getByRole('button', { name: '+ 새 대화' })
+    for (let i = 0; i < 3; i++) await newChat.click()
+    expect(await blanks()).toBe(1)
+    expect(await page.locator('.main__header').textContent()).toBe('새 대화') // 그 빈 대화가 선택돼 있다
+
+    await send('빈 대화 채우기')
+    await newChat.click()
+    await newChat.click()
+    expect(await blanks()).toBe(1)
+  })
+})
+

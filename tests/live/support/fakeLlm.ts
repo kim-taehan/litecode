@@ -11,7 +11,12 @@ import type { AddressInfo } from 'node:net'
 //   결과를 붙여 다시 부르면 위 규칙으로 끝난다. `[bash:pwd]` 로 세션의 작업 디렉터리를 답에서 읽는다 (01_probe 규칙)
 // - 그 밖에는 `echo: <마지막 user 메시지>` 를 두 조각으로 나눠 스트리밍한다
 // - `GET /requests` 는 지금까지 받은 chat/completions 요청 수를 JSON 으로 준다 — 테스트 프로세스는
-//   globalSetup 과 달라 requestCount() 를 직접 못 부르므로 HTTP 로 연다
+//   globalSetup 과 달라 requestCount() 를 직접 못 부르므로 HTTP 로 연다. 마지막 `/v1/models` 요청의 Authorization
+//   헤더(modelsAuth)도 함께 준다 — 설정 화면이 저장한 키가 복호화돼 게이트웨이까지 갔는지 본다
+// - `GET /v1/models` 는 OpenAI 호환 모델 목록 FAKE_MODELS 를 준다 (설정 > 모델의 "사용 가능한 모델 가져오기")
+
+/** `GET /v1/models` 가 주는 모델 id */
+export const FAKE_MODELS = ['fake-alpha', 'fake-beta']
 
 export interface FakeLlm {
   /** opencode.json 의 provider baseURL 에 넣을 값 (`.../v1`) */
@@ -44,12 +49,19 @@ function chunk(delta: Record<string, unknown>, finish: string | null = null): st
 export async function startFakeLlm(): Promise<FakeLlm> {
   let count = 0
   let toolCalls = 0
+  let modelsAuth: string | undefined
   const server = http.createServer((req, res) => {
     let raw = ''
     req.on('data', (part) => (raw += part))
     req.on('end', () => {
       if (req.method === 'GET' && req.url === '/requests') {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ count }))
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ count, modelsAuth }))
+        return
+      }
+      if (req.method === 'GET' && req.url === '/v1/models') {
+        modelsAuth = req.headers.authorization
+        const data = FAKE_MODELS.map((id) => ({ id, object: 'model', owned_by: 'fake' }))
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ object: 'list', data }))
         return
       }
       if (!req.url?.endsWith('/chat/completions')) {

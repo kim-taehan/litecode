@@ -118,6 +118,22 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   확인한다. 상대 경로·`~`·빈 문자열은 생성부터 500.
 - 폴더 값은 realpath·끝 슬래시 정규화 없이 **문자열 그대로** 저장되고 `GET /api/session?directory=` 는 정확 일치다 —
   litecode 는 `fs.realpath` 한 값 하나로 통일한다.
+- **opencode 에 설정 넘기기** (실측 2026-09-30, 1.18.18 — 근거 `_workspace/01_probe.md`, 2단계 설계의 전제):
+  - 신규 세대가 읽는 설정은 **전역 폴더 하나**(`OPENCODE_CONFIG_DIR`, 없으면 `$XDG_CONFIG_HOME/opencode`) + 세션 폴더의
+    opencode.json 뿐이다. `OPENCODE_CONFIG_CONTENT`·`OPENCODE_CONFIG` 로 넣은 provider 는 레거시 `GET /config` 에만 보이고 턴은
+    `prompted` 에서 **조용히 멈춘다**. → 앱은 `OPENCODE_CONFIG_DIR=<userData>/opencode` 에 opencode.json 을 생성해 넘긴다
+    (opencode 가 그 폴더에 npm 설치를 백그라운드로 한다 — **폐쇄망에서 실패하면 어떻게 되는지 미확인**)
+  - **키**는 provider 의 `"env": ["LITECODE_KEY_n"]` + 자식 프로세스 env 로만. `{env:X}`·`{file:…}` 는 치환 안 되고 **문자 그대로
+    헤더에 실린다**. `PUT /auth/{id}` 키는 안 쓰인다
+  - 레거시 `GET /provider`·`/config/providers` 는 풀린 키를 돌려준다 → 앱이 띄우는 opencode 에는 **항상
+    `OPENCODE_SERVER_PASSWORD`** (Basic, 사용자명 `opencode`)
+  - 설정 변경은 **재시작해야** 적용된다(dispose·PATCH 전부 안 먹음). 재시작 때 진행 중 턴은 끝 이벤트 없이 사라진다 —
+    `ctx.llm` 이 스스로 "중단됨" 으로 끝내야 한다. 세션 기록은 남는다
+  - **세션 폴더의 opencode.json 이 앱 provider 의 baseURL 까지 덮어 앱 키가 그리로 간다** (재현됨,
+    `OPENCODE_DISABLE_PROJECT_CONFIG` 로 못 막음). `/api/model?location[directory]=` 의 `api.url` 로 덮였는지 보고 거부한다
+  - 세션 저장소는 `OPENCODE_DB=<절대 경로>` 로 사용자 opencode 와 가른다. `XDG_CONFIG_HOME` 은 bash·git 이 물려받으므로 바꾸지 않는다
+  - 동봉: closed-code `scripts/fetch-opencode.mjs`(npm 레지스트리 플랫폼별 패키지, sha512) · `electron-builder.yml` extraResources ·
+    `binary.ts` 거의 그대로. 버전은 **1.18.18 고정** (latest 는 1.18.33 — 올리기 전에 위 실측을 다시)
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.
@@ -129,7 +145,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | `src/services/providers.ts` | provider 설정(이름·baseURL·프로토콜·모델 카탈로그) 관리 — dsh Settings > Models 화면과 같은 모양 |
 | `src/services/llm.ts` | opencode 세션 생성(모델 명시 + 카탈로그에 모델이 뜰 때까지 대기) → SSE 구독 → 프롬프트 전송 → `admittedSeq` 이하 재생분을 버리고 텍스트 수집. 실물 테스트로 고정됨 (2026-09-30). **남은 공백:** SSE 타임아웃 없음(SSE 로 안 오는 실패는 영원히 대기), 전송 실패 시 unhandled rejection, 재시작 직후 이어가는 세션은 모델 확인 안 함 |
 | `electron/` + `renderer/` | Electron 앱. 사이드바(프로젝트 전환·새 대화·세션 목록) + 채팅창. IPC 로 위 서비스에 연결됨 |
-| 설정 화면 | 없음. provider 는 `electron/main.ts` 에 하드코딩된 더미 하나뿐 |
+| 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. **아직 opencode 에 안 넘긴다** — 추가한 provider 로는 대화 불가(2단계: 앱이 동봉 opencode 를 띄워 설정 전달, 실측 중) |
 | 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). 실물 테스트가 착지 기준이다 |
 | 세션 영속화 | 없음. 새로고침하면 대화 목록이 다 날아감 (React state 뿐) |
 | 프로젝트 전환 | 시안대로 구현 (2026-09-30). 사이드바 전환 버튼 + 팝오버(검색·즐겨찾기·최근·폴더 열기), 목록에서 빼기(폴더는 안 지움), 이름 바꾸기(보이는 이름만), 잘린 경로·대화 제목은 마우스를 올리면 흘러가며 보이고 옆 카드에 전체 내용(dsh 방식), 앱을 켜면 마지막 프로젝트. 목록은 `ctx.projects`(userData `projects.json`). 대화는 프로젝트별로 메모리에만 — **대화 영속화는 아직 없다** |

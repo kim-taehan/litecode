@@ -6,6 +6,9 @@ import type { LitecodeBridge } from '../shared/ipc.ts'
 // shared/ipc.ts 의 Channel 과 반드시 같아야 한다.
 const Channel = {
   LIST_PROVIDERS: 'providers:list',
+  SAVE_PROVIDER: 'providers:save',
+  REMOVE_PROVIDER: 'providers:remove',
+  FETCH_PROVIDER_MODELS: 'providers:fetch-models',
   SEND_MESSAGE: 'chat:send',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
@@ -17,6 +20,9 @@ const Channel = {
 
 const bridge: LitecodeBridge = {
   listProviders: () => ipcRenderer.invoke(Channel.LIST_PROVIDERS),
+  saveProvider: (input) => ipcRenderer.invoke(Channel.SAVE_PROVIDER, input),
+  removeProvider: (id) => ipcRenderer.invoke(Channel.REMOVE_PROVIDER, id),
+  fetchProviderModels: (draft) => ipcRenderer.invoke(Channel.FETCH_PROVIDER_MODELS, draft),
   sendMessage: (providerId, modelId, directory, prompt, sessionId) =>
     ipcRenderer.invoke(Channel.SEND_MESSAGE, providerId, modelId, directory, prompt, sessionId),
   listProjects: () => ipcRenderer.invoke(Channel.LIST_PROJECTS),

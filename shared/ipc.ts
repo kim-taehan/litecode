@@ -1,16 +1,19 @@
 // 렌더러 ↔ 메인 IPC 계약. 채널 이름과 페이로드 모양을 한 곳에 둔다.
 // 타입은 서비스 쪽 정의를 그대로 재수출한다 — 같은 모양을 두 곳에 베끼지 않는다.
 
-import type { ProviderConfig } from '../src/services/providers.ts'
+import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
 import type { ChatResult } from '../src/services/llm.ts'
 import type { Project } from '../src/services/projects.ts'
 
-export type { ProviderConfig, ModelCatalogEntry } from '../src/services/providers.ts'
+export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { ChatResult } from '../src/services/llm.ts'
 export type { Project } from '../src/services/projects.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
+  SAVE_PROVIDER: 'providers:save',
+  REMOVE_PROVIDER: 'providers:remove',
+  FETCH_PROVIDER_MODELS: 'providers:fetch-models',
   SEND_MESSAGE: 'chat:send',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
@@ -21,7 +24,13 @@ export const Channel = {
 } as const
 
 export interface LitecodeBridge {
-  listProviders(): Promise<ProviderConfig[]>
+  /** 키는 안 오고 설정 여부(hasKey)만 */
+  listProviders(): Promise<ProviderSummary[]>
+  /** 설정 > 모델의 [적용] — 새로 추가하거나 고치고 바뀐 목록을 준다. apiKey 가 비었으면 저장된 키 유지 */
+  saveProvider(input: ProviderInput): Promise<ProviderSummary[]>
+  removeProvider(id: string): Promise<ProviderSummary[]>
+  /** 메인 프로세스가 `GET {baseURL}/models` 로 묻는다. 키는 입력한 것, 없으면 id 의 저장된 키 */
+  fetchProviderModels(draft: { id?: string; baseURL: string; apiKey?: string }): Promise<ModelCatalogEntry[]>
   /** sessionId 를 안 주면 directory(작업 디렉터리)에서 세션을 새로 만든다 — 결과의 sessionId 를 다음 호출에 넘긴다 */
   sendMessage(providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string): Promise<ChatResult>
   /** 최근 프로젝트 — 맨 앞이 마지막으로 연 프로젝트 */
