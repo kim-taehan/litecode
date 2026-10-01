@@ -28,6 +28,8 @@ const Channel = {
   RESIZE_TERMINAL: 'terminal:resize',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
+  OPEN_EXTERNAL: 'shell:open-external',
+  LOAD_TRAJECTORY: 'trajectory:load',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -63,6 +65,8 @@ const bridge: LitecodeBridge = {
     ipcRenderer.on(Channel.TERMINAL_EXIT, handler)
     return () => void ipcRenderer.removeListener(Channel.TERMINAL_EXIT, handler)
   },
+  openExternal: (url) => ipcRenderer.invoke(Channel.OPEN_EXTERNAL, url),
+  loadTrajectory: (directory, sessionId) => ipcRenderer.invoke(Channel.LOAD_TRAJECTORY, directory, sessionId),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

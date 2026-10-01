@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -13,7 +13,9 @@ import { TerminalsService } from '../src/services/terminals.ts'
 import { AtTrigger } from '../src/triggers/at.ts'
 import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
+import { TrajectoryService } from '../src/services/trajectory.ts'
 import { Channel } from '../shared/ipc.ts'
+import { isWebUrl } from '../shared/webUrl.ts'
 import { canSealKeys } from './keyStorage.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -73,6 +75,7 @@ mounted.push(ctx.plugin(TerminalsService))
 mounted.push(ctx.plugin(AtTrigger))
 mounted.push(ctx.plugin(SlashTrigger))
 mounted.push(ctx.plugin(BangTrigger))
+mounted.push(ctx.plugin(TrajectoryService))
 
 /** IPC 핸들러를 되돌릴 수 있게 건다 — 의존 서비스가 다시 올라와 bootstrap 이 다시 돌면, Cordis 가 먼저 이것을 풀어
  *  "이미 등록된 핸들러" 오류 없이 다시 건다 (Cordis 원칙: 모든 등록은 effect 로) */
@@ -137,8 +140,15 @@ function bootstrap(ctx: Context): void {
     if (picked.canceled || !picked.filePaths[0]) return undefined
     return ctx.projects.open(picked.filePaths[0])
   })
+  // 답의 링크 — 렌더러가 걸러도 여기서 다시 거른다 (답은 모델이 쓴 글이라 file:·javascript: 등이 올 수 있다)
+  handle(ctx, Channel.OPEN_EXTERNAL, async (_event, url: string) => {
+    if (typeof url !== 'string' || !isWebUrl(url)) return false
+    await shell.openExternal(url)
+    return true
+  })
+  handle(ctx, Channel.LOAD_TRAJECTORY, async (_event, directory: string, sessionId: string) => ctx.trajectory.read(directory, sessionId))
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals']
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory']
 mounted.push(ctx.plugin(bootstrap))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).
@@ -173,6 +183,13 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+
+  // 앱 창은 앱 화면에서 벗어나지 않는다 — 링크가 새 창(Shift·가운데 클릭)이나 다른 주소로 이동하는 길을 막는다.
+  // 답의 링크는 OPEN_EXTERNAL 로 OS 브라우저에서 연다. 같은 출처 이동(개발 서버 새로고침)은 그대로 둔다
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (event, url) => {
+    if (new URL(url).origin !== new URL(win.webContents.getURL()).origin) event.preventDefault()
   })
 
   win.webContents.on('preload-error', (_event, preloadPath, error) => {

@@ -327,7 +327,7 @@ export class LlmService extends Service {
 
   /** 세션의 메시지 전부 (asc). 읽기만 한다 — 화면별 모양 변환(historyMessages 등)은 따로 둔다: 같은 응답을 다른 모양으로 쓸 화면이 있다.
    *  cursor 는 order 와 같이 못 준다(/doc). 마지막 쪽에도 cursor.next 가 오므로 받은 개수 < limit 이거나 빈 쪽이면 끝이다 (01c Q1) */
-  private async readMessages(conn: EngineConnection, sessionId: string): Promise<OpencodeMessage[]> {
+  async readMessages(conn: EngineConnection, sessionId: string): Promise<OpencodeMessage[]> {
     const messages: OpencodeMessage[] = []
     let query = `order=asc&limit=${MESSAGE_PAGE}`
     while (true) {
@@ -496,7 +496,7 @@ async function interruption(closed: AbortSignal): Promise<string> {
  *  opencode 는 없는 경로로도 세션을 200 으로 만들지만 그 세션은 모든 요청이 500 이고, 그 경로는 서버 재시작 전까지
  *  계속 500 이다 (폴더를 나중에 만들어도) — 사용자 opencode 를 오염시키므로 opencode 에 닿기 전에 거른다.
  *  realpath 인 이유: opencode 는 경로를 문자열 그대로 저장·비교한다 (2026-09-30 실측, 01_probe Q3). */
-async function realDirectory(directory: string): Promise<string | undefined> {
+export async function realDirectory(directory: string): Promise<string | undefined> {
   if (!path.isAbsolute(directory)) return undefined
   try {
     const real = await fs.realpath(directory)

@@ -1413,3 +1413,229 @@ button {
   font-size: 12px;
   color: var(--text-tertiary);
 }
+
+/* Trajectory 탭 (renderer/Trajectory.tsx) — dsh ui-trajectory 참조: 얇은 툴바, 3레인 시간축, 턴별 목록 */
+.main__tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  padding: 6px 24px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.main__tab {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.main__tab:hover {
+  color: var(--text);
+}
+
+.main__tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.trajectory {
+  flex-grow: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.trajectory__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 18px;
+  background: var(--bg);
+  border-bottom: 0.5px solid var(--border);
+}
+
+.trajectory__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.trajectory__toggle:hover,
+.trajectory__toggle[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.trajectory__search {
+  margin-left: auto;
+  width: 180px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.trajectory__timeline {
+  padding: 10px 18px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.trajectory__lane {
+  display: flex;
+  align-items: center;
+  height: 16px;
+  gap: 8px;
+}
+
+.trajectory__lane-name {
+  width: 44px;
+  flex: none;
+  font-size: 11px;
+  color: var(--text-caption);
+}
+
+.trajectory__track {
+  position: relative;
+  flex-grow: 1;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--fill-selector);
+}
+
+/* Model 막대: 앞쪽 회색이 응답을 기다린 구간(--wait), 나머지가 생성 */
+.trajectory__bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 2px;
+  --wait: 0%;
+  background: linear-gradient(to right, var(--text-caption) var(--wait), var(--accent) var(--wait));
+}
+
+.trajectory__bar[data-kind='user'],
+.trajectory__bar[data-kind='context'] {
+  background: var(--text-secondary);
+}
+
+.trajectory__bar[data-kind='tool'] {
+  background: var(--ok);
+}
+
+.trajectory__bar.trajectory__bar--open {
+  background: transparent;
+  border-left: 2px solid var(--text-tertiary);
+}
+
+.trajectory__bar.trajectory__bar--error {
+  background: var(--danger);
+}
+
+.trajectory__ledger {
+  padding: 6px 0 24px;
+}
+
+.trajectory__turn-head {
+  display: block;
+  width: 100%;
+  padding: 6px 18px;
+  border: 0;
+  border-bottom: 0.5px solid var(--border-light);
+  background: var(--bg);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.trajectory__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 18px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.trajectory__row:hover {
+  background: var(--fill-hover);
+}
+
+.trajectory__row[data-kind='tool'] {
+  padding-left: 42px;
+}
+
+.trajectory__fold {
+  width: 14px;
+  flex: none;
+}
+
+.trajectory__fold button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.trajectory__tag {
+  width: 72px;
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.trajectory__text {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.trajectory__call,
+.trajectory__result {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+}
+
+.trajectory__result {
+  color: var(--text-secondary);
+}
+
+.trajectory__row--error .trajectory__text,
+.trajectory__row--error .trajectory__result,
+.trajectory__row--error .trajectory__tag {
+  color: var(--danger);
+}
+
+.trajectory__time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}

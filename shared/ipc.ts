@@ -6,6 +6,7 @@ import type { ChatResult, History } from '../src/services/llm.ts'
 import type { Project } from '../src/services/projects.ts'
 import type { Conversation } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
+import type { Trajectory } from '../src/services/trajectory.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -13,6 +14,7 @@ export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { Project } from '../src/services/projects.ts'
 export type { Conversation } from '../src/services/sessions.ts'
 export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
+export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -40,6 +42,8 @@ export const Channel = {
   TERMINAL_DATA: 'terminal:data',
   /** 메인 → 화면 (directory) */
   TERMINAL_EXIT: 'terminal:exit',
+  OPEN_EXTERNAL: 'shell:open-external',
+  LOAD_TRAJECTORY: 'trajectory:load',
 } as const
 
 export interface LitecodeBridge {
@@ -95,6 +99,10 @@ export interface LitecodeBridge {
   /** 해제 함수를 준다 */
   onTerminalData(listener: (directory: string, chunk: string, end: number) => void): () => void
   onTerminalExit(listener: (directory: string) => void): () => void
+  /** 답의 링크를 OS 기본 브라우저로 연다 — 메인이 절대 http(s) 만 연다(그 밖은 false) */
+  openExternal(url: string): Promise<boolean>
+  /** 대화 하나의 스텝·도구 기록 (Trajectory 탭). directory 는 그 대화의 작업 폴더 — 없으면 엔진에 묻지 않고 missingFolder */
+  loadTrajectory(directory: string, sessionId: string): Promise<Trajectory>
 }
 
 declare global {
