@@ -251,6 +251,19 @@ function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
             disabled={busy}
             onChange={(event) => setModel(index, { displayName: event.target.value })}
           />
+          {/* opencode 는 custom 모델의 한도를 모른다 — 적으면 엔진에 넘기고 입력창 통계 줄의 컨텍스트 % 가 보인다 (비우면 "—") */}
+          <input
+            className="settings-input"
+            aria-label={`컨텍스트 길이 ${index + 1}`}
+            placeholder="컨텍스트 길이"
+            title="컨텍스트 길이 (토큰, 선택)"
+            type="number"
+            min={1}
+            step={1}
+            value={model.contextLength ?? ''}
+            disabled={busy}
+            onChange={(event) => setModel(index, { contextLength: event.target.value === '' ? undefined : Number(event.target.value) })}
+          />
           <button
             type="button"
             className="settings-icon-button"

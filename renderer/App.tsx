@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Project, ProviderSummary } from '../shared/ipc.ts'
+import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
+import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
+import { ModelSelect } from './ModelSelect.tsx'
 import { SettingsModal } from './Settings.tsx'
+import { StatsBar } from './StatsBar.tsx'
+import { addTurn, chatStats, type ChatUsage } from './stats.ts'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -14,14 +19,21 @@ interface Session {
   project: string
   /** 엔진 쪽 세션 id — 첫 메시지를 보낼 때 생기고, 그 뒤로는 계속 재사용한다 */
   engineSessionId?: string
+  /** 입력창 드롭다운에서 고른 이 대화의 모델. 없으면(아직 안 고르고 안 보낸 새 대화) 마지막으로 고른 모델을 따른다.
+   *  대화 중에 바꾸면 다음 턴부터 그 모델로 간다 (엔진 세션의 모델은 ctx.llm 이 바꾼다) */
+  model?: ModelRef
   title: string
   messages: ChatMessage[]
   /** 답을 기다리는 중 — 대화마다 따로. 기다리는 동안 다른 대화·프로젝트는 보낼 수 있다 (03_qa) */
   pending?: boolean
+  /** 마지막 활동 시각(ms) — 목록에 `38min`·`1d` 로 보이고, 보관 개수 제한의 기준이 된다 */
+  updatedAt: number
+  /** 입력창 아래 통계 줄의 값 — 턴마다 엔진이 주는 사용량·시간을 이 대화에 더한다. 없으면 "—" */
+  usage?: ChatUsage
 }
 
 function newSession(project: string): Session {
-  return { id: crypto.randomUUID(), project, title: '새 대화', messages: [] }
+  return { id: crypto.randomUUID(), project, title: '새 대화', messages: [], updatedAt: Date.now() }
 }
 
 /** 그 프로젝트에 대화가 하나도 없으면 새 대화를 하나 더한다 — 같은 값을 두 번 넣어도 한 번만 더해진다 */
@@ -93,6 +105,16 @@ const SIDEBAR_MIN = 264
 const SIDEBAR_MAX = 420
 const SIDEBAR_DEFAULT = 272
 const LAYOUT_KEY = 'litecode.sidebar'
+/** 마지막으로 고른 모델 — 새 대화가 이것으로 시작한다(재시작해도). 같은 편의 설정이라 localStorage 에 둔다 */
+const LAST_MODEL_KEY = 'litecode.model'
+
+function readLastModel(): ModelRef | undefined {
+  try {
+    return parseModelRef(localStorage.getItem(LAST_MODEL_KEY))
+  } catch {
+    return undefined
+  }
+}
 
 function clampSidebar(px: number): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)))
@@ -116,6 +138,16 @@ function SidebarIcon() {
   )
 }
 
+/** 로고 아이콘 — 간단한 기하 도형(둥근 사각형 안의 >_). 다른 회사 로고는 쓰지 않는다 */
+function LogoMark() {
+  return (
+    <svg className="sidebar__mark" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <rect width="24" height="24" rx="7" fill="currentColor" />
+      <path d="M7.5 8.5L11 12L7.5 15.5M12.5 16H16.5" stroke="var(--bg)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
+  )
+}
+
 type HoverCardContent = { title: string; detail?: string }
 
 /** 잘린 행에 500ms 머물면 행 오른쪽 8px 에 전체 내용 카드 (dsh ui-primitives HoverCard). 흘러가는 글자도 함께 켜고 끈다 */
@@ -125,12 +157,14 @@ function useHoverCard() {
   useEffect(() => () => clearTimeout(timer.current), [])
   return {
     card,
-    enter(row: HTMLElement, content: HoverCardContent): void {
+    /** always: 잘리지 않아도 카드를 띄운다 — 카드에 제목 말고 다른 정보(메시지 수 등)가 있을 때 */
+    enter(row: HTMLElement, content: HoverCardContent, always = false): void {
       startMarquee(row)
       clearTimeout(timer.current)
-      if (!isClipped(row)) return
+      if (!always && !isClipped(row)) return
       timer.current = setTimeout(() => {
-        const rect = row.getBoundingClientRect()
+        // 행에 딸린 버튼(☆·✎·× 등)까지 포함한 줄 전체의 오른쪽 바깥에 붙인다 — 버튼을 덮지 않게
+        const rect = (row.closest<HTMLElement>('[data-hover-row]') ?? row).getBoundingClientRect()
         setCard({ ...content, top: rect.top, left: rect.right + 8 })
       }, 500)
     },
@@ -169,6 +203,12 @@ export function App() {
   const switchRef = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState('')
   const sessionHover = useHoverCard()
+  // 목록의 `38min`·`1h` 가 저절로 늘어나게 30초마다 다시 그린다
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(tick)
+  }, [])
   const [layout, setLayout] = useState(readLayout)
   const drag = useRef<{ x: number; width: number }>(undefined)
   useEffect(() => {
@@ -178,6 +218,15 @@ export function App() {
       // 못 쓰면 이번 실행 동안만 기억한다
     }
   }, [layout])
+  const [lastModel, setLastModel] = useState(readLastModel)
+  useEffect(() => {
+    if (!lastModel) return
+    try {
+      localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(lastModel))
+    } catch {
+      // 못 쓰면 이번 실행 동안만 기억한다
+    }
+  }, [lastModel])
   const listRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLButtonElement>(null)
@@ -205,8 +254,9 @@ export function App() {
   const project = projects?.find((candidate) => candidate.path === current)
   const visible = sessions.filter((session) => session.project === project?.path)
   const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
-  const provider = providers[0]
-  const model = provider?.models[0]
+  /** 이 대화의 모델 — 설정에서 지워졌으면 chosen 이 없고 보내기가 막힌다 */
+  const selected = active?.model ?? initialModel(providers, lastModel)
+  const chosen = findModel(providers, selected)
 
   /** 팝오버를 닫는다. 키보드로 닫았거나 골랐으면 포커스를 전환 버튼으로 돌려준다 (dsh ui-primitives Menu) */
   function closeSwitcher(returnFocus: boolean): void {
@@ -265,9 +315,14 @@ export function App() {
     setSessions((sessionsNow) => sessionsNow.map((session) => (session.id === id ? mutate(session) : session)))
   }
 
+  function chooseModel(next: ModelRef): void {
+    if (active) updateSession(active.id, (session) => ({ ...session, model: next }))
+    setLastModel(next)
+  }
+
   async function send(): Promise<void> {
     const prompt = draft.trim()
-    if (!prompt || !provider || !model || !active || active.pending) return
+    if (!prompt || !selected || !chosen || !active || active.pending) return
 
     // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
     const target = active
@@ -275,15 +330,19 @@ export function App() {
     updateSession(target.id, (session) => ({
       ...session,
       pending: true,
+      updatedAt: Date.now(),
+      model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
       title: session.messages.length === 0 ? prompt.slice(0, 24) : session.title,
       messages: [...session.messages, { role: 'user', text: prompt }],
     }))
 
-    const result = await window.litecode.sendMessage(provider.id, model.id, target.project, prompt, target.engineSessionId)
+    const result = await window.litecode.sendMessage(selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId)
     updateSession(target.id, (session) => ({
       ...session,
       pending: false,
+      updatedAt: Date.now(),
       engineSessionId: result.sessionId ?? session.engineSessionId,
+      usage: result.usage ? addTurn(session.usage, result.usage) : session.usage,
       messages: [
         ...session.messages,
         { role: 'assistant', text: result.ok ? (result.text ?? '') : `⚠️ ${result.error}` },
@@ -310,6 +369,22 @@ export function App() {
           onPointerUp={() => (drag.current = undefined)}
           onPointerCancel={() => (drag.current = undefined)}
         />
+        {/* dsh ui-sidebar 로고 줄: 왼쪽 아이콘·이름, 오른쪽 끝 접기 */}
+        <div className="sidebar__logo">
+          <span className="sidebar__identity">
+            <LogoMark />
+            <span className="sidebar__brand">LiteCode</span>
+          </span>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label="사이드바 숨기기"
+            title="사이드바 숨기기"
+            onClick={() => setLayout((now) => ({ ...now, hidden: true }))}
+          >
+            <SidebarIcon />
+          </button>
+        </div>
         <div className="sidebar__project">
           <button
             type="button"
@@ -373,11 +448,12 @@ export function App() {
                 sessionHover.enter(event.currentTarget, {
                   title: session.title,
                   detail: session.pending ? '답을 기다리는 중' : `메시지 ${session.messages.length}개`,
-                })
+                }, true)
               }
               onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
             >
               <span className="session-item__title marquee">{session.title}</span>
+              {session.messages.length > 0 && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
             </button>
           ))}
         </div>
@@ -391,15 +467,18 @@ export function App() {
       </aside>
 
       <main className={`main${layout.hidden ? ' main--full' : ''}`}>
-        <button
-          type="button"
-          className="sidebar-toggle"
-          aria-label={layout.hidden ? '사이드바 보이기' : '사이드바 숨기기'}
-          title={layout.hidden ? '사이드바 보이기' : '사이드바 숨기기'}
-          onClick={() => setLayout((now) => ({ ...now, hidden: !now.hidden }))}
-        >
-          <SidebarIcon />
-        </button>
+        {/* 사이드바를 숨기면 로고 줄의 접기 버튼도 같이 사라지므로 그때만 여기서 다시 연다 */}
+        {layout.hidden && (
+          <button
+            type="button"
+            className="sidebar-toggle sidebar-toggle--floating"
+            aria-label="사이드바 보이기"
+            title="사이드바 보이기"
+            onClick={() => setLayout((now) => ({ ...now, hidden: false }))}
+          >
+            <SidebarIcon />
+          </button>
+        )}
         {projects && !project && (
           <div className="open-guide">
             {openError && (
@@ -421,30 +500,62 @@ export function App() {
               {active.messages.length === 0 && <div className="empty">무엇을 도와드릴까요?</div>}
               {active.messages.map((message, index) => (
                 <div key={index} className={`bubble bubble--${message.role}`}>
-                  {message.text}
+                  {/* 모델이 빈 줄로 답을 시작하기도 한다 — 앞뒤 공백은 보여 주지 않는다 (속 줄바꿈은 그대로) */}
+                  {message.text.trim()}
                 </div>
               ))}
             </div>
 
             <div className="composer">
-              <textarea
-                className="composer__input"
-                placeholder="메시지를 입력하세요…"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault()
-                    void send()
-                  }
-                }}
-              />
-              <div className="composer__row">
-                <span className="composer__model" title={provider?.displayName}>{model?.displayName ?? '모델 불러오는 중…'}</span>
-                <button type="button" className="composer__send" onClick={() => void send()} disabled={active.pending}>
-                  보내기
-                </button>
+              {/* dsh InputBar: 둥근 카드 하나에 입력칸과 아래 줄(왼쪽 +, 오른쪽 모델 선택·둥근 보내기)을 담고, 카드 밑에 통계 줄 */}
+              <div className="composer__box">
+                <textarea
+                  className="composer__input"
+                  placeholder="메시지를 입력하세요…"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    // 한글 등 입력기가 조합 중인 Enter 는 조합을 확정하는 키다 — 여기서 보내면 "안녕" 이 "아ㄴ녕" 으로 가고
+                    // 마지막 글자가 입력창에 남는다. keyCode 229 는 isComposing 을 안 채우는 환경용
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) return
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      void send()
+                    }
+                  }}
+                />
+                <div className="composer__row">
+                  {/* dsh 에선 첨부 메뉴. 첨부 기능이 생길 때까지 모양만 두고 막는다 — 막힌 버튼은 툴팁을 못 띄워 감싼 쪽에 둔다 */}
+                  <span className="composer__add-wrap" title="준비 중">
+                    <button type="button" className="composer__add" aria-label="첨부 (준비 중)" disabled>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" strokeWidth="1.3" aria-hidden="true">
+                        <path d="M8 2V14M2 8H14" stroke="currentColor" />
+                      </svg>
+                    </button>
+                  </span>
+                  <div className="composer__trailing">
+                    <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
+                    <button
+                      type="button"
+                      className="composer__send"
+                      aria-label="보내기"
+                      title="보내기 (Enter)"
+                      onClick={() => void send()}
+                      disabled={active.pending || !chosen || !draft.trim()}
+                    >
+                      {/* dsh 보내기 화살표 (16 격자) */}
+                      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                        <path
+                          d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
               </div>
+              {/* 컨텍스트 % 의 한도는 지금 고른 모델의 설정값 (설정 > 모델의 "컨텍스트 길이") */}
+              <StatsBar stats={chatStats(active.usage, chosen?.model.contextLength)} />
             </div>
           </>
         )}
@@ -541,7 +652,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
               <div key={group.name} role="group" aria-label={group.name}>
                 <div className="project-popover__label">{group.name}</div>
                 {group.items.map((project) => (
-                  <div key={project.path} className={`project-item${project.path === current ? ' project-item--active' : ''}`}>
+                  <div key={project.path} data-hover-row className={`project-item${project.path === current ? ' project-item--active' : ''}`}>
                     {editing === project.path ? (
                       <input
                         className="project-item__rename"
@@ -550,6 +661,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                         autoFocus
                         onFocus={(event) => event.currentTarget.select()}
                         onKeyDown={(event) => {
+                          if (event.nativeEvent.isComposing || event.keyCode === 229) return // 한글 조합 확정 Enter
                           if (event.key === 'Enter') event.currentTarget.blur()
                           if (event.key === 'Escape') {
                             event.stopPropagation() // 팝오버까지 닫지 않는다
@@ -567,7 +679,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                       type="button"
                       className="project-item__main"
                       disabled={busy}
-                      onMouseEnter={(event) => hover.enter(event.currentTarget, { title: project.name, detail: project.path })}
+                      onMouseEnter={(event) => hover.enter(event.currentTarget, { title: project.name, detail: project.path }, true)}
                       onMouseLeave={(event) => hover.leave(event.currentTarget)}
                       onClick={() => onPick(project)}
                     >

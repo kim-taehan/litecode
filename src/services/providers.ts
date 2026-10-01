@@ -14,6 +14,9 @@ import { providerIdFor } from '../../shared/providerId.ts'
 export interface ModelCatalogEntry {
   id: string
   displayName: string
+  /** 컨텍스트 길이(토큰, 선택) — opencode 는 custom 모델의 한도를 모른다(01_probe). 엔진이 opencode.json 의 limit 으로 넘기고
+   *  통계 줄의 컨텍스트 % 에 쓴다. 없으면 % 는 "—" */
+  contextLength?: number
 }
 
 export interface ProviderConfig {
@@ -107,7 +110,14 @@ export class ProviderRegistry extends Service {
     const baseURL = input.baseURL.trim()
     if (!displayName) throw new Error('표시 이름을 입력하세요')
     if (!isHttpUrl(baseURL)) throw new Error('Base URL 은 http(s) 주소여야 합니다')
-    const models = input.models.map((model) => ({ id: model.id.trim(), displayName: model.displayName.trim() || model.id.trim() }))
+    const models = input.models.map((model) => ({
+      id: model.id.trim(),
+      displayName: model.displayName.trim() || model.id.trim(),
+      ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
+    }))
+    if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
+      throw new Error('컨텍스트 길이는 1 이상의 정수로 입력하세요')
+    }
     if (models.length === 0 || models.some((model) => !model.id)) throw new Error('모델을 하나 이상, id 와 함께 입력하세요')
     if (new Set(models.map((model) => model.id)).size !== models.length) throw new Error('모델 id 가 겹칩니다')
     const apiKey = input.apiKey?.trim()

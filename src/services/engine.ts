@@ -83,7 +83,13 @@ export function engineConfig(providers: ProviderConfig[], proxy: Pick<KeyProxy, 
       npm: '@ai-sdk/openai-compatible',
       name: config.displayName,
       options: { baseURL: proxy.baseURLFor(config.id), apiKey: proxy.token },
-      models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.displayName }])),
+      // 컨텍스트 길이를 주면 opencode 가 /api/model 의 limit 으로 그대로 안다 (01_probe 2026-10-01). output 0 = 모름 (요청에 안 실린다)
+      models: Object.fromEntries(
+        config.models.map((model) => [
+          model.id,
+          { name: model.displayName, ...(model.contextLength && { limit: { context: model.contextLength, output: 0 } }) },
+        ]),
+      ),
     }
   }
   return { $schema: 'https://opencode.ai/config.json', provider }

@@ -25,7 +25,7 @@ const fakeProvider = (): ProviderConfig => ({
   displayName: 'Fake',
   baseURL: `${inject('fakeLlmUrl')}/v1`,
   protocol: 'openai-chat-completions',
-  models: [{ id: 'echo', displayName: 'Echo' }],
+  models: [{ id: 'echo', displayName: 'Echo' }, { id: 'echo-b', displayName: 'Echo B' }],
 })
 
 /** 새 컨텍스트에 providers·engine·llm 을 올린다. state 아래에 엔진 상태(설정 폴더·DB·PID)와 격리 XDG 를 둔다 */
@@ -48,6 +48,13 @@ beforeAll(async () => {
 async function opencodeGet(pathAndQuery: string): Promise<Response> {
   const conn = await services.engine.connection()
   return fetch(`${conn.url}${pathAndQuery}`, { headers: conn.headers })
+}
+
+type LastChat = { model: string; messages: { role: string; text: string }[] }
+/** 가짜 LLM 이 마지막으로 받은 chat 요청 — model 과 messages 요약 */
+async function lastChat(): Promise<LastChat> {
+  const res = await fetch(`${inject('fakeLlmUrl')}/requests`)
+  return ((await res.json()) as { lastChat: LastChat }).lastChat
 }
 
 async function fakeLlmRequests(): Promise<number> {
@@ -94,6 +101,41 @@ describe('ctx.llm ↔ 실물 opencode', () => {
     expect(result.error).toContain('fake/no-such-model')
     expect(result.sessionId).toBeUndefined()
   }, MODEL_CATALOG_TIMEOUT_MS + 5_000)
+
+  // opencode 는 세션을 만들 때 모델이 정해지고 prompt 본문엔 model 이 없다 — 이어가는 대화에서 다른 모델을 넘기면
+  // ctx.llm 이 POST /api/session/{id}/model 로 바꾼 뒤 보낸다. 앞 턴 맥락은 그대로 실린다 (_workspace/01_probe.md)
+  it('이어가는 대화에서 다른 모델을 넘기면 그 세션의 모델을 바꿔 보내고, 앞 턴 맥락이 실린다', async () => {
+    const first = await services.llm.chat('fake', 'echo-b', work, '첫 턴 알파')
+    expect(first).toMatchObject({ ok: true, text: 'echo: 첫 턴 알파' })
+    expect((await lastChat()).model).toBe('echo-b')
+
+    const second = await services.llm.chat('fake', 'echo', work, '둘째 턴 베타', first.sessionId)
+    expect(second).toMatchObject({ ok: true, sessionId: first.sessionId, text: 'echo: 둘째 턴 베타' })
+    const sent = await lastChat()
+    expect(sent.model).toBe('echo')
+    expect(sent.messages.filter((message) => message.role !== 'system')).toEqual([
+      { role: 'user', text: '첫 턴 알파' },
+      { role: 'assistant', text: 'echo: 첫 턴 알파' },
+      { role: 'user', text: '둘째 턴 베타' },
+    ])
+  })
+
+  // 함정(01_probe): opencode 는 없는 모델로 바꿔도 204 를 주고 다음 턴이 조용히 매달린다 — 바꾸기 전에 확인해야 한다
+  it('이어가는 대화를 없는 모델로 바꾸려 하면 바꾸지 않고 ok:false 이고, 그 세션은 이전 모델로 계속 쓸 수 있다', async () => {
+    const first = await services.llm.chat('fake', 'echo-b', work, '바꾸기 전')
+    expect(first.ok).toBe(true)
+    const before = await fakeLlmRequests()
+
+    const refused = await services.llm.chat('fake', 'no-such-model', work, '없는 모델로', first.sessionId)
+    expect(refused).toMatchObject({ ok: false, sessionId: first.sessionId })
+    expect(refused.error).toContain('fake/no-such-model')
+    expect(await fakeLlmRequests()).toBe(before)
+    const session = (await (await opencodeGet(`/api/session/${first.sessionId}`)).json()) as { data: { model: { id: string } } }
+    expect(session.data.model.id).toBe('echo-b')
+
+    expect(await services.llm.chat('fake', 'echo-b', work, '이어서', first.sessionId)).toMatchObject({ ok: true, text: 'echo: 이어서' })
+    expect((await lastChat()).model).toBe('echo-b')
+  }, MODEL_CATALOG_TIMEOUT_MS + 30_000)
 
   it('LLM 이 실패하면 step.failed 를 잡아 ok:false 와 사유를 돌려준다', async () => {
     const result = await services.llm.chat('fake', 'echo', work, '[fail] 일부러')
@@ -192,11 +234,36 @@ describe('ctx.llm ↔ 막 뜬 opencode (카탈로그 로드 중)', () => {
     for (const fiber of freshFibers.reverse()) await fiber.dispose()
   })
 
-  it('다른 호출자가 카탈로그 로드를 먼저 일으켜도 설정의 모델이 나올 때까지 기다려 턴을 돈다', async () => {
+  it('다른 호출자가 카탈로그 로드를 먼저 일으켜도 설정의 모델이 나올 때까지 기다려 턴을 돈다', async (context) => {
     const fresh = await freshServices.engine.connection()
     const first = (await (await fetch(`${fresh.url}/api/model`, { headers: fresh.headers })).json()) as { data: unknown[] }
-    expect(first.data).toHaveLength(0) // 로드를 일으킨 첫 조회 — 이 직후가 가운데 목록 구간이다
+    // 로드를 일으킨 첫 조회는 보통 빈 목록이고, 이 직후가 가운데 목록 구간이다. 그런데 opencode 가 이미 채웠으면(이 머신 실측 8353개)
+    // 이 시나리오를 재현하지 못한 것이다 — 실패가 아니라 건너뛴다 (확률적 테스트, 2026-10-01)
+    if (first.data.length !== 0) return context.skip(`첫 조회가 이미 ${first.data.length}개 — 가운데 목록 구간을 못 만들었다`)
 
     expect(await freshServices.llm.chat('fake', 'echo', work, '로드 중')).toMatchObject({ ok: true, text: 'echo: 로드 중' })
+  })
+})
+
+// 통계 줄의 원천 — 턴 결과에 중립 모양의 사용량을 싣는다 (_workspace/01_probe.md, 2026-10-01).
+// 가짜 LLM 은 요청마다 FAKE_USAGE 를 돌려준다: opencode 매핑으로 input 700(1000−300)·cache.read 300·output 50
+describe('ctx.llm 턴 사용량', () => {
+  it('도구 턴은 스텝 2개이고, 토큰은 가짜 LLM usage 를 스텝마다 더한 값이다', async () => {
+    const result = await services.llm.chat('fake', 'echo', work, '[bash:echo 사용량]')
+    expect(result).toMatchObject({ ok: true, text: expect.stringContaining('tool: 사용량') })
+    const usage = result.usage!
+    expect(usage.steps).toBe(2)
+    expect(usage.tokens).toEqual({ input: 1_400, output: 100, reasoning: 0, cacheRead: 600, cacheWrite: 0 })
+    expect(usage.lastContextTokens).toBe(1_050)
+    expect(usage.ttftSteps).toBe(2)
+    expect(usage.llmMs).toBeGreaterThanOrEqual(0)
+    expect(usage.messageTokens).toBeGreaterThan(0)
+    expect(usage.messageTokens).toBeLessThan(1_050)
+  })
+
+  it('이어가는 턴의 사용량은 그 턴 것만이다 (이전 턴 재생분을 더하지 않는다)', async () => {
+    const first = await services.llm.chat('fake', 'echo', work, '[bash:echo 하나]')
+    const second = await services.llm.chat('fake', 'echo', work, '둘', first.sessionId)
+    expect(second.usage).toMatchObject({ steps: 1, tokens: { input: 700, output: 50, cacheRead: 300 } })
   })
 })

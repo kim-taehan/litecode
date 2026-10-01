@@ -28,6 +28,18 @@ describe('engineConfig — 앱이 생성하는 opencode.json', () => {
   })
 })
 
+// 01_probe (2026-10-01): custom 모델의 한도는 opencode 가 모른다(limit.context 0). 모델에 limit 을 적으면 /api/model 에 그대로 보인다
+describe('engineConfig — 컨텍스트 길이', () => {
+  it('컨텍스트 길이를 준 모델만 limit {context, output: 0} 을 싣는다', () => {
+    const proxy = { token: 't', baseURLFor: (id: string) => `http://127.0.0.1:9/${id}` }
+    const config = engineConfig([{ ...provider('a'), models: [{ id: 'm1', displayName: 'M1', contextLength: 32_768 }, { id: 'm2', displayName: 'M2' }] }], proxy)
+    expect((config.provider as Record<string, { models: unknown }>)['a']!.models).toEqual({
+      m1: { name: 'M1', limit: { context: 32_768, output: 0 } },
+      m2: { name: 'M2' },
+    })
+  })
+})
+
 describe('engineEnv — opencode 자식 프로세스 env', () => {
   it('설정 폴더·DB·비밀번호를 싣고, 카탈로그 받기를 끄며(폐쇄망), 사용자명 재정의는 뺀다', () => {
     const env = engineEnv({ PATH: '/bin', OPENCODE_SERVER_USERNAME: 'x' }, { configDir: '/c', db: '/d.db', password: 'pw' })

@@ -9,7 +9,7 @@ import { _electron as electron, type ElectronApplication, type Page } from 'play
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { alive, freePort, isolatedEnv } from './support/opencodeServer.ts'
-import { FAKE_MODELS } from './support/fakeLlm.ts'
+import { FAKE_MODELS, FAKE_USAGE } from './support/fakeLlm.ts'
 import { badgeColor } from '../../renderer/badge.ts'
 
 // 앱 실물 테스트 — 진짜 Electron 창을 띄워 사람처럼 입력하고, 답이 화면에 뜨는지 본다.
@@ -44,8 +44,9 @@ async function launch(): Promise<void> {
     env: { ...isolatedEnv(tmp), LITECODE_TEST_HIDDEN: '1', LITECODE_DEV_SERVER_URL: devServerUrl, LITECODE_GATEWAY_URL: `${inject('fakeLlmUrl')}/v1` },
   })
   page = await app.firstWindow()
-  // 사이드바를 숨긴 채 켜질 수도 있어 늘 보이는 사이드바 토글로 준비를 확인한다
-  await page.locator('.sidebar-toggle').waitFor()
+  // 사이드바를 숨긴 채 켜질 수도 있어 사이드바 토글로 준비를 확인한다 — 로고 줄의 접기 버튼이나, 숨겼으면 본문의 다시 열기 버튼.
+  // 숨긴 사이드바 안의 접기 버튼도 DOM 에는 있으므로 보이는 것만 본다
+  await page.locator('.sidebar-toggle:visible').waitFor()
 }
 
 beforeAll(async () => {
@@ -98,7 +99,7 @@ const focused = () => page.evaluate(() => {
 const switcher = () => page.locator('.project-switch')
 const popover = () => page.locator('.project-popover')
 const popoverNames = () => popover().locator('.project-item__name').allTextContents()
-const sessionTitles = () => page.locator('.session-item').allTextContents()
+const sessionTitles = () => page.locator('.session-item__title').allTextContents() // 줄에는 시각(now·1d)도 붙는다
 /** 팝오버의 한 묶음(즐겨찾기·최근)에 보이는 이름 */
 const groupNames = (group: '즐겨찾기' | '최근') => popover().getByRole('group', { name: group }).locator('.project-item__name').allTextContents()
 const row = (name: string) => popover().locator('.project-item', { hasText: name })
@@ -126,6 +127,15 @@ async function send(text: string): Promise<string> {
   await page.keyboard.press('Enter')
   await expect.poll(() => replies().count(), { timeout: 30_000 }).toBe(before + 1)
   return (await replies().last().textContent()) ?? ''
+}
+
+/** 이 대화에서 보낼 수 있는가 — 빈 입력이면 보내기가 늘 막히므로(dsh) 글자를 넣어 보고 비운다 */
+async function canSend(): Promise<boolean> {
+  const input = page.getByPlaceholder('메시지를 입력하세요…')
+  await input.fill('확인')
+  const enabled = await page.getByRole('button', { name: '보내기' }).isEnabled()
+  await input.fill('')
+  return enabled
 }
 
 describe('앱 ↔ 실물 opencode', () => {
@@ -174,7 +184,7 @@ describe('앱 ↔ 실물 opencode', () => {
 
   it('LLM 이 실패하면 경고를 화면에 띄우고 다시 보낼 수 있다', async () => {
     expect(await send('[fail] 화면 실패')).toContain('⚠️')
-    expect(await page.getByRole('button', { name: '보내기' }).isEnabled()).toBe(true)
+    expect(await canSend()).toBe(true)
   })
 
   it('B 를 열고 대화한 뒤 A 로 전환하면 A 의 대화만 보이고, B 로 돌아가면 B 의 대화가 그대로다', async () => {
@@ -209,17 +219,17 @@ describe('앱 ↔ 실물 opencode', () => {
     await page.getByRole('button', { name: '+ 새 대화' }).click()
     await page.getByPlaceholder('메시지를 입력하세요…').fill('[bash:sleep 6 && pwd]')
     await page.keyboard.press('Enter')
-    expect(await page.getByRole('button', { name: '보내기' }).isDisabled()).toBe(true) // 이 대화는 기다리는 중
+    expect(await canSend()).toBe(false) // 이 대화는 기다리는 중
 
     await switchTo('beta-app')
-    expect(await page.getByRole('button', { name: '보내기' }).isEnabled()).toBe(true)
+    expect(await canSend()).toBe(true)
     expect(await send('A 를 기다리는 중')).toBe('echo: A 를 기다리는 중')
 
     await switchTo('alpha-app')
     expect(await sessionTitles()).toContain('[bash:sleep 6 && pwd]')
     await expect.poll(() => replies().count(), { timeout: 20_000 }).toBe(1)
     expect((await replies().last().textContent())!.split('\n')[0]).toBe(`tool: ${alpha}`)
-    expect(await page.getByRole('button', { name: '보내기' }).isEnabled()).toBe(true)
+    expect(await canSend()).toBe(true)
 
     await switchTo('beta-app')
     expect((await replies().allTextContents()).some((text) => text.includes(alpha))).toBe(false)
@@ -423,7 +433,7 @@ describe('앱 ↔ 실물 opencode', () => {
 
   // 이름 아래에 경로가 이미 보이므로 다 보이면 아무것도 안 띄운다. 잘린 경로는 dsh ui-workspace 처럼 마우스를 올리면
   // 흘러가며 끝을 보이고, 머물면 옆 카드에 전체 경로를 띄운다 (dsh ui-primitives HoverCard)
-  it('잘린 경로는 마우스를 올리면 흘러가며 끝을 보이고 옆 카드에 전체 경로가 뜬다 — 다 보이는 경로는 그대로', async () => {
+  it('잘린 경로는 마우스를 올리면 흘러가며 끝을 보이고, 카드는 경로 길이와 상관없이 뜬다', async () => {
     const short = '/private/tmp' // 실제 경로가 짧아 팝오버에서 안 잘린다
     const long = path.join(tmp, 'a-very-long-directory-name-to-overflow', 'another-deeply-nested-folder', 'zz-long-leaf')
     await fs.mkdir(long, { recursive: true })
@@ -444,9 +454,14 @@ describe('앱 ↔ 실물 opencode', () => {
     await expect.poll(() => scrolled('zz-long-leaf'), { timeout: 5_000 }).toBeGreaterThan(0)
     await expect.poll(() => card().textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain(long)
 
+    // 카드는 행의 ☆·✎·× 버튼을 덮지 않는다 — 행 전체(버튼 포함)의 오른쪽 바깥에 뜬다 (2026-10-01 사용자 캡처)
+    const actions = (await row('zz-long-leaf').locator('.project-item__actions').boundingBox())!
+    const cardBox = (await card().boundingBox())!
+    expect(cardBox.x).toBeGreaterThanOrEqual(actions.x + actions.width)
+
+    // 짧아 다 보이는 경로에도 카드는 뜬다 — 사용자: nexcore(짧은 경로)에 호버가 안 뜬다 (2026-10-01). 흘러가지는 않는다
     await row('tmp').locator('.project-item__main').hover()
-    await page.waitForTimeout(800) // 카드가 뜨는 머묾(500ms)을 넘겨도
-    expect(await card().count()).toBe(0)
+    await expect.poll(() => card().textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain('/private/tmp')
     expect(await scrolled('tmp')).toBe(0)
     expect(await scrolled('zz-long-leaf')).toBe(0) // 떠난 행은 제자리로
     await page.keyboard.press('Escape')
@@ -501,7 +516,7 @@ const card = (name: string) => dialog().locator('.provider-card', { has: page.lo
 const cardNames = () => dialog().locator('.provider-card__name').allTextContents()
 const field = (label: string) => dialog().getByLabel(label, { exact: true })
 const modelIds = () => dialog().locator('.model-row input[aria-label^="모델 id"]').evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))
-const fakeLlm = async () => (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { count: number; modelsAuth?: string; chatAuth?: string }
+const fakeLlm = async () => (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { count: number; modelsAuth?: string; chatAuth?: string; chatModels: string[] }
 
 async function openSettings(): Promise<void> {
   if (!(await dialog().isVisible())) await settingsButton().click()
@@ -744,12 +759,12 @@ describe('엔진 — 앱이 띄운 opencode', () => {
     await page.getByPlaceholder('메시지를 입력하세요…').fill('[slow] 기다리는 중')
     await page.keyboard.press('Enter')
     await expect.poll(async () => (await fakeLlm()).count, { timeout: 20_000 }).toBe(before + 1) // LLM 이 답을 쥐고 있다
-    expect(await page.getByRole('button', { name: '보내기' }).isDisabled()).toBe(true)
+    expect(await canSend()).toBe(false)
 
     await editGateway(() => field('모델 이름 1').fill('Qwen 다음'))
     await expect.poll(lastReply, { timeout: 15_000 }).toContain('중단됨')
     expect(await lastReply()).toContain('⚠️')
-    expect(await page.getByRole('button', { name: '보내기' }).isEnabled()).toBe(true)
+    expect(await canSend()).toBe(true)
     // 같은 대화(같은 opencode 세션)에서 이어진다. 재시작 뒤 첫 턴은 opencode 가 user 메시지에 <system-update> 를 붙여 첫 줄만 본다
     expect((await send('이어서')).split('\n')[0]).toBe('echo: 이어서')
   })
@@ -832,6 +847,30 @@ describe('엔진 — 앱이 띄운 opencode', () => {
     expect(await enginePid()).not.toBe(orphan)
   })
 
+  // dsh ui-sidebar 로고 줄 (2026-10-01 사용자): 왼쪽 [아이콘][LiteCode], 오른쪽 끝 접기 버튼. 그 아래 프로젝트 전환.
+  // 숨기면 로고 줄도 사라지므로 그때만 본문 왼쪽 위에 다시 여는 버튼이 있다
+  it('사이드바 맨 위 로고 줄에 LiteCode 와 오른쪽 끝 접기 버튼이 있고, 숨겼을 때만 본문에 다시 열기 버튼이 있다', async () => {
+    const sidebar = page.locator('.sidebar')
+    const logo = sidebar.locator('.sidebar__logo')
+    expect(await logo.locator('.sidebar__brand').textContent()).toBe('LiteCode')
+    expect(await logo.locator('svg').first().isVisible()).toBe(true) // 아이콘
+    const hide = page.getByRole('button', { name: '사이드바 숨기기' })
+    expect(await logo.getByRole('button', { name: '사이드바 숨기기' }).count()).toBe(1)
+    const [row, button, brand, switcherBox] = await Promise.all([logo.boundingBox(), hide.boundingBox(), logo.locator('.sidebar__brand').boundingBox(), switcher().boundingBox()])
+    expect(row!.x + row!.width - (button!.x + button!.width)).toBeLessThan(16) // 오른쪽 끝
+    expect(brand!.x).toBeLessThan(button!.x)
+    expect(switcherBox!.y).toBeGreaterThanOrEqual(row!.y + row!.height - 1) // 프로젝트 전환은 그 아래
+    expect(await page.locator('.main').getByRole('button', { name: '사이드바 보이기' }).count()).toBe(0)
+
+    await hide.click()
+    expect(await sidebar.isVisible()).toBe(false)
+    const show = page.locator('.main').getByRole('button', { name: '사이드바 보이기' })
+    expect(await show.isVisible()).toBe(true)
+    await show.click()
+    expect(await logo.isVisible()).toBe(true)
+    expect(await show.count()).toBe(0)
+  })
+
   // dsh ui-layout: 사이드바는 경계를 끌어 264~420px 로 조절하고, 버튼으로 숨긴다. 둘 다 재시작해도 기억한다
   it('사이드바는 경계를 끌어 최소·최대 안에서 폭을 바꾸고, 숨겼다 다시 보이며, 재시작해도 그대로다', async () => {
     const sidebar = () => page.locator('.sidebar') // 재시작하면 창이 바뀌므로 매번 새로 찾는다
@@ -864,5 +903,329 @@ describe('엔진 — 앱이 띄운 opencode', () => {
     await page.getByRole('button', { name: '사이드바 보이기' }).click()
     expect(await width()).toBe(320)
   })
+
+  // 한글 입력기: 조합 중에 Enter 를 누르면 조합 확정용 Enter 다 — 보내면 "안녕" 이 "아ㄴ녕" 으로 가고 "녕" 이 남는다 (2026-10-01 사용자 캡처)
+  it('한글 조합 중의 Enter 는 보내지 않고, 조합이 끝난 Enter 로 보낸다', async () => {
+    // 앞 테스트들이 남긴 프로젝트(주소를 덮는 opencode.json 등)에 기대지 않게 깨끗한 폴더를 연다
+    const clean = path.join(tmp, 'composer-app')
+    await fs.mkdir(clean, { recursive: true })
+    await pickFolderNextTime(clean)
+    await openPopover()
+    await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
+    await expect.poll(currentName, { timeout: 10_000 }).toBe('composer-app')
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    const input = page.getByPlaceholder('메시지를 입력하세요…')
+    await input.fill('안녕')
+    const before = await replies().count()
+    // 입력기가 조합 중일 때 브라우저가 내는 keydown: isComposing=true, keyCode 229
+    await input.evaluate((el) => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229, bubbles: true, cancelable: true }))
+    })
+    await page.waitForTimeout(500)
+    expect(await input.inputValue()).toBe('안녕') // 아직 안 보냈다
+    expect(await page.locator('.bubble--user').count()).toBe(0)
+
+    expect(await send('안녕')).toBe('echo: 안녕')
+    expect(await replies().count()).toBe(before + 1)
+  })
+
+  // 입력창만 dsh 와 똑같이 (2026-10-01 00_request 성공 기준 1) — dsh InputBar 의 값: 카드 반경 28, + 28px 원, 보내기 34px 원
+  it('입력창은 dsh 처럼 + 가 왼쪽 아래, 모델·보내기가 오른쪽 아래이고, + 는 준비 중이며 빈 입력이면 보내기가 막힌다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    const card = page.locator('.composer__box')
+    const input = page.getByPlaceholder('메시지를 입력하세요…')
+    const attach = page.getByRole('button', { name: '첨부 (준비 중)' })
+    const model = page.locator('.model-select__trigger')
+    const sendButton = page.getByRole('button', { name: '보내기' })
+    const rect = async (locator: typeof card) => (await locator.boundingBox({ timeout: 2_000 }))!
+    const [c, i, a, m, s] = await Promise.all([rect(card), rect(input), rect(attach), rect(model), rect(sendButton)])
+
+    for (const control of [a, m, s]) expect(control.y).toBeGreaterThanOrEqual(i.y + i.height - 1) // 입력칸 아래 줄
+    expect(a.x - c.x).toBeLessThan(c.width / 4) // + 는 왼쪽
+    expect(m.x).toBeGreaterThan(c.x + c.width / 2) // 모델은 오른쪽
+    expect(s.x).toBeGreaterThan(m.x + m.width - 1) // 보내기는 모델 오른쪽
+    expect(c.x + c.width - (s.x + s.width)).toBeLessThan(16)
+    expect([a.width, a.height, s.width, s.height]).toEqual([28, 28, 34, 34])
+    expect(await card.evaluate((el) => getComputedStyle(el).borderRadius)).toBe('28px')
+
+    // + 는 첨부 기능이 생길 때까지 눌러도 아무 일 없고, 머물면 "준비 중"
+    expect(await attach.isDisabled()).toBe(true)
+    expect(await page.locator('[title="준비 중"]').filter({ has: attach }).count()).toBe(1)
+
+    expect(await sendButton.isDisabled()).toBe(true) // 빈 입력
+    await input.fill('   ')
+    expect(await sendButton.isDisabled()).toBe(true) // 공백뿐
+    await input.fill('보낼 말')
+    expect(await sendButton.isEnabled()).toBe(true)
+    await input.fill('')
+  })
+
+  // 통계 줄 3칸 + 머물면 팝업 (00_request 성공 기준 3). 엔진 값이 연결되기 전에는 숫자를 지어내지 않고 "—"
+  it('입력창 아래 통계 줄 세 칸에 머물면 각 팝업이 뜨고, 값이 없는 항목은 "—" 다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    const bar = page.locator('.composer-stats')
+    const pills = bar.locator('.stats-pill')
+    expect(await pills.count()).toBe(3)
+    const cardBottom = await page.locator('.composer__box').evaluate((el) => el.getBoundingClientRect().bottom)
+    expect((await bar.boundingBox())!.y).toBeGreaterThanOrEqual(cardBottom)
+    expect(await pills.allTextContents()).toEqual(['—', '—', '—'])
+
+    const rows = (name: string) =>
+      page.getByRole('dialog', { name }).evaluate((el) => [...el.querySelectorAll('dt')].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]))
+    const expectations: [number, string, string[]][] = [
+      [0, '세션 통계', ['LLM 시간', '도구 시간', '첫 토큰까지 평균 (TTFT)', '초당 토큰 (TPS)']],
+      [1, '토큰 사용량', ['합계', '캐시 적중', '캐시 안 된 입력', '캐시된 입력', '출력']],
+      [2, '컨텍스트 사용', ['시스템·도구', '메시지']],
+    ]
+    for (const [index, title, labels] of expectations) {
+      await pills.nth(index).hover()
+      await page.getByRole('dialog', { name: title }).waitFor({ timeout: 2_000 })
+      expect(await rows(title)).toEqual(labels.map((label) => [label, '—']))
+      await page.locator('.main__header').hover() // 벗어나면 닫힌다
+      await expect.poll(() => page.getByRole('dialog', { name: title }).count(), { timeout: 2_000 }).toBe(0)
+    }
+  })
+
+  // 성공 기준 2·3 — 통계는 ctx.llm 이 턴 결과에 싣는 사용량을 대화별로 더한 것. 가짜 LLM 은 요청(스텝)마다 FAKE_USAGE 를 주고
+  // opencode 매핑으로 스텝당 input 700·cache.read 300·output 50 (01_probe). 도구 턴은 스텝 2개
+  it('대화하면 통계 줄의 turns·steps·토큰이 가짜 LLM usage 합과 같고, 팝업이 채워지며, 컨텍스트 길이를 설정하면 % 가 보인다', async () => {
+    const step = { input: FAKE_USAGE.prompt_tokens - FAKE_USAGE.prompt_tokens_details.cached_tokens, cacheRead: FAKE_USAGE.prompt_tokens_details.cached_tokens, output: FAKE_USAGE.completion_tokens }
+    const perStep = step.input + step.cacheRead + step.output
+    const pills = page.locator('.composer-stats .stats-pill')
+    const rows = (name: string) =>
+      page.getByRole('dialog', { name }).evaluate((el) => Object.fromEntries([...el.querySelectorAll('dt')].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent])))
+    async function popup(index: number, name: string): Promise<Record<string, string>> {
+      await pills.nth(index).hover()
+      await page.getByRole('dialog', { name }).waitFor({ timeout: 2_000 })
+      const found = await rows(name)
+      await page.locator('.main__header').hover()
+      return found as Record<string, string>
+    }
+
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    expect((await send('[bash:echo 통계]')).split('\n')[0]).toBe('tool: 통계')
+    await expect.poll(() => pills.nth(0).textContent(), { timeout: 5_000 }).toMatch(/^1 turns 2 steps·\d+(\.\d)? tok\/s$/)
+    expect(await pills.nth(1).textContent()).toBe(`${(2 * perStep / 1000).toFixed(1)}K tok·Cache hit 30%`)
+
+    expect(await send('두 번째')).toBe('echo: 두 번째')
+    await expect.poll(() => pills.nth(0).textContent(), { timeout: 5_000 }).toMatch(/^2 turns 3 steps·/)
+    const total = 3 * perStep
+    expect(await popup(1, '토큰 사용량')).toEqual({
+      합계: `${total.toLocaleString('en-US')} tok`,
+      '캐시 적중': '30%',
+      '캐시 안 된 입력': `${(3 * step.input).toLocaleString('en-US')} tok`,
+      '캐시된 입력': `${3 * step.cacheRead} tok`,
+      출력: `${3 * step.output} tok`,
+    })
+    const session = await popup(0, '세션 통계')
+    for (const label of ['LLM 시간', '도구 시간', '첫 토큰까지 평균 (TTFT)', '초당 토큰 (TPS)']) expect(session[label]).not.toBe('—')
+
+    // 한도를 모르면 % 는 "—", 크기와 구성 어림은 보인다
+    expect(await pills.nth(2).textContent()).toBe('—')
+    const unknown = await popup(2, '컨텍스트 사용')
+    expect(unknown['메시지']).toMatch(/^~\d+$/)
+    expect(unknown['시스템·도구']).toMatch(/^~/)
+
+    // 설정 > 모델에 컨텍스트 길이를 적으면 마지막 스텝 크기 / 한도
+    await editGateway(() => field('컨텍스트 길이 1').fill(String(4 * perStep)))
+    await page.keyboard.press('Escape')
+    await expect.poll(() => pills.nth(2).textContent(), { timeout: 5_000 }).toBe('25%')
+    await pills.nth(2).hover()
+    expect(await page.getByRole('dialog', { name: '컨텍스트 사용' }).locator('.stats-dialog__title').textContent()).toContain(`~${(perStep / 1000).toFixed(1)}K / ${(4 * perStep / 1000).toFixed(1)}K`)
+    await page.locator('.main__header').hover()
+
+    // 다른 대화는 따로 센다
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    expect(await pills.allTextContents()).toEqual(['—', '—', '—'])
+  })
+
+  it('답이 빈 줄로 시작해도 말풍선은 첫 글자부터 보인다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    expect(await send('[lead] 앞 공백')).toBe('echo: [lead] 앞 공백')
+  })
+
+  // dsh 세션 행처럼 대화 목록의 카드는 제목 길이와 상관없이 뜬다 — 제목 말고도 메시지 수·대기 상태를 보여 주므로 (2026-10-01 사용자 지적)
+  it('대화 목록은 짧은 제목에도 머물면 카드가 뜬다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await send('짧음')
+    await page.locator('.session-item', { hasText: '짧음' }).hover()
+    await expect.poll(() => page.locator('.hover-card').textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain('메시지 2개')
+    await page.locator('.main__header').hover()
+  })
+
+  it('대화 목록 줄에 마지막 활동 시각이 짧게 보인다 (빈 새 대화는 시각 없음)', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    expect(await page.locator('.session-item--active .session-item__time').count()).toBe(0)
+    await send('시각 확인')
+    const time = page.locator('.session-item', { hasText: '시각 확인' }).locator('.session-item__time')
+    expect(await time.textContent()).toBe('now')
+  })
+
+  // 실제 사용자 폴더 `cobol-to-nexcore-converter 2/references` 에서 대화가 안 됐다 — 경로의 공백 (2026-10-01)
+  it('경로에 공백이 있는 폴더에서도 대화가 된다', async () => {
+    const spaced = path.join(tmp, 'converter 2', 'references')
+    await fs.mkdir(spaced, { recursive: true })
+    await pickFolderNextTime(spaced)
+    await openPopover()
+    await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
+    await expect.poll(currentName, { timeout: 10_000 }).toBe('references')
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    expect(await send('공백 경로')).toBe('echo: 공백 경로')
+  })
 })
 
+// 모델 선택 (00_request 모델 선택 성공 기준 1~4). 화면은 dsh ui-model-selection 을 따른다 — provider 묶음, 고른 줄에 체크,
+// ↑/↓·Enter·Esc. 대화 중 변경은 ctx.llm 이 opencode 세션의 모델을 바꾼다 (_workspace/01_probe.md)
+describe('모델 선택', () => {
+  const trigger = () => page.locator('.model-select__trigger')
+  const menu = () => page.getByRole('menu', { name: '모델' })
+  const composerModel = () => page.locator('.composer__model').textContent({ timeout: 1_000 })
+  /** 가짜 LLM 이 마지막으로 받은 chat 요청의 model 과 messages 요약 (system 은 뺀다) */
+  const lastChat = async () => {
+    const { lastChat } = (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as {
+      lastChat: { model: string; messages: { role: string; text: string }[] }
+    }
+    return { model: lastChat.model, messages: lastChat.messages.filter((message) => message.role !== 'system') }
+  }
+  /** 테스트가 시작한 뒤 가짜 LLM 이 받은 chat 요청의 model */
+  const modelsSince = async (before: number) => (await fakeLlm()).chatModels.slice(before)
+
+  async function chooseModel(name: string): Promise<void> {
+    if (!(await menu().isVisible())) await trigger().click()
+    await menu().getByRole('menuitemradio', { name, exact: true }).click()
+    await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe(name)
+  }
+
+  beforeAll(async () => {
+    // 가짜 LLM 이 받을 모델 둘 — 기본 provider 의 첫 모델을 echo 로 바꾸고 echo-b 를 더한다 (모델 id 가 바뀌어 opencode 가 다시 뜬다)
+    await openSettings()
+    await card('Internal LiteLLM Gateway').getByRole('button', { name: '편집' }).click()
+    await field('모델 id 1').fill('echo')
+    await field('모델 이름 1').fill('Echo')
+    await dialog().getByRole('button', { name: '+ 모델 추가' }).click()
+    await field('모델 id 2').fill('echo-b')
+    await field('모델 이름 2').fill('Echo B')
+    await dialog().getByRole('button', { name: '적용' }).click()
+    await field('Base URL').waitFor({ state: 'detached', timeout: 5_000 }) // expect.poll 은 훅 안에서 못 쓴다
+    await page.keyboard.press('Escape')
+    // 앞 테스트들이 남긴 프로젝트(주소를 덮는 opencode.json 등)에 기대지 않게 깨끗한 폴더를 연다
+    const clean = path.join(tmp, 'model-app')
+    await fs.mkdir(clean, { recursive: true })
+    await pickFolderNextTime(clean)
+    // 이 묶음만 돌리면(-t) 최근 목록이 비어 전환 버튼이 곧바로 대화상자를 연다 — 팝오버가 뜰 때만 그 안의 버튼을 누른다
+    await switcher().click()
+    await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click({ timeout: 2_000 }).catch(() => {})
+    await switcher().locator('.project-switch__name', { hasText: 'model-app' }).waitFor({ timeout: 10_000 })
+  })
+
+  // 성공 기준 1
+  it('입력창 아래 모델 드롭다운에 설정의 모델이 provider 묶음으로 모두 보이고, 마우스·키보드로 고른다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe('Echo')
+    await trigger().click()
+    const group = menu().getByRole('group', { name: 'Internal LiteLLM Gateway' })
+    expect(await group.getByRole('menuitemradio').allTextContents()).toEqual(['Echo', 'Echo B'])
+    expect(await menu().getByRole('menuitemradio', { name: 'Echo', exact: true }).getAttribute('aria-checked')).toBe('true')
+    expect(await focused()).toBe('Echo') // 열면 지금 쓰는 모델 줄에 포커스
+
+    await menu().getByRole('menuitemradio', { name: 'Echo B' }).click()
+    await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
+    expect(await composerModel()).toBe('Echo B')
+    expect(await trigger().evaluate((el) => el === document.activeElement)).toBe(true) // 고르면 포커스는 드롭다운 버튼으로
+
+    // 키보드: Enter 로 열고 ↑ 로 옮겨 Enter 로 고른다. Esc 는 고르지 않고 닫는다
+    await page.keyboard.press('Enter')
+    await menu().waitFor({ timeout: 5_000 })
+    expect(await focused()).toBe('Echo B')
+    await page.keyboard.press('ArrowUp')
+    expect(await focused()).toBe('Echo')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
+    expect(await composerModel()).toBe('Echo B')
+    expect(await page.locator('.composer').count()).toBe(1) // Esc 가 다른 것(대화 화면)까지 닫지 않는다
+    await page.keyboard.press('Enter')
+    await menu().waitFor({ timeout: 5_000 })
+    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
+    expect(await composerModel()).toBe('Echo')
+  })
+
+  // 성공 기준 2 — 선택은 대화마다 기억된다
+  // 모델을 바꾸면 바뀐 것을 알 수 있게 모델 버튼 위에 작은 팝업을 잠깐 띄운다 (2026-10-01 사용자 — "조금만하게 보여줄 수 있을까")
+  it('모델을 바꾸면 작은 팝업으로 바뀐 모델을 잠깐 보여 준다', async () => {
+    await chooseModel('Echo B')
+    await chooseModel('Echo')
+    const toast = page.locator('.model-toast')
+    expect(await toast.textContent({ timeout: 1_000 })).toContain('Echo')
+    await expect.poll(() => toast.count(), { timeout: 5_000 }).toBe(0) // 잠깐 뒤 사라진다
+  })
+
+  it('새 대화에서 Echo B 를 고르고 보내면 LLM 이 받은 요청의 model 이 echo-b 이고, 다른 대화의 선택과 섞이지 않는다', async () => {
+    await chooseModel('Echo B')
+    const before = (await fakeLlm()).chatModels.length
+    expect(await send('비 모델로')).toBe('echo: 비 모델로')
+    const sent = await modelsSince(before)
+    expect(sent.length).toBeGreaterThan(0)
+    expect(new Set(sent)).toEqual(new Set(['echo-b']))
+
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await chooseModel('Echo')
+    const echoBefore = (await fakeLlm()).chatModels.length
+    expect(await send('기본 모델로')).toBe('echo: 기본 모델로')
+    expect(new Set(await modelsSince(echoBefore))).toEqual(new Set(['echo']))
+
+    await page.locator('.session-item', { hasText: '비 모델로' }).click()
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe('Echo B') // 그 대화의 모델
+  })
+
+  // 성공 기준 3 — 같은 대화에서 바꾸면 다음 턴이 새 모델로 가고, 앞 턴 맥락은 그대로 실린다
+  it('같은 대화에서 Echo 로 바꿔 보내면 그 요청의 model 이 echo 이고 앞 턴 맥락이 실린다', async () => {
+    // 앞 테스트가 Echo B 로 한 턴 보낸 대화("비 모델로")가 선택돼 있다
+    expect(await page.locator('.main__header').textContent()).toBe('비 모델로')
+    await chooseModel('Echo')
+    expect(await send('에코로 바꿈')).toBe('echo: 에코로 바꿈')
+    expect(await lastChat()).toEqual({
+      model: 'echo',
+      messages: [
+        { role: 'user', text: '비 모델로' },
+        { role: 'assistant', text: 'echo: 비 모델로' },
+        { role: 'user', text: '에코로 바꿈' },
+      ],
+    })
+  })
+
+  // 성공 기준 4 — 마지막 선택은 localStorage 편의 설정이라 재시작해도 남는다
+  it('앱을 다시 켜면 새 대화는 마지막으로 고른 모델로 시작하고, 그 모델로 보낸다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await chooseModel('Echo B')
+    await app.close()
+    await launch()
+    await expect.poll(composerModel, { timeout: 10_000 }).toBe('Echo B')
+    const before = (await fakeLlm()).chatModels.length
+    expect(await send('다시 켠 뒤')).toBe('echo: 다시 켠 뒤')
+    expect(new Set(await modelsSince(before))).toEqual(new Set(['echo-b']))
+  })
+
+  // 설계: 설정에서 지운 모델은 "없음" 으로 보이고, 다른 모델을 고르기 전에는 보내지 않는다
+  it('대화의 모델이 설정에서 지워지면 "모델 없음" 으로 보이고 보내기가 막히며, 다른 모델을 고르면 풀려 그 모델로 이어 간다', async () => {
+    await openSettings()
+    await card('Internal LiteLLM Gateway').getByRole('button', { name: '편집' }).click()
+    await dialog().getByRole('button', { name: '모델 삭제 2' }).click()
+    await dialog().getByRole('button', { name: '적용' }).click()
+    await expect.poll(() => field('Base URL').count(), { timeout: 5_000 }).toBe(0)
+    await page.keyboard.press('Escape')
+
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe('모델 없음')
+    expect(await canSend()).toBe(false)
+    await trigger().click()
+    expect(await menu().getByRole('menuitemradio').allTextContents()).toEqual(['Echo'])
+    await menu().getByRole('menuitemradio', { name: 'Echo', exact: true }).click()
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe('Echo')
+    expect(await canSend()).toBe(true)
+    // 지워진 모델로 만든 대화도 고른 모델로 이어진다
+    expect(await send('남은 모델로')).toBe('echo: 남은 모델로')
+    expect((await lastChat()).model).toBe('echo')
+  })
+})

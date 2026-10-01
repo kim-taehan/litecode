@@ -7,6 +7,7 @@ import type { Project } from '../src/services/projects.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { ChatResult } from '../src/services/llm.ts'
+export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { Project } from '../src/services/projects.ts'
 
 export const Channel = {

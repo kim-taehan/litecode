@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { normalizeBaseURL } from './providers.ts'
 import type { EngineConnection } from './engine.ts'
+import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import './engine.ts'
 
 // opencode 를 감싸는 서비스 — 위층(세션·UI)은 이 ctx.llm 키만 알고 opencode 를 직접 모른다.
@@ -35,6 +36,15 @@ export interface ChatResult {
   sessionId?: string
   text?: string
   error?: string
+  /** 이 턴의 사용량·시간 (중립 모양 — turnUsage.ts). 끝난 스텝이 없으면 없다 */
+  usage?: TurnUsage
+}
+
+interface TurnOutcome {
+  ok: boolean
+  text: string
+  error?: string
+  usage?: TurnUsage
 }
 
 interface OpencodeEventEnvelope {
@@ -106,8 +116,26 @@ export class LlmService extends Service {
     return ((await res.json()) as { data: CatalogModel[] }).data
   }
 
-  /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더·모델을 따른다
-   *  (prompt 본문에는 model·location 필드가 없다) — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다). */
+  // 이어가는 세션의 모델 바꾸기 — prompt 본문엔 model 이 없고(additionalProperties:false), 이 호출(204)이 다음 턴부터 바꾼다.
+  // 앞 턴 맥락은 그대로 실린다 (2026-10-01 실측 5/5, _workspace/01_probe.md). 세션의 지금 모델은 GET 으로 본다 — SSE 의
+  // model.switched 가 이전 턴 step.started 보다 먼저 올 수 있어 이벤트 순서로 추론하지 않는다.
+  // opencode 는 모델이 있는지 검증하지 않는다(없어도 204, 다음 턴이 step.* 없이 매달린다) — 그래서 chat 이 모델·주소 확인을
+  // 통과한 뒤에만 부른다.
+  private async useModel(conn: EngineConnection, sessionId: string, providerId: string, modelId: string): Promise<void> {
+    const res = await fetch(`${conn.url}/api/session/${sessionId}`, { headers: conn.headers })
+    if (!res.ok) throw new Error(`세션 조회 실패 (${res.status})`)
+    const current = ((await res.json()) as { data: { model?: { providerID?: string; id?: string } } }).data.model
+    if (current?.providerID === providerId && current.id === modelId) return
+    const switched = await fetch(`${conn.url}/api/session/${sessionId}/model`, {
+      method: 'POST',
+      headers: { ...conn.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: { providerID: providerId, id: modelId } }),
+    })
+    if (!switched.ok) throw new Error(`모델 바꾸기 실패 (${switched.status})`)
+  }
+
+  /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더를 따르고, 모델이 다르면
+   *  보내기 전에 그 세션의 모델을 바꾼다 — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다). */
   async chat(providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: `provider ${providerId} 없음` }
@@ -127,7 +155,8 @@ export class LlmService extends Service {
       if (normalizeBaseURL(model.api?.url ?? '') !== normalizeBaseURL(conn.providerBaseURL(providerId))) {
         return { ok: false, sessionId: id, error: `이 프로젝트의 opencode.json 이 provider 주소를 바꿉니다 (${model.api?.url}) — 대화 내용이 그 주소로 갈 수 있어 보내지 않았습니다` }
       }
-      id ??= await this.createSession(conn, providerId, modelId, workdir)
+      if (id) await this.useModel(conn, id, providerId, modelId)
+      else id = await this.createSession(conn, providerId, modelId, workdir)
 
       let admitted!: (seq: number) => void
       const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)))
@@ -146,10 +175,21 @@ export class LlmService extends Service {
       admitted(((await admit.json()) as { data: { admittedSeq: number } }).data.admittedSeq)
 
       const result = await events.result
-      return { ok: result.ok, sessionId: id, text: result.text, error: result.error }
+      const usage = result.usage && { ...result.usage, messageTokens: await this.messageTokens(conn, id) }
+      return { ok: result.ok, sessionId: id, text: result.text, error: result.error, usage }
     } catch (error) {
       if (conn?.closed.aborted) return { ok: false, sessionId: id, error: INTERRUPTED }
       return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
+    }
+  }
+
+  /** 컨텍스트 중 대화 메시지 몫 (추정). 통계용이라 못 구해도 턴은 그대로 돌려준다 */
+  private async messageTokens(conn: EngineConnection, sessionId: string): Promise<number | undefined> {
+    try {
+      const res = await fetch(`${conn.url}/api/session/${sessionId}/context`, { headers: conn.headers })
+      return res.ok ? messageTokens(((await res.json()) as { data: Parameters<typeof messageTokens>[0] }).data) : undefined
+    } catch {
+      return undefined
     }
   }
 
@@ -163,7 +203,7 @@ export class LlmService extends Service {
     conn: EngineConnection,
     sessionId: string,
     admittedSeq: Promise<number>,
-  ): { result: Promise<{ ok: boolean; text: string; error?: string }>; stop: () => void } {
+  ): { result: Promise<TurnOutcome>; stop: () => void } {
     const controller = new AbortController()
     const result = (async () => {
       const res = await fetch(`${conn.url}/api/session/${sessionId}/event`, {
@@ -176,6 +216,7 @@ export class LlmService extends Service {
       const decoder = new TextDecoder()
       let buffer = ''
       const texts: string[] = []
+      const meter = new TurnMeter()
 
       try {
         while (true) {
@@ -183,7 +224,7 @@ export class LlmService extends Service {
             if (controller.signal.aborted) throw error // 우리가 멈췄다 (stop)
             return undefined // 연결이 잘렸다 (undici: "terminated")
           })
-          if (!read || read.done) return { ok: false, text: texts.join(''), error: await interruption(conn.closed) }
+          if (!read || read.done) return { ok: false, text: texts.join(''), error: await interruption(conn.closed), usage: meter.usage() }
           const { value } = read
           buffer += decoder.decode(value, { stream: true })
 
@@ -191,7 +232,7 @@ export class LlmService extends Service {
           while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
             const frame = buffer.slice(0, frameEnd)
             buffer = buffer.slice(frameEnd + 2)
-            const outcome = this.handleFrame(frame, texts, await admittedSeq)
+            const outcome = this.handleFrame(frame, texts, meter, await admittedSeq)
             if (outcome) return outcome
           }
         }
@@ -204,7 +245,7 @@ export class LlmService extends Service {
     return { result, stop: () => controller.abort() }
   }
 
-  private handleFrame(frame: string, texts: string[], admittedSeq: number): { ok: boolean; text: string; error?: string } | undefined {
+  private handleFrame(frame: string, texts: string[], meter: TurnMeter, admittedSeq: number): TurnOutcome | undefined {
     const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
     if (!dataLine) return undefined
 
@@ -215,6 +256,7 @@ export class LlmService extends Service {
       return undefined
     }
     if ((event.durable?.seq ?? Infinity) <= admittedSeq) return undefined // 이전 턴의 재생분
+    meter.observe(event.type, event.data)
 
     if (event.type === 'session.next.text.ended') {
       const text = event.data['text']
@@ -223,11 +265,11 @@ export class LlmService extends Service {
     }
     if (event.type === 'session.next.step.ended') {
       if (event.data['finish'] === 'tool-calls') return undefined // 다음 스텝이 이어진다
-      return { ok: true, text: texts.join('') }
+      return { ok: true, text: texts.join(''), usage: meter.usage() }
     }
     if (event.type === 'session.next.step.failed') {
       const error = event.data['error'] as { message?: string } | undefined
-      return { ok: false, text: texts.join(''), error: error?.message ?? '알 수 없는 오류' }
+      return { ok: false, text: texts.join(''), error: error?.message ?? '알 수 없는 오류', usage: meter.usage() }
     }
     return undefined
   }

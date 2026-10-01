@@ -144,6 +144,15 @@ Electron 렌더러 (React)          Electron 메인 프로세스
     opencode 자식 PATH 앞에 둔다(2b). 개발 머신에서 오프라인을 재현하려면 HOME 도 비워야 한다(`~/.npm` 캐시가 설치를 채워 준다)
   - 동봉: closed-code `scripts/fetch-opencode.mjs`(npm 레지스트리 플랫폼별 패키지, sha512) · `electron-builder.yml` extraResources ·
     `binary.ts` 거의 그대로. 버전은 **1.18.18 고정** (latest 는 1.18.33 — 올리기 전에 위 실측을 다시)
+- **대화 중 모델 바꾸기** (실측 2026-10-01): `POST /api/session/{id}/model` body `{"model":{"providerID","id"}}` → 204. 다음 턴부터 새
+  모델, 앞 맥락 유지(5/5). prompt 본문엔 model 을 못 싣는다(additionalProperties:false). **없는 모델로 바꿔도 204 이고 다음 턴이
+  `prompted` 에서 조용히 멈춘다** → 바꾸기 전에 모델 확인을 먼저 통과시킨다. 진행 중 턴에 바꾸면 그 턴은 옛 모델로 끝난다
+- **토큰·시간 통계** (실측 2026-10-01): 스텝마다 `session.next.step.ended.data.tokens {input, output, reasoning, cache:{read,write}}`
+  (세션 합계는 opencode 가 안 준다 — 직접 합산). 모든 이벤트에 `data.timestamp`(ms). **`text.delta` 는 세션 SSE 에 안 온다** —
+  첫 토큰 시각은 `text.started`. `step.started` 는 첫 바이트 뒤에 찍혀 TTFT 기준으로 못 쓴다(첫 스텝은 `prompted` 기준).
+  usage 매핑: input = prompt_tokens − cached_tokens, cache.read = cached, output = completion − reasoning, cache.write 는 늘 0.
+  비용은 가격을 줘도 0. custom 모델의 컨텍스트 한도는 0(모름) — opencode.json 모델에 `limit:{context}` 를 주면 반영된다.
+  컨텍스트 구성(시스템·도구·메시지 크기)은 opencode 가 안 준다 — 추정만 가능
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.
