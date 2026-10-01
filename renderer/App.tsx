@@ -6,6 +6,7 @@ import { findModel, initialModel, parseModelRef, type ModelRef } from './modelCh
 import { ModelSelect } from './ModelSelect.tsx'
 import { SettingsModal } from './Settings.tsx'
 import { StatsBar } from './StatsBar.tsx'
+import { Trajectory } from './Trajectory.tsx'
 import { addTurn, chatStats, type ChatUsage } from './stats.ts'
 
 interface ChatMessage {
@@ -249,6 +250,8 @@ export function App() {
   const [failedProject, setFailedProject] = useState<string>()
   const switchRef = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState('')
+  /** 본문 탭 — 대화(Chat) 또는 스텝·도구 기록(Trajectory) */
+  const [view, setView] = useState<'chat' | 'trajectory'>('chat')
   const sessionHover = useHoverCard()
   // 목록의 `38min`·`1h` 가 저절로 늘어나게 30초마다 다시 그린다
   const [now, setNow] = useState(Date.now)
@@ -664,7 +667,17 @@ export function App() {
         {active && (
           <>
             <div className="main__header">{active.title}</div>
+            <div className="main__tabs" role="tablist" aria-label="보기">
+              {(['chat', 'trajectory'] as const).map((tab) => (
+                <button key={tab} type="button" role="tab" className="main__tab" aria-selected={view === tab} onClick={() => setView(tab)}>
+                  {tab === 'chat' ? 'Chat' : 'Trajectory'}
+                </button>
+              ))}
+            </div>
 
+            {view === 'trajectory' ? (
+              <Trajectory key={active.id} directory={active.project} sessionId={active.engineSessionId} pending={!!active.pending} />
+            ) : (
             <div className="main__messages" ref={listRef}>
               {active.history === 'missing' ? (
                 <div className="empty" role="alert">
@@ -682,6 +695,7 @@ export function App() {
                 </div>
               ))}
             </div>
+            )}
 
             <div className="composer">
               {/* dsh InputBar: 둥근 카드 하나에 입력칸과 아래 줄(왼쪽 +, 오른쪽 모델 선택·둥근 보내기)을 담고, 카드 밑에 통계 줄 */}
