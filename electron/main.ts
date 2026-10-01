@@ -8,6 +8,7 @@ import { EngineService } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { SessionsService, type Conversation } from '../src/services/sessions.ts'
+import { TrajectoryService } from '../src/services/trajectory.ts'
 import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { canSealKeys } from './keyStorage.ts'
@@ -63,6 +64,7 @@ mounted.push(ctx.plugin(SessionsService, {
   file: path.join(userData, 'sessions.json'),
   limit: Number(process.env.LITECODE_TEST_SESSION_LIMIT) || undefined,
 }))
+mounted.push(ctx.plugin(TrajectoryService))
 
 /** IPC 핸들러를 되돌릴 수 있게 건다 — 의존 서비스가 다시 올라와 bootstrap 이 다시 돌면, Cordis 가 먼저 이것을 풀어
  *  "이미 등록된 핸들러" 오류 없이 다시 건다 (Cordis 원칙: 모든 등록은 effect 로) */
@@ -114,8 +116,9 @@ function bootstrap(ctx: Context): void {
     await shell.openExternal(url)
     return true
   })
+  handle(ctx, Channel.LOAD_TRAJECTORY, async (_event, directory: string, sessionId: string) => ctx.trajectory.read(directory, sessionId))
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions']
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'trajectory']
 mounted.push(ctx.plugin(bootstrap))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).

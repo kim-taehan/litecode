@@ -21,6 +21,7 @@ const Channel = {
   REMOVE_CONVERSATION: 'sessions:remove',
   LOAD_CONVERSATION: 'sessions:history',
   OPEN_EXTERNAL: 'shell:open-external',
+  LOAD_TRAJECTORY: 'trajectory:load',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -41,6 +42,7 @@ const bridge: LitecodeBridge = {
   removeConversation: (id) => ipcRenderer.invoke(Channel.REMOVE_CONVERSATION, id),
   loadConversation: (id) => ipcRenderer.invoke(Channel.LOAD_CONVERSATION, id),
   openExternal: (url) => ipcRenderer.invoke(Channel.OPEN_EXTERNAL, url),
+  loadTrajectory: (directory, sessionId) => ipcRenderer.invoke(Channel.LOAD_TRAJECTORY, directory, sessionId),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)
