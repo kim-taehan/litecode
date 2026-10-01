@@ -42,7 +42,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   처음부터 다시 짜는 건 opencode/dsh 가 가장 공들인 부분이라 일이 제일 크다 — 지금 벗어나려는
   "너무 커진 일"을 새 이름으로 반복하는 셈이다.
 - **다만 opencode 는 `ctx.llm` 서비스 뒤에 숨긴다.** 위층(화면·세션)은 이 키만 알고 opencode
-  를 직접 모른다. 나중에 엔진을 바꿔도 이 서비스 경계만 교체하면 된다 — closed-code 의
+  를 직접 모른다. 나중에 엔진을 바꿔도 이 서비스 경계(`ctx.llm` + opencode 프로세스를 쥔 `ctx.engine`)만 교체하면 된다 — closed-code 의
   "부패방지 계층"과 같은 목적을, 이번엔 Cordis 서비스 경계로 더 깔끔하게 표현한다.
 - **플러그인 뼈대는 [Cordis](https://github.com/cordiverse/cordis)** (deepseek-harness 가
   쓰는 것과 같은 프레임워크, dsh 전용이 아니라 독립 OSS 다). 서비스는 `ctx.<key>` 로 등록되고
@@ -211,3 +211,4 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-09-30 | 한 라운드에는 사용자 요청만 — QA 참고는 따로 모아 보고 | skills/litecode-build | 사용자 "너무 오래 걸린다" |
 | 2026-09-30 | QA 는 `차단` 재현 스크립트를 `_workspace/qa-repro/` 에 남긴다 | agents/boundary-qa | 프로브를 지워 구현자가 재현 못 함 |
 | 2026-09-30 | 테스트 창을 화면에 띄우지 않는다 (`LITECODE_TEST_HIDDEN=1`) — 에이전트·스크립트도 따른다 | skills/live-test | 사용자 "테스트 중 다른 일을 못 하겠다" |
+| 2026-10-01 | 엔진 경계 = `ctx.llm` + `ctx.engine` (문서 정정), bootstrap 의 IPC·종료를 Cordis effect·fiber dispose 로 | agents/litecode-dev, electron/main.ts | 코디스 사용 검토 |

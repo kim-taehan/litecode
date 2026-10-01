@@ -19,7 +19,7 @@ Cordis 서비스 경계 뒤에 숨긴다. 구조와 함정은 레포 루트 `CLA
      채널 이름 불일치·preload 로딩 실패·SSE 재생 같은 결함이 안 잡힌다
    - 절차와 도구는 `live-test` 스킬
 2. **opencode 는 `ctx.llm` 뒤에만 있다.** renderer·IPC·다른 서비스가 opencode URL·이벤트 이름을
-   직접 알면 경계가 무너진 것이다. 엔진을 바꿀 때 `llm.ts` 하나만 교체할 수 있어야 한다.
+   직접 알면 경계가 무너진 것이다. 엔진 경계는 **`ctx.llm`(대화)과 `ctx.engine`(opencode 프로세스·키 프록시) 두 서비스**다 — 엔진을 바꿀 때 이 둘만 교체할 수 있어야 한다.
 3. **서비스 접근은 `inject` 로만.** `ctx.plugin(X)` 바로 다음 줄에서 `ctx.x` 를 쓰지 않는다 —
    비동기 마운트라 undefined 로 조용히 죽는다 (CLAUDE.md 아키텍처 함정 1).
 4. **IPC 채널은 두 곳에 있다.** `shared/ipc.ts` 와 `electron/preload.cts`(CJS 라 import 불가).

@@ -131,7 +131,8 @@ export class EngineService extends Service {
   ) {
     super(ctx, 'engine')
     reapStale(opts.pidFile)
-    ctx.on('providers/changed', () => void this.restart().catch(() => {}))
+    // 재시작이 실패해도 다음 대화가 다시 띄워 본다 — 다만 조용히 묻히지 않게 사유는 남긴다(키는 안 싣는다: 오류는 프로세스·포트 사유뿐)
+    ctx.on('providers/changed', () => void this.restart().catch((error: unknown) => console.error('[engine] 설정 변경 후 재시작 실패', (error as Error).message)))
     ctx.effect(() => () => this.stop())
   }
 

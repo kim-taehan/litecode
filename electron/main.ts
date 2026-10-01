@@ -14,9 +14,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Cordis 컨텍스트는 메인 프로세스에 하나만 둔다 — 렌더러는 IPC 로만 닿는다.
 const ctx = new Context()
+// 올린 순서대로 쥔다 — 앱을 끌 때 거꾸로 내려 각 서비스가 걸어 둔 정리(effect)를 다 돌린다 (opencode·키 프록시 끄기 등)
+const mounted: { dispose(): Promise<void> }[] = []
 // userData 는 --user-data-dir 스위치를 따른다 (실물 테스트가 이걸로 격리한다).
 const userData = app.getPath('userData')
-ctx.plugin(ProviderRegistry, {
+mounted.push(ctx.plugin(ProviderRegistry, {
   file: path.join(userData, 'providers.json'),
   keysFile: path.join(userData, 'provider-keys.json'),
   // safeStorage 는 app ready 뒤에만 쓸 수 있다 — 키 저장은 설정 화면에서만 일어나므로 그때는 늘 ready 다.
@@ -42,52 +44,53 @@ ctx.plugin(ProviderRegistry, {
       models: [{ id: 'qwen3.8-27b', displayName: 'Qwen3.8 27B' }],
     },
   ],
-})
+}))
 // opencode 는 앱이 직접 띄운다 (서버 하나). 사용자가 따로 띄운 opencode 에 붙는 길은 두지 않는다 — 폐쇄망에서는 사용자가
 // `opencode serve` 를 칠 수 없고, 제품이 안 쓰는 분기는 낡는다 (closed-code 결정과 같다). 실물 테스트도 앱이 띄운 것을 쓴다.
-ctx.plugin(EngineService, {
+mounted.push(ctx.plugin(EngineService, {
   configDir: path.join(userData, 'opencode'),
   db: path.join(userData, 'opencode.db'),
   pidFile: path.join(userData, 'opencode-server.json'),
   // 설치본에는 opencode·rg 가 실려 있다 (electron-builder.yml extraResources). 개발 실행의 resourcesPath 는 electron 배포물 자리라 넘기지 않는다
   bundled: app.isPackaged ? bundledPaths(process.resourcesPath) : undefined,
-})
-ctx.plugin(LlmService)
-ctx.plugin(ProjectsService, { file: path.join(userData, 'projects.json') })
+}))
+mounted.push(ctx.plugin(LlmService))
+mounted.push(ctx.plugin(ProjectsService, { file: path.join(userData, 'projects.json') }))
+
+/** IPC 핸들러를 되돌릴 수 있게 건다 — 의존 서비스가 다시 올라와 bootstrap 이 다시 돌면, Cordis 가 먼저 이것을 풀어
+ *  "이미 등록된 핸들러" 오류 없이 다시 건다 (Cordis 원칙: 모든 등록은 effect 로) */
+function handle(ctx: Context, channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void {
+  ctx.effect(() => {
+    ipcMain.handle(channel, listener)
+    return () => ipcMain.removeHandler(channel)
+  })
+}
 
 // 서비스는 비동기로 마운트된다 — ctx.providers 를 바로 쓰지 않고, inject 로
 // 선언한 플러그인 안에서만 접근한다 (Cordis 원칙: 순서는 inject 로 표현한다).
 function bootstrap(ctx: Context): void {
-  ipcMain.handle(Channel.LIST_PROVIDERS, async () => ctx.providers.list())
-  ipcMain.handle(Channel.SAVE_PROVIDER, async (_event, input: ProviderInput) => ctx.providers.save(input))
-  ipcMain.handle(Channel.REMOVE_PROVIDER, async (_event, id: string) => ctx.providers.remove(id))
-  ipcMain.handle(Channel.FETCH_PROVIDER_MODELS, async (_event, draft: { id?: string; baseURL: string; apiKey?: string }) =>
+  handle(ctx, Channel.LIST_PROVIDERS, async () => ctx.providers.list())
+  handle(ctx, Channel.SAVE_PROVIDER, async (_event, input: ProviderInput) => ctx.providers.save(input))
+  handle(ctx, Channel.REMOVE_PROVIDER, async (_event, id: string) => ctx.providers.remove(id))
+  handle(ctx, Channel.FETCH_PROVIDER_MODELS, async (_event, draft: { id?: string; baseURL: string; apiKey?: string }) =>
     ctx.providers.fetchAvailableModels(draft),
   )
-  ipcMain.handle(
+  handle(
+    ctx,
     Channel.SEND_MESSAGE,
     async (_event, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string) =>
       ctx.llm.chat(providerId, modelId, directory, prompt, sessionId),
   )
-  ipcMain.handle(Channel.LIST_PROJECTS, async () => ctx.projects.list())
-  ipcMain.handle(Channel.OPEN_PROJECT, async (_event, directory: string) => ctx.projects.open(directory))
-  ipcMain.handle(Channel.SET_PROJECT_FAVORITE, async (_event, directory: string, favorite: boolean) =>
+  handle(ctx, Channel.LIST_PROJECTS, async () => ctx.projects.list())
+  handle(ctx, Channel.OPEN_PROJECT, async (_event, directory: string) => ctx.projects.open(directory))
+  handle(ctx, Channel.SET_PROJECT_FAVORITE, async (_event, directory: string, favorite: boolean) =>
     ctx.projects.setFavorite(directory, favorite),
   )
-  ipcMain.handle(Channel.REMOVE_PROJECT, async (_event, directory: string) => ctx.projects.remove(directory))
-  ipcMain.handle(Channel.RENAME_PROJECT, async (_event, directory: string, name: string) => ctx.projects.rename(directory, name))
+  handle(ctx, Channel.REMOVE_PROJECT, async (_event, directory: string) => ctx.projects.remove(directory))
+  handle(ctx, Channel.RENAME_PROJECT, async (_event, directory: string, name: string) => ctx.projects.rename(directory, name))
   // 켜자마자 띄운다 — 첫 메시지가 opencode 기동을 기다리지 않게. 실패하면 첫 전송이 사유를 받는다 (그때 다시 띄워 본다)
   void ctx.engine.connection().catch(() => {})
-  // 앱 종료를 한 번 붙잡아 opencode 를 끈다 — GUI 앱에는 자식을 데려가 줄 터미널이 없어 흘려보내면 남는다
-  // (closed-code app/quitGuard.ts). quit 은 이 핸들러로 되돌아오므로 exit 로 끝내고, 빗장으로 재진입을 막는다
-  let quitting = false
-  app.on('before-quit', (event) => {
-    if (quitting) return
-    quitting = true
-    event.preventDefault()
-    void ctx.engine.stop().finally(() => app.exit(0))
-  })
-  ipcMain.handle(Channel.PICK_PROJECT_FOLDER, async (event) => {
+  handle(ctx, Channel.PICK_PROJECT_FOLDER, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options = { properties: ['openDirectory' as const] }
     const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
@@ -96,7 +99,20 @@ function bootstrap(ctx: Context): void {
   })
 }
 bootstrap.inject = ['providers', 'llm', 'projects', 'engine']
-ctx.plugin(bootstrap)
+mounted.push(ctx.plugin(bootstrap))
+
+// 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).
+// GUI 앱에는 자식을 데려가 줄 터미널이 없어 흘려보내면 opencode 가 남는다 (closed-code app/quitGuard.ts). Cordis 의 dispose 는
+// 비동기 정리가 끝날 때까지 기다린다(실측). quit 은 이 핸들러로 되돌아오므로 exit 로 끝내고, 빗장으로 재진입을 막는다
+let quitting = false
+app.on('before-quit', (event) => {
+  if (quitting) return
+  quitting = true
+  event.preventDefault()
+  void (async () => {
+    for (const fiber of mounted.reverse()) await fiber.dispose().catch((error: unknown) => console.error('[quit] 서비스 정리 실패', error))
+  })().finally(() => app.exit(0))
+})
 
 // 실물 테스트는 창을 화면에 띄우지 않는다 — 사용자 화면·포커스를 가로채지 않게. 그려지기는 하고(paintWhenInitiallyHidden),
 // 숨겨진 창의 타이머·애니메이션이 느려지지 않게(backgroundThrottling) 해서 playwright 조작은 그대로 된다. 제품은 이 변수를 안 쓴다
