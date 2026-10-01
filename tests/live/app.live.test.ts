@@ -34,6 +34,8 @@ let tmp: string
 let userData: string
 let alpha: string
 let beta: string
+/** 다음 launch 에 더할 환경 — 대화 영속화 묶음이 보관 개수를 낮춘다 */
+let extraEnv: Record<string, string> = {}
 
 async function launch(): Promise<void> {
   app = await electron.launch({
@@ -41,7 +43,7 @@ async function launch(): Promise<void> {
     // 사용자 Keychain 에 항목을 만들거나 접근 허락 창을 띄우지 않게 (암호화 자체는 그대로 돈다)
     args: ['.', `--user-data-dir=${userData}`, '--use-mock-keychain'],
     cwd: root,
-    env: { ...isolatedEnv(tmp), LITECODE_TEST_HIDDEN: '1', LITECODE_DEV_SERVER_URL: devServerUrl, LITECODE_GATEWAY_URL: `${inject('fakeLlmUrl')}/v1` },
+    env: { ...isolatedEnv(tmp), LITECODE_TEST_HIDDEN: '1', LITECODE_DEV_SERVER_URL: devServerUrl, LITECODE_GATEWAY_URL: `${inject('fakeLlmUrl')}/v1`, ...extraEnv },
   })
   page = await app.firstWindow()
   // 사이드바를 숨긴 채 켜질 수도 있어 사이드바 토글로 준비를 확인한다 — 로고 줄의 접기 버튼이나, 숨겼으면 본문의 다시 열기 버튼.
@@ -366,18 +368,19 @@ describe('앱 ↔ 실물 opencode', () => {
     expect(JSON.parse(await fs.readFile(path.join(userData, 'projects.json'), 'utf8'))).toEqual({ recent: [beta], favorites: [], names: {} })
   })
 
-  // 성공 기준 9 — 현재 프로젝트를 빼면 다음 프로젝트로, 없으면 첫 실행 안내로. 뺀 프로젝트의 메모리 속 대화는 버린다
+  // 성공 기준 9 — 현재 프로젝트를 빼면 다음 프로젝트로, 없으면 첫 실행 안내로. 뺀 프로젝트의 저장된 대화는 남아 다시 열면 돌아온다
   it('현재 프로젝트를 빼면 다음 프로젝트로, 마지막이면 첫 실행 안내로 간다', async () => {
     await pickFolderNextTime(alpha)
     await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('alpha-app')
-    expect(await sessionTitles()).toEqual(['새 대화']) // 빼기 전의 A 대화는 버려졌다
+    // 빼기 전의 A 대화가 돌아온다 — 대화 목록은 프로젝트를 빼도 남는다 (대화 영속화 성공 기준 4)
+    expect(await sessionTitles()).toEqual(['[bash:sleep 6 && pwd]', '화면에서 안녕', '[bash:pwd]'])
 
     await openPopover()
     await row('alpha-app').hover()
     await row('alpha-app').getByRole('button', { name: '목록에서 빼기', exact: true }).click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('beta-app')
-    expect(await sessionTitles()).toEqual(['새 대화']) // B 의 대화 (앞 테스트의 재시작으로 메모리 대화는 비었다)
+    expect(await sessionTitles()).toEqual(['새 대화', 'B 에서 안녕']) // B 의 대화 — 켤 때 저장된 대화 위에 새 대화가 생겼다
 
     await row('beta-app').hover()
     await row('beta-app').getByRole('button', { name: '목록에서 빼기', exact: true }).click()
@@ -510,7 +513,7 @@ describe('앱 ↔ 실물 opencode', () => {
 })
 
 // 설정 화면 조작 — 설정 > 모델 과 엔진 묶음이 같이 쓴다
-const settingsButton = () => page.getByRole('button', { name: '⚙ 설정' })
+const settingsButton = () => page.getByRole('button', { name: '설정', exact: true })
 const dialog = () => page.getByRole('dialog', { name: '설정' })
 const card = (name: string) => dialog().locator('.provider-card', { has: page.locator('.provider-card__name', { hasText: name }) })
 const cardNames = () => dialog().locator('.provider-card__name').allTextContents()
@@ -539,7 +542,7 @@ async function filesContaining(dir: string, needle: string): Promise<string[]> {
 describe('설정 > 모델', () => {
   const SECRET = 'sk-live-SECRET-4242'
 
-  it('사이드바 하단의 ⚙ 설정은 모델 페이지로 모달을 열고, × 와 Esc 로 닫힌다', async () => {
+  it('사이드바 하단의 설정은 모델 페이지로 모달을 열고, × 와 Esc 로 닫힌다', async () => {
     expect(await page.getByText('연결됨').count()).toBe(0)
     await settingsButton().click()
     await dialog().waitFor({ timeout: 5_000 })
@@ -551,6 +554,20 @@ describe('설정 > 모델', () => {
     await openSettings()
     await page.keyboard.press('Escape')
     await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+  })
+
+  // dsh ui-sidebar 메뉴 줄(.panelRow)과 같은 모양 — 사용자: "설정이 너무 작다" (2026-10-01 캡처)
+  it('설정 버튼은 dsh 사이드바 메뉴 줄 모양이다 — 36px 줄·12px 모서리·14px 글자·20px 톱니, 위 구분선 없음', async () => {
+    const button = settingsButton()
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(36)
+    expect(await button.evaluate((el) => {
+      const style = getComputedStyle(el)
+      return [style.borderRadius, style.fontSize, style.padding, style.minHeight]
+    })).toEqual(['12px', '14px', '7px 8px', '36px'])
+    const icon = (await button.locator('svg').boundingBox())!
+    expect([icon.width, icon.height]).toEqual([20, 20])
+    expect(await button.textContent()).toBe('설정')
+    expect(await page.locator('.sidebar__foot').evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('0px')
   })
 
   it('provider 를 추가하면 재시작해도 남고, 키는 화면·userData 어디에도 평문으로 없다', async () => {
@@ -1229,3 +1246,252 @@ describe('모델 선택', () => {
     expect((await lastChat()).model).toBe('echo')
   })
 })
+
+// 대화 영속화 (2026-10-01 00_request 성공 기준 1~6, 방식 A). 목록 정보는 userData/sessions.json(ctx.sessions), 내용은 opencode DB 에서
+// 다시 부른다. 엔진 세션이 지워졌는지는 앱이 띄운 opencode 의 DB(userData/opencode.db)를 sqlite3 로 직접 본다 — 테스트는 엔진
+// 비밀번호를 모른다. 보관 개수는 LITECODE_TEST_SESSION_LIMIT 로 3 으로 낮춘다
+describe('대화 영속화', () => {
+  const LIMIT = 3
+  const composerModel = () => page.locator('.composer__model').textContent({ timeout: 1_000 })
+  const stored = async () =>
+    (JSON.parse(await fs.readFile(path.join(userData, 'sessions.json'), 'utf8')) as { conversations: { id: string; title: string; engineSessionId?: string; updatedAt: number; model?: { modelId: string } }[] }).conversations
+  const storedBy = async (title: string) => (await stored()).find((conversation) => conversation.title === title)
+  /** 엔진 DB 에 그 세션이 있나 — opencode 가 떠 있는 채로 읽는다 (WAL 이라 읽기는 된다) */
+  const engineHas = (id: string) =>
+    execFileSync('sqlite3', [path.join(userData, 'opencode.db'), `select count(*) from session where id = '${id}'`], { encoding: 'utf8' }).trim() === '1'
+  const item = (title: string) => page.locator('.session-item', { hasText: title })
+  const lastChat = async () =>
+    ((await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { lastChat: { model: string; messages: { role: string; text: string }[] } }).lastChat
+  let persist: string
+
+  async function openFolder(dir: string): Promise<void> {
+    await pickFolderNextTime(dir)
+    if (await page.locator('.open-guide').isVisible()) await page.locator('.open-guide').getByRole('button', { name: '폴더 열기…' }).click()
+    else {
+      await openPopover()
+      await popover().getByRole('button', { name: '＋ 폴더 열기…' }).click()
+    }
+    await expect.poll(currentName, { timeout: 10_000 }).toBe(path.basename(dir))
+  }
+
+  async function restart(): Promise<void> {
+    await app.close()
+    await launch()
+  }
+
+  async function chooseModel(name: string): Promise<void> {
+    await page.locator('.model-select__trigger').click()
+    await page.getByRole('menu', { name: '모델' }).getByRole('menuitemradio', { name, exact: true }).click()
+    await expect.poll(composerModel, { timeout: 5_000 }).toBe(name)
+  }
+
+  async function deleteConversation(title: string): Promise<void> {
+    await item(title).hover()
+    await item(title).getByRole('button', { name: '대화 삭제' }).click()
+    await item(title).getByRole('button', { name: '삭제 확인' }).click()
+    await expect.poll(sessionTitles, { timeout: 5_000 }).not.toContain(title)
+  }
+
+  beforeAll(async () => {
+    // 모델 둘(Echo·Echo B)을 둔다 — "고른 모델이 그대로" 를 기본값과 가르려고. 앞 묶음이 두 번째 모델을 지웠다(이 묶음만 돌리면 기본 모델 하나)
+    await openSettings()
+    await card('Internal LiteLLM Gateway').getByRole('button', { name: '편집' }).click()
+    await field('모델 id 1').fill('echo')
+    await field('모델 이름 1').fill('Echo')
+    if ((await modelIds()).length < 2) {
+      await dialog().getByRole('button', { name: '+ 모델 추가' }).click()
+      await field('모델 id 2').fill('echo-b')
+      await field('모델 이름 2').fill('Echo B')
+    }
+    await dialog().getByRole('button', { name: '적용' }).click()
+    await field('Base URL').waitFor({ state: 'detached', timeout: 5_000 })
+    await page.keyboard.press('Escape')
+
+    extraEnv = { LITECODE_TEST_SESSION_LIMIT: String(LIMIT) }
+    await app.close()
+    await launch()
+    persist = path.join(tmp, 'persist-app')
+    await fs.mkdir(persist, { recursive: true })
+  })
+
+  // 성공 기준 1
+  it('대화 두 개를 하고 앱을 다시 켜면 목록·제목·시각·고른 모델이 그대로이고, 누르면 내용이 보이며 같은 엔진 세션으로 이어 간다', async () => {
+    await openFolder(persist)
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await chooseModel('Echo B')
+    expect(await send('첫 대화')).toBe('echo: 첫 대화')
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await chooseModel('Echo')
+    expect(await send('둘째 대화')).toBe('echo: 둘째 대화')
+    const before = await stored()
+    const first = (await storedBy('첫 대화'))!
+    expect(first.engineSessionId).toMatch(/^ses/)
+    const times = await page.locator('.session-item__time').allTextContents()
+
+    await restart()
+    await expect.poll(currentName, { timeout: 10_000 }).toBe('persist-app')
+    expect(await sessionTitles()).toEqual(['새 대화', '둘째 대화', '첫 대화']) // 켜면 저장된 대화 위의 새 대화에서 시작한다
+    expect(await page.locator('.session-item__time').allTextContents()).toEqual(times)
+    expect(await stored()).toEqual(before)
+
+    await item('첫 대화').click()
+    await expect.poll(() => page.locator('.bubble').allTextContents(), { timeout: 15_000 }).toEqual(['첫 대화', 'echo: 첫 대화'])
+    expect(await page.locator('.main__header').textContent()).toBe('첫 대화')
+    expect(await composerModel()).toBe('Echo B')
+    await item('둘째 대화').click()
+    await expect.poll(() => page.locator('.bubble').allTextContents(), { timeout: 15_000 }).toEqual(['둘째 대화', 'echo: 둘째 대화'])
+    expect(await composerModel()).toBe('Echo')
+
+    await item('첫 대화').click()
+    expect((await send('이어서')).split('\n')[0]).toBe('echo: 이어서')
+    const chat = await lastChat()
+    expect(chat.model).toBe('echo-b')
+    expect(chat.messages.filter((message) => message.role !== 'system').slice(0, 2)).toEqual([
+      { role: 'user', text: '첫 대화' },
+      { role: 'assistant', text: 'echo: 첫 대화' },
+    ])
+    expect((await storedBy('첫 대화'))!.engineSessionId).toBe(first.engineSessionId) // 같은 엔진 세션
+  })
+
+  // 성공 기준 2
+  it('휴지통 → "삭제 확인" 으로 지우면 목록에서 사라지고, 재시작해도 없으며, 엔진 세션도 지워졌다', async () => {
+    const engineId = (await storedBy('둘째 대화'))!.engineSessionId!
+    expect(engineHas(engineId)).toBe(true)
+
+    await item('둘째 대화').hover()
+    expect(await item('둘째 대화').locator('.session-item__time').isVisible()).toBe(false) // hover 면 시각 자리에 휴지통
+    await item('둘째 대화').getByRole('button', { name: '대화 삭제' }).click()
+    expect(await sessionTitles()).toContain('둘째 대화') // 아직 확인 전
+    await item('둘째 대화').getByRole('button', { name: '삭제 확인' }).click()
+    await expect.poll(sessionTitles, { timeout: 5_000 }).not.toContain('둘째 대화')
+    await expect.poll(() => engineHas(engineId), { timeout: 10_000 }).toBe(false)
+
+    await restart()
+    await expect.poll(currentName, { timeout: 10_000 }).toBe('persist-app')
+    expect(await sessionTitles()).toEqual(['새 대화', '첫 대화'])
+    expect(await storedBy('둘째 대화')).toBeUndefined()
+  })
+
+  it('"삭제 확인" 은 포커스를 잃거나 Esc 면 휴지통으로 돌아가고 지우지 않는다', async () => {
+    await item('첫 대화').hover()
+    await item('첫 대화').getByRole('button', { name: '대화 삭제' }).click()
+    await page.keyboard.press('Escape')
+    expect(await item('첫 대화').getByRole('button', { name: '삭제 확인' }).count()).toBe(0)
+    await item('첫 대화').getByRole('button', { name: '대화 삭제' }).click()
+    await page.locator('.main__header').click()
+    expect(await item('첫 대화').getByRole('button', { name: '삭제 확인' }).count()).toBe(0)
+    expect(await sessionTitles()).toContain('첫 대화')
+  })
+
+  // 성공 기준 3 (제한은 테스트만 3 으로 — 제품은 50)
+  it('한 프로젝트의 대화가 제한을 넘으면 마지막 활동이 가장 오래된 것이 지워진다 (엔진 세션도)', async () => {
+    const crowded = path.join(tmp, 'crowded-app')
+    await fs.mkdir(crowded)
+    await openFolder(crowded)
+    for (const title of ['하나', '둘', '셋']) {
+      await page.getByRole('button', { name: '+ 새 대화' }).click()
+      await send(title)
+    }
+    expect(await sessionTitles()).toEqual(['셋', '둘', '하나'])
+    const oldest = (await storedBy('하나'))!.engineSessionId!
+
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await send('넷')
+    await expect.poll(sessionTitles, { timeout: 5_000 }).toEqual(['넷', '셋', '둘'])
+    await expect.poll(() => engineHas(oldest), { timeout: 10_000 }).toBe(false)
+    expect((await stored()).map((conversation) => conversation.title)).toContain('첫 대화') // 다른 프로젝트는 세지 않는다
+  })
+
+  // 성공 기준 4
+  it('프로젝트를 × 로 뺐다가(재시작을 거쳐도) 같은 폴더를 다시 열면 대화가 돌아온다', async () => {
+    await switchTo('persist-app')
+    await openPopover()
+    await row('persist-app').hover()
+    await row('persist-app').getByRole('button', { name: '목록에서 빼기', exact: true }).click()
+    await expect.poll(popoverNames, { timeout: 5_000 }).not.toContain('persist-app')
+    await page.keyboard.press('Escape')
+
+    await restart()
+    await openFolder(persist)
+    expect(await sessionTitles()).toEqual(['첫 대화'])
+    await item('첫 대화').click()
+    await expect.poll(() => page.locator('.bubble').count(), { timeout: 15_000 }).toBe(4)
+  })
+
+  // 성공 기준 6
+  it('답을 기다리는 중 앱을 끄고 다시 켜면 그 대화 마지막에 "중단됨" 이 보이고, 이어서 보낼 수 있다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    const before = (await fakeLlm()).count
+    await page.getByPlaceholder('메시지를 입력하세요…').fill('[slow] 끄기 전')
+    await page.keyboard.press('Enter')
+    await expect.poll(async () => (await fakeLlm()).count, { timeout: 20_000 }).toBe(before + 1) // LLM 이 답을 쥐고 있다
+
+    await restart()
+    await item('[slow] 끄기 전').click()
+    await expect.poll(() => page.locator('.bubble').allTextContents(), { timeout: 15_000 }).toHaveLength(2)
+    const [question, answer] = await page.locator('.bubble').allTextContents()
+    expect(question).toBe('[slow] 끄기 전')
+    expect(answer).toContain('⚠️')
+    expect(answer).toContain('중단됨')
+    expect((await send('다시')).split('\n')[0]).toBe('echo: 다시')
+  })
+
+  // 01_probe: DELETE 뒤에도 본문은 WAL·빈 페이지에 남는다 → 지운 뒤(답 대기 턴이 없을 때) 체크포인트+VACUUM 으로 걷어낸다
+  it('지운 대화의 본문은 opencode DB 파일(-wal·-shm 포함)에 남지 않고, 대화는 계속 된다', async () => {
+    const mark = `ZQXPURGE${Date.now()}`
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await send(mark)
+    expect(await dbOccurrences(mark)).toBeGreaterThan(0)
+
+    await deleteConversation(mark)
+    await expect.poll(() => dbOccurrences(mark), { timeout: 15_000 }).toBe(0)
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    expect(await send('정리 뒤')).toBe('echo: 정리 뒤')
+  })
+
+  // 성공 기준 5 (리더 결정): 못 연 프로젝트의 대화는 안내 화면에 "폴더가 없습니다" 로 보이고 지우기만 된다
+  it('폴더를 지운 뒤 다시 켜면 안내 화면에 그 프로젝트 대화가 "폴더가 없습니다" 로 보이고 지우기만 되며, opencode 는 그 경로를 묻지 않았다', async () => {
+    const gone = path.join(tmp, 'gone-app')
+    await fs.mkdir(gone)
+    await openFolder(gone)
+    for (const title of ['사라질 하나', '사라질 둘']) {
+      await page.getByRole('button', { name: '+ 새 대화' }).click()
+      await send(title)
+    }
+    const removed = (await storedBy('사라질 하나'))!.engineSessionId!
+
+    await app.close()
+    await fs.rm(gone, { recursive: true })
+    await launch()
+    await expect.poll(() => page.locator('.open-guide').getByRole('alert').textContent({ timeout: 1_000 }), { timeout: 10_000 }).toContain(gone)
+    const list = page.getByRole('list', { name: '이 폴더의 대화' })
+    const missing = (title: string) => list.locator('.missing-list__item', { hasText: title })
+    expect(await list.locator('.missing-list__title').allTextContents()).toEqual(['사라질 둘', '사라질 하나'])
+    expect(await missing('사라질 하나').textContent()).toContain('폴더가 없습니다')
+    expect(await page.locator('.bubble').count()).toBe(0) // 열 수 없다
+    expect(await page.getByPlaceholder('메시지를 입력하세요…').count()).toBe(0)
+
+    await missing('사라질 하나').getByRole('button', { name: '대화 삭제' }).click()
+    await missing('사라질 하나').getByRole('button', { name: '삭제 확인' }).click()
+    await expect.poll(() => list.locator('.missing-list__title').allTextContents(), { timeout: 5_000 }).toEqual(['사라질 둘'])
+    expect(await storedBy('사라질 하나')).toBeUndefined()
+    await expect.poll(() => engineHas(removed), { timeout: 10_000 }).toBe(false)
+
+    // 요청 0 의 증거: 없는 경로를 opencode 에 한 번이라도 넘겼으면 그 경로는 opencode 재시작 전까지 500 이다 (01c Q5).
+    // 폴더를 되살려 열면 남은 대화의 내용이 그대로 온다
+    await fs.mkdir(gone)
+    await openFolder(gone)
+    await item('사라질 둘').click()
+    await expect.poll(() => page.locator('.bubble').allTextContents(), { timeout: 15_000 }).toEqual(['사라질 둘', 'echo: 사라질 둘'])
+  })
+})
+
+/** 앱이 띄운 opencode 의 DB 와 -wal·-shm 에서 표식이 나온 횟수 */
+async function dbOccurrences(mark: string): Promise<number> {
+  let count = 0
+  for (const suffix of ['', '-wal', '-shm']) {
+    const bytes = await fs.readFile(path.join(userData, `opencode.db${suffix}`)).catch(() => Buffer.alloc(0))
+    for (let at = bytes.indexOf(mark); at !== -1; at = bytes.indexOf(mark, at + 1)) count++
+  }
+  return count
+}

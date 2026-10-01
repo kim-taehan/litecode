@@ -342,14 +342,73 @@ button {
 .session-item {
   display: flex;
   align-items: center;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.session-item__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
   gap: 8px;
   text-align: left;
   padding: 10px 12px;
-  border-radius: 8px;
   border: none;
+  border-radius: 8px;
   background: none;
-  font-size: 13px;
+  font: inherit;
+  color: inherit;
+}
+
+/* 휴지통은 hover·포커스 때만 시각 자리에 — dsh ui-workspace 세션 행처럼 시각을 숨기고 버튼을 보인다 */
+.session-item__actions {
+  display: none;
+  align-items: center;
+  padding-right: 6px;
+}
+
+.session-item:hover .session-item__actions,
+.session-item:focus-within .session-item__actions,
+.session-item--confirming .session-item__actions {
+  display: flex;
+}
+
+.session-item:hover .session-item__time,
+.session-item:focus-within .session-item__time,
+.session-item--confirming .session-item__time {
+  display: none;
+}
+
+.session-item__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+}
+
+.session-item__action:hover,
+.session-item__action:focus-visible {
+  background: var(--fill-active);
   color: var(--text);
+  outline: none;
+}
+
+.session-item__confirm {
+  padding: 3px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--danger-bg);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--danger);
+  white-space: nowrap;
 }
 
 .session-item__title {
@@ -368,24 +427,43 @@ button {
 }
 
 .sidebar__foot {
-  padding: 8px;
-  border-top: 1px solid var(--border);
+  padding: 6px 8px;
 }
 
-/* dsh ui-settings-general 트리거 행: 사이드바 폭 전체, hover 때만 배경 */
+/* dsh ui-sidebar 메뉴 줄(.panelRow)과 같은 모양 — 36px 줄, 20px 톱니, 본문 글자색. dsh 발치에는 구분선이 없다 */
 .settings-trigger {
-  width: 100%;
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 4px);
+  min-height: 36px;
+  margin: 0 2px;
+  padding: 7px 8px;
+  box-sizing: border-box;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   text-align: left;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 22px;
   color: var(--text);
 }
 
-.settings-trigger:hover,
+.settings-trigger svg {
+  flex: none;
+}
+
+.settings-trigger:hover {
+  background: var(--fill-hover);
+}
+
 .settings-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.settings-trigger--active,
+.settings-trigger--active:hover {
   background: var(--fill-active);
 }
 
@@ -1301,4 +1379,37 @@ button {
 
 @keyframes model-toast-in {
   from { opacity: 0; transform: translateY(4px); }
+}
+
+/* 안내 화면의 "폴더가 없는 프로젝트" 대화 — 지우기만 된다 */
+.missing-list {
+  width: min(420px, 100%);
+  margin: 0 0 16px;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.missing-list__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.missing-list__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.missing-list__note {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }

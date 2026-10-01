@@ -29,6 +29,22 @@ Agent({ name: "litecode-dev", subagent_type: "litecode-dev", model: "opus", run_
         description: "...", prompt: "지시 · 근거(파일 경로) · 범위" })
 ```
 
+## 병렬 라운드 — 겹치는 파일이 적을 때만
+
+Cordis 서비스·플러그인은 이름으로 갈려 있어 병렬에 유리하다. 막히는 건 공유 파일(`renderer/App.tsx`·`styles.css`·
+`shared/ipc.ts`·`preload.cts`·`electron/main.ts`)과 실물 테스트(머신 하나에서 Electron·opencode 동시 기동 → 타이밍 흔들림)다.
+
+- **동시 구현은 2개까지.** 두 번째부터는 `Agent(..., isolation: "worktree")` 로 따로 작업 공간을 준다
+  - worktree 는 HEAD 기준이다 — 다른 라운드의 커밋 안 된 변경은 안 보인다. `_workspace/` 도 없다(gitignore) → 요구 문서는 **절대 경로**로 준다
+  - `node_modules` 는 원본을 심볼릭 링크(`ln -s <원본>/node_modules node_modules`), 안 되면 `npm install`
+- **화면은 기능별 새 컴포넌트 파일**로 만들고 `App.tsx` 에는 끼워 넣는 몇 줄만 — 합칠 때 충돌을 작게
+- **실물 테스트도 기능별 새 파일**(`tests/live/<feature>.live.test.ts`) — 자기 앱을 띄우고 다른 테스트 순서에 기대지 않는다
+- **실물 테스트는 한 번에 하나** — 잠금 `/tmp/litecode-live.lock` 을 잡고 돌린다:
+  `until mkdir /tmp/litecode-live.lock 2>/dev/null; do sleep 20; done; npm run test:live; rc=$?; rmdir /tmp/litecode-live.lock; exit $rc`
+  (잠금이 30분 넘게 남아 있고 vitest 프로세스가 없으면 죽은 잠금 — 지워도 된다)
+- **합치기는 리더**가 한다: 먼저 끝난 라운드를 커밋한 뒤 worktree 브랜치를 그 위로 합치고, 착지 조건 3종을 합친 트리에서 다시 돌린다
+- 엔진 경계(`llm.ts`·`engine.ts`)나 같은 IPC 를 함께 고치는 라운드끼리는 병렬로 하지 않는다
+
 ## 문턱 — 에이전트를 띄우기 전에 잰다
 
 에이전트는 싸지 않다 (정의·스킬 로딩 + 재개할 때마다 대화 전체 재로딩). 이 레포는 작다(코드 수백 줄).

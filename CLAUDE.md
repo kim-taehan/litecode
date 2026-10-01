@@ -153,6 +153,15 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   usage 매핑: input = prompt_tokens − cached_tokens, cache.read = cached, output = completion − reasoning, cache.write 는 늘 0.
   비용은 가격을 줘도 0. custom 모델의 컨텍스트 한도는 0(모름) — opencode.json 모델에 `limit:{context}` 를 주면 반영된다.
   컨텍스트 구성(시스템·도구·메시지 크기)은 opencode 가 안 준다 — 추정만 가능
+- **지운 대화가 DB 에 남는다** (실측 2026-10-01): 레거시 DELETE 뒤 본문은 WAL 에, 체크포인트 뒤엔 freelist 페이지에 남는다(macOS
+  secure_delete=FAST). **checkpoint(TRUNCATE) → VACUUM → checkpoint** 까지 해야 0. opencode 가 떠 있는 동안 외부에서 해도 안전했다
+  (동시 턴 중 10회, busy 0·손상 0). Electron 33 엔 node:sqlite 가 없어 **동봉 opencode 를 `BUN_BE_BUN=1` 로 띄워 bun:sqlite 를 쓴다**
+  (문서화 안 된 동작 — 1.18.18 고정 전제). 잠금을 5초(opencode busy_timeout) 넘게 쥐면 그 사이 prompt 가 500 으로 실패한다
+- **입력 트리거(@ · / · !)** (실측 2026-10-01, `_workspace/01d_triggers.md`): **`prompt.files` 는 쓰지 않는다** — openai-compatible 경로에선
+  이미지 data: URI 만 되고 `.md`·`.txt`·`.ts` 를 붙이면 step.failed, **그 뒤 그 세션의 모든 턴이 같은 오류로 실패**(revert 로도 복구 안 됨).
+  후보 목록은 신규 세대(`/api/fs/find`·`/api/fs/list`·`/api/command`)에 있지만 `/`·`!` 실행은 레거시뿐이고 기록이 갈라진다 → 앱이 풀어서
+  `prompt.text` 로 보낸다. `prompt` 에 **`resume:false`** 를 주면 LLM 을 안 돌리고 입력만 저장(다음 턴 맥락에 실림). prompt 본문 `id`
+  (`msg_…`)는 앱이 정할 수 있다(중복 409). 새 폴더의 첫 `/api/command` 는 빈 배열 — 0.1~0.3초 뒤 다시. 명령 파일 변경은 재시작해야 반영
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.
@@ -168,7 +177,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | 패키징 (2b) | electron-builder. `scripts/fetch-opencode.mjs` 가 opencode 1.18.18(npm 레지스트리, sha512)·ripgrep 15.1.0(sha256)을 `build/vendor/` 에 받고(레포 제외), `extraResources` 로 `Resources/opencode`·`Resources/rg` 에 싣는다. 앱은 `OPENCODE_BIN` > 동봉 > PATH 순으로 찾고, 동봉 rg 폴더를 opencode PATH 맨 앞에 둔다(폐쇄망 grep 300초 멈춤 방지). mac ad-hoc 서명만 — **공증 없음, 다른 Mac 에서 내려받은 zip 의 격리(quarantine) 동작은 미검증**. vite `base: './'` (설치본 file:// 에서 assets 경로) |
 | 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. 설정한 provider 로 실제 대화된다(ctx.engine 이 opencode 에 넘김, 2a). 바이너리 동봉·패키징은 2b |
 | 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). 실물 테스트가 착지 기준이다 |
-| 세션 영속화 | 없음. 새로고침하면 대화 목록이 다 날아감 (React state 뿐) |
+| 세션 영속화 | `ctx.sessions` (2026-10-01). 내용 정본은 opencode DB, 앱은 목록 정보만(userData `sessions.json` — 제목·마지막 활동·모델·통계). 프로젝트당 50개(넘치면 오래된 것 자동 삭제)·하나씩 수동 삭제(두 번 눌러 확인). 삭제 뒤·opencode 기동 전에 DB 정리(`BUN_BE_BUN` + checkpoint→VACUUM). 폴더 없는 프로젝트 대화는 "폴더가 없습니다"(삭제만, opencode 요청 0). 끊긴 턴은 "중단됨". `/message` 는 100개씩 끝까지(한도 200) |
 | 프로젝트 전환 | 시안대로 구현 (2026-09-30). 사이드바 전환 버튼 + 팝오버(검색·즐겨찾기·최근·폴더 열기), 목록에서 빼기(폴더는 안 지움), 이름 바꾸기(보이는 이름만), 잘린 경로·대화 제목은 마우스를 올리면 흘러가며 보이고 옆 카드에 전체 내용(dsh 방식), 앱을 켜면 마지막 프로젝트. 목록은 `ctx.projects`(userData `projects.json`). 대화는 프로젝트별로 메모리에만 — **대화 영속화는 아직 없다** |
 
 ## 실행
@@ -212,3 +221,4 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-09-30 | QA 는 `차단` 재현 스크립트를 `_workspace/qa-repro/` 에 남긴다 | agents/boundary-qa | 프로브를 지워 구현자가 재현 못 함 |
 | 2026-09-30 | 테스트 창을 화면에 띄우지 않는다 (`LITECODE_TEST_HIDDEN=1`) — 에이전트·스크립트도 따른다 | skills/live-test | 사용자 "테스트 중 다른 일을 못 하겠다" |
 | 2026-10-01 | 엔진 경계 = `ctx.llm` + `ctx.engine` (문서 정정), bootstrap 의 IPC·종료를 Cordis effect·fiber dispose 로 | agents/litecode-dev, electron/main.ts | 코디스 사용 검토 |
+| 2026-10-01 | 병렬 라운드 규칙 — 동시 2개·worktree·기능별 컴포넌트/실물 테스트 파일·실물 테스트 잠금·리더가 합침 | skills/litecode-build | 사용자 "병렬 개발은 안 되나" |

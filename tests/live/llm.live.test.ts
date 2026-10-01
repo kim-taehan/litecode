@@ -267,3 +267,95 @@ describe('ctx.llm 턴 사용량', () => {
     expect(second.usage).toMatchObject({ steps: 1, tokens: { input: 700, output: 50, cacheRead: 300 } })
   })
 })
+
+// 대화 영속화 (00_request 2026-10-01): 지난 대화는 opencode 의 조립된 메시지 목록에서 다시 그린다 (01c Q2)
+describe('ctx.llm 지난 대화·세션 삭제', () => {
+  async function folder(name: string): Promise<string> {
+    const dir = path.join(root, name)
+    await fs.mkdir(dir)
+    return dir
+  }
+
+  it('지난 대화를 중립 모양 말풍선으로 돌려준다 — 도구 턴은 한 답, 실패 턴은 사유', async () => {
+    const dir = await folder('history')
+    let attached: string | undefined
+    const first = await services.llm.chat('fake', 'echo', dir, '[bash:echo 기록]', undefined, async (id) => void (attached = id))
+    expect(attached).toBe(first.sessionId) // 새 세션은 프롬프트 전에 알린다
+    await services.llm.chat('fake', 'echo', dir, '[fail] 실패', first.sessionId)
+    await services.llm.chat('fake', 'echo', dir, '셋째', first.sessionId)
+
+    const history = await services.llm.history(dir, first.sessionId!)
+    expect(history.error).toBeUndefined()
+    expect(history.messages.map(({ role, text }) => [role, text.split('\n')[0]])).toEqual([
+      ['user', '[bash:echo 기록]'],
+      ['assistant', 'tool: 기록'],
+      ['user', '[fail] 실패'],
+      ['assistant', ''],
+      ['user', '셋째'],
+      ['assistant', 'echo: 셋째'],
+    ])
+    expect(history.messages[3]!.error).toContain('500')
+  })
+
+  // 세션 삭제는 레거시 DELETE 뿐 (01c Q3). 이미 없는 세션을 다시 지워도 실패로 보지 않는다
+  it('세션을 지우면 opencode 에서 사라지고, 다시 지워도 오류가 아니다', async () => {
+    const result = await services.llm.chat('fake', 'echo', work, '지울 것')
+    await services.llm.deleteSession(result.sessionId!)
+    expect((await opencodeGet(`/api/session/${result.sessionId}`)).status).toBe(404)
+    await services.llm.deleteSession(result.sessionId!)
+  })
+
+  // 폴더가 없어진 세션의 내용 요청은 500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 500 이다 (01c Q5).
+  // 서버가 그 경로를 캐시하고 있으면 200 이 나므로 재시작으로 캐시를 비운다. 폴더를 되살린 뒤 내용이 오면 없을 때 묻지 않은 것이다
+  it('작업 폴더가 없으면 opencode 에 묻지 않고 missingFolder — 폴더를 되살리면 그대로 불러진다', async () => {
+    const dir = await folder('vanishing')
+    const result = await services.llm.chat('fake', 'echo', dir, '사라질 폴더')
+    await fs.rm(dir, { recursive: true })
+    await services.engine.restart()
+
+    expect(await services.llm.history(dir, result.sessionId!)).toEqual({ messages: [], missingFolder: true })
+
+    await fs.mkdir(dir)
+    const revived = await services.llm.history(dir, result.sessionId!)
+    expect(revived.error).toBeUndefined()
+    expect(revived.messages.map((message) => message.text)).toEqual(['사라질 폴더', 'echo: 사라질 폴더'])
+  })
+
+  // /message 의 limit 상한은 200 이고 기본은 50 이다(2026-10-01 실측) — cursor 로 끝까지 넘기지 않으면 긴 대화의 앞이 잘린다
+  it('긴 대화(메시지 120개)도 엔진 재시작 뒤 첫 메시지부터 다 불러온다', async () => {
+    const dir = await folder('long')
+    let id: string | undefined
+    for (let turn = 1; turn <= 60; turn++) id = (await services.llm.chat('fake', 'echo', dir, `긴 ${turn}`, id)).sessionId
+    await services.engine.restart()
+
+    const history = await services.llm.history(dir, id!)
+    expect(history.error).toBeUndefined()
+    expect(history.messages).toHaveLength(120)
+    expect(history.messages[0]).toEqual({ role: 'user', text: '긴 1' })
+    expect(history.messages.at(-1)!.text.split('\n')[0]).toBe('echo: 긴 60')
+  }, 240_000)
+
+  // 지운 본문은 DB 파일(WAL·빈 페이지)에 남는다(01_probe). 정리 전에 앱이 꺼졌어도 다음에 opencode 를 띄우기 직전에 걷힌다.
+  // 정리는 opencode 실행 파일을 BUN_BE_BUN=1 로 쓴다(문서화 안 된 bun 동작, 1.18.18 에서 확인) — 안 먹으면 여기가 깨진다
+  it('엔진을 띄우기 직전에 지운 대화의 본문을 DB·-wal·-shm 에서 걷어낸다', async () => {
+    const mark = `ZQXSTART${Date.now()}`
+    const result = await services.llm.chat('fake', 'echo', work, mark)
+    await services.llm.deleteSession(result.sessionId!) // 지우기만 — 정리는 안 부른다
+    const db = path.join(root, 'state', 'opencode.db')
+    expect(await occurrences(db, mark)).toBeGreaterThan(0)
+
+    await services.engine.restart()
+    expect(await occurrences(db, mark)).toBe(0)
+    expect((await services.llm.chat('fake', 'echo', work, '정리 뒤')).text).toBe('echo: 정리 뒤')
+  })
+})
+
+/** DB 와 -wal·-shm 에서 표식이 나온 횟수 */
+async function occurrences(db: string, mark: string): Promise<number> {
+  let count = 0
+  for (const file of [db, `${db}-wal`, `${db}-shm`]) {
+    const bytes = await fs.readFile(file).catch(() => Buffer.alloc(0))
+    for (let at = bytes.indexOf(mark); at !== -1; at = bytes.indexOf(mark, at + 1)) count++
+  }
+  return count
+}

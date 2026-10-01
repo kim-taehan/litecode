@@ -2,13 +2,15 @@
 // 타입은 서비스 쪽 정의를 그대로 재수출한다 — 같은 모양을 두 곳에 베끼지 않는다.
 
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
-import type { ChatResult } from '../src/services/llm.ts'
+import type { ChatResult, History } from '../src/services/llm.ts'
 import type { Project } from '../src/services/projects.ts'
+import type { Conversation } from '../src/services/sessions.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
-export type { ChatResult } from '../src/services/llm.ts'
+export type { ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
 export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { Project } from '../src/services/projects.ts'
+export type { Conversation } from '../src/services/sessions.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -22,6 +24,10 @@ export const Channel = {
   SET_PROJECT_FAVORITE: 'projects:set-favorite',
   REMOVE_PROJECT: 'projects:remove',
   RENAME_PROJECT: 'projects:rename',
+  LIST_CONVERSATIONS: 'sessions:list',
+  SAVE_CONVERSATION: 'sessions:save',
+  REMOVE_CONVERSATION: 'sessions:remove',
+  LOAD_CONVERSATION: 'sessions:history',
 } as const
 
 export interface LitecodeBridge {
@@ -32,8 +38,9 @@ export interface LitecodeBridge {
   removeProvider(id: string): Promise<ProviderSummary[]>
   /** 메인 프로세스가 `GET {baseURL}/models` 로 묻는다. 키는 입력한 것, 없으면 id 의 저장된 키 */
   fetchProviderModels(draft: { id?: string; baseURL: string; apiKey?: string }): Promise<ModelCatalogEntry[]>
-  /** sessionId 를 안 주면 directory(작업 디렉터리)에서 세션을 새로 만든다 — 결과의 sessionId 를 다음 호출에 넘긴다 */
-  sendMessage(providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string): Promise<ChatResult>
+  /** sessionId 를 안 주면 directory(작업 디렉터리)에서 세션을 새로 만든다 — 결과의 sessionId 를 다음 호출에 넘긴다.
+   *  conversationId 는 저장된 대화(saveConversation) — 새 세션이 생기자마자 거기에 붙인다 (답 대기 중 앱이 꺼져도 다시 열리게) */
+  sendMessage(conversationId: string, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string): Promise<ChatResult>
   /** 최근 프로젝트 — 맨 앞이 마지막으로 연 프로젝트 */
   listProjects(): Promise<Project[]>
   /** 그 폴더를 열어 최근 목록 맨 앞에 올린다 */
@@ -46,6 +53,14 @@ export interface LitecodeBridge {
   removeProject(directory: string): Promise<Project[]>
   /** 보이는 이름만 바꾼다 (폴더 이름은 그대로). 빈 이름이면 폴더 이름으로 */
   renameProject(directory: string, name: string): Promise<Project[]>
+  /** 저장된 대화 목록 정보 — 모든 프로젝트, 맨 앞이 가장 최근에 만든 것 */
+  listConversations(): Promise<Conversation[]>
+  /** 넣거나 고친다. 그 프로젝트가 보관 개수를 넘어 지운 대화 id 를 준다 */
+  saveConversation(conversation: Conversation): Promise<string[]>
+  /** 목록에서 빼고 엔진 세션도 지운다 (되돌리기 없음) */
+  removeConversation(id: string): Promise<void>
+  /** 저장된 대화의 말풍선. 작업 폴더가 없으면 엔진에 묻지 않고 missingFolder */
+  loadConversation(id: string): Promise<History>
 }
 
 declare global {

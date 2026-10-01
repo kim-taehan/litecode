@@ -7,6 +7,7 @@ import { LlmService } from '../src/services/llm.ts'
 import { EngineService } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
+import { SessionsService, type Conversation } from '../src/services/sessions.ts'
 import { Channel } from '../shared/ipc.ts'
 import { canSealKeys } from './keyStorage.ts'
 
@@ -56,6 +57,11 @@ mounted.push(ctx.plugin(EngineService, {
 }))
 mounted.push(ctx.plugin(LlmService))
 mounted.push(ctx.plugin(ProjectsService, { file: path.join(userData, 'projects.json') }))
+// 보관 개수는 실물 테스트만 낮춘다 (51번째 대화를 50개 만들지 않고 확인하려고). 제품은 이 변수를 안 쓴다
+mounted.push(ctx.plugin(SessionsService, {
+  file: path.join(userData, 'sessions.json'),
+  limit: Number(process.env.LITECODE_TEST_SESSION_LIMIT) || undefined,
+}))
 
 /** IPC 핸들러를 되돌릴 수 있게 건다 — 의존 서비스가 다시 올라와 bootstrap 이 다시 돌면, Cordis 가 먼저 이것을 풀어
  *  "이미 등록된 핸들러" 오류 없이 다시 건다 (Cordis 원칙: 모든 등록은 effect 로) */
@@ -78,9 +84,13 @@ function bootstrap(ctx: Context): void {
   handle(
     ctx,
     Channel.SEND_MESSAGE,
-    async (_event, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string) =>
-      ctx.llm.chat(providerId, modelId, directory, prompt, sessionId),
+    async (_event, conversationId: string, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string) =>
+      ctx.llm.chat(providerId, modelId, directory, prompt, sessionId, (created) => ctx.sessions.attach(conversationId, created)),
   )
+  handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
+  handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))
+  handle(ctx, Channel.REMOVE_CONVERSATION, async (_event, id: string) => ctx.sessions.remove(id))
+  handle(ctx, Channel.LOAD_CONVERSATION, async (_event, id: string) => ctx.sessions.history(id))
   handle(ctx, Channel.LIST_PROJECTS, async () => ctx.projects.list())
   handle(ctx, Channel.OPEN_PROJECT, async (_event, directory: string) => ctx.projects.open(directory))
   handle(ctx, Channel.SET_PROJECT_FAVORITE, async (_event, directory: string, favorite: boolean) =>
@@ -98,7 +108,7 @@ function bootstrap(ctx: Context): void {
     return ctx.projects.open(picked.filePaths[0])
   })
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine']
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions']
 mounted.push(ctx.plugin(bootstrap))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).

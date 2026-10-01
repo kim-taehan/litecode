@@ -40,6 +40,34 @@ export interface ChatResult {
   usage?: TurnUsage
 }
 
+/** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */
+export interface HistoryMessage {
+  role: 'user' | 'assistant'
+  text: string
+  error?: string
+}
+
+export interface History {
+  messages: HistoryMessage[]
+  /** 작업 폴더가 없어 opencode 에 묻지 않았다 */
+  missingFolder?: boolean
+  /** 불러오지 못한 사유 */
+  error?: string
+}
+
+/** GET /api/session/{id}/message 의 메시지 중 우리가 읽는 필드 (01c Q2 실측) */
+interface OpencodeMessage {
+  type: string
+  text?: string
+  time?: { created?: number; completed?: number }
+  content?: { type: string; text?: string }[]
+  error?: { message?: string }
+}
+
+// /message 의 limit 상한은 200 이다 — 넘기면 400 InvalidRequestError, 안 주면 50 (2026-10-01 실측, opencode 1.18.18, 메시지 260개 세션).
+// 상한보다 낮게 잡고 cursor 로 끝까지 넘긴다
+const MESSAGE_PAGE = 100
+
 interface TurnOutcome {
   ok: boolean
   text: string
@@ -64,6 +92,10 @@ export const INTERRUPTED = '중단됨 — 엔진(opencode)이 재시작되거나
 
 export class LlmService extends Service {
   static readonly inject = ['providers', 'engine']
+
+  /** 답을 기다리는 턴 수 — DB 정리는 0 일 때만 돈다 (정리 잠금이 길면 그 사이 opencode 쓰기가 실패한다, 01_probe) */
+  private turns = 0
+  private purgeWanted = false
 
   constructor(ctx: Context) {
     super(ctx, 'llm')
@@ -135,8 +167,33 @@ export class LlmService extends Service {
   }
 
   /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더를 따르고, 모델이 다르면
-   *  보내기 전에 그 세션의 모델을 바꾼다 — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다). */
-  async chat(providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string): Promise<ChatResult> {
+   *  보내기 전에 그 세션의 모델을 바꾼다 — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다).
+   *  onSession 은 새 세션을 만든 직후, 프롬프트를 보내기 전에 불린다 — 답을 기다리는 중에 앱이 꺼져도 그 대화를 다시 열 수 있게 */
+  async chat(
+    providerId: string,
+    modelId: string,
+    directory: string,
+    prompt: string,
+    sessionId?: string,
+    onSession?: (sessionId: string) => Promise<void>,
+  ): Promise<ChatResult> {
+    this.turns++
+    try {
+      return await this.turn(providerId, modelId, directory, prompt, sessionId, onSession)
+    } finally {
+      this.turns--
+      this.purgeIfIdle()
+    }
+  }
+
+  private async turn(
+    providerId: string,
+    modelId: string,
+    directory: string,
+    prompt: string,
+    sessionId?: string,
+    onSession?: (sessionId: string) => Promise<void>,
+  ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: `provider ${providerId} 없음` }
 
@@ -156,7 +213,10 @@ export class LlmService extends Service {
         return { ok: false, sessionId: id, error: `이 프로젝트의 opencode.json 이 provider 주소를 바꿉니다 (${model.api?.url}) — 대화 내용이 그 주소로 갈 수 있어 보내지 않았습니다` }
       }
       if (id) await this.useModel(conn, id, providerId, modelId)
-      else id = await this.createSession(conn, providerId, modelId, workdir)
+      else {
+        id = await this.createSession(conn, providerId, modelId, workdir)
+        await onSession?.(id)
+      }
 
       let admitted!: (seq: number) => void
       const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)))
@@ -181,6 +241,59 @@ export class LlmService extends Service {
       if (conn?.closed.aborted) return { ok: false, sessionId: id, error: INTERRUPTED }
       return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
     }
+  }
+
+  /** 지난 대화의 말풍선. directory 는 그 세션의 작업 폴더 — 없으면 opencode 에 묻지 않는다: 폴더가 없어진 세션은 내용 요청이
+   *  500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 계속 500 이다 (01c Q5). 재시작 뒤에도 내용은
+   *  그대로 온다(01c Q2) — 이벤트 재생 대신 조립된 메시지 목록을 쓴다 */
+  async history(directory: string, sessionId: string): Promise<History> {
+    if (!(await realDirectory(directory))) return { messages: [], missingFolder: true }
+    try {
+      const conn = await this.ctx.engine.connection()
+      const raw = await this.readMessages(conn, sessionId)
+      const active = await fetch(`${conn.url}/api/session/active`, { headers: conn.headers })
+      if (!active.ok) throw new Error(`진행 중 세션 조회 실패 (${active.status})`)
+      const running = sessionId in ((await active.json()) as { data: Record<string, unknown> }).data
+      return { messages: historyMessages(raw, running) }
+    } catch (error) {
+      return { messages: [], error: `대화를 불러오지 못했습니다: ${(error as Error).message}` }
+    }
+  }
+
+  /** 세션의 메시지 전부 (asc). 읽기만 한다 — 화면별 모양 변환(historyMessages 등)은 따로 둔다: 같은 응답을 다른 모양으로 쓸 화면이 있다.
+   *  cursor 는 order 와 같이 못 준다(/doc). 마지막 쪽에도 cursor.next 가 오므로 받은 개수 < limit 이거나 빈 쪽이면 끝이다 (01c Q1) */
+  private async readMessages(conn: EngineConnection, sessionId: string): Promise<OpencodeMessage[]> {
+    const messages: OpencodeMessage[] = []
+    let query = `order=asc&limit=${MESSAGE_PAGE}`
+    while (true) {
+      const res = await fetch(`${conn.url}/api/session/${sessionId}/message?${query}`, { headers: conn.headers })
+      if (!res.ok) throw new Error(`메시지 조회 실패 (${res.status})`)
+      const page = (await res.json()) as { data: OpencodeMessage[]; cursor?: { next?: string | null } }
+      messages.push(...page.data)
+      if (page.data.length < MESSAGE_PAGE || !page.cursor?.next) return messages
+      query = new URLSearchParams({ cursor: page.cursor.next, limit: String(MESSAGE_PAGE) }).toString()
+    }
+  }
+
+  /** 지운 대화의 본문을 DB 파일에서 걷어낸다 (ctx.engine.purgeDeleted). 답을 기다리는 턴이 있으면 다 끝난 뒤로 미룬다 */
+  purgeDeleted(): void {
+    this.purgeWanted = true
+    this.purgeIfIdle()
+  }
+
+  private purgeIfIdle(): void {
+    if (this.turns > 0 || !this.purgeWanted) return
+    this.purgeWanted = false
+    void this.ctx.engine.purgeDeleted()
+  }
+
+  /** 세션을 지운다. 신규 세대(/api/*)에는 세션 삭제가 없어 **레거시 `DELETE /session/{id}` 를 쓰는 유일한 자리**다 (01c Q3).
+   *  레거시 호출이라 CONFIG_DIR 에 npm 설치를 한 번 일으킨다 — 폐쇄망에선 조용히 실패하고 기능 영향은 없다 (01b).
+   *  이미 없는 세션(404)은 지워진 것으로 본다. 지운 본문은 DB 의 WAL 에 남는다 (01c Q3) */
+  async deleteSession(sessionId: string): Promise<void> {
+    const conn = await this.ctx.engine.connection()
+    const res = await fetch(`${conn.url}/session/${sessionId}`, { method: 'DELETE', headers: conn.headers })
+    if (!res.ok && res.status !== 404) throw new Error(`세션 삭제 실패 (${res.status})`)
   }
 
   /** 컨텍스트 중 대화 메시지 몫 (추정). 통계용이라 못 구해도 턴은 그대로 돌려준다 */
@@ -273,6 +386,33 @@ export class LlmService extends Service {
     }
     return undefined
   }
+}
+
+/** opencode 메시지(asc) → 말풍선. 도구 턴의 assistant 여럿은 한 답으로 합치고 텍스트만 쓴다 — 실시간 턴이 text.ended 만
+ *  모으는 것과 같은 모양. 끊긴 턴(01c Q6): 그 세션이 돌고 있지 않은데 마지막이 답 없는 user 이거나 완료 시각 없는 assistant 면
+ *  끝에 "중단됨" 을 단다 (재시작 뒤 opencode 는 그 턴을 다시 돌리지 않는다) */
+export function historyMessages(raw: OpencodeMessage[], running: boolean): HistoryMessage[] {
+  const messages: HistoryMessage[] = []
+  for (const message of raw) {
+    if (message.type === 'user') {
+      messages.push({ role: 'user', text: message.text ?? '' })
+      continue
+    }
+    if (message.type !== 'assistant') continue // 모델 바꿈·시스템·압축 등은 말풍선이 아니다
+    const previous = messages.at(-1)
+    const reply: HistoryMessage = previous?.role === 'assistant' ? previous : { role: 'assistant', text: '' }
+    if (reply !== previous) messages.push(reply)
+    reply.text += (message.content ?? []).filter((part) => part.type === 'text').map((part) => part.text ?? '').join('')
+    if (message.error) reply.error = message.error.message ?? '알 수 없는 오류'
+  }
+
+  const last = raw.filter((message) => message.type === 'user' || message.type === 'assistant').at(-1)
+  if (!running && last && (last.type === 'user' || !last.time?.completed)) {
+    const reply = messages.at(-1)
+    if (reply?.role === 'assistant') reply.error = INTERRUPTED
+    else messages.push({ role: 'assistant', text: '', error: INTERRUPTED })
+  }
+  return messages
 }
 
 /** 끝 이벤트 없이 스트림이 끊겼을 때의 사유. 서버가 끝나면 소켓이 exit 보다 먼저 닫혀(실측 2026-09-30, 앱 실물 테스트에서

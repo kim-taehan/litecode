@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -70,6 +70,23 @@ interface ServerRecord {
   url: string
 }
 
+const PURGE_TIMEOUT_MS = 30_000
+// 지운 대화 본문을 DB 파일에서 걷어낸다 (2026-10-01 실측, _workspace/01_probe.md). DELETE 뒤에도 본문은 WAL 에, 체크포인트 뒤에는
+// main 의 빈 페이지에 남는다(secure_delete 기본값) — TRUNCATE 체크포인트 → VACUUM → 다시 TRUNCATE 해야 세 파일 모두 0 이 된다.
+// sqlite 는 opencode 실행 파일을 BUN_BE_BUN=1 로 띄워 bun 의 bun:sqlite 로 연다 — Electron 33(Node 20)엔 node:sqlite 가 없고 의존성을
+// 늘리지 않으려고. **문서화 안 된 bun 동작에 기댄다** (opencode 1.18.18 = bun 1.3.14 에서 확인). 버전이 바뀌어 안 먹으면 정리는 로그만
+// 남기고 넘어가고, 실물 테스트(DB 파일에 표식 0건)가 깨진다. opencode 가 떠 있어도 됐다 — 다만 잠금을 opencode busy_timeout(5초) 넘게
+// 쥐면 그동안의 opencode 쓰기가 실패하므로, 답을 기다리는 턴이 없을 때만 부른다(ctx.llm). busy_timeout 은 우리가 기다리는 쪽이다
+const PURGE_SCRIPT = [
+  'const { Database } = require("bun:sqlite")',
+  'const db = new Database(process.env.LITECODE_PURGE_DB)',
+  'db.run("PRAGMA busy_timeout=2000")',
+  'const before = db.query("PRAGMA wal_checkpoint(TRUNCATE)").get()',
+  'db.run("VACUUM")',
+  'const after = db.query("PRAGMA wal_checkpoint(TRUNCATE)").get()',
+  'db.close()',
+  'console.log(JSON.stringify({ busy: before.busy || after.busy }))',
+].join(';')
 const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 초 무응답인 때가 있다 (live-test 스킬 기록)
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
@@ -124,6 +141,8 @@ export class EngineService extends Service {
   private disposed = false
   /** 엔진과 수명을 같이 한다 (토큰은 앱 실행마다 바뀐다) */
   private proxy?: Promise<KeyProxy>
+  /** DB 정리는 한 번에 하나만 */
+  private purging: Promise<void> = Promise.resolve()
 
   constructor(
     ctx: Context,
@@ -161,6 +180,16 @@ export class EngineService extends Service {
     await (await this.proxy?.catch(() => undefined))?.close()
   }
 
+  /** 지운 대화 본문을 DB 파일에서 걷어낸다 (위 PURGE_SCRIPT). 실패·busy 면 로그만 남기고 다음 기회로 — 대화 기능을 막지 않는다.
+   *  띄우기 직전에도 스스로 부른다(크래시로 놓친 정리까지). 떠 있을 때는 답을 기다리는 턴이 없을 때만 부를 것 (ctx.llm.purgeDeleted) */
+  purgeDeleted(): Promise<void> {
+    const base = this.opts.env ?? process.env
+    const bin = findOpencodeBinary(base, undefined, this.opts.bundled?.opencode).path
+    if (!bin) return Promise.resolve()
+    this.purging = this.purging.then(() => purgeDb(bin, this.opts.db, base))
+    return this.purging
+  }
+
   private retire(): void {
     const old = this.current
     this.current = undefined
@@ -188,6 +217,7 @@ export class EngineService extends Service {
       return provider && { baseURL: provider.baseURL, apiKey: this.ctx.providers.apiKey(id) }
     })
     const proxy = await this.proxy
+    await this.purgeDeleted() // 다른 연결이 없을 때 — 지난 실행이 정리 전에 끝났어도 여기서 걷힌다
     fs.mkdirSync(this.opts.configDir, { recursive: true })
     fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(engineConfig(this.ctx.providers.all(), proxy), null, 2))
 
@@ -239,6 +269,20 @@ export class EngineService extends Service {
       throw new Error(`${(error as Error).message}\n${output.trim()}`.trimEnd())
     }
     return { url, headers, closed: closer.signal, providerBaseURL: (id) => proxy.baseURLFor(id), pid: child.pid!, stop }
+  }
+}
+
+async function purgeDb(bin: string, db: string, base: NodeJS.ProcessEnv): Promise<void> {
+  if (!fs.existsSync(db)) return // 열면 빈 DB 를 만든다
+  try {
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(bin, ['-e', PURGE_SCRIPT], { env: { ...base, BUN_BE_BUN: '1', LITECODE_PURGE_DB: db }, timeout: PURGE_TIMEOUT_MS }, (error, out) =>
+        error ? reject(error) : resolve(out),
+      ),
+    )
+    if ((JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as { busy?: number }).busy) console.warn('[engine] DB 정리: 잠겨 있어 일부 못 했다 — 다음 기회에')
+  } catch (error) {
+    console.error('[engine] DB 정리 실패 — 다음 기회에', (error as Error).message)
   }
 }
 

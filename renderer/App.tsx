@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Project, ProviderSummary } from '../shared/ipc.ts'
+import type { Conversation, HistoryMessage, Project, ProviderSummary } from '../shared/ipc.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
@@ -30,15 +30,60 @@ interface Session {
   updatedAt: number
   /** 입력창 아래 통계 줄의 값 — 턴마다 엔진이 주는 사용량·시간을 이 대화에 더한다. 없으면 "—" */
   usage?: ChatUsage
+  /** 지난 실행에서 저장된 대화의 내용 상태 — 목록 정보만 저장되고 내용은 열 때 엔진에서 부른다(ctx.sessions). 이번 실행에 만든 대화는 없다 */
+  history?: 'unloaded' | 'loading' | 'loaded' | 'missing'
 }
 
 function newSession(project: string): Session {
   return { id: crypto.randomUUID(), project, title: '새 대화', messages: [], updatedAt: Date.now() }
 }
 
+/** 아직 아무것도 안 보낸 새 대화 — 저장하지 않고, 지울 것도 없다 */
+function isBlank(session: Session): boolean {
+  return session.messages.length === 0 && !session.history
+}
+
+/** 저장할 목록 정보 (말풍선·대기 상태는 빼고) */
+function toConversation({ id, project, engineSessionId, title, updatedAt, model, usage }: Session): Conversation {
+  return { id, project, engineSessionId, title, updatedAt, model, usage }
+}
+
+function fromConversation(conversation: Conversation): Session {
+  return { ...conversation, usage: conversation.usage as ChatUsage | undefined, messages: [], history: 'unloaded' }
+}
+
+/** 실시간 턴과 같은 모양 — 실패·중단이면 사유를 ⚠️ 로 */
+function toChatMessage({ role, text, error }: HistoryMessage): ChatMessage {
+  return { role, text: error ? `⚠️ ${error}` : text }
+}
+
 /** 그 프로젝트에 대화가 하나도 없으면 새 대화를 하나 더한다 — 같은 값을 두 번 넣어도 한 번만 더해진다 */
 function withSessionFor(project: string) {
   return (current: Session[]) => (current.some((session) => session.project === project) ? current : [newSession(project), ...current])
+}
+
+/** 그 프로젝트에 빈 새 대화가 없으면 맨 앞에 더한다 — 앱을 켜면 저장된 대화 위에 새 대화로 시작한다 */
+function withBlankFor(project: string) {
+  return (current: Session[]) =>
+    current.some((session) => session.project === project && isBlank(session)) ? current : [newSession(project), ...current]
+}
+
+/** 20px 외곽선 톱니 — dsh 사이드바 설정 줄의 아이콘 자리 */
+function GearIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15.64 8.26L17.35 8.51L17.35 11.49L15.64 11.74L15.22 12.75L16.25 14.14L14.14 16.25L12.75 15.22L11.74 15.64L11.49 17.35L8.51 17.35L8.26 15.64L7.25 15.22L5.86 16.25L3.75 14.14L4.78 12.75L4.36 11.74L2.65 11.49L2.65 8.51L4.36 8.26L4.78 7.25L3.75 5.86L5.86 3.75L7.25 4.78L8.26 4.36L8.51 2.65L11.49 2.65L11.74 4.36L12.75 4.78L14.14 3.75L16.25 5.86L15.22 7.25Z" />
+      <circle cx="10" cy="10" r="2.5" />
+    </svg>
+  )
+}
+
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
+      <path d="M2.5 4.5H13.5M6.5 4.5V3H9.5V4.5M4 4.5L4.7 13.2C4.75 13.65 5.1 14 5.55 14H10.45C10.9 14 11.25 13.65 11.3 13.2L12 4.5M6.75 7V11.5M9.25 7V11.5" />
+    </svg>
+  )
 }
 
 function Badge({ project }: { project: Project }) {
@@ -200,6 +245,8 @@ export function App() {
   const [picking, setPicking] = useState(false)
   /** 프로젝트를 못 열었을 때의 사유 — 팝오버와 첫 실행 안내에 보인다 */
   const [openError, setOpenError] = useState<string>()
+  /** 못 연 프로젝트 경로 — 안내 화면이 그 폴더의 저장된 대화를 "폴더가 없습니다" 로 보이고 지우게만 한다 (열지 않는다 — opencode 요청 0) */
+  const [failedProject, setFailedProject] = useState<string>()
   const switchRef = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState('')
   const sessionHover = useHoverCard()
@@ -236,16 +283,45 @@ export function App() {
     settingsRef.current?.focus()
   }, [])
 
+  /** 대화 id → 마지막으로 저장한 목록 정보(JSON) — 바뀐 대화만 저장한다 */
+  const saved = useRef(new Map<string, string>())
+
   useEffect(() => {
     void window.litecode.listProviders().then(setProviders)
+    // 저장된 대화 목록을 먼저 올린다 — 프로젝트를 열 때 "대화가 없으면 새 대화" 가 저장된 대화를 보고 판단하게.
     // 앱을 켜면 마지막 프로젝트(목록 맨 앞)를 열어 본다. 디스크에서 지워졌으면 안내 화면에 사유를 보이고,
     // 다른 프로젝트로 몰래 넘어가지 않는다 — 사용자가 고르지 않은 폴더에서 대화가 돌면 안 된다.
-    // 목록은 그 뒤에 보인다 (열어 보는 동안 안내 화면이 번쩍이지 않게).
-    void window.litecode.listProjects().then(async (list) => {
-      if (list[0]) await pick(() => window.litecode.openProject(list[0]!.path), cannotOpen(list[0].path))
+    // 목록은 그 뒤에 보인다 (열어 보는 동안 안내 화면이 번쩍이지 않게). 켠 직후에는 저장된 대화 위의 새 대화에서 시작한다
+    void (async () => {
+      const stored = (await window.litecode.listConversations()).map(fromConversation)
+      for (const session of stored) saved.current.set(session.id, JSON.stringify(toConversation(session)))
+      setSessions(stored)
+      const list = await window.litecode.listProjects()
+      if (list[0] && (await pick(() => window.litecode.openProject(list[0]!.path), cannotOpen(list[0].path), list[0].path)) === 'opened') {
+        setSessions(withBlankFor(list[0].path))
+      }
       setProjects((loaded) => loaded ?? list)
-    })
+    })()
   }, [])
+
+  // 대화 목록 정보가 바뀌면 저장한다 (제목·시각·엔진 세션·모델·통계). 빈 새 대화는 저장하지 않는다.
+  // 보관 개수를 넘어 지워진 대화는 화면에서도 뺀다
+  useEffect(() => {
+    for (const session of sessions) {
+      if (isBlank(session)) continue
+      const conversation = toConversation(session)
+      const key = JSON.stringify(conversation)
+      if (saved.current.get(session.id) === key) continue
+      saved.current.set(session.id, key)
+      void window.litecode.saveConversation(conversation).then(forgetPruned)
+    }
+  }, [sessions])
+
+  function forgetPruned(ids: string[]): void {
+    if (ids.length === 0) return
+    for (const id of ids) saved.current.delete(id)
+    setSessions((sessionsNow) => sessionsNow.filter((session) => !ids.includes(session.id)))
+  }
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
@@ -257,6 +333,22 @@ export function App() {
   /** 이 대화의 모델 — 설정에서 지워졌으면 chosen 이 없고 보내기가 막힌다 */
   const selected = active?.model ?? initialModel(providers, lastModel)
   const chosen = findModel(providers, selected)
+  /** 휴지통을 눌러 "삭제 확인" 을 기다리는 대화 */
+  const [confirming, setConfirming] = useState<string>()
+
+  // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
+  useEffect(() => {
+    if (active?.history !== 'unloaded') return
+    const id = active.id
+    updateSession(id, (session) => ({ ...session, history: 'loading' }))
+    void window.litecode.loadConversation(id).then((loaded) =>
+      updateSession(id, (session) => ({
+        ...session,
+        history: loaded.missingFolder ? 'missing' : 'loaded',
+        messages: [...loaded.messages.map(toChatMessage), ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])],
+      })),
+    )
+  }, [active?.id, active?.history])
 
   /** 팝오버를 닫는다. 키보드로 닫았거나 골랐으면 포커스를 전환 버튼으로 돌려준다 (dsh ui-primitives Menu) */
   function closeSwitcher(returnFocus: boolean): void {
@@ -265,18 +357,25 @@ export function App() {
   }
 
   /** 프로젝트를 열어(최근 목록 맨 앞으로 올려) 현재 프로젝트로 보여준다. 못 열면 사유를 남기고 현재 선택은 그대로 */
-  async function pick(request: () => Promise<Project | undefined>, failure: string): Promise<'opened' | 'cancelled' | 'failed'> {
+  async function pick(request: () => Promise<Project | undefined>, failure: string, dir?: string): Promise<'opened' | 'cancelled' | 'failed'> {
     setPicking(true)
     setOpenError(undefined)
+    setFailedProject(undefined)
     try {
       const opened = await request()
       if (!opened) return 'cancelled' // 대화상자 취소
       setProjects(await window.litecode.listProjects())
       setCurrent(opened.path)
-      setSessions(withSessionFor(opened.path))
+      // 폴더가 되살아났으면 "폴더가 없습니다" 였던 대화를 다시 불러 본다
+      setSessions((sessionsNow) =>
+        withSessionFor(opened.path)(
+          sessionsNow.map((session) => (session.project === opened.path && session.history === 'missing' ? { ...session, history: 'unloaded' } : session)),
+        ),
+      )
       return 'opened'
     } catch {
       setOpenError(failure)
+      setFailedProject(dir)
       return 'failed'
     } finally {
       setPicking(false)
@@ -291,28 +390,39 @@ export function App() {
   }
 
   async function pickRecent(target: Project): Promise<void> {
-    if ((await pick(() => window.litecode.openProject(target.path), cannotOpen(target.path))) === 'opened') closeSwitcher(true)
+    if ((await pick(() => window.litecode.openProject(target.path), cannotOpen(target.path), target.path)) === 'opened') closeSwitcher(true)
   }
 
   async function toggleFavorite(target: Project): Promise<void> {
     setProjects(await window.litecode.setProjectFavorite(target.path, !target.favorite))
   }
 
-  /** 목록에서만 뺀다(폴더는 그대로). 그 프로젝트의 메모리 속 대화는 버린다. 현재 프로젝트였으면 목록의 다음 것으로,
-   *  남은 게 없으면 첫 실행 안내로 간다 (00_request C) */
+  /** 목록에서만 뺀다(폴더는 그대로). 저장된 대화는 남는다 — 같은 폴더를 다시 열면 돌아온다. 빈 새 대화만 버린다.
+   *  현재 프로젝트였으면 목록의 다음 것으로, 남은 게 없으면 첫 실행 안내로 간다 (00_request C) */
   async function remove(target: Project): Promise<void> {
     const list = await window.litecode.removeProject(target.path)
     setProjects(list)
-    setSessions((sessionsNow) => sessionsNow.filter((session) => session.project !== target.path))
+    setSessions((sessionsNow) => sessionsNow.filter((session) => session.project !== target.path || !isBlank(session)))
+    if (target.path === failedProject) setFailedProject(undefined)
     if (target.path !== current) return
     setCurrent(undefined)
     const next = list[0]
-    if (next) await pick(() => window.litecode.openProject(next.path), cannotOpen(next.path))
+    if (next) await pick(() => window.litecode.openProject(next.path), cannotOpen(next.path), next.path)
     else closeSwitcher(true)
   }
 
   function updateSession(id: string, mutate: (session: Session) => Session): void {
     setSessions((sessionsNow) => sessionsNow.map((session) => (session.id === id ? mutate(session) : session)))
+  }
+
+  /** 대화를 지운다 — 목록에서 빼고 엔진 세션도 (ctx.sessions). 되돌리기 없음. 그 프로젝트에 대화가 안 남으면 새 대화를 둔다 */
+  async function removeConversation(target: Session): Promise<void> {
+    setConfirming(undefined)
+    await window.litecode.removeConversation(target.id)
+    saved.current.delete(target.id)
+    const rest = (sessionsNow: Session[]) => sessionsNow.filter((session) => session.id !== target.id)
+    // 안내 화면(못 연 프로젝트)에서 지운 것이면 새 대화를 두지 않는다 — 열린 프로젝트에만
+    setSessions((sessionsNow) => (target.project === current ? withSessionFor(target.project)(rest(sessionsNow)) : rest(sessionsNow)))
   }
 
   function chooseModel(next: ModelRef): void {
@@ -322,21 +432,26 @@ export function App() {
 
   async function send(): Promise<void> {
     const prompt = draft.trim()
-    if (!prompt || !selected || !chosen || !active || active.pending) return
+    if (!prompt || !selected || !chosen || !active || active.pending || !canWrite(active)) return
 
     // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
     const target = active
     setDraft('')
-    updateSession(target.id, (session) => ({
+    const start = (session: Session): Session => ({
       ...session,
       pending: true,
       updatedAt: Date.now(),
       model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
-      title: session.messages.length === 0 ? prompt.slice(0, 24) : session.title,
+      title: isBlank(session) ? prompt.slice(0, 24) : session.title,
       messages: [...session.messages, { role: 'user', text: prompt }],
-    }))
+    })
+    updateSession(target.id, start)
+    // 보내기 전에 목록에 저장해 둔다 — 엔진 세션이 생기면 메인 프로세스가 여기에 붙인다 (답을 기다리는 중 앱이 꺼져도 다시 열리게)
+    const conversation = toConversation(start(target))
+    saved.current.set(target.id, JSON.stringify(conversation))
+    forgetPruned(await window.litecode.saveConversation(conversation))
 
-    const result = await window.litecode.sendMessage(selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId)
+    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId)
     updateSession(target.id, (session) => ({
       ...session,
       pending: false,
@@ -348,6 +463,11 @@ export function App() {
         { role: 'assistant', text: result.ok ? (result.text ?? '') : `⚠️ ${result.error}` },
       ],
     }))
+  }
+
+  /** 내용을 다 불러온 대화에만 보낸다 — 폴더가 없는 대화는 지우기만 된다 */
+  function canWrite(session: Session): boolean {
+    return !session.history || session.history === 'loaded'
   }
 
   return (
@@ -425,7 +545,7 @@ export function App() {
             onClick={() => {
               if (!project) return
               // 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace) — 이미 있으면 새로 만들지 않고 그리로 간다
-              const blank = sessions.find((session) => session.project === project.path && session.messages.length === 0)
+              const blank = sessions.find((session) => session.project === project.path && isBlank(session))
               const session = blank ?? newSession(project.path)
               if (!blank) setSessions((sessionsNow) => [session, ...sessionsNow])
               setActiveIds((current) => ({ ...current, [project.path]: session.id }))
@@ -438,30 +558,73 @@ export function App() {
         <div className="sidebar__label">대화 목록</div>
 
         <div className="sidebar__sessions">
+          {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
+              바뀌고 한 번 더 눌러야 지운다(설정 화면 provider 삭제와 같은 방식). 포커스를 잃거나 Esc 면 되돌린다 */}
           {visible.map((session) => (
-            <button
+            <div
               key={session.id}
-              type="button"
-              className={`session-item${session.id === active?.id ? ' session-item--active' : ''}`}
-              onClick={() => setActiveIds((current) => ({ ...current, [session.project]: session.id }))}
-              onMouseEnter={(event) =>
-                sessionHover.enter(event.currentTarget, {
-                  title: session.title,
-                  detail: session.pending ? '답을 기다리는 중' : `메시지 ${session.messages.length}개`,
-                }, true)
-              }
-              onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
+              data-hover-row
+              className={`session-item${session.id === active?.id ? ' session-item--active' : ''}${confirming === session.id ? ' session-item--confirming' : ''}`}
             >
-              <span className="session-item__title marquee">{session.title}</span>
-              {session.messages.length > 0 && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
-            </button>
+              <button
+                type="button"
+                className="session-item__main"
+                onClick={() => setActiveIds((current) => ({ ...current, [session.project]: session.id }))}
+                onMouseEnter={(event) =>
+                  sessionHover.enter(event.currentTarget, {
+                    title: session.title,
+                    detail: session.pending
+                      ? '답을 기다리는 중'
+                      : session.history === 'unloaded' || session.history === 'loading'
+                        ? undefined
+                        : `메시지 ${session.messages.length}개`,
+                  }, true)
+                }
+                onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
+              >
+                <span className="session-item__title marquee">{session.title}</span>
+                {!isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
+              </button>
+              {!isBlank(session) && !session.pending && (
+                <span className="session-item__actions">
+                  {confirming === session.id ? (
+                    <button
+                      type="button"
+                      className="session-item__confirm"
+                      autoFocus
+                      onClick={() => void removeConversation(session)}
+                      onBlur={() => setConfirming(undefined)}
+                      onKeyDown={(event) => event.key === 'Escape' && setConfirming(undefined)}
+                    >
+                      삭제 확인
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="session-item__action"
+                      aria-label="대화 삭제"
+                      title="대화 삭제"
+                      onClick={() => setConfirming(session.id)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
           ))}
         </div>
         <HoverCard card={sessionHover.card} />
 
         <div className="sidebar__foot">
-          <button type="button" className="settings-trigger" ref={settingsRef} onClick={() => setSettingsOpen(true)}>
-            ⚙ 설정
+          <button
+            type="button"
+            className={`settings-trigger${settingsOpen ? ' settings-trigger--active' : ''}`}
+            ref={settingsRef}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <GearIcon />
+            설정
           </button>
         </div>
       </aside>
@@ -486,6 +649,12 @@ export function App() {
                 {openError}
               </p>
             )}
+            {failedProject && (
+              <MissingConversations
+                sessions={sessions.filter((session) => session.project === failedProject && !isBlank(session))}
+                onRemove={removeConversation}
+              />
+            )}
             <p>작업할 폴더를 열어 주세요</p>
             <button type="button" className="open-guide__button" disabled={picking} onClick={() => void openFolder()}>
               폴더 열기…
@@ -497,7 +666,15 @@ export function App() {
             <div className="main__header">{active.title}</div>
 
             <div className="main__messages" ref={listRef}>
-              {active.messages.length === 0 && <div className="empty">무엇을 도와드릴까요?</div>}
+              {active.history === 'missing' ? (
+                <div className="empty" role="alert">
+                  폴더가 없습니다: {active.project}
+                </div>
+              ) : active.history === 'unloaded' || active.history === 'loading' ? (
+                <div className="empty">불러오는 중…</div>
+              ) : (
+                active.messages.length === 0 && <div className="empty">무엇을 도와드릴까요?</div>
+              )}
               {active.messages.map((message, index) => (
                 <div key={index} className={`bubble bubble--${message.role}`}>
                   {/* 모델이 빈 줄로 답을 시작하기도 한다 — 앞뒤 공백은 보여 주지 않는다 (속 줄바꿈은 그대로) */}
@@ -541,7 +718,7 @@ export function App() {
                       aria-label="보내기"
                       title="보내기 (Enter)"
                       onClick={() => void send()}
-                      disabled={active.pending || !chosen || !draft.trim()}
+                      disabled={active.pending || !chosen || !draft.trim() || !canWrite(active)}
                     >
                       {/* dsh 보내기 화살표 (16 격자) */}
                       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -562,6 +739,39 @@ export function App() {
       </main>
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
     </div>
+  )
+}
+
+/** 못 연(폴더가 없는) 프로젝트의 저장된 대화 — 열 수 없고 지우기만 된다. 내용을 부르지 않는다(없는 경로를 opencode 에 넘기면
+ *  그 경로가 재시작 전까지 500 — 01c Q5). 지우기는 대화 목록 행과 같은 휴지통 → "삭제 확인" */
+function MissingConversations({ sessions, onRemove }: { sessions: Session[]; onRemove(session: Session): Promise<void> }) {
+  const [confirming, setConfirming] = useState<string>()
+  if (sessions.length === 0) return null
+  return (
+    <ul className="missing-list" aria-label="이 폴더의 대화">
+      {sessions.map((session) => (
+        <li key={session.id} className="missing-list__item">
+          <span className="missing-list__title">{session.title}</span>
+          <span className="missing-list__note">폴더가 없습니다</span>
+          {confirming === session.id ? (
+            <button
+              type="button"
+              className="session-item__confirm"
+              autoFocus
+              onClick={() => void onRemove(session)}
+              onBlur={() => setConfirming(undefined)}
+              onKeyDown={(event) => event.key === 'Escape' && setConfirming(undefined)}
+            >
+              삭제 확인
+            </button>
+          ) : (
+            <button type="button" className="session-item__action" aria-label="대화 삭제" title="대화 삭제" onClick={() => setConfirming(session.id)}>
+              <TrashIcon />
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
 
