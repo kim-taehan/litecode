@@ -36,6 +36,8 @@ Cordis 서비스·플러그인은 이름으로 갈려 있어 병렬에 유리하
 
 - **동시 구현은 2개까지.** 두 번째부터는 `Agent(..., isolation: "worktree")` 로 따로 작업 공간을 준다
   - worktree 는 HEAD 기준이다 — 다른 라운드의 커밋 안 된 변경은 안 보인다. `_workspace/` 도 없다(gitignore) → 요구 문서는 **절대 경로**로 준다
+  - worktree 에이전트는 원본 경로(`_workspace/`)에 **쓰지 못한다**(샌드박스) — 보고서는 최종 답변 본문으로 받고 리더가 `_workspace/02_dev_report_<기능>.md` 에 옮긴다. worktree 브랜치에 커밋까지 시킨다
+  - 합치기 전 시험: 리더가 scratchpad 에 임시 worktree 를 만들어 시험 합치기 → 3종을 그 트리에서 돌린다. 공유 파일(ipc·preload·main) 충돌은 대부분 "같은 자리 덧붙임" — 양쪽 줄을 다 살리면 된다
   - `node_modules` 는 원본을 심볼릭 링크(`ln -s <원본>/node_modules node_modules`), 안 되면 `npm install`
 - **화면은 기능별 새 컴포넌트 파일**로 만들고 `App.tsx` 에는 끼워 넣는 몇 줄만 — 합칠 때 충돌을 작게
 - **실물 테스트도 기능별 새 파일**(`tests/live/<feature>.live.test.ts`) — 자기 앱을 띄우고 다른 테스트 순서에 기대지 않는다

@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SessionsService, type Conversation } from '../../src/services/sessions.ts'
+import type { History } from '../../src/services/llm.ts'
 
 // 대화 목록 정보 — userData 의 sessions.json. 내용의 정본은 opencode DB 이고 여기는 목록에 보일 것만 쥔다 (00_request 방식 A).
 // 프로젝트마다 최근 50개(테스트는 낮춘다), 넘치면 마지막 활동이 가장 오래된 것부터 지운다. 지우기는 목록에서 빼고 엔진 세션도 지운다 —
@@ -35,6 +36,9 @@ class FakeLlm extends Service {
   }
   purgeDeleted(): void {
     this.purges++
+  }
+  async history(): Promise<History> {
+    return { messages: [{ id: 'msg_a', role: 'user', text: 'Say world (풀어 쓴 template)' }, { role: 'assistant', text: 'echo' }, { id: 'msg_b', role: 'user', text: '그냥 질문' }] }
   }
 }
 
@@ -147,6 +151,16 @@ describe('SessionsService', () => {
     const third = await start()
     await settle()
     expect(third.llm.deleted).toEqual([]) // 지운 것은 다시 안 지운다
+  })
+
+  // `/hi world` 는 풀어 쓴 template 으로 엔진에 간다 — 다시 열어도 친 글이 보이게 메시지 id 로 적어 둔다 (01d "말풍선 문제")
+  it('label 로 적은 메시지는 다시 열면 그 글로 보이고, 화면이 labels 없이 다시 저장해도 남는다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1', { engineSessionId: 'ses_1' }))
+    await sessions.label('c1', 'msg_a', '/hi world')
+    await sessions.save(conversation('c1', { engineSessionId: 'ses_1', title: '바뀐 제목' }))
+
+    expect((await (await start()).sessions.history('c1')).messages.map((message) => message.text)).toEqual(['/hi world', 'echo', '그냥 질문'])
   })
 
   it('손상된 파일이면 빈 목록으로 시작한다', async () => {

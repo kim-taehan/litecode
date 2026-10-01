@@ -32,6 +32,14 @@ describe('historyMessages', () => {
     ])
   })
 
+  it('user 말풍선은 엔진 메시지 id 를 싣는다 — 앱이 정한 id 로 보일 글을 찾는다 (ctx.sessions label)', () => {
+    expect(historyMessages([{ ...user('Say world'), id: 'msg_litecode_1' }, assistant('echo: Say world')], false)[0]).toEqual({
+      id: 'msg_litecode_1',
+      role: 'user',
+      text: 'Say world',
+    })
+  })
+
   it('실패한 턴은 오류를 싣는다', () => {
     const failed = assistant('', { content: [], finish: 'error', error: { type: 'unknown', message: 'Provider request failed with HTTP 500' } })
     expect(historyMessages([user('[fail]'), failed], false)).toEqual([

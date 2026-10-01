@@ -1,9 +1,11 @@
 import { Context, Service } from 'cordis'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { normalizeBaseURL } from './providers.ts'
 import type { EngineConnection } from './engine.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
+import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
 import './engine.ts'
 
 // opencode 를 감싸는 서비스 — 위층(세션·UI)은 이 ctx.llm 키만 알고 opencode 를 직접 모른다.
@@ -42,6 +44,8 @@ export interface ChatResult {
 
 /** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */
 export interface HistoryMessage {
+  /** 엔진 메시지 id (user 만) — chat 에 messageId 로 넘긴 값이 그대로 온다 */
+  id?: string
   role: 'user' | 'assistant'
   text: string
   error?: string
@@ -57,6 +61,7 @@ export interface History {
 
 /** GET /api/session/{id}/message 의 메시지 중 우리가 읽는 필드 (01c Q2 실측) */
 interface OpencodeMessage {
+  id?: string
   type: string
   text?: string
   time?: { created?: number; completed?: number }
@@ -67,6 +72,19 @@ interface OpencodeMessage {
 // /message 의 limit 상한은 200 이다 — 넘기면 400 InvalidRequestError, 안 주면 50 (2026-10-01 실측, opencode 1.18.18, 메시지 260개 세션).
 // 상한보다 낮게 잡고 cursor 로 끝까지 넘긴다
 const MESSAGE_PAGE = 100
+
+/** 입력 트리거(@ 파일)용 폴더 항목 — 폴더는 path 끝에 `/` */
+export interface FileEntry {
+  path: string
+  type: 'file' | 'directory'
+}
+
+/** 입력 트리거(/ 명령)용 명령 — template 의 `$ARGUMENTS`·`$1`… 는 부르는 쪽이 푼다 */
+export interface EngineCommand {
+  name: string
+  template: string
+  description?: string
+}
 
 interface TurnOutcome {
   ok: boolean
@@ -168,7 +186,8 @@ export class LlmService extends Service {
 
   /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더를 따르고, 모델이 다르면
    *  보내기 전에 그 세션의 모델을 바꾼다 — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다).
-   *  onSession 은 새 세션을 만든 직후, 프롬프트를 보내기 전에 불린다 — 답을 기다리는 중에 앱이 꺼져도 그 대화를 다시 열 수 있게 */
+   *  onSession 은 새 세션을 만든 직후, 프롬프트를 보내기 전에 불린다 — 답을 기다리는 중에 앱이 꺼져도 그 대화를 다시 열 수 있게.
+   *  messageId(newMessageId)를 주면 이 입력의 엔진 메시지 id 가 그것이 된다 — history 의 id 로 돌아온다 */
   async chat(
     providerId: string,
     modelId: string,
@@ -176,10 +195,11 @@ export class LlmService extends Service {
     prompt: string,
     sessionId?: string,
     onSession?: (sessionId: string) => Promise<void>,
+    messageId?: string,
   ): Promise<ChatResult> {
     this.turns++
     try {
-      return await this.turn(providerId, modelId, directory, prompt, sessionId, onSession)
+      return await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId)
     } finally {
       this.turns--
       this.purgeIfIdle()
@@ -193,6 +213,7 @@ export class LlmService extends Service {
     prompt: string,
     sessionId?: string,
     onSession?: (sessionId: string) => Promise<void>,
+    messageId?: string,
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: `provider ${providerId} 없음` }
@@ -223,7 +244,7 @@ export class LlmService extends Service {
       const admit = await fetch(`${conn.url}/api/session/${id}/prompt`, {
         method: 'POST',
         headers: { ...conn.headers, 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: { text: prompt } }),
+        body: JSON.stringify({ ...(messageId && { id: messageId }), prompt: { text: prompt } }),
       }).catch((error: unknown) => {
         events.stop()
         throw error
@@ -241,6 +262,50 @@ export class LlmService extends Service {
       if (conn?.closed.aborted) return { ok: false, sessionId: id, error: INTERRUPTED }
       return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
     }
+  }
+
+  /** chat 에 넘길 새 메시지 id. opencode 는 클라이언트가 정한 id 를 그대로 쓴다(`^msg_` 면 된다, 같은 id 두 번은 409) —
+   *  `/` 명령처럼 보낸 본문과 보일 글이 다를 때, 앱이 이 id 로 보일 글을 따로 적어 둔다 (01d "말풍선 문제") */
+  newMessageId(): string {
+    return `msg_litecode_${randomUUID().replaceAll('-', '')}`
+  }
+
+  // 입력 트리거용 목록 (01d). 쿼리 이름은 모두 `location[directory]` — 틀리면 서버 cwd 기준으로 조용히 온다. 폴더는 chat 과 같은
+  // realDirectory 를 거친다(없는 경로를 opencode 에 넘기면 그 경로가 재시작 전까지 500 이 된다 — 01c Q5)
+
+  /** 퍼지 검색 (opencode 기본 상한 50). 새 파일은 몇 초 뒤에야 잡힌다 */
+  async findFiles(directory: string, query: string, limit: number, signal?: AbortSignal): Promise<FileEntry[]> {
+    return this.engineGet<FileEntry[]>('/api/fs/find', directory, { query, limit: String(limit) }, signal)
+  }
+
+  /** 폴더 바로 아래 (rel 은 프로젝트 기준 상대 경로, 빈 글자면 맨 위). 숨김·무시 파일도 다 온다. 폴더 밖은 opencode 가 500 */
+  async listDirectory(directory: string, rel: string, signal?: AbortSignal): Promise<FileEntry[]> {
+    return this.engineGet<FileEntry[]>('/api/fs/list', directory, rel ? { path: rel } : {}, signal)
+  }
+
+  /** 그 폴더의 명령. 새 폴더의 첫 호출은 빈 배열이라(0.1~0.3초 뒤 채워진다, 01d) 비면 잠깐 뒤 한 번 더 묻는다. 캐시하지 않는다 */
+  async listCommands(directory: string): Promise<EngineCommand[]> {
+    const first = await this.engineGet<EngineCommand[]>('/api/command', directory)
+    if (first.length > 0) return first
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return this.engineGet<EngineCommand[]>('/api/command', directory)
+  }
+
+  /** 그 폴더에서 셸 하나를 띄워 붙는다 (opencode pty — opencodePty.ts) */
+  async openTerminal(directory: string, on: TerminalEvents): Promise<TerminalHandle> {
+    const workdir = await realDirectory(directory)
+    if (!workdir) throw new Error(`작업 디렉터리가 없다: ${directory}`)
+    return openPty(await this.ctx.engine.connection(), workdir, on)
+  }
+
+  private async engineGet<T>(route: string, directory: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
+    const workdir = await realDirectory(directory)
+    if (!workdir) throw new Error(`작업 디렉터리가 없다: ${directory}`)
+    const conn = await this.ctx.engine.connection()
+    const query = new URLSearchParams({ 'location[directory]': workdir, ...params })
+    const res = await fetch(`${conn.url}${route}?${query}`, { headers: conn.headers, signal })
+    if (!res.ok) throw new Error(`${route} 실패 (${res.status})`)
+    return ((await res.json()) as { data: T }).data
   }
 
   /** 지난 대화의 말풍선. directory 는 그 세션의 작업 폴더 — 없으면 opencode 에 묻지 않는다: 폴더가 없어진 세션은 내용 요청이
@@ -395,7 +460,7 @@ export function historyMessages(raw: OpencodeMessage[], running: boolean): Histo
   const messages: HistoryMessage[] = []
   for (const message of raw) {
     if (message.type === 'user') {
-      messages.push({ role: 'user', text: message.text ?? '' })
+      messages.push({ id: message.id, role: 'user', text: message.text ?? '' })
       continue
     }
     if (message.type !== 'assistant') continue // 모델 바꿈·시스템·압축 등은 말풍선이 아니다

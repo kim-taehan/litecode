@@ -1,0 +1,185 @@
+/* 입력 트리거 메뉴 (dsh ui-input-trigger MenuView 값) · 셸 모드 경고 · 터미널 칸. 색은 styles.css 토큰만 쓴다 */
+
+.trigger-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--menu);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-prominent);
+}
+
+.trigger-menu__group {
+  padding: 5px 8px 2px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+.trigger-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* 강조는 하나 — 마우스도 키보드와 같은 강조를 옮긴다 */
+.trigger-menu__item--active {
+  background: var(--fill-hover);
+}
+
+.trigger-menu__icon {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.trigger-menu__name {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trigger-menu__detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.trigger-menu__drill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.trigger-menu__key {
+  display: none;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--fill-hover);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-caption);
+}
+
+.trigger-menu__item--active .trigger-menu__key {
+  display: inline-flex;
+}
+
+.trigger-menu__chevron {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+}
+
+.trigger-menu__chevron:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+/* 메뉴가 없을 때의 한 줄 — `!` 셸 안내, 막은 사유 */
+.trigger-note {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 14px;
+  right: 14px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.trigger-note--error {
+  color: var(--danger);
+}
+
+/* 셸 모드 — `!rm -rf` 를 질문으로 착각해 보내지 않게 입력 카드를 빨갛게 (closed-code composerMode).
+   이 파일이 styles.css 보다 먼저 실리므로 .composer__box 를 이기게 두 클래스로 쓴다 */
+.composer__box.composer__box--danger {
+  box-shadow: 0 0 0 1.5px var(--danger), var(--shadow-soft);
+}
+
+.composer__box--danger .trigger-note {
+  color: var(--danger);
+}
+
+/* 터미널 칸 — 본문 맨 아래, 입력창 밑 (closed-code 셸 서랍). 대화가 주인공이라 여남은 줄만 */
+.shell-drawer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.shell-drawer__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+}
+
+.shell-drawer__title {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.shell-drawer__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+}
+
+.shell-drawer__close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.shell-drawer__close:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.shell-drawer__screen {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 4px 12px;
+}

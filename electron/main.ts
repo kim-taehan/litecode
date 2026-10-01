@@ -8,6 +8,11 @@ import { EngineService } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { SessionsService, type Conversation } from '../src/services/sessions.ts'
+import { TriggerRegistry, type TriggerScope } from '../src/services/triggers.ts'
+import { TerminalsService } from '../src/services/terminals.ts'
+import { AtTrigger } from '../src/triggers/at.ts'
+import { SlashTrigger } from '../src/triggers/slash.ts'
+import { BangTrigger } from '../src/triggers/bang.ts'
 import { Channel } from '../shared/ipc.ts'
 import { canSealKeys } from './keyStorage.ts'
 
@@ -62,6 +67,12 @@ mounted.push(ctx.plugin(SessionsService, {
   file: path.join(userData, 'sessions.json'),
   limit: Number(process.env.LITECODE_TEST_SESSION_LIMIT) || undefined,
 }))
+// 입력창 트리거 — 등록소 하나에 플러그인 셋이 effect 로 등록한다. 하나를 내리면 그 문자는 평범한 글자가 된다
+mounted.push(ctx.plugin(TriggerRegistry))
+mounted.push(ctx.plugin(TerminalsService))
+mounted.push(ctx.plugin(AtTrigger))
+mounted.push(ctx.plugin(SlashTrigger))
+mounted.push(ctx.plugin(BangTrigger))
 
 /** IPC 핸들러를 되돌릴 수 있게 건다 — 의존 서비스가 다시 올라와 bootstrap 이 다시 돌면, Cordis 가 먼저 이것을 풀어
  *  "이미 등록된 핸들러" 오류 없이 다시 건다 (Cordis 원칙: 모든 등록은 effect 로) */
@@ -84,13 +95,32 @@ function bootstrap(ctx: Context): void {
   handle(
     ctx,
     Channel.SEND_MESSAGE,
-    async (_event, conversationId: string, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string) =>
-      ctx.llm.chat(providerId, modelId, directory, prompt, sessionId, (created) => ctx.sessions.attach(conversationId, created)),
+    async (_event, conversationId: string, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string, display?: string) => {
+      // 보낸 본문과 보일 글이 다르면(`/` 명령) 엔진 메시지 id 를 정해 보일 글을 적어 둔다 — 다시 열어도 친 글이 보이게
+      const messageId = display ? ctx.llm.newMessageId() : undefined
+      if (messageId) await ctx.sessions.label(conversationId, messageId, display!)
+      return ctx.llm.chat(providerId, modelId, directory, prompt, sessionId, (created) => ctx.sessions.attach(conversationId, created), messageId)
+    },
   )
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
   handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))
   handle(ctx, Channel.REMOVE_CONVERSATION, async (_event, id: string) => ctx.sessions.remove(id))
   handle(ctx, Channel.LOAD_CONVERSATION, async (_event, id: string) => ctx.sessions.history(id))
+  handle(ctx, Channel.QUERY_TRIGGER, async (_event, scope: TriggerScope, draft: string, caret: number) => ctx.triggers.query(scope, draft, caret))
+  handle(ctx, Channel.PICK_TRIGGER, async (_event, scope: TriggerScope, char: string, id: string, action: 'pick' | 'drill') =>
+    ctx.triggers.pick(scope, char, id, action),
+  )
+  handle(ctx, Channel.SUBMIT_TRIGGER, async (_event, scope: TriggerScope, draft: string) => ctx.triggers.submit(scope, draft))
+  handle(ctx, Channel.OPEN_TERMINAL, async (_event, directory: string) => ctx.terminals.attach(directory))
+  handle(ctx, Channel.WRITE_TERMINAL, async (_event, directory: string, data: string) => ctx.terminals.write(directory, data))
+  handle(ctx, Channel.RESIZE_TERMINAL, async (_event, directory: string, rows: number, cols: number) => ctx.terminals.resize(directory, rows, cols))
+  // 터미널 출력은 메인이 먼저 안다 — 모든 창에 흘려보낸다 (화면이 폴더로 거른다). ctx.on 은 bootstrap 이 내려가면 같이 풀린다
+  ctx.on('terminal/data', (directory, chunk, end) => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TERMINAL_DATA, directory, chunk, end)
+  })
+  ctx.on('terminal/exit', (directory) => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TERMINAL_EXIT, directory)
+  })
   handle(ctx, Channel.LIST_PROJECTS, async () => ctx.projects.list())
   handle(ctx, Channel.OPEN_PROJECT, async (_event, directory: string) => ctx.projects.open(directory))
   handle(ctx, Channel.SET_PROJECT_FAVORITE, async (_event, directory: string, favorite: boolean) =>
@@ -108,7 +138,7 @@ function bootstrap(ctx: Context): void {
     return ctx.projects.open(picked.filePaths[0])
   })
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions']
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals']
 mounted.push(ctx.plugin(bootstrap))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).

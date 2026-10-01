@@ -162,6 +162,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   후보 목록은 신규 세대(`/api/fs/find`·`/api/fs/list`·`/api/command`)에 있지만 `/`·`!` 실행은 레거시뿐이고 기록이 갈라진다 → 앱이 풀어서
   `prompt.text` 로 보낸다. `prompt` 에 **`resume:false`** 를 주면 LLM 을 안 돌리고 입력만 저장(다음 턴 맥락에 실림). prompt 본문 `id`
   (`msg_…`)는 앱이 정할 수 있다(중복 409). 새 폴더의 첫 `/api/command` 는 빈 배열 — 0.1~0.3초 뒤 다시. 명령 파일 변경은 재시작해야 반영
+- **opencode pty** (실측 2026-10-01, 1.18.18): `POST /api/pty?location[directory]=<dir>` `{cwd, title}` → `{id, command:"/bin/zsh", args:["-l"], cwd, status, pid}` (args 는 주지 않는다 — 서버가 `-l` 을 붙인다). 웹소켓 `GET /api/pty/{id}/connect?location[directory]=<dir>&cursor=0` 에 **Basic Authorization 헤더 그대로**(없으면 401). 키 바이트를 그대로 보내고, 출력은 텍스트 프레임, 바이너리 프레임(`0x00{"cursor":N}`)은 제어라 버린다. `cursor=0` 이면 지금까지 출력을 재생. **다른 폴더로 붙으면 열리지도 닫히지도 않고 멈춘다**(기한 필요). 크기는 `PUT /api/pty/{id}` `{size:{rows,cols}}`. opencode 가 끝나면 셸도 끝난다. 네이티브 모듈 불필요 — 메인은 `ws`(Electron 33 의 Node 20 엔 전역 WebSocket 이 없다), 화면은 `@xterm/xterm`. 셸은 opencode env 를 물려받는다(서버 비밀번호 포함)
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.
@@ -178,6 +179,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. 설정한 provider 로 실제 대화된다(ctx.engine 이 opencode 에 넘김, 2a). 바이너리 동봉·패키징은 2b |
 | 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). 실물 테스트가 착지 기준이다 |
 | 세션 영속화 | `ctx.sessions` (2026-10-01). 내용 정본은 opencode DB, 앱은 목록 정보만(userData `sessions.json` — 제목·마지막 활동·모델·통계). 프로젝트당 50개(넘치면 오래된 것 자동 삭제)·하나씩 수동 삭제(두 번 눌러 확인). 삭제 뒤·opencode 기동 전에 DB 정리(`BUN_BE_BUN` + checkpoint→VACUUM). 폴더 없는 프로젝트 대화는 "폴더가 없습니다"(삭제만, opencode 요청 0). 끊긴 턴은 "중단됨". `/message` 는 100개씩 끝까지(한도 200) |
+| 입력 트리거 | `ctx.triggers` 등록소 + `src/triggers/{at,slash,bang}.ts` 플러그인(effect 등록, 2026-10-01). `@` 는 경로 텍스트만, `/` 는 앱이 template 을 풀어 보내고 prompt `id`(`msg_litecode_…`)로 `ctx.sessions.labels` 에 친 글을 적어 다시 열어도 `/hi world` 로 보인다, 모르는 `/xxx` 는 막는다, `!` 는 `ctx.terminals`(프로젝트별 opencode pty, 화면 xterm)에서 돌고 대화 맥락에 안 들어간다 |
 | 프로젝트 전환 | 시안대로 구현 (2026-09-30). 사이드바 전환 버튼 + 팝오버(검색·즐겨찾기·최근·폴더 열기), 목록에서 빼기(폴더는 안 지움), 이름 바꾸기(보이는 이름만), 잘린 경로·대화 제목은 마우스를 올리면 흘러가며 보이고 옆 카드에 전체 내용(dsh 방식), 앱을 켜면 마지막 프로젝트. 목록은 `ctx.projects`(userData `projects.json`). 대화는 프로젝트별로 메모리에만 — **대화 영속화는 아직 없다** |
 
 ## 실행

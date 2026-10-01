@@ -7,6 +7,9 @@ import { ModelSelect } from './ModelSelect.tsx'
 import { SettingsModal } from './Settings.tsx'
 import { StatsBar } from './StatsBar.tsx'
 import { addTurn, chatStats, type ChatUsage } from './stats.ts'
+import { useTriggers } from './useTriggers.ts'
+import { TriggerPopup } from './TriggerPopup.tsx'
+import { ShellDrawer } from './ShellDrawer.tsx'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -335,6 +338,20 @@ export function App() {
   const chosen = findModel(providers, selected)
   /** 휴지통을 눌러 "삭제 확인" 을 기다리는 대화 */
   const [confirming, setConfirming] = useState<string>()
+  /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
+  const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
+  const trigger = useTriggers({
+    directory: active?.project,
+    draft,
+    setDraft,
+    onSend: (text, display) => void send({ text, display }),
+    onShell: (directory) => setShellOpen((open) => ({ ...open, [directory]: true })),
+  })
+  /** Enter·보내기 — 입력 트리거(`/`·`!`)가 다루지 않으면 평범하게 보낸다 */
+  const submit = () =>
+    void trigger.submit().then((handled) => {
+      if (!handled) void send()
+    })
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
   useEffect(() => {
@@ -430,8 +447,10 @@ export function App() {
     setLastModel(next)
   }
 
-  async function send(): Promise<void> {
-    const prompt = draft.trim()
+  /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display */
+  async function send(command?: { text: string; display: string }): Promise<void> {
+    const prompt = command?.text ?? draft.trim()
+    const shown = command?.display ?? prompt
     if (!prompt || !selected || !chosen || !active || active.pending || !canWrite(active)) return
 
     // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
@@ -442,8 +461,8 @@ export function App() {
       pending: true,
       updatedAt: Date.now(),
       model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
-      title: isBlank(session) ? prompt.slice(0, 24) : session.title,
-      messages: [...session.messages, { role: 'user', text: prompt }],
+      title: isBlank(session) ? shown.slice(0, 24) : session.title,
+      messages: [...session.messages, { role: 'user', text: shown }],
     })
     updateSession(target.id, start)
     // 보내기 전에 목록에 저장해 둔다 — 엔진 세션이 생기면 메인 프로세스가 여기에 붙인다 (답을 기다리는 중 앱이 꺼져도 다시 열리게)
@@ -451,7 +470,7 @@ export function App() {
     saved.current.set(target.id, JSON.stringify(conversation))
     forgetPruned(await window.litecode.saveConversation(conversation))
 
-    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId)
+    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId, command?.display)
     updateSession(target.id, (session) => ({
       ...session,
       pending: false,
@@ -685,8 +704,11 @@ export function App() {
 
             <div className="composer">
               {/* dsh InputBar: 둥근 카드 하나에 입력칸과 아래 줄(왼쪽 +, 오른쪽 모델 선택·둥근 보내기)을 담고, 카드 밑에 통계 줄 */}
-              <div className="composer__box">
+              <div className={`composer__box${trigger.query?.tone ? ` composer__box--${trigger.query.tone}` : ''}`}>
+                <TriggerPopup trigger={trigger} />
                 <textarea
+                  ref={trigger.inputRef}
+                  {...trigger.inputProps}
                   className="composer__input"
                   placeholder="메시지를 입력하세요…"
                   value={draft}
@@ -695,9 +717,10 @@ export function App() {
                     // 한글 등 입력기가 조합 중인 Enter 는 조합을 확정하는 키다 — 여기서 보내면 "안녕" 이 "아ㄴ녕" 으로 가고
                     // 마지막 글자가 입력창에 남는다. keyCode 229 는 isComposing 을 안 채우는 환경용
                     if (event.nativeEvent.isComposing || event.keyCode === 229) return
+                    if (trigger.onKeyDown(event)) return
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
-                      void send()
+                      submit()
                     }
                   }}
                 />
@@ -717,7 +740,7 @@ export function App() {
                       className="composer__send"
                       aria-label="보내기"
                       title="보내기 (Enter)"
-                      onClick={() => void send()}
+                      onClick={submit}
                       disabled={active.pending || !chosen || !draft.trim() || !canWrite(active)}
                     >
                       {/* dsh 보내기 화살표 (16 격자) */}
@@ -734,6 +757,9 @@ export function App() {
               {/* 컨텍스트 % 의 한도는 지금 고른 모델의 설정값 (설정 > 모델의 "컨텍스트 길이") */}
               <StatsBar stats={chatStats(active.usage, chosen?.model.contextLength)} />
             </div>
+            {shellOpen[active.project] && (
+              <ShellDrawer key={active.project} directory={active.project} onClose={() => setShellOpen((open) => ({ ...open, [active.project]: false }))} />
+            )}
           </>
         )}
       </main>

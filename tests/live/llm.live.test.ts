@@ -331,7 +331,7 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
     const history = await services.llm.history(dir, id!)
     expect(history.error).toBeUndefined()
     expect(history.messages).toHaveLength(120)
-    expect(history.messages[0]).toEqual({ role: 'user', text: '긴 1' })
+    expect(history.messages[0]).toMatchObject({ role: 'user', text: '긴 1' }) // user 말풍선은 엔진 메시지 id 도 싣는다 (ctx.sessions label)
     expect(history.messages.at(-1)!.text.split('\n')[0]).toBe('echo: 긴 60')
   }, 240_000)
 

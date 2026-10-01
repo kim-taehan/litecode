@@ -33,6 +33,8 @@ export interface Conversation {
   model?: { providerId: string; modelId: string }
   /** 화면이 턴마다 더한 통계 합계 — 모양은 화면(renderer/stats.ts)이 정하고 여기는 그대로 보관한다 */
   usage?: unknown
+  /** 엔진 메시지 id → 말풍선에 보일 글. `/` 명령처럼 보낸 본문(풀어 쓴 template)과 사용자가 친 글이 다른 입력만 (label) */
+  labels?: Record<string, string>
 }
 
 interface Stored {
@@ -78,7 +80,7 @@ export class SessionsService extends Service {
     let removed: Conversation[] = []
     await this.update((stored) => {
       const existing = stored.conversations.find((entry) => entry.id === input.id)
-      const next = pick({ ...input, engineSessionId: input.engineSessionId ?? existing?.engineSessionId })
+      const next = pick({ ...input, engineSessionId: input.engineSessionId ?? existing?.engineSessionId, labels: input.labels ?? existing?.labels })
       const conversations = existing
         ? stored.conversations.map((entry) => (entry === existing ? next : entry))
         : [next, ...stored.conversations]
@@ -98,6 +100,14 @@ export class SessionsService extends Service {
     }))
   }
 
+  /** 엔진 메시지 하나가 말풍선에 보일 글을 적는다 — 다시 열어도 `/hi world` 가 풀어 쓴 본문 대신 보이게 (01d "말풍선 문제") */
+  async label(id: string, messageId: string, display: string): Promise<void> {
+    await this.update((stored) => ({
+      ...stored,
+      conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, labels: { ...entry.labels, [messageId]: display } } : entry)),
+    }))
+  }
+
   /** 목록에서 빼고 엔진 세션도 지운다. 되돌리기 없음 */
   async remove(id: string): Promise<void> {
     await this.update((stored) => dropping(stored.conversations, stored.orphans, stored.conversations.filter((entry) => entry.id === id)))
@@ -109,7 +119,9 @@ export class SessionsService extends Service {
     const conversation = (await this.read()).conversations.find((entry) => entry.id === id)
     if (!conversation) return { messages: [], error: '없는 대화입니다' }
     if (!conversation.engineSessionId) return { messages: [] }
-    return this.ctx.llm.history(conversation.project, conversation.engineSessionId)
+    const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId)
+    const labels = conversation.labels ?? {}
+    return { ...history, messages: history.messages.map((message) => (message.id && message.id in labels ? { ...message, text: labels[message.id]! } : message)) }
   }
 
   /** orphans 를 하나씩 지워 보고, 지운 게 있으면 DB 파일 정리를 부탁한다. 실패한 것은 남겨 다음에 다시 — 한 번에 한 줄만 돈다 */
@@ -166,8 +178,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, updatedAt, model, usage }: Conversation): Conversation {
-  return { id, project, engineSessionId, title, updatedAt, model, usage }
+function pick({ id, project, engineSessionId, title, updatedAt, model, usage, labels }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, updatedAt, model, usage, labels }
 }
 
 function isConversation(value: unknown): value is Conversation {

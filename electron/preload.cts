@@ -20,6 +20,14 @@ const Channel = {
   SAVE_CONVERSATION: 'sessions:save',
   REMOVE_CONVERSATION: 'sessions:remove',
   LOAD_CONVERSATION: 'sessions:history',
+  QUERY_TRIGGER: 'triggers:query',
+  PICK_TRIGGER: 'triggers:pick',
+  SUBMIT_TRIGGER: 'triggers:submit',
+  OPEN_TERMINAL: 'terminal:open',
+  WRITE_TERMINAL: 'terminal:write',
+  RESIZE_TERMINAL: 'terminal:resize',
+  TERMINAL_DATA: 'terminal:data',
+  TERMINAL_EXIT: 'terminal:exit',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -27,8 +35,8 @@ const bridge: LitecodeBridge = {
   saveProvider: (input) => ipcRenderer.invoke(Channel.SAVE_PROVIDER, input),
   removeProvider: (id) => ipcRenderer.invoke(Channel.REMOVE_PROVIDER, id),
   fetchProviderModels: (draft) => ipcRenderer.invoke(Channel.FETCH_PROVIDER_MODELS, draft),
-  sendMessage: (conversationId, providerId, modelId, directory, prompt, sessionId) =>
-    ipcRenderer.invoke(Channel.SEND_MESSAGE, conversationId, providerId, modelId, directory, prompt, sessionId),
+  sendMessage: (conversationId, providerId, modelId, directory, prompt, sessionId, display) =>
+    ipcRenderer.invoke(Channel.SEND_MESSAGE, conversationId, providerId, modelId, directory, prompt, sessionId, display),
   listProjects: () => ipcRenderer.invoke(Channel.LIST_PROJECTS),
   openProject: (directory) => ipcRenderer.invoke(Channel.OPEN_PROJECT, directory),
   pickProjectFolder: () => ipcRenderer.invoke(Channel.PICK_PROJECT_FOLDER),
@@ -39,6 +47,22 @@ const bridge: LitecodeBridge = {
   saveConversation: (conversation) => ipcRenderer.invoke(Channel.SAVE_CONVERSATION, conversation),
   removeConversation: (id) => ipcRenderer.invoke(Channel.REMOVE_CONVERSATION, id),
   loadConversation: (id) => ipcRenderer.invoke(Channel.LOAD_CONVERSATION, id),
+  queryTrigger: (scope, draft, caret) => ipcRenderer.invoke(Channel.QUERY_TRIGGER, scope, draft, caret),
+  pickTrigger: (scope, char, id, action) => ipcRenderer.invoke(Channel.PICK_TRIGGER, scope, char, id, action),
+  submitTrigger: (scope, draft) => ipcRenderer.invoke(Channel.SUBMIT_TRIGGER, scope, draft),
+  openTerminal: (directory) => ipcRenderer.invoke(Channel.OPEN_TERMINAL, directory),
+  writeTerminal: (directory, data) => ipcRenderer.invoke(Channel.WRITE_TERMINAL, directory, data),
+  resizeTerminal: (directory, rows, cols) => ipcRenderer.invoke(Channel.RESIZE_TERMINAL, directory, rows, cols),
+  onTerminalData: (listener) => {
+    const handler = (_event: unknown, directory: string, chunk: string, end: number) => listener(directory, chunk, end)
+    ipcRenderer.on(Channel.TERMINAL_DATA, handler)
+    return () => void ipcRenderer.removeListener(Channel.TERMINAL_DATA, handler)
+  },
+  onTerminalExit: (listener) => {
+    const handler = (_event: unknown, directory: string) => listener(directory)
+    ipcRenderer.on(Channel.TERMINAL_EXIT, handler)
+    return () => void ipcRenderer.removeListener(Channel.TERMINAL_EXIT, handler)
+  },
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)
