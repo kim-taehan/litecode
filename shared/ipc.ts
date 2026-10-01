@@ -28,6 +28,7 @@ export const Channel = {
   SAVE_CONVERSATION: 'sessions:save',
   REMOVE_CONVERSATION: 'sessions:remove',
   LOAD_CONVERSATION: 'sessions:history',
+  OPEN_EXTERNAL: 'shell:open-external',
 } as const
 
 export interface LitecodeBridge {
@@ -61,6 +62,8 @@ export interface LitecodeBridge {
   removeConversation(id: string): Promise<void>
   /** 저장된 대화의 말풍선. 작업 폴더가 없으면 엔진에 묻지 않고 missingFolder */
   loadConversation(id: string): Promise<History>
+  /** 답의 링크를 OS 기본 브라우저로 연다 — 메인이 절대 http(s) 만 연다(그 밖은 false) */
+  openExternal(url: string): Promise<boolean>
 }
 
 declare global {

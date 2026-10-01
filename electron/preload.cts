@@ -20,6 +20,7 @@ const Channel = {
   SAVE_CONVERSATION: 'sessions:save',
   REMOVE_CONVERSATION: 'sessions:remove',
   LOAD_CONVERSATION: 'sessions:history',
+  OPEN_EXTERNAL: 'shell:open-external',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -39,6 +40,7 @@ const bridge: LitecodeBridge = {
   saveConversation: (conversation) => ipcRenderer.invoke(Channel.SAVE_CONVERSATION, conversation),
   removeConversation: (id) => ipcRenderer.invoke(Channel.REMOVE_CONVERSATION, id),
   loadConversation: (id) => ipcRenderer.invoke(Channel.LOAD_CONVERSATION, id),
+  openExternal: (url) => ipcRenderer.invoke(Channel.OPEN_EXTERNAL, url),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

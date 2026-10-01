@@ -1,0 +1,114 @@
+/* 답 말풍선 마크다운 — dsh ui-primitives markdown/MarkdownText.module.css·CodeBlock.module.css 의 간격·모양을 litecode 토큰으로.
+   말풍선(.bubble)은 pre-wrap 이라 여기서 끈다 — 빈 줄은 문단 간격 하나로만 보인다 (코드 블록 안은 그대로) */
+.md {
+  white-space: normal;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+
+.md strong { font-weight: 600; }
+.md p { margin: 10px 0; }
+.md h1 { font-size: 20px; line-height: 28px; font-weight: 600; margin: 20px 0 10px; }
+.md h2 { font-size: 17px; line-height: 26px; font-weight: 600; margin: 18px 0 8px; }
+.md h3 { font-size: 15px; line-height: 24px; font-weight: 600; margin: 16px 0 8px; }
+.md :where(h4, h5, h6) { font-size: 14px; font-weight: 600; margin: 12px 0 6px; }
+
+.md a {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+.md a:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+
+.md :where(ul, ol) { margin: 10px 0; padding-left: 20px; }
+.md li + li { margin-top: 4px; }
+.md li > p { margin: 6px 0; }
+.md li::marker { color: var(--text-secondary); }
+.md li > input[type='checkbox'] { margin: 0 6px 0 0; vertical-align: -1px; accent-color: var(--text-secondary); }
+
+.md hr {
+  border: none;
+  height: 0.5px;
+  margin: 18px 0;
+  background: var(--border);
+}
+
+.md blockquote {
+  margin: 10px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--text-caption);
+  color: var(--text-secondary);
+}
+
+.md :not(pre) > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  background: var(--fill-selector);
+  border: 0.5px solid var(--border-light);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.md-table { max-width: 100%; overflow-x: auto; margin: 10px 0; }
+.md table { border-collapse: collapse; font-size: 13px; }
+.md :where(th, td) { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
+.md th { background: var(--fill-selector); font-weight: 600; }
+
+.md-html { white-space: pre-wrap; }
+:where(.md, .md blockquote, .md li) > .md-html { display: block; margin: 10px 0; }
+
+.md-image { color: var(--text-tertiary); font-style: italic; }
+.md-footnote { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+
+/* 코드 블록 — 머리(언어·복사) + 회색 바탕 고정폭 본문 */
+.md-code {
+  margin: 12px 0;
+  background: var(--fill-selector);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.md-code__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--fill-active);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.md-code__lang {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.md-code__copy {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.md-code__copy:hover { color: var(--text); }
+
+.md-code pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
