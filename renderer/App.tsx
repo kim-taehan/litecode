@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKe
 import type { Project, ProviderSummary } from '../shared/ipc.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
+import { Markdown } from './Markdown.tsx'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { SettingsModal } from './Settings.tsx'
@@ -500,8 +501,8 @@ export function App() {
               {active.messages.length === 0 && <div className="empty">무엇을 도와드릴까요?</div>}
               {active.messages.map((message, index) => (
                 <div key={index} className={`bubble bubble--${message.role}`}>
-                  {/* 모델이 빈 줄로 답을 시작하기도 한다 — 앞뒤 공백은 보여 주지 않는다 (속 줄바꿈은 그대로) */}
-                  {message.text.trim()}
+                  {/* 모델이 빈 줄로 답을 시작하기도 한다 — 앞뒤 공백은 보여 주지 않는다 (속 줄바꿈은 그대로). 답은 마크다운으로 */}
+                  {message.role === 'assistant' ? <Markdown text={message.text.trim()} /> : message.text.trim()}
                 </div>
               ))}
             </div>

@@ -15,6 +15,8 @@ import type { AddressInfo } from 'node:net'
 // - 마지막 user 메시지에 `[call:<도구 이름> <json 인자>]` 가 있으면 그 도구 호출을 낸다 — bash 밖의 도구(grep 등)를 부른다.
 //   예: `[call:grep {"pattern":"needle"}]`. 끝나는 것은 bash 와 같다 (01b_offline 제안)
 // - 마지막 user 메시지에 `[lead]` 가 있으면 답을 빈 줄 두 개로 시작한다 — 실제 모델(Qwen)이 그렇게 답한다 (2026-10-01 사용자 캡처)
+// - 마지막 user 메시지에 `[md]` 가 있으면 MARKDOWN_REPLY(제목·한글 굵게·목록·표·코드 블록·링크·원격 이미지·원문 HTML·빈 줄 과다)를
+//   답한다 — 답 말풍선 마크다운 렌더링을 본다 (markdown.live.test.ts)
 // - 그 밖에는 `echo: <마지막 user 메시지>` 를 두 조각으로 나눠 스트리밍한다
 // - `GET /requests` 는 지금까지 받은 chat/completions 요청 수를 JSON 으로 준다 — 테스트 프로세스는
 //   globalSetup 과 달라 requestCount() 를 직접 못 부르므로 HTTP 로 연다. 마지막 `/v1/models` 요청의 Authorization
@@ -36,6 +38,37 @@ export const DRIP_MS = 1_500
 /** 답마다 돌려주는 usage (OpenAI 모양) */
 export const FAKE_USAGE = { prompt_tokens: 1_000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 300 } }
 const USAGE_CHUNK = `data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 0, model: 'echo', choices: [], usage: FAKE_USAGE })}\n\n`
+
+/** `[md]` 의 답 — 화면 요소로 나와야 하는 것과, 실행·로드되면 안 되는 것(script·onerror·원격 이미지)을 함께 싣는다 */
+export const MARKDOWN_REPLY = [
+  '## 요약',
+  '',
+  '**프로젝트명:**라이트코드 입니다. 자세한 건 [문서](https://example.com/doc) 참고.',
+  '',
+  '',
+  '',
+  '',
+  '빈 줄 네 개 뒤 문단.',
+  '',
+  '- 첫째',
+  '- 둘째',
+  '',
+  '| 이름 | 값 |',
+  '|---|---:|',
+  '| alpha | 1 |',
+  '',
+  '```ts',
+  'const answer = 42',
+  '```',
+  '',
+  '---',
+  '',
+  '<script>window.__mdPwned = "script"</script>',
+  '',
+  '<img src="x" onerror="window.__mdPwned = \'onerror\'">',
+  '',
+  '![원격 그림](https://example.com/tracker.png)',
+].join('\n')
 
 export interface FakeLlm {
   /** opencode.json 의 provider baseURL 에 넣을 값 (`.../v1`) */
@@ -115,7 +148,9 @@ export async function startFakeLlm(): Promise<FakeLlm> {
         res.end('data: [DONE]\n\n')
         return
       }
-      const reply = (last?.role !== 'tool' && text.includes('[lead]') ? '\n\n' : '') + (last?.role === 'tool' ? `tool: ${contentText(last)}` : `echo: ${text}`)
+      const reply = last?.role !== 'tool' && text.includes('[md]')
+        ? MARKDOWN_REPLY
+        : (last?.role !== 'tool' && text.includes('[lead]') ? '\n\n' : '') + (last?.role === 'tool' ? `tool: ${contentText(last)}` : `echo: ${text}`)
       const half = Math.ceil(reply.length / 2)
       const answer = (): void => {
         res.writeHead(200, { 'content-type': 'text/event-stream' })

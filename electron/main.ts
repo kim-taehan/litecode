@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -8,6 +8,7 @@ import { EngineService } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { Channel } from '../shared/ipc.ts'
+import { isWebUrl } from '../shared/webUrl.ts'
 import { canSealKeys } from './keyStorage.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -97,6 +98,12 @@ function bootstrap(ctx: Context): void {
     if (picked.canceled || !picked.filePaths[0]) return undefined
     return ctx.projects.open(picked.filePaths[0])
   })
+  // 답의 링크 — 렌더러가 걸러도 여기서 다시 거른다 (답은 모델이 쓴 글이라 file:·javascript: 등이 올 수 있다)
+  handle(ctx, Channel.OPEN_EXTERNAL, async (_event, url: string) => {
+    if (typeof url !== 'string' || !isWebUrl(url)) return false
+    await shell.openExternal(url)
+    return true
+  })
 }
 bootstrap.inject = ['providers', 'llm', 'projects', 'engine']
 mounted.push(ctx.plugin(bootstrap))
@@ -133,6 +140,13 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+
+  // 앱 창은 앱 화면에서 벗어나지 않는다 — 링크가 새 창(Shift·가운데 클릭)이나 다른 주소로 이동하는 길을 막는다.
+  // 답의 링크는 OPEN_EXTERNAL 로 OS 브라우저에서 연다. 같은 출처 이동(개발 서버 새로고침)은 그대로 둔다
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (event, url) => {
+    if (new URL(url).origin !== new URL(win.webContents.getURL()).origin) event.preventDefault()
   })
 
   win.webContents.on('preload-error', (_event, preloadPath, error) => {

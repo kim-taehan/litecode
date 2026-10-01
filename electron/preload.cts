@@ -16,6 +16,7 @@ const Channel = {
   SET_PROJECT_FAVORITE: 'projects:set-favorite',
   REMOVE_PROJECT: 'projects:remove',
   RENAME_PROJECT: 'projects:rename',
+  OPEN_EXTERNAL: 'shell:open-external',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -31,6 +32,7 @@ const bridge: LitecodeBridge = {
   setProjectFavorite: (directory, favorite) => ipcRenderer.invoke(Channel.SET_PROJECT_FAVORITE, directory, favorite),
   removeProject: (directory) => ipcRenderer.invoke(Channel.REMOVE_PROJECT, directory),
   renameProject: (directory, name) => ipcRenderer.invoke(Channel.RENAME_PROJECT, directory, name),
+  openExternal: (url) => ipcRenderer.invoke(Channel.OPEN_EXTERNAL, url),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

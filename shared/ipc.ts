@@ -22,6 +22,7 @@ export const Channel = {
   SET_PROJECT_FAVORITE: 'projects:set-favorite',
   REMOVE_PROJECT: 'projects:remove',
   RENAME_PROJECT: 'projects:rename',
+  OPEN_EXTERNAL: 'shell:open-external',
 } as const
 
 export interface LitecodeBridge {
@@ -46,6 +47,8 @@ export interface LitecodeBridge {
   removeProject(directory: string): Promise<Project[]>
   /** 보이는 이름만 바꾼다 (폴더 이름은 그대로). 빈 이름이면 폴더 이름으로 */
   renameProject(directory: string, name: string): Promise<Project[]>
+  /** 답의 링크를 OS 기본 브라우저로 연다 — 메인이 절대 http(s) 만 연다(그 밖은 false) */
+  openExternal(url: string): Promise<boolean>
 }
 
 declare global {
