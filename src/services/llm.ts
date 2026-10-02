@@ -11,6 +11,7 @@ import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty
 import { messageItems, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type TurnItem } from './turnProgress.ts'
 import { projectInstructions } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
+import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
 
@@ -382,6 +383,7 @@ export class LlmService extends Service {
       if ('error' in ready) return { ok: false, sessionId, error: ready.error }
       id = ready.id
       if (this.busy.has(id)) return { ok: false, sessionId: id, error: tr('error.contextBusy') }
+      if (sessionId) await carryOver(conn, id, ready.workdir, { providerID: providerId, modelID: modelId }, messageId) // 옛 대화를 먼저 (#21)
       const res = await fetch(`${conn.url}/session/${id}/prompt_async?${at(ready.workdir)}`, {
         method: 'POST',
         headers: { ...conn.headers, 'content-type': 'application/json' },
@@ -427,6 +429,8 @@ export class LlmService extends Service {
       this.declined.set(id, declined)
       const userMessageId = messageId ?? this.newMessageId()
       const system = await projectInstructions(workdir)
+      // 레거시 전환 전에 쌓인 대화면 옛 글을 이 입력 앞에 한 번 넣는다 (migrate.ts, #21). 새로 만든 세션은 옛 기록이 없다
+      if (sessionId) await carryOver(conn, id, workdir, { providerID: providerId, modelID: modelId }, userMessageId)
 
       let admitted!: (sent: boolean) => void
       const scope = new TurnScope(id, userMessageId)
@@ -542,7 +546,9 @@ export class LlmService extends Service {
       const status = await fetch(`${conn.url}/session/status?${at(workdir)}`, { headers: conn.headers })
       if (!status.ok) throw new Error(tr('error.activeSessions', { status: status.status }))
       const running = sessionId in ((await status.json()) as Record<string, unknown>)
-      return { messages: historyMessages(raw.filter((message) => !hidden.has(message.info.id)), running, workdir) }
+      // 레거시 전환 전에 쌓인 기록(신규 세대)이 먼저다 — 그 뒤에 레거시로 이어 쓴 기록 (migrate.ts, #21)
+      const previous = (await readPreviousMessages(conn, sessionId)).filter((message) => !message.id || !hidden.has(message.id))
+      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(raw.filter((message) => !hidden.has(message.info.id)), running, workdir)] }
     } catch (error) {
       return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
     }

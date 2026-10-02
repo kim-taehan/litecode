@@ -34,6 +34,9 @@ let release: () => void = () => {}
 let calls: string[] = []
 /** 받은 모든 요청의 URL (쿼리 포함) — 레거시 호출의 ?directory= 를 본다 */
 let urls: string[] = []
+/** 신규 세대 기록(레거시 전환 전에 쌓인 대화, GET /api/session/{id}/message). 비어 있지 않으면 레거시 기록(GET /session/{id}/message)도
+ *  흉내 낸다 — 받은 prompt_async 의 user 메시지가 쌓인다 (#21 이어 쓰기) */
+let previous: unknown[] = []
 const AGENTS = ['build', 'plan', 'litecode-ask', 'litecode-full'].map((id) => ({ id, mode: 'primary' }))
 
 afterEach(() => {
@@ -50,6 +53,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
   let busy = false
   calls = []
   urls = []
+  const legacy: unknown[] = []
   const pending: { permission: unknown[]; question: unknown[] } = { permission: [], question: [] }
   const emit = (type: string, properties: Record<string, unknown>) => events?.write(`data: ${JSON.stringify({ type, properties: { sessionID: 'ses_1', ...properties } })}\n\n`)
   const part = (p: Record<string, unknown>) => emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: A, ...p }, time: Date.now() })
@@ -80,7 +84,8 @@ async function fakeOpencode(ending: Ending): Promise<string> {
     }
     if (req.method === 'POST' && route === '/session') return void req.on('end', () => res.end(JSON.stringify({ id: 'ses_1', title: 'x' })))
     if (route === '/session/status') return void res.end(JSON.stringify(busy ? { ses_1: { type: 'busy' } } : {}))
-    if (route === '/session/ses_1/message') return void res.end('[]')
+    if (route === '/session/ses_1/message') return void res.end(JSON.stringify(legacy))
+    if (route === '/api/session/ses_1/message') return void res.end(JSON.stringify({ data: previous, cursor: { next: null } }))
     if (route === '/permission' || route === '/question') return void res.end(JSON.stringify(pending[route === '/permission' ? 'permission' : 'question']))
     // 답: once·답하기는 도구가 이어서 끝나고 턴이 끝난다. 거절은 도구 error 뒤 곧바로 idle (01w)
     const answered = /^\/(permission|question)\/(\w+)\/(reply|reject)$/.exec(route)
@@ -113,6 +118,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
       return void req.on('end', () => {
         const body = JSON.parse(raw) as { messageID: string; noReply?: boolean }
         prompts.push(body)
+        if (previous.length > 0) legacy.push({ info: { id: body.messageID, role: 'user' }, parts: [] })
         if (ending === 'reject') return void res.writeHead(500).end()
         res.writeHead(204).end()
         if (body.noReply) return
@@ -518,5 +524,55 @@ describe('ctx.llm /event 무바이트 구간 (01q)', () => {
     const { llm } = await start(await fakeOpencode('cut'))
     await llm.chat('p', 'm', directory, 'hi')
     expect(calls.filter((call) => call.includes('/abort'))).toEqual([])
+  })
+})
+
+describe('옛 대화 이어 쓰기 (이슈 #21)', () => {
+  afterEach(() => {
+    previous = []
+  })
+  const v2 = [
+    { id: 'msg_old_u', type: 'user', text: 'my name is ZED', time: { created: 1 } },
+    { id: 'msg_old_a', type: 'assistant', agent: 'build', time: { created: 2, completed: 3 }, content: [{ type: 'text', text: 'hi ZED' }] },
+  ]
+
+  it('신규 세대 기록만 있는 세션의 첫 레거시 턴 직전에 옛 글을 합성·noReply 로 한 번 넣고, 다음 턴엔 안 넣는다', async () => {
+    previous = v2
+    const { llm } = await start(await fakeOpencode('done'))
+    expect(await llm.chat('p', 'm', directory, 'what is my name', 'ses_1')).toMatchObject({ ok: true })
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).toMatchObject({ noReply: true, model: { providerID: 'p', modelID: 'm' }, parts: [{ type: 'text', synthetic: true }] })
+    const injected = (prompts[0]!['parts'] as { text: string }[])[0]!.text
+    expect(injected).toContain('user: my name is ZED\nassistant: hi ZED')
+    expect(String(prompts[0]!['messageID']) < String(prompts[1]!['messageID'])).toBe(true) // 옛 글이 이번 입력보다 먼저 선다
+    expect(prompts[1]).toMatchObject({ parts: [{ type: 'text', text: 'what is my name' }] })
+
+    await llm.chat('p', 'm', directory, 'again', 'ses_1')
+    expect(prompts).toHaveLength(3)
+    expect(prompts[2]).not.toHaveProperty('noReply')
+  })
+
+  it('`!` 카드를 먼저 보내도(addContext) 옛 글이 그 앞에 한 번 들어간다', async () => {
+    previous = v2
+    const { llm } = await start(await fakeOpencode('done'))
+    const id = llm.newMessageId()
+    expect(await llm.addContext('p', 'm', directory, '$ ls', id, 'ses_1')).toMatchObject({ ok: true })
+    expect(prompts.map((prompt) => (prompt['parts'] as { synthetic?: boolean }[])[0]!.synthetic ?? false)).toEqual([true, false])
+    await llm.chat('p', 'm', directory, 'next', 'ses_1')
+    expect(prompts).toHaveLength(3)
+  })
+
+  it('새 세션·신규 기록이 없는 세션엔 아무것도 넣지 않는다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    await llm.chat('p', 'm', directory, 'hi')
+    await llm.chat('p', 'm', directory, 'again', 'ses_1')
+    expect(prompts.filter((prompt) => prompt['noReply'])).toEqual([])
+  })
+
+  it('다시 열면 신규 기록이 먼저 말풍선이 된다', async () => {
+    previous = v2
+    const { llm } = await start(await fakeOpencode('done'))
+    const history = await llm.history(directory, 'ses_1')
+    expect(history.messages.map(({ role, text }) => `${role}:${text}`)).toEqual(['user:my name is ZED', 'assistant:hi ZED'])
   })
 })
