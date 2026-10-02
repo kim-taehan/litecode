@@ -240,6 +240,53 @@ describe('알림', () => {
     await setForeground(false)
   })
 
+  // 새 대화의 첫 턴 — 엔진 세션이 그 턴 안에서 생긴다. 화면은 답이 온 뒤에야 그 세션 id 를 알므로, 메인이 미리 대화에 붙여야 알림이 간다
+  it('새 대화의 첫 턴: 앞에서 다른 대화를 보고 있으면 토스트 + 행 점', async () => {
+    await setForeground(true)
+    await resetRecord()
+    await page.locator('.new-chat').click()
+    await submit('[late] fresh front')
+    await openChat('hello three')
+    const toast = page.locator('.toast', { hasText: '[late] fresh front' })
+    await toast.waitFor({ timeout: 15_000 })
+    expect(await toast.textContent()).toContain('beta-app · 끝났습니다')
+    await expect.poll(() => rowDot('[late] fresh front').getAttribute('data-status'), { timeout: 5_000 }).toBe('done')
+    expect(await shown()).toEqual([])
+    await openChat('[late] fresh front') // 읽음으로 — 다음 시나리오에 점을 남기지 않는다
+    await expect.poll(state, { timeout: 5_000 }).toEqual({})
+  })
+
+  it('새 대화의 첫 턴: 뒤에서 끝나면 PC 알림', async () => {
+    await setForeground(false)
+    await resetRecord()
+    await page.locator('.new-chat').click()
+    await submit('[late] fresh back')
+    await expect.poll(shown, { timeout: 15_000 }).toEqual([{ title: '[late] fresh back', body: 'beta-app · 끝났습니다', closed: false }])
+    await setForeground(true)
+    await openChat('hello three')
+    await openChat('[late] fresh back')
+    await expect.poll(state, { timeout: 5_000 }).toEqual({})
+  })
+
+  it('새 대화의 첫 턴: 질문 대기는 "답 필요" 점과 PC 알림', async () => {
+    await setForeground(false)
+    await resetRecord()
+    await page.locator('.new-chat').click()
+    await submit('[call:question {"questions":[{"question":"Which OS?","header":"OS","options":[{"label":"mac","description":"m"},{"label":"linux","description":"l"}]}]}]')
+    const title = '[call:question {"questio' // 제목은 첫 24자
+    await expect.poll(shown, { timeout: 30_000 }).toEqual([{ title, body: 'beta-app · 질문에 답을 기다립니다', closed: false }])
+    await expect.poll(() => rowDot(title).getAttribute('data-status'), { timeout: 5_000 }).toBe('attention')
+    const card = page.locator('.attention-card[data-kind="question"]')
+    await card.locator('.attention-question__option', { hasText: 'linux' }).click()
+    await card.getByRole('button', { name: '답 보내기' }).click()
+    await page.locator('.bubble--assistant', { hasText: '"Which OS?"="linux"' }).waitFor({ timeout: 30_000 })
+    await setForeground(true)
+    const id = (await page.evaluate(() => window.litecode.listConversations())).find((entry) => entry.title === title)!.id
+    await page.evaluate((conversationId) => window.litecode.viewConversation(conversationId), id)
+    await expect.poll(state, { timeout: 5_000 }).toEqual({})
+    await setForeground(false)
+  })
+
   it('중단(답을 기다리는 중 provider 저장으로 엔진 재시작)은 PC 알림 없이 앱 안 점만', async () => {
     await resetRecord()
     await switchTo('alpha-app')
