@@ -71,8 +71,8 @@ interface AssistantTurnProps {
 }
 
 export function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = [], onAnswer }: AssistantTurnProps) {
-  // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다)
-  const { compactions, rest } = takeCompactions(items)
+  // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다
+  const { compactions, rest } = takeCompactions(running ? items : items.filter((item) => item.kind !== 'retry'))
   const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(rest)
   const foldable = !running && !failed && work.length > 0
   const [open, setOpen] = useState(false)
@@ -128,6 +128,24 @@ function WorkRow({ item, directory }: { item: Exclude<TurnItem, { kind: 'compact
     return (
       <div className="turn-row turn-row--text" data-kind="text">
         <Markdown text={item.text.trim()} directory={directory} />
+      </div>
+    )
+  }
+  if (item.kind === 'retry') {
+    if (item.status !== 'waiting') return null
+    // 엔진이 LLM 요청을 다시 보내려고 기다린다 (게이트웨이 500 등 — 레거시는 5번까지, 합계 ~71초) — 사유는 펼치지 않고 줄에 그대로
+    return (
+      <div className="turn-row" data-kind="retry" data-live role="status">
+        <div className="turn-row__line">
+          <RetryIcon />
+          <span className="turn-row__title">{t('chat.retrying', { attempt: item.attempt })}</span>
+          {item.message && (
+            <>
+              <span className="turn-row__dot" aria-hidden="true" />
+              <span className="turn-row__summary">{item.message}</span>
+            </>
+          )}
+        </div>
       </div>
     )
   }
@@ -224,6 +242,15 @@ function Icon({ children }: { children: ReactNode }) {
     <svg className="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {children}
     </svg>
+  )
+}
+
+function RetryIcon() {
+  return (
+    <Icon>
+      <path d="M13.25 8A5.25 5.25 0 1 1 11.6 4.2" />
+      <path d="M12.25 1.75V4.75H9.25" />
+    </Icon>
   )
 }
 

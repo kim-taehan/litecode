@@ -191,7 +191,7 @@ describe('알림', () => {
     await switchTo('beta-app')
     await page.keyboard.press('Escape')
     await openChat('hello three')
-    await submit('[late][fail] three fails') // 가짜 LLM 이 3초 뒤 500 (사유 "fake-llm: 요청된 실패")
+    await submit('[late][fail] three fails') // 가짜 LLM 이 3초 뒤 400 (사유 "fake-llm: 요청된 실패")
     await switchTo('alpha-app')
     await page.keyboard.press('Escape')
     const toast = page.locator('.toast', { hasText: 'hello three' })

@@ -4,7 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { ProviderRegistry, type ProviderConfig } from '../../src/services/providers.ts'
-import { LlmService, type Attention, type LlmConfig } from '../../src/services/llm.ts'
+import { LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type LlmConfig } from '../../src/services/llm.ts'
+import { SLOW_MS } from './support/fakeLlm.ts'
 import { EngineService } from '../../src/services/engine.ts'
 import { tr } from '../../src/i18n.ts'
 import { engineOptions } from './support/opencodeServer.ts'
@@ -25,7 +26,7 @@ let root: string
 let work: string
 /** 세션 SSE 타임아웃을 짧게 준 ctx.llm */
 let short: Context
-/** 제품과 같은 설정(타임아웃 없음)의 ctx.llm */
+/** 제품과 같은 설정(무바이트 한도 STREAM_IDLE_TIMEOUT_MS — heartbeat 세 번)의 ctx.llm */
 let product: Context
 
 const fakeProvider = (): ProviderConfig => ({
@@ -87,7 +88,12 @@ describe('세션 SSE 가 끊긴 뒤 (01q)', () => {
   })
 })
 
-describe('제품 설정(세션 SSE 타임아웃 없음)', () => {
+describe(`제품 설정(무바이트 한도 ${STREAM_IDLE_TIMEOUT_MS}ms)`, () => {
+  // 레거시 /event 는 10초마다 heartbeat 를 보낸다 — 한도는 FIN 없이 죽은 연결만 잡고, LLM 이 한도보다 오래 조용해도 턴은 끊기지 않는다 (이슈 #20)
+  it(`LLM 이 ${SLOW_MS / 1000}초 동안 첫 바이트를 안 보내도(한도 ${STREAM_IDLE_TIMEOUT_MS / 1000}초 이상) heartbeat 덕에 끝까지 받는다`, async () => {
+    expect(await product.llm.chat('fake', 'echo', work, '[slow] 오래 걸리는 답')).toMatchObject({ ok: true, text: 'echo: [slow] 오래 걸리는 답' })
+  }, SLOW_MS + 20_000)
+
   it(`짧은 타임아웃이면 끊기는 승인 대기(${APPROVAL_WAIT_MS}ms)를 지나 끝까지 받는다`, async () => {
     const approving = approveAfter(product, APPROVAL_WAIT_MS, 'once')
     const result = await product.llm.chat('fake', 'echo', work, '[bash:pwd] 오래 기다린 승인', undefined, undefined, undefined, undefined, 'ask', approving.onAttention)
