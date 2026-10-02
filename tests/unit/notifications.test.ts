@@ -261,4 +261,13 @@ describe('NotificationsService', () => {
     await fiber.dispose()
     expect(host.shown.map((entry) => entry.closed)).toEqual([true, true])
   })
+
+  it('서비스를 내리면(설정 > 기능에서 알림 끄기) dock 배지도 지운다', async () => {
+    const { ctx, host, notifications, fiber } = await start()
+    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
+    await notifications.idle()
+    expect(host.badges.at(-1)).toBe(1)
+    await fiber.dispose()
+    expect(host.badges.at(-1)).toBe(0)
+  })
 })

@@ -581,3 +581,79 @@
   font-size: 12px;
   color: var(--danger);
 }
+
+/* 기능 페이지 (이슈 #8) — dsh ui-settings-plugin-inventory 카드 목록의 치수: 두 칸 격자·간격 10, 카드 12×14·0.5px 선·반경 12 */
+.features-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 16px;
+}
+
+.features-page__intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-tertiary);
+}
+
+.feature-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feature-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 12px 14px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.feature-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.feature-card__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.feature-card__description,
+.feature-card__requires {
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.feature-card__requires {
+  color: var(--warn);
+}
+
+.settings-switch:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

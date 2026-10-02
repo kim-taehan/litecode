@@ -5,6 +5,7 @@ import { isLanguage, type Language } from '../../shared/i18n/index.ts'
 import { setMainLanguage, tr } from '../i18n.ts'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../shared/fontSize.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
+import { isFeatureSwitches, type FeatureSwitches } from '../../shared/features.ts'
 
 // 앱 설정(설정 > 일반) — 언어·테마·대화 글자 크기·코딩 뷰. 정본은 이 서비스, 앱에서는 userData 의 settings.json 하나
 // ("설정 파일 열기" 가 여는 파일 — dsh 처럼 사용자가 텍스트로 고칠 수 있다). 손으로 고친 값은 다음 실행 때 읽는다(파일 감시 없음).
@@ -26,6 +27,8 @@ export interface Settings {
   defaultMode: Mode
   /** "다른 앱에서 열기" 의 기본 앱 id — 메뉴에서 마지막으로 고른 앱 (dsh 방식, 설정 화면 없음). 없으면 목록 첫 앱 (ctx.openIn) */
   openInApp?: string
+  /** 기능별 켜기 (설정 > 기능, 이슈 #8) — false 로 적힌 기능만 꺼진다. 없으면 모두 켜짐 (ctx.features 가 묶음을 올리고 내린다) */
+  features?: FeatureSwitches
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9). 새 대화는 기본 모드(01k §6) */
@@ -55,6 +58,7 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   notifications: (value): value is boolean => typeof value === 'boolean',
   defaultMode: isMode,
   openInApp: (value): value is string => typeof value === 'string',
+  features: isFeatureSwitches,
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

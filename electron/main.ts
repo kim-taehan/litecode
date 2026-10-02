@@ -26,6 +26,7 @@ import { isWebUrl } from '../shared/webUrl.ts'
 import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
+import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -96,14 +97,9 @@ mounted.push(ctx.plugin(SessionsService, {
   file: path.join(userData, 'sessions.json'),
   limit: Number(process.env.LITECODE_TEST_SESSION_LIMIT) || undefined,
 }))
-// 입력창 트리거 — 등록소 하나에 플러그인 셋이 effect 로 등록한다. 하나를 내리면 그 문자는 평범한 글자가 된다
+// 입력창 트리거 — 등록소 하나에 플러그인 셋이 effect 로 등록한다. 하나를 내리면 그 문자는 평범한 글자가 된다.
+// 등록소는 바탕이다(등록된 트리거가 없으면 모든 입력이 평범한 글). `@`·`/`·`!` 는 기능 묶음으로 ctx.features 가 올린다 (아래)
 mounted.push(ctx.plugin(TriggerRegistry))
-mounted.push(ctx.plugin(TerminalsService))
-mounted.push(ctx.plugin(ShellService))
-mounted.push(ctx.plugin(AtTrigger))
-mounted.push(ctx.plugin(SlashTrigger))
-mounted.push(ctx.plugin(BangTrigger))
-mounted.push(ctx.plugin(TrajectoryService))
 
 /** IPC 핸들러를 되돌릴 수 있게 건다 — 의존 서비스가 다시 올라와 bootstrap 이 다시 돌면, Cordis 가 먼저 이것을 풀어
  *  "이미 등록된 핸들러" 오류 없이 다시 건다 (Cordis 원칙: 모든 등록은 effect 로) */
@@ -172,16 +168,6 @@ function bootstrap(ctx: Context): void {
     ctx.triggers.pick(scope, char, id, action),
   )
   handle(ctx, Channel.SUBMIT_TRIGGER, async (_event, scope: TriggerScope, draft: string) => ctx.triggers.submit(scope, draft))
-  handle(ctx, Channel.OPEN_TERMINAL, async (_event, directory: string) => ctx.terminals.attach(directory))
-  handle(ctx, Channel.WRITE_TERMINAL, async (_event, directory: string, data: string) => ctx.terminals.write(directory, data))
-  handle(ctx, Channel.RESIZE_TERMINAL, async (_event, directory: string, rows: number, cols: number) => ctx.terminals.resize(directory, rows, cols))
-  // 터미널 출력은 메인이 먼저 안다 — 모든 창에 흘려보낸다 (화면이 폴더로 거른다). ctx.on 은 bootstrap 이 내려가면 같이 풀린다
-  ctx.on('terminal/data', (directory, chunk, end) => {
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TERMINAL_DATA, directory, chunk, end)
-  })
-  ctx.on('terminal/exit', (directory) => {
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TERMINAL_EXIT, directory)
-  })
   handle(ctx, Channel.LIST_PROJECTS, async () => ctx.projects.list())
   handle(ctx, Channel.OPEN_PROJECT, async (_event, directory: string) => ctx.projects.open(directory))
   handle(ctx, Channel.SET_PROJECT_FAVORITE, async (_event, directory: string, favorite: boolean) =>
@@ -204,7 +190,6 @@ function bootstrap(ctx: Context): void {
     await shell.openExternal(url)
     return true
   })
-  handle(ctx, Channel.LOAD_TRAJECTORY, async (_event, directory: string, sessionId: string) => ctx.trajectory.read(directory, sessionId))
   // 파일 언급 칩 — 프로젝트 안의 파일만. 누르면 OS 파일 관리자에서 그 파일을 가리킨다(열거나 실행하지 않는다 — 답은 모델이 쓴 글이다)
   handle(ctx, Channel.RESOLVE_FILES, async (_event, directory: string, tokens: string[]) => (Array.isArray(tokens) ? existingFiles(directory, tokens) : []))
   handle(ctx, Channel.REVEAL_FILE, async (_event, directory: string, token: string) => {
@@ -212,21 +197,6 @@ function bootstrap(ctx: Context): void {
     if (file) shell.showItemInFolder(file)
     return !!file
   })
-  // `!명령` 카드 — 메인이 프로젝트 폴더에서 돌리고(ctx.shell), 끝나면 그 대화에 저장한다(ctx.sessions). 출력 조각은 모든 창에
-  handle(ctx, Channel.RUN_SHELL, async (_event, conversationId: string, runId: string, directory: string, command: string, position: number) => {
-    const at = Date.now()
-    const result = await ctx.shell.run(runId, directory, command)
-    const card = { ...result, id: runId, at, position }
-    await ctx.sessions.addShell(conversationId, card)
-    return card
-  })
-  handle(ctx, Channel.STOP_SHELL, async (_event, runId: string) => ctx.shell.stop(runId))
-  ctx.on('shell/data', (runId, chunk) => {
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.SHELL_DATA, runId, chunk)
-  })
-  handle(ctx, Channel.SHARE_SHELL, async (_event, conversationId: string, cardId: string, providerId: string, modelId: string) =>
-    ctx.sessions.shareShell(conversationId, cardId, providerId, modelId),
-  )
   handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
   handle(ctx, Channel.SET_SETTINGS, async (_event, patch: Partial<Settings>) => ctx.settings.set(patch))
   // dsh 처럼 설정 정본 파일을 연다 (없으면 만든다). openPath 는 OS 연결 프로그램 — 실패하면 사유 문자열을 준다
@@ -239,8 +209,13 @@ function bootstrap(ctx: Context): void {
   ctx.on('settings/changed', (settings) => {
     nativeTheme.themeSource = settings.appearance
   })
+  // 켜진 기능 — 화면은 이것을 보고 꺼진 기능의 버튼·탭·단축키를 그리지 않는다. 바뀌면 (묶음을 다 올리고 내린 뒤) 모든 창에
+  handle(ctx, Channel.GET_FEATURES, async () => ctx.features.enabled())
+  ctx.on('features/changed', (enabled) => broadcast(Channel.FEATURES_CHANGED, enabled))
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory', 'shell', 'settings']
+// 바탕 연결 — 대화·엔진·설정·provider·프로젝트·대화 저장·트리거 등록소. 끌 수 없다. 기능마다의 연결은 아래 기능 묶음에 있어
+// 기능 하나를 빼도(끄거나 서비스가 못 떠도) 이 연결은 그대로 뜬다
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'settings', 'features']
 mounted.push(ctx.plugin(bootstrap))
 
 /** 모든 앱 창에 보낸다 */
@@ -248,7 +223,41 @@ function broadcast(channel: string, ...args: unknown[]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
 }
 
-// 알림 IPC — bootstrap 과 따로 둔다: ctx.notifications 를 빼면 이 줄들만 사라지고 나머지 앱은 그대로다
+// ── 기능 묶음 (이슈 #8) — 기능 서비스와 그 IPC 연결을 한 플러그인으로 올리고 내린다. 켜고 끄기는 ctx.features 가 settings 를 보고 한다
+
+// `!명령` 카드 — 메인이 프로젝트 폴더에서 돌리고(ctx.shell), 끝나면 그 대화에 저장한다(ctx.sessions). 출력 조각은 모든 창에
+function shellBridge(ctx: Context): void {
+  handle(ctx, Channel.RUN_SHELL, async (_event, conversationId: string, runId: string, directory: string, command: string, position: number) => {
+    const at = Date.now()
+    const result = await ctx.shell.run(runId, directory, command)
+    const card = { ...result, id: runId, at, position }
+    await ctx.sessions.addShell(conversationId, card)
+    return card
+  })
+  handle(ctx, Channel.STOP_SHELL, async (_event, runId: string) => ctx.shell.stop(runId))
+  ctx.on('shell/data', (runId, chunk) => broadcast(Channel.SHELL_DATA, runId, chunk))
+  handle(ctx, Channel.SHARE_SHELL, async (_event, conversationId: string, cardId: string, providerId: string, modelId: string) =>
+    ctx.sessions.shareShell(conversationId, cardId, providerId, modelId),
+  )
+}
+shellBridge.inject = ['shell', 'sessions']
+
+// 터미널 칸 — 출력은 메인이 먼저 안다. 모든 창에 흘려보낸다 (화면이 폴더로 거른다). ctx.on 은 묶음이 내려가면 같이 풀린다
+function terminalsBridge(ctx: Context): void {
+  handle(ctx, Channel.OPEN_TERMINAL, async (_event, directory: string) => ctx.terminals.attach(directory))
+  handle(ctx, Channel.WRITE_TERMINAL, async (_event, directory: string, data: string) => ctx.terminals.write(directory, data))
+  handle(ctx, Channel.RESIZE_TERMINAL, async (_event, directory: string, rows: number, cols: number) => ctx.terminals.resize(directory, rows, cols))
+  ctx.on('terminal/data', (directory, chunk, end) => broadcast(Channel.TERMINAL_DATA, directory, chunk, end))
+  ctx.on('terminal/exit', (directory) => broadcast(Channel.TERMINAL_EXIT, directory))
+}
+terminalsBridge.inject = ['terminals']
+
+function trajectoryBridge(ctx: Context): void {
+  handle(ctx, Channel.LOAD_TRAJECTORY, async (_event, directory: string, sessionId: string) => ctx.trajectory.read(directory, sessionId))
+}
+trajectoryBridge.inject = ['trajectory']
+
+// 알림 IPC — ctx.notifications 를 빼면 이 줄들만 사라지고 나머지 앱은 그대로다
 function notificationsBridge(ctx: Context): void {
   handle(ctx, Channel.GET_NOTIFICATIONS, async () => ctx.notifications.snapshot())
   handle(ctx, Channel.VIEW_CONVERSATION, async (_event, conversationId?: string) => ctx.notifications.view(conversationId))
@@ -264,7 +273,6 @@ function notificationsBridge(ctx: Context): void {
   })
 }
 notificationsBridge.inject = ['notifications']
-mounted.push(ctx.plugin(notificationsBridge))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).
 // GUI 앱에는 자식을 데려가 줄 터미널이 없어 흘려보내면 opencode 가 남는다 (closed-code app/quitGuard.ts). Cordis 의 dispose 는
@@ -300,19 +308,61 @@ const windows: WindowAccess = {
 const notifyTest: NotifyTestRecord | undefined = hiddenForTests ? { foreground: false, shown: [], badge: [], reveals: 0 } : undefined
 const notifyHost = notifyTest ? recordingHost(notifyTest) : systemHost(windows)
 if (notifyTest) Object.assign(globalThis, { __litecodeNotifyTest: { record: notifyTest, emit: (name: string, ...args: unknown[]) => (ctx.emit as (...all: unknown[]) => void)(name, ...args) } })
-mounted.push(ctx.plugin(NotificationsService, notifyHost))
 app.on('second-instance', () => notifyHost.reveal())
 
 // 다른 앱에서 열기 (대화 머리 분할 버튼) — 실물 테스트는 실행을 기록만 한다(globalThis.__litecodeOpenInTest). 제품은 이 길이 없다
 const openInTest: OpenInTestRecord | undefined = hiddenForTests ? { launches: [] } : undefined
 if (openInTest) Object.assign(globalThis, { __litecodeOpenInTest: openInTest })
-mounted.push(ctx.plugin(OpenInService, { host: openInTest ? recordingOpenInHost(openInTest) : systemOpenInHost }))
+const openInHost = openInTest ? recordingOpenInHost(openInTest) : systemOpenInHost
 function openInBridge(ctx: Context): void {
   handle(ctx, Channel.OPEN_IN_APPS, async () => ctx.openIn.apps())
   handle(ctx, Channel.OPEN_IN, async (_event, appId: string, directory: string) => ctx.openIn.open(appId, directory))
 }
 openInBridge.inject = ['openIn']
-mounted.push(ctx.plugin(openInBridge))
+
+/** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게 */
+const features: FeatureDefinition[] = [
+  { id: 'at', plugin: AtTrigger },
+  { id: 'slash', plugin: SlashTrigger },
+  { id: 'bang', plugin: BangTrigger }, // `!명령`(shell) 이 꺼지면 같이 꺼진다 (FEATURE_REQUIRES)
+  {
+    id: 'shell',
+    plugin: (ctx) => {
+      ctx.plugin(ShellService)
+      ctx.plugin(shellBridge)
+    },
+  },
+  {
+    id: 'terminal',
+    plugin: (ctx) => {
+      ctx.plugin(TerminalsService)
+      ctx.plugin(terminalsBridge)
+    },
+  },
+  {
+    id: 'trajectory',
+    plugin: (ctx) => {
+      ctx.plugin(TrajectoryService)
+      ctx.plugin(trajectoryBridge)
+    },
+  },
+  {
+    id: 'notifications',
+    plugin: (ctx) => {
+      ctx.plugin(NotificationsService, notifyHost)
+      ctx.plugin(notificationsBridge)
+    },
+  },
+  {
+    id: 'openIn',
+    plugin: (ctx) => {
+      ctx.plugin(OpenInService, { host: openInHost })
+      ctx.plugin(openInBridge)
+    },
+  },
+]
+// 종료 때 바탕보다 먼저 내려간다(거꾸로 내리므로) — 터미널·셸·알림이 엔진보다 먼저 정리된다
+mounted.push(ctx.plugin(FeaturesService, features))
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({

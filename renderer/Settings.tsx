@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../shared/ipc.ts'
 import { providerIdFor } from '../shared/providerId.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
+import { FeaturesPage } from './FeaturesSettings.tsx'
 import { useT } from './settingsStore.ts'
 import { ContextLengthNotes } from './ContextLengthNotes.tsx'
 import './settings.css'
@@ -19,7 +20,7 @@ export function reason(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
-type Page = 'general' | 'models'
+type Page = 'general' | 'models' | 'features'
 
 interface SettingsModalProps {
   providers: ProviderSummary[]
@@ -47,6 +48,15 @@ function DataIcon() {
   )
 }
 
+/** 16px 퍼즐 조각 — 기능 메뉴 (dsh Built-in plugins 메뉴 자리) */
+function PuzzleIcon() {
+  return (
+    <svg className="settings-nav__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 5.5H5.2A1.6 1.6 0 1 1 8.4 5.5H11V8.1A1.6 1.6 0 1 1 11 11.3V13.5H2.5Z" />
+    </svg>
+  )
+}
+
 function CloseIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
@@ -69,6 +79,7 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
   const pages: { id: Page; label: string; icon: ReactNode }[] = [
     { id: 'general', label: t('settings.nav.general'), icon: <GearIcon /> },
     { id: 'models', label: t('settings.nav.models'), icon: <DataIcon /> },
+    { id: 'features', label: t('settings.nav.features'), icon: <PuzzleIcon /> },
   ]
 
   return (
@@ -102,7 +113,13 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
             </button>
           </div>
           <div className="settings-body">
-            {page === 'general' ? <GeneralPage /> : <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />}
+            {page === 'general' ? (
+              <GeneralPage />
+            ) : page === 'features' ? (
+              <FeaturesPage />
+            ) : (
+              <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />
+            )}
           </div>
         </div>
       </div>

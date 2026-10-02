@@ -133,6 +133,7 @@ export class NotificationsService extends Service {
     })
     ctx.effect(() => () => {
       for (const id of [...this.shown.keys()]) this.close(id)
+      this.host.setBadge(0) // 꺼진 알림의 배지가 dock 에 남지 않게 (설정 > 기능에서 알림을 끄면 이 서비스가 내려간다)
     })
   }
 

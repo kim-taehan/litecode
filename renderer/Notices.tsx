@@ -21,7 +21,8 @@ const MAX_TOASTS = 3
 
 let nextKey = 0
 
-export function useNotices(viewing: string | undefined) {
+/** enabled: 설정 > 기능의 알림 — 꺼지면 점·알림 토스트를 비우고 듣지 않는다 (짧은 안내 say 는 그대로) */
+export function useNotices(viewing: string | undefined, enabled = true) {
   const [state, setState] = useState<NoticeState>({})
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const viewingRef = useRef(viewing)
@@ -34,6 +35,11 @@ export function useNotices(viewing: string | undefined) {
   }
 
   useEffect(() => {
+    if (!enabled) {
+      setState({})
+      setToasts((now) => now.filter((entry) => !entry.toast))
+      return
+    }
     // 알림 플러그인이 빠졌으면(채널 없음) 점·토스트 없이 그대로 돈다
     void window.litecode.getNotifications().then(setState, () => {})
     const offChanged = window.litecode.onNotificationsChanged(setState)
@@ -44,11 +50,11 @@ export function useNotices(viewing: string | undefined) {
       offChanged()
       offToast()
     }
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
-    void window.litecode.viewConversation(viewing).catch(() => {})
-  }, [viewing])
+    if (enabled) void window.litecode.viewConversation(viewing).catch(() => {})
+  }, [viewing, enabled])
 
   return {
     state,
