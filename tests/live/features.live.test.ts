@@ -148,7 +148,7 @@ describe('기능 켜기/끄기', () => {
     await expect.poll(() => drawer().count(), { timeout: 5_000 }).toBe(0)
   })
 
-  it('설정 > 기능 — 기능마다 카드(이름·스위치·한 줄 설명), 모두 켜짐. dsh 카드 치수', async () => {
+  it('설정 > 기능 — 기능마다 카드(이름·스위치·한 줄 설명), 웹 도구만 꺼짐(이슈 #14). dsh 카드 치수', async () => {
     await openFeatures()
     expect(await dialog().locator('.settings-nav__item').allTextContents()).toEqual(['일반', '모델', '기능'])
     expect(await dialog().locator('.feature-card__title').allTextContents()).toEqual([
@@ -160,9 +160,10 @@ describe('기능 켜기/끄기', () => {
       '추론 과정',
       '알림',
       '다른 앱에서 열기',
+      '웹 도구',
     ])
-    expect(await dialog().locator('.feature-card__description').count()).toBe(8)
-    expect(await dialog().getByRole('switch').evaluateAll((list) => list.map((el) => el.getAttribute('aria-checked')))).toEqual(Array(8).fill('true'))
+    expect(await dialog().locator('.feature-card__description').count()).toBe(9)
+    expect(await dialog().getByRole('switch').evaluateAll((list) => list.map((el) => el.getAttribute('aria-checked')))).toEqual([...Array(8).fill('true'), 'false'])
     const card = dialog().locator('.feature-card').first()
     expect(await card.evaluate((el) => [getComputedStyle(el).padding, getComputedStyle(el).borderTopWidth])).toEqual(['12px 14px', '0.5px'])
     await fs.mkdir(path.join(root, 'shots'), { recursive: true })

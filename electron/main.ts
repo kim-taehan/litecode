@@ -360,6 +360,7 @@ const features: FeatureDefinition[] = [
       ctx.plugin(openInBridge)
     },
   },
+  // 웹 도구(web)는 묶음이 없다 — ctx.engine 이 features/changed 를 듣고 opencode.json 을 다시 써 재시작한다 (이슈 #14)
 ]
 // 종료 때 바탕보다 먼저 내려간다(거꾸로 내리므로) — 터미널·셸·알림이 엔진보다 먼저 정리된다
 mounted.push(ctx.plugin(FeaturesService, features))

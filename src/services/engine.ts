@@ -11,6 +11,7 @@ import type { ProviderConfig } from './providers.ts'
 import type { Mode } from '../../shared/modes.ts'
 import { tr } from '../i18n.ts'
 import './providers.ts'
+import type {} from './features.ts' // ctx.features·'features/changed' 타입
 
 // 앱이 띄우는 opencode 서버 하나의 수명 (ctx.engine). ctx.llm 은 이 서비스에서 주소·인증을 받아 쓰고, 그 밖의 누구도
 // opencode 를 모른다. 프로젝트마다 띄우지 않는다 — 세션마다 location.directory 로 폴더를 가른다 (01_probe Q1).
@@ -110,10 +111,23 @@ const PLAN_PROMPT = [
   'Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode.',
   'Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.',
 ].join(' ')
-export const ENGINE_AGENTS = {
-  plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny' } },
-  [MODE_AGENT.ask]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', question: 'allow' } },
+// 웹 도구(webfetch·websearch)는 켰을 때 이 규칙을 따른다 — 계획 deny, 매번 묻기 ask, 기본·전체 허용 (이슈 #14)
+export const ENGINE_AGENTS: Record<string, { mode?: string; prompt: string; permission: Record<string, string> }> = {
+  plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny' } },
+  [MODE_AGENT.ask]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow' } },
   [MODE_AGENT.full]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { '*': 'allow' } },
+}
+
+// 웹 도구 끄기 (이슈 #14, 실측 2026-10-02 opencode 1.18.18 — 가짜 LLM 이 받은 요청의 tools 로 봤다). deny 면 도구가 LLM 요청에서 빠진다.
+// 전역 `permission`(또는 `tools: {x: false}` — 결과 같음)만으로는 **에이전트 규칙에 진다**: litecode-ask 의 webfetch:ask·litecode-full 의
+// "*":allow 가 되살린다. 규칙은 뒤가 이기므로 정의한 에이전트마다 맨 뒤에 deny 를 덧붙인다. build(정의 없음)와 레거시 task 의 하위 에이전트
+// (explore·general)는 전역 deny 로 빠졌다. 신규 /api prompt·레거시 prompt_async 둘 다 4 모드 모두에서 빠졌다 (레거시엔 원래 websearch 가 없다)
+const WEB_TOOLS_DENY = { webfetch: 'deny', websearch: 'deny' }
+
+/** 웹 도구 규칙을 빼고 맨 뒤에 deny 를 붙인다 — 객체 펼치기는 있던 키의 자리를 지키므로 지운 뒤 붙인다 */
+function withWebDenied(permission: Record<string, string>): Record<string, string> {
+  const rest = Object.fromEntries(Object.entries(permission).filter(([name]) => !(name in WEB_TOOLS_DENY)))
+  return { ...rest, ...WEB_TOOLS_DENY }
 }
 
 const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 초 무응답인 때가 있다 (live-test 스킬 기록)
@@ -137,7 +151,7 @@ function hiddenEnvNames(env: NodeJS.ProcessEnv): string[] {
 export function engineConfig(
   providers: ProviderConfig[],
   proxy: Pick<KeyProxy, 'token' | 'baseURLFor'>,
-  extra: { mcp?: Record<string, EngineMcp>; childEnv?: NodeJS.ProcessEnv } = {},
+  extra: { mcp?: Record<string, EngineMcp>; childEnv?: NodeJS.ProcessEnv; webTools?: boolean } = {},
 ): Record<string, unknown> {
   const provider: Record<string, unknown> = {}
   for (const config of providers) {
@@ -163,7 +177,10 @@ export function engineConfig(
   return {
     $schema: 'https://opencode.ai/config.json',
     provider,
-    agent: ENGINE_AGENTS,
+    agent: extra.webTools
+      ? ENGINE_AGENTS
+      : Object.fromEntries(Object.entries(ENGINE_AGENTS).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }])),
+    ...(!extra.webTools && { permission: WEB_TOOLS_DENY }),
     // 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 데이터 폴더에 만든다(큰 저장소에서 비용). litecode 는 revert 를 안 쓴다 (01w 1절)
     snapshot: false,
     ...(mcp && { mcp }),
@@ -269,6 +286,8 @@ export class EngineService extends Service {
   private proxy?: Promise<KeyProxy>
   /** DB 정리는 한 번에 하나만 */
   private purging: Promise<void> = Promise.resolve()
+  /** 떠 있는(띄우는 중인) 서버의 opencode.json 에 넣은 웹 도구 켜짐 (설정 > 기능 web, 기본 꺼짐) */
+  private launchedWebTools = false
 
   constructor(
     ctx: Context,
@@ -278,6 +297,12 @@ export class EngineService extends Service {
     reapStale(opts.pidFile)
     // 재시작이 실패해도 다음 대화가 다시 띄워 본다 — 다만 조용히 묻히지 않게 사유는 남긴다(키는 안 싣는다: 오류는 프로세스·포트 사유뿐)
     ctx.on('providers/changed', () => void this.restart().catch((error: unknown) => console.error('[engine] 설정 변경 후 재시작 실패', (error as Error).message)))
+    // 웹 도구 켜기/끄기 (이슈 #14) — 설정은 재시작해야 먹는다. 떠 있는 서버와 값이 다르면 다시 띄운다(진행 중 턴은 중단됨).
+    // 안 떠 있으면 다음 기동이 읽는다(launch). features 는 inject 하지 않는다 — 기능 레지스트리 없이 띄운 엔진(서비스 실물 테스트)은 꺼짐으로 돈다
+    ctx.on('features/changed', (enabled) => {
+      if (!this.current || enabled.includes('web') === this.launchedWebTools) return
+      void this.restart().catch((error: unknown) => console.error('[engine] 웹 도구 변경 후 재시작 실패', (error as Error).message))
+    })
     ctx.effect(() => () => this.stop())
   }
 
@@ -355,7 +380,8 @@ export class EngineService extends Service {
     })
 
     fs.mkdirSync(this.opts.configDir, { recursive: true })
-    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env })
+    this.launchedWebTools = this.ctx.get('features')?.isEnabled('web') ?? false
+    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, webTools: this.launchedWebTools })
     fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(config, null, 2))
     prepareInstallMarkers(this.opts.configDir, env)
 

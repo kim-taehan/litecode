@@ -236,6 +236,8 @@ export const ko = {
   'feature.notifications.description': '작업이 끝나거나 답이 필요하면 상태 점·토스트·PC 알림·dock 배지로 알립니다',
   'feature.openIn': '다른 앱에서 열기',
   'feature.openIn.description': '대화 머리의 버튼으로 프로젝트 폴더를 편집기·터미널 등 다른 앱에서 엽니다',
+  'feature.web': '웹 도구',
+  'feature.web.description': 'AI 가 웹 검색·웹 페이지 읽기 도구를 씁니다 (기본 꺼짐 — 바꾸면 엔진을 다시 띄워 진행 중인 답이 중단됩니다)',
   'settings.openFile': '설정 파일 열기',
   'settings.openFileError': '설정 파일을 열 수 없습니다',
   'settings.saveError': '저장하지 못했습니다. 다시 시도하세요',
