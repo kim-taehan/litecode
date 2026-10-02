@@ -148,17 +148,6 @@ export interface EngineMessage {
   parts: EnginePart[]
 }
 
-/** 신규 세대 GET /api/session/{id}/message 의 메시지 — 레거시 전환 전에 쌓인 대화의 기록. 지금은 Trajectory 탭만 읽는다 (01c Q2 실측) */
-interface OpencodeMessage {
-  id?: string
-  type: string
-  text?: string
-}
-
-// /message 의 limit 상한은 200 이다 — 넘기면 400 InvalidRequestError, 안 주면 50 (2026-10-01 실측, opencode 1.18.18, 메시지 260개 세션).
-// 상한보다 낮게 잡고 cursor 로 끝까지 넘긴다
-const MESSAGE_PAGE = 100
-
 /** 입력 트리거(@ 파일)용 폴더 항목 — 폴더는 path 끝에 `/` */
 export interface FileEntry {
   path: string
@@ -195,8 +184,8 @@ interface CatalogModel {
 export const MODEL_CATALOG_TIMEOUT_MS = 10_000
 /** 에이전트 목록도 지연 로드된다(01f: 첫 응답 빈 목록, ~1.5초) — 모델 카탈로그와 같은 기한 */
 export const AGENT_LIST_TIMEOUT_MS = 10_000
-/** 한 턴에 자동 요약이 이만큼 넘게 돌면 멈춘다 — 레거시는 요약 뒤 스스로 "Continue" 턴을 돌리고, 모델 한도가 작으면(한도 − 20000 이 프롬프트보다
- *  작으면) 요약 → 다시 넘침이 끝없이 돈다 (01w 자동 요약 행, 가짜 LLM 30초에 10회 이상). 요약 표시·뒤 처리는 L2 — 여기는 무한 반복만 막는다 */
+/** 한 턴에 자동 요약이 이만큼 넘게 돌면 멈춘다 — 레거시는 요약 뒤 스스로 "Continue" 턴을 돌리고, 모델 한도가 작으면(한도 − 32000 이 프롬프트보다
+ *  작으면 — renderer/compaction.ts) 요약 → 다시 넘침이 끝없이 돈다 (01w 자동 요약 행, 가짜 LLM 30초에 10회 이상). 요약 줄·이음 답은 TurnScope */
 export const MAX_COMPACTIONS_PER_TURN = 3
 /** 구독을 걸고 server.connected 를 기다리는 한도 — 헤더와 함께 바로 온다(01w) */
 const CONNECT_TIMEOUT_MS = 10_000
@@ -205,8 +194,12 @@ export function interruptedError(): string {
   return tr('error.interrupted')
 }
 
+/** /event 의 무바이트 한도 기본값 — 레거시 /event 는 10초마다 heartbeat 를 보낸다(01w). 세 번 연달아 안 오면 연결이 FIN 없이 죽은 것으로 보고
+ *  "중단됨" 으로 끝낸다 (끊긴 연결을 기다리며 턴이 영원히 도는 것을 막는다 — 01q 와 같은 정책) */
+export const STREAM_IDLE_TIMEOUT_MS = 30_000
+
 export interface LlmConfig {
-  /** /event SSE 의 무바이트 한도(ms). 0 = 없음(기본). 시험이 끊김을 짧게 재현할 때만 준다 */
+  /** /event SSE 의 무바이트 한도(ms). 기본 STREAM_IDLE_TIMEOUT_MS, 0 = 없음. 시험이 끊김을 짧게 재현할 때 준다 */
   streamTimeoutMs?: number
 }
 
@@ -230,14 +223,15 @@ export class LlmService extends Service {
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
   private watchers = new Map<string, { answered(requestId: string): void }>()
 
-  /** /event 를 여는 dispatcher. 전역 fetch(undici) 기본 bodyTimeout·headersTimeout 은 300초다 — 레거시 /event 는 heartbeat 가 10초마다 와서
-   *  걸리지 않지만, 시험이 끊김을 재현하려고 짧은 한도를 줄 수 있게 따로 둔다 (01q). 끊김 감지는 엔진 생존(conn.closed)으로도 한다.
+  /** /event 를 여는 dispatcher. 전역 fetch(undici) 기본 bodyTimeout·headersTimeout 은 300초다 — 레거시 /event 는 heartbeat 가 10초마다 오므로
+   *  무바이트 한도를 STREAM_IDLE_TIMEOUT_MS 로 줄여 죽은 연결을 30초 안에 알아챈다(이슈 #20). 시험은 더 짧게 줄 수 있다 (01q).
+   *  끊김 감지는 엔진 생존(conn.closed)으로도 한다.
    *  undici 는 Electron 33 메인의 Node 20.18.3 내장(6.21.1)과 같은 버전을 쓴다 */
   private streamDispatcher: Agent
 
   constructor(ctx: Context, config: LlmConfig = {}) {
     super(ctx, 'llm')
-    const timeout = config.streamTimeoutMs ?? 0
+    const timeout = config.streamTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS
     this.streamDispatcher = new Agent({ bodyTimeout: timeout, headersTimeout: timeout })
     ctx.effect(() => () => void this.streamDispatcher.close().catch(() => {}))
   }
@@ -548,7 +542,7 @@ export class LlmService extends Service {
       const status = await fetch(`${conn.url}/session/status?${at(workdir)}`, { headers: conn.headers })
       if (!status.ok) throw new Error(tr('error.activeSessions', { status: status.status }))
       const running = sessionId in ((await status.json()) as Record<string, unknown>)
-      return { messages: historyMessages(raw.filter((message) => !hidden.has(message.info.id)), running) }
+      return { messages: historyMessages(raw.filter((message) => !hidden.has(message.info.id)), running, workdir) }
     } catch (error) {
       return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
     }
@@ -561,19 +555,9 @@ export class LlmService extends Service {
     return (await res.json()) as EngineMessage[]
   }
 
-  /** 신규 세대 기록(레거시 전환 전에 쌓인 대화)의 메시지 전부 (asc) — Trajectory 탭이 읽는다 (레거시 판은 L2).
-   *  cursor 는 order 와 같이 못 준다(/doc). 마지막 쪽에도 cursor.next 가 오므로 받은 개수 < limit 이거나 빈 쪽이면 끝이다 (01c Q1) */
-  async readMessages(conn: EngineConnection, sessionId: string): Promise<OpencodeMessage[]> {
-    const messages: OpencodeMessage[] = []
-    let query = `order=asc&limit=${MESSAGE_PAGE}`
-    while (true) {
-      const res = await fetch(`${conn.url}/api/session/${sessionId}/message?${query}`, { headers: conn.headers })
-      if (!res.ok) throw new Error(tr('error.messageRead', { status: res.status }))
-      const page = (await res.json()) as { data: OpencodeMessage[]; cursor?: { next?: string | null } }
-      messages.push(...page.data)
-      if (page.data.length < MESSAGE_PAGE || !page.cursor?.next) return messages
-      query = new URLSearchParams({ cursor: page.cursor.next, limit: String(MESSAGE_PAGE) }).toString()
-    }
+  /** 레거시 기록 그대로 (오래된 것부터) — Trajectory 탭이 읽는다. workdir 는 realDirectory 를 거친 세션 폴더 (?directory= 에 쓴다) */
+  async readMessages(workdir: string, sessionId: string): Promise<EngineMessage[]> {
+    return this.engineMessages(await this.ctx.engine.connection(), sessionId, workdir)
   }
 
   /** 지운 대화의 본문을 DB 파일에서 걷어낸다 (ctx.engine.purgeDeleted). 답을 기다리는 턴이 있으면 다 끝난 뒤로 미룬다 */
@@ -627,7 +611,7 @@ export class LlmService extends Service {
   ): { connected: Promise<void>; result: Promise<TurnOutcome>; stop: () => void } {
     const sessionId = scope.sessionId
     const controller = new AbortController()
-    const tracker = new TurnTracker()
+    const tracker = new TurnTracker(workdir)
     const meter = new TurnMeter()
     let connected!: () => void
     let failConnect!: (error: unknown) => void
@@ -635,6 +619,9 @@ export class LlmService extends Service {
     connecting.catch(() => {})
     let seenUser = false
     let compactions = 0
+    /** 게이트웨이가 한도 초과로 거절했다 — opencode 는 자동 요약으로 줄여 이어 간다. 요약이 안 돌고 끝나면 실패다 */
+    let overflowed = false
+    let compactionSeen = false
     let failure: EngineMessageInfo['error']
     let declinedEnd = false
     let finish!: (outcome: TurnOutcome) => void
@@ -647,10 +634,10 @@ export class LlmService extends Service {
       return outcome({ ok: false, error: tr('error.stopped'), interrupted: true })
     }
     const ended = (): TurnOutcome => {
+      if (overflowed && !compactionSeen) failure ??= { name: 'ContextOverflowError' }
       if (failure) {
         if (failure.name === 'MessageAbortedError') return outcome({ ok: false, error: tr('error.stopped'), interrupted: true }) // 다른 클라이언트가 멈췄다
-        const message = failure.data?.message
-        return outcome({ ok: false, error: message ? turnError(message) : tr('error.unknown') })
+        return outcome({ ok: false, error: failureText(failure) })
       }
       return declinedEnd ? outcome({ ok: true, declined: true }) : outcome({ ok: true })
     }
@@ -670,9 +657,23 @@ export class LlmService extends Service {
       const props = event.properties ?? {}
       if (event.type === 'server.connected') return connected()
       const role = scope.of(event.type, props)
+      if (role === 'summary') {
+        // 요약 답 — 글은 답이 아니다. 끝나면 요약 줄을 구분선으로, 실패(한도 초과로 요약도 못 함)면 그 사유로 턴이 끝난다 (idle 이 뒤따른다)
+        if (event.type !== 'message.updated') return
+        const info = props['info'] as EngineMessageInfo
+        const item = info.error ? tracker.compaction(info.parentID!, 'failed') : info.time?.completed !== undefined ? tracker.compaction(info.parentID!, 'done') : undefined
+        if (item) onProgress?.(item)
+        if (info.error) failure = info.error
+        return
+      }
       if (role) {
         if (role === 'assistant' || event.type === 'message.updated') meter.observe(event.type, props) // user 의 글 파트는 출력이 아니다
         if (role === 'user' && event.type === 'message.updated') seenUser = true
+        if (role === 'user' && (props['part'] as EnginePart | undefined)?.type === 'compaction') {
+          compactionSeen = true
+          const item = tracker.compaction((props['part'] as EnginePart).messageID!, 'running')
+          if (item) onProgress?.(item)
+        }
         if (role === 'assistant') {
           if (event.type === 'message.updated') {
             const info = props['info'] as EngineMessageInfo
@@ -688,9 +689,16 @@ export class LlmService extends Service {
       }
       if (props['sessionID'] !== sessionId) return
       if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal()
+      if (event.type === 'session.status' && seenUser) {
+        const item = tracker.status(props['status'] as Parameters<TurnTracker['status']>[0])
+        if (item) onProgress?.(item)
+        return
+      }
       if (event.type === 'session.error') {
         const error = props['error'] as EngineMessageInfo['error']
-        if (seenUser) failure ??= error // 이 턴의 실패 — idle 이 뒤따른다
+        // 게이트웨이의 한도 초과는 끝이 아니다 — opencode 가 자동 요약으로 줄여 이어 간다(L2 실측). 요약도 못 하면 요약 답의 error 로 온다
+        if (seenUser && error?.name === 'ContextOverflowError') overflowed = true
+        else if (seenUser) failure ??= error // 이 턴의 실패 — idle 이 뒤따른다
         else void settleError(error)
         return
       }
@@ -895,13 +903,17 @@ function parseFrame(frame: string): EngineEvent | undefined {
 /** 레거시 메시지(asc) → 말풍선. 한 턴의 assistant 여럿(도구 스텝)은 한 답으로 합치고 텍스트만 쓴다 — 실시간 턴이 글 줄만 모으는 것과 같은 모양.
  *  끊긴 턴: 엔진 재시작 뒤 그 턴은 완료 시각 없는 assistant(+ running 도구)로 남는다(01w) — 그 세션이 돌고 있지 않은데 마지막이 답 없는 user 이거나
  *  완료 시각 없는 assistant 면 끝에 "중단됨" 을 단다. 마지막이 아닌 턴도 같은 모양이면 중단이다. 사용자가 멈춘 턴은 MessageAbortedError 다.
- *  자동 요약 답(summary:true)과 합성 글만 있는 user(요약 뒤 Continue)는 말풍선이 아니다 (요약 표시는 L2) */
-export function historyMessages(raw: readonly EngineMessage[], running: boolean): HistoryMessage[] {
+ *  자동 요약(L2): 요약 user(compaction 파트)는 그 턴 답의 요약 줄(끝나면 done — 화면은 구분선)이고, 요약 답(summary:true)의 글은 답이 아니다.
+ *  요약 뒤 user 하나(합성 Continue·한도 초과 뒤 앞 user 의 복사본)는 말풍선이 아니라 이음이다 — 그 답은 같은 턴 답에 붙는다 (TurnScope 와 같은 규칙).
+ *  root 는 세션 폴더 — 바꾼 파일 경로를 그 기준 상대로 보인다 */
+export function historyMessages(raw: readonly EngineMessage[], running: boolean, root = ''): HistoryMessage[] {
   const messages: HistoryMessage[] = []
   let sentAt: number | undefined
   let asked: HistoryMessage | undefined
   /** 지금 답의 마지막 assistant — 다음 user 가 오면 그 턴이 끝났는지 본다 */
   let lastStep: EngineMessage | undefined
+  /** 요약 user 를 봤다 — 다음 user 는 이음이다 (요약이 실패하면 이음이 없다) */
+  let awaitingContinuation = false
   const closeTurn = (final: boolean): void => {
     if (final && running) return
     const reply = messages.at(-1)
@@ -910,11 +922,33 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean)
       if (lastStep && !lastStep.info.time?.completed && !reply.error && !reply.declined) Object.assign(reply, { error: interruptedError(), interrupted: true })
     } else if (final) messages.push({ role: 'assistant', text: '', error: interruptedError(), interrupted: true })
   }
+  /** 지금 턴의 답 말풍선 — 없으면 만든다 */
+  const currentReply = (): HistoryMessage => {
+    const previous = messages.at(-1)
+    if (previous?.role === 'assistant') return previous
+    const reply: HistoryMessage = { role: 'assistant', text: '', items: [] }
+    messages.push(reply)
+    return reply
+  }
+  const finishedAt = (completed: number | undefined, reply: HistoryMessage): void => {
+    if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
+    else delete reply.duration // 마지막 스텝이 안 끝났다
+  }
   for (const message of raw) {
     const { info, parts } = message
     if (info.role === 'user') {
+      if (asked && parts.some((part) => part.type === 'compaction')) {
+        const reply = currentReply()
+        reply.items = [...(reply.items ?? []), { kind: 'compaction', id: `${info.id}:compaction`, status: 'running' }]
+        awaitingContinuation = true
+        continue
+      }
+      if (awaitingContinuation) {
+        awaitingContinuation = false
+        continue
+      }
       const text = parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
-      if (!parts.some((part) => part.type === 'text' && !part.synthetic)) continue // 합성 글뿐 (요약 Continue·compaction 표식)
+      if (!parts.some((part) => part.type === 'text' && !part.synthetic)) continue // 합성 글뿐
       closeTurn(false)
       sentAt = info.time?.created
       lastStep = undefined
@@ -923,24 +957,39 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean)
       messages.push(asked)
       continue
     }
-    if (info.summary === true) continue // 자동 요약 답 (L2)
-    const previous = messages.at(-1)
-    const reply: HistoryMessage = previous?.role === 'assistant' ? previous : { role: 'assistant', text: '', items: [] }
-    if (reply !== previous) messages.push(reply)
+    if (info.summary === true) {
+      const reply = currentReply()
+      const id = `${info.parentID ?? ''}:compaction`
+      const status = info.error ? 'failed' : info.time?.completed !== undefined ? 'done' : 'running'
+      reply.items = (reply.items ?? []).map((item) => (item.kind === 'compaction' && item.id === id ? { ...item, status } : item))
+      if (info.error) {
+        awaitingContinuation = false
+        reply.error = failureText(info.error)
+      }
+      lastStep = message
+      finishedAt(info.time?.completed, reply)
+      continue
+    }
+    const reply = currentReply()
     reply.text += parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
-    reply.items = [...(reply.items ?? []), ...messageItems(parts)]
+    reply.items = [...(reply.items ?? []), ...messageItems(parts, root)]
     lastStep = message
-    const completed = info.time?.completed
-    if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
-    else delete reply.duration // 마지막 스텝이 안 끝났다
+    finishedAt(info.time?.completed, reply)
     if (info.error?.name === 'MessageAbortedError') Object.assign(reply, { error: tr('error.stopped'), interrupted: true })
-    else if (info.error) reply.error = info.error.data?.message ? turnError(info.error.data.message) : tr('error.unknown')
+    else if (info.error) reply.error = failureText(info.error)
     // 턴의 마지막 답 메시지가 정한다 — 앞 스텝의 실패한 도구는 다음 스텝이 이어 덮는다
     if (!info.error && endedByDecline(parts)) reply.declined = true
     else delete reply.declined
   }
   closeTurn(true)
   return messages
+}
+
+/** 엔진 실패 → 화면 사유. 한도 초과(게이트웨이 오류가 자동 요약으로도 안 줄었다 — opencode 가 ContextOverflowError 로 분류)는 "새 대화로" 안내 */
+export function failureText(error: EngineMessageInfo['error']): string {
+  if (error?.name === 'ContextOverflowError') return tr('error.contextOverflow')
+  const message = error?.data?.message
+  return message ? turnError(message) : tr('error.unknown')
 }
 
 /** 답 메시지의 마지막 파트가 오류로 끝난 도구인가 — 턴의 마지막 메시지가 이러면 승인·질문 거절이다: 거절하면 그 도구가 error 로 끝나고 다음 스텝

@@ -123,10 +123,14 @@ export class TurnMeter {
 
 /** 대화 메시지가 컨텍스트에서 차지하는 토큰 어림 — 레거시 GET /session/{id}/message 의 글자 수 ÷ 4.
  *  opencode 는 컨텍스트 구성(시스템 프롬프트·도구 정의·메시지)을 안 준다 (01_probe). 글 파트(합성 제외)·도구 입력(JSON)과 결과(output)를 센다.
- *  자동 요약 뒤의 몫만 세는 것은 L2 (지금은 전부) */
-export function messageTokens(messages: readonly { parts?: readonly EnginePart[] }[]): number {
+ *  자동 요약이 끝났으면 그 요약 답부터 센다 — 그 앞 기록은 요약으로 바뀌어 LLM 에 안 실린다 (L2 실측: 요약 뒤 요청은 "What did we do so far?" + 요약 + 그 뒤) */
+export function messageTokens(messages: readonly { info?: EngineMessageInfo; parts?: readonly EnginePart[] }[]): number {
+  let from = 0
+  messages.forEach((message, index) => {
+    if (message.info?.summary === true && !message.info.error && message.info.time?.completed !== undefined) from = index
+  })
   let chars = 0
-  for (const message of messages) {
+  for (const message of messages.slice(from)) {
     for (const part of message.parts ?? []) {
       if ((part.type === 'text' || part.type === 'reasoning') && !part.synthetic) chars += part.text?.length ?? 0
       if (part.type !== 'tool' || !part.state) continue

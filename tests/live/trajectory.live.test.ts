@@ -8,10 +8,10 @@ import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { freePort, isolatedEnv } from './support/opencodeServer.ts'
 
-// Trajectory 탭 실물 테스트 — 진짜 Electron 창에서 대화한 뒤 Trajectory 탭이 opencode 기록(/api/session/{id}/message)을
+// Trajectory 탭 실물 테스트 — 진짜 Electron 창에서 대화한 뒤 Trajectory 탭이 opencode 레거시 기록(/session/{id}/message?directory=)을
 // 스텝·도구 줄과 3레인 시간축으로 보이는지 본다. 렌더러 → preload(trajectory:load) → ctx.trajectory → ctx.llm.readMessages →
 // opencode 를 관통한다. 자기 앱·vite·임시 폴더를 띄우고 다른 실물 테스트의 순서에 기대지 않는다.
-// 가짜 LLM 규칙: [bash:<cmd>] 는 bash 도구, [call:read {"filePath":…}] 는 1.18.18 에서 인자 키가 틀려(path) 반드시 실패하는 도구,
+// 가짜 LLM 규칙: [bash:<cmd>] 는 bash 도구, [call:read {"path":…}] 는 레거시에서 인자 키가 틀려(filePath) 반드시 실패하는 도구,
 // [drip] 은 두 조각 사이 1.5초 — 생성이 긴 스텝을 만든다 (01e).
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
@@ -107,13 +107,13 @@ describe('Trajectory 탭', () => {
   })
 
   it('Trajectory 탭을 연 채로 보내면 턴이 끝난 뒤 다시 읽어 새 줄이 생긴다 — 실패한 도구는 빨간 줄과 빨간 막대', async () => {
-    await type('읽기 실패 [call:read {"filePath":"/nope-litecode"}]')
+    await type('읽기 실패 [call:read {"path":"/nope-litecode"}]')
     await expect.poll(() => turnHeads().count(), { timeout: 30_000 }).toBe(2)
 
     const failed = page.locator('.trajectory__row--error[data-kind="tool"]')
     await expect.poll(() => failed.count(), { timeout: 10_000 }).toBe(1)
-    expect(await failed.innerText()).toContain('read {"filePath":"/nope-litecode"}')
-    expect(await failed.innerText()).toContain('Invalid tool input')
+    expect(await failed.innerText()).toContain('read {"path":"/nope-litecode"}')
+    expect(await failed.innerText()).toContain('invalid arguments')
     expect(await bars(2).and(page.locator('.trajectory__bar--error')).count()).toBe(1)
   })
 
@@ -125,8 +125,10 @@ describe('Trajectory 탭', () => {
 
   it('대화 중 AGENTS.md 를 바꾸면 그다음 턴에 CONTEXT 줄(지시문 바뀜)이 생긴다', async () => {
     await fs.writeFile(path.join(project, 'AGENTS.md'), '# 규칙 2 — 바뀜\n')
-    // opencode 는 바뀐 지시문을 <system-update> 로 user 메시지 뒤에 붙여 LLM 에 보낸다 — 가짜 LLM 이 그대로 되돌려 준다
+    // 앱이 매 턴 AGENTS.md 를 prompt system 으로 싣고(instructions.ts) 그 값이 user 기록에 남는다 — 앞 턴과 달라진 턴에 CONTEXT 줄 (이슈 #20)
     expect(await send('지시문 확인')).toContain('echo: 지시문 확인')
+    const { lastChatText } = (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { lastChatText: string }
+    expect(lastChatText).toContain('# 규칙 2 — 바뀜') // 바뀐 지시문이 그 턴 LLM 요청에 실렸다
     await tab('Trajectory').click()
 
     const context = page.locator('.trajectory__row[data-kind="context"]')
