@@ -4,6 +4,7 @@ import path from 'node:path'
 import { isLanguage, type Language } from '../../shared/i18n/index.ts'
 import { setMainLanguage, tr } from '../i18n.ts'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../shared/fontSize.ts'
+import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 
 // 앱 설정(설정 > 일반) — 언어·테마·대화 글자 크기·코딩 뷰. 정본은 이 서비스, 앱에서는 userData 의 settings.json 하나
 // ("설정 파일 열기" 가 여는 파일 — dsh 처럼 사용자가 텍스트로 고칠 수 있다). 손으로 고친 값은 다음 실행 때 읽는다(파일 감시 없음).
@@ -21,10 +22,12 @@ export interface Settings {
   codingView: boolean
   /** PC 알림(OS 알림)을 띄운다 — 끄면 PC 알림만 없고 앱 안 토스트·점은 그대로 (ctx.notifications, 결정 Q9) */
   notifications: boolean
+  /** 새 대화가 시작하는 모드 (입력창 칩의 처음 값). 대화마다의 모드는 ctx.sessions 에 */
+  defaultMode: Mode
 }
 
-/** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9) */
-const DEFAULTS: Settings = { language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true }
+/** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9). 새 대화는 기본 모드(01k §6) */
+const DEFAULTS: Settings = { language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: DEFAULT_MODE }
 
 export interface SettingsOptions {
   /** settings.json 경로. 없으면 메모리에만 둔다 */
@@ -48,6 +51,7 @@ const valid: { [K in keyof Settings]: (value: unknown) => value is Settings[K] }
   fontSize: (value): value is number => Number.isInteger(value) && (value as number) >= FONT_SIZE_MIN && (value as number) <= FONT_SIZE_MAX,
   codingView: (value): value is boolean => typeof value === 'boolean',
   notifications: (value): value is boolean => typeof value === 'boolean',
+  defaultMode: isMode,
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

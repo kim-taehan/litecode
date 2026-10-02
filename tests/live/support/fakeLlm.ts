@@ -28,6 +28,7 @@ import type { AddressInfo } from 'node:net'
 //   복호화돼 게이트웨이까지 갔는지 본다 (chatAuth 는 opencode 가 보낸 것 — 키가 엔진 env 로 전달됐는지).
 //   chatModels 는 받은 chat/completions 요청 본문의 model 을 받은 순서대로 — 입력창에서 고른 모델로 갔는지 본다.
 //   lastChat 은 마지막 요청의 model 과 messages 요약(역할·글자 앞 80자) — 모델을 바꾼 뒤에도 앞 턴 맥락이 실렸는지 본다.
+//   lastChat.tools 는 그 요청에 실린 도구 이름(정렬) — 모드(에이전트)가 도구를 뺐는지 LLM 요청 본문으로 본다 (approval.live.test.ts)
 //   lastChatText 는 마지막 요청 messages 의 글 전체를 이은 것 — 긴 맥락(`!` 카드 출력)이 실렸는지 본다
 // - `GET /v1/models` 는 OpenAI 호환 모델 목록 FAKE_MODELS 를 준다 (설정 > 모델의 "사용 가능한 모델 가져오기")
 // - 스트림 답마다 finish 청크 뒤·[DONE] 앞에 `choices: []` + FAKE_USAGE 청크를 보낸다 (opencode 가 stream_options.include_usage
@@ -115,7 +116,7 @@ export async function startFakeLlm(): Promise<FakeLlm> {
   let modelsAuth: string | undefined
   let chatAuth: string | undefined
   const chatModels: string[] = []
-  let lastChat: { model: string; messages: { role: string; text: string }[] } | undefined
+  let lastChat: { model: string; messages: { role: string; text: string }[]; tools: string[] } | undefined
   let lastChatText = ''
   const server = http.createServer((req, res) => {
     let raw = ''
@@ -137,10 +138,14 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       }
       count++
       chatAuth = req.headers.authorization
-      const body = JSON.parse(raw) as { model: string; messages: ChatMessage[] }
+      const body = JSON.parse(raw) as { model: string; messages: ChatMessage[]; tools?: { function?: { name?: string } }[] }
       chatModels.push(body.model)
       const messages = body.messages
-      lastChat = { model: body.model, messages: messages.map((message) => ({ role: message.role, text: contentText(message).slice(0, 80) })) }
+      lastChat = {
+        model: body.model,
+        messages: messages.map((message) => ({ role: message.role, text: contentText(message).slice(0, 80) })),
+        tools: (body.tools ?? []).map((entry) => entry.function?.name ?? '').sort(),
+      }
       lastChatText = messages.map(contentText).join('\n')
       const text = lastUserText(messages)
       if (text.includes('[fail]')) {

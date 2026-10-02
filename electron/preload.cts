@@ -31,6 +31,8 @@ const Channel = {
   OPEN_EXTERNAL: 'shell:open-external',
   LOAD_TRAJECTORY: 'trajectory:load',
   TURN_PROGRESS: 'chat:progress',
+  TURN_ATTENTION: 'chat:attention',
+  REPLY_ATTENTION: 'chat:reply-attention',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   RUN_SHELL: 'shell:run',
@@ -60,8 +62,8 @@ const bridge: LitecodeBridge = {
   saveProvider: (input) => ipcRenderer.invoke(Channel.SAVE_PROVIDER, input),
   removeProvider: (id) => ipcRenderer.invoke(Channel.REMOVE_PROVIDER, id),
   fetchProviderModels: (draft) => ipcRenderer.invoke(Channel.FETCH_PROVIDER_MODELS, draft),
-  sendMessage: (conversationId, providerId, modelId, directory, prompt, sessionId, display) =>
-    ipcRenderer.invoke(Channel.SEND_MESSAGE, conversationId, providerId, modelId, directory, prompt, sessionId, display),
+  sendMessage: (conversationId, providerId, modelId, directory, prompt, sessionId, display, mode) =>
+    ipcRenderer.invoke(Channel.SEND_MESSAGE, conversationId, providerId, modelId, directory, prompt, sessionId, display, mode),
   listProjects: () => ipcRenderer.invoke(Channel.LIST_PROJECTS),
   openProject: (directory) => ipcRenderer.invoke(Channel.OPEN_PROJECT, directory),
   pickProjectFolder: () => ipcRenderer.invoke(Channel.PICK_PROJECT_FOLDER),
@@ -95,6 +97,8 @@ const bridge: LitecodeBridge = {
     ipcRenderer.on(Channel.TURN_PROGRESS, handler)
     return () => void ipcRenderer.removeListener(Channel.TURN_PROGRESS, handler)
   },
+  onTurnAttention: (listener) => listen(Channel.TURN_ATTENTION, listener),
+  replyAttention: (sessionId, requestId, answer) => ipcRenderer.invoke(Channel.REPLY_ATTENTION, sessionId, requestId, answer),
   resolveFiles: (directory, tokens) => ipcRenderer.invoke(Channel.RESOLVE_FILES, directory, tokens),
   revealFile: (directory, token) => ipcRenderer.invoke(Channel.REVEAL_FILE, directory, token),
   runShell: (conversationId, runId, directory, command, position) =>

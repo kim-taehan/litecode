@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Conversation, ConversationStatus, HistoryMessage, OpenTarget, Project, ProviderSummary, TurnItem } from '../shared/ipc.ts'
+import type { Attention, Conversation, ConversationStatus, HistoryMessage, Mode, OpenTarget, Project, ProviderSummary, TurnItem } from '../shared/ipc.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
@@ -18,6 +18,7 @@ import { ShellCard, type ShellCardView } from './ShellCard.tsx'
 import { useSettings, useT } from './settingsStore.ts'
 import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
+import { ModeChip, nextMode } from './ModeChip.tsx'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -25,12 +26,16 @@ interface ChatMessage {
   text: string
   /** user: 보낸 시각 */
   at?: number
+  /** user: 이 턴을 돌린 모드 — 앞 턴과 다르면 그 자리에 구분선 */
+  mode?: Mode
   /** assistant: 그 턴의 진행 줄 (생각·도구·글) */
   items?: TurnItem[]
   /** assistant: 걸린 시간(ms) */
   duration?: number
   failed?: boolean
   interrupted?: boolean
+  /** assistant: 승인·질문을 거절해 끝났다 (실패 아님) */
+  declined?: boolean
 }
 
 interface Session {
@@ -42,6 +47,8 @@ interface Session {
   /** 입력창 드롭다운에서 고른 이 대화의 모델. 없으면(아직 안 고르고 안 보낸 새 대화) 마지막으로 고른 모델을 따른다.
    *  대화 중에 바꾸면 다음 턴부터 그 모델로 간다 (엔진 세션의 모델은 ctx.llm 이 바꾼다) */
   model?: ModelRef
+  /** 입력창 칩의 모드. 없으면 설정의 "새 대화 기본 모드". 바꾸면 다음 턴을 보낼 때 엔진 세션이 그 모드가 된다 (ctx.llm) */
+  mode?: Mode
   title: string
   messages: ChatMessage[]
   /** 답을 기다리는 중 — 대화마다 따로. 기다리는 동안 다른 대화·프로젝트는 보낼 수 있다 (03_qa) */
@@ -49,6 +56,8 @@ interface Session {
   /** 답을 기다리는 턴의 진행 줄 (메인이 실시간으로 민다) 과 보낸 시각 — 턴이 끝나면 답에 옮긴다 */
   progress?: TurnItem[]
   sentAt?: number
+  /** 답을 기다리는 턴이 기다리는 승인·질문 (메인이 민다) — 진행 중 턴 안에 카드로 */
+  attention?: Attention[]
   /** `!명령` 결과 카드 — 저장된 것은 메인(ctx.sessions)이 정본이고, 여기는 화면 사본 + 돌고 있는 카드 */
   shells?: ShellCardView[]
   /** 마지막 활동 시각(ms) — 목록에 `38min`·`1d` 로 보이고, 보관 개수 제한의 기준이 된다 */
@@ -69,8 +78,8 @@ function isBlank(session: Session): boolean {
 }
 
 /** 저장할 목록 정보 (말풍선·대기 상태·카드는 빼고 — 카드는 메인이 저장한다) */
-function toConversation({ id, project, engineSessionId, title, updatedAt, model, usage }: Session): Conversation {
-  return { id, project, engineSessionId, title, updatedAt, model, usage }
+function toConversation({ id, project, engineSessionId, title, updatedAt, model, mode, usage }: Session): Conversation {
+  return { id, project, engineSessionId, title, updatedAt, model, mode, usage }
 }
 
 function fromConversation(conversation: Conversation): Session {
@@ -78,8 +87,8 @@ function fromConversation(conversation: Conversation): Session {
 }
 
 /** 실시간 턴과 같은 모양 — 실패·중단이면 사유를 ⚠️ 로 */
-function toChatMessage({ role, text, error, at, items, duration, interrupted }: HistoryMessage): ChatMessage {
-  return { role, text: error ? `⚠️ ${error}` : text, at, items, duration, failed: !!error, interrupted }
+function toChatMessage({ role, text, error, at, mode, items, duration, interrupted, declined }: HistoryMessage): ChatMessage {
+  return { role, text: error ? `⚠️ ${error}` : text, at, mode, items, duration, failed: !!error, interrupted, declined }
 }
 
 /** 그 프로젝트에 대화가 하나도 없으면 새 대화를 하나 더한다 — 같은 값을 두 번 넣어도 한 번만 더해진다 */
@@ -383,6 +392,14 @@ export function App() {
       ),
     [],
   )
+  // 답을 기다리는 턴의 승인·질문 — 진행 줄과 같은 방식 (끝난 뒤 늦게 온 것은 버린다)
+  useEffect(
+    () =>
+      window.litecode.onTurnAttention((conversationId, requests) =>
+        updateSession(conversationId, (session) => (session.pending ? { ...session, attention: requests } : session)),
+      ),
+    [],
+  )
   // 돌고 있는 `!명령` 카드의 출력 조각 — 카드 id 로 찾는다
   useEffect(
     () =>
@@ -406,6 +423,8 @@ export function App() {
   /** 이 대화의 모델 — 설정에서 지워졌으면 chosen 이 없고 보내기가 막힌다 */
   const selected = active?.model ?? initialModel(providers, lastModel)
   const chosen = findModel(providers, selected)
+  /** 이 대화의 모드 — 고른 적 없으면 새 대화 기본 모드 */
+  const mode = active?.mode ?? settings.defaultMode
   /** 알림 — 메인이 쥔 대화별 상태(점)와 앞일 때의 토스트. 지금 보는 대화를 메인에 알린다 */
   const notices = useNotices(active?.id)
 
@@ -558,19 +577,24 @@ export function App() {
     setSessions((sessionsNow) => (target.project === current ? withSessionFor(target.project)(rest(sessionsNow)) : rest(sessionsNow)))
   }
 
+  function chooseMode(next: Mode): void {
+    if (active) updateSession(active.id, (session) => ({ ...session, mode: next }))
+  }
+
   function chooseModel(next: ModelRef): void {
     if (active) updateSession(active.id, (session) => ({ ...session, model: next }))
     setLastModel(next)
   }
 
-  /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display */
-  async function send(command?: { text: string; display: string }): Promise<void> {
+  /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display. withMode: 이 턴부터 그 모드로 ("이 계획대로 실행") */
+  async function send(command?: { text: string; display: string }, withMode?: Mode): Promise<void> {
     const prompt = command?.text ?? draft.trim()
     const shown = command?.display ?? prompt
     if (!prompt || !selected || !chosen || !active || active.pending || !canWrite(active)) return
 
     // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
     const target = active
+    const turnMode = withMode ?? mode
     setDraft('')
     following.current = true
     const sentAt = Date.now()
@@ -581,8 +605,9 @@ export function App() {
       sentAt,
       updatedAt: Date.now(),
       model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
+      mode: turnMode, // 모드도 — 설정의 기본 모드가 나중에 바뀌어도 이 대화는 그대로
       title: isBlank(session) ? shown.slice(0, 24) : session.title,
-      messages: [...session.messages, { role: 'user', text: shown, at: sentAt }],
+      messages: [...session.messages, { role: 'user', text: shown, at: sentAt, mode: turnMode }],
     })
     updateSession(target.id, start)
     // 보내기 전에 목록에 저장해 둔다 — 엔진 세션이 생기면 메인 프로세스가 여기에 붙인다 (답을 기다리는 중 앱이 꺼져도 다시 열리게)
@@ -590,12 +615,14 @@ export function App() {
     saved.current.set(target.id, JSON.stringify(conversation))
     forgetPruned(await window.litecode.saveConversation(conversation))
 
-    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId, command?.display)
+    const display = command && command.display !== prompt ? command.display : undefined
+    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId, display, turnMode)
     updateSession(target.id, (session) => ({
       ...session,
       pending: false,
       progress: undefined,
       sentAt: undefined,
+      attention: undefined,
       updatedAt: Date.now(),
       engineSessionId: result.sessionId ?? session.engineSessionId,
       usage: result.usage ? addTurn(session.usage, result.usage) : session.usage,
@@ -608,6 +635,7 @@ export function App() {
           duration: Date.now() - sentAt,
           failed: !result.ok,
           interrupted: result.interrupted,
+          declined: result.declined,
         },
       ],
     }))
@@ -914,6 +942,11 @@ export function App() {
               {active.messages.map((message, index) => (
                 <Fragment key={index}>
                   {shellCards(active, (position) => position === index)}
+                  {message.role === 'user' && switchedMode(active.messages, index) && (
+                    <div className="mode-divider" data-mode={message.mode} role="separator">
+                      {t('mode.switched', { name: t(`mode.${message.mode!}`) })}
+                    </div>
+                  )}
                   {message.role === 'user' ? (
                     <UserMessage text={message.text} at={message.at} />
                   ) : (
@@ -922,15 +955,40 @@ export function App() {
                       text={message.text}
                       failed={message.failed}
                       interrupted={message.interrupted}
+                      declined={message.declined}
                       duration={message.duration}
                       directory={active.project}
                     />
                   )}
                 </Fragment>
               ))}
+              {/* 계획 모드로 끝난 마지막 턴 — 누르면 기본 모드로 바꾸고 이어 실행. 신규 세대 opencode 는 "이제 실행해도 된다" 를
+                  안 붙이므로 보내는 문장이 그 역할을 한다 (01k §5) */}
+              {!active.pending && planEnded(active.messages) && (
+                <button
+                  type="button"
+                  className="run-plan"
+                  disabled={!chosen}
+                  onClick={() => {
+                    const text = t('mode.runPlanPrompt')
+                    void send({ text, display: text }, 'build')
+                  }}
+                >
+                  {t('mode.runPlan')}
+                </button>
+              )}
               {shellCards(active, (position) => position === active.messages.length)}
               {active.pending && (
-                <AssistantTurn key="running" running items={active.progress ?? []} text="" startedAt={active.sentAt} directory={active.project} />
+                <AssistantTurn
+                  key="running"
+                  running
+                  items={active.progress ?? []}
+                  text=""
+                  startedAt={active.sentAt}
+                  directory={active.project}
+                  attention={active.attention}
+                  onAnswer={(request, answer) => window.litecode.replyAttention(request.sessionId, request.id, answer)}
+                />
               )}
               {shellCards(active, (position) => position > active.messages.length)}
               </div>
@@ -947,7 +1005,7 @@ export function App() {
                   ref={trigger.inputRef}
                   {...trigger.inputProps}
                   className="composer__input"
-                  placeholder={t('composer.placeholder')}
+                  placeholder={mode === 'plan' ? t('composer.planPlaceholder') : t('composer.placeholder')}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -955,6 +1013,12 @@ export function App() {
                     // 마지막 글자가 입력창에 남는다. keyCode 229 는 isComposing 을 안 채우는 환경용
                     if (event.nativeEvent.isComposing || event.keyCode === 229) return
                     if (trigger.onKeyDown(event)) return
+                    // Shift+Tab — 모드 순환 (opencode TUI·Claude Code 와 같은 키). 입력창에서만 브라우저 기본(뒤로 포커스)을 막는다
+                    if (event.key === 'Tab' && event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+                      event.preventDefault()
+                      if (!active.pending) chooseMode(nextMode(mode))
+                      return
+                    }
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
                       submit()
@@ -970,6 +1034,7 @@ export function App() {
                       </svg>
                     </button>
                   </span>
+                  <ModeChip value={mode} locked={!!active.pending} onChange={chooseMode} />
                   <div className="composer__trailing">
                     <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
                     <button
@@ -1235,4 +1300,18 @@ function ProjectPopover({ projects, current, statusOf, busy, error, onPick, onOp
       <HoverCard card={hover.card} />
     </div>
   )
+}
+
+/** 그 내 말이 앞 내 말과 다른 모드로 갔나 — 모드가 바뀐 자리의 구분선 */
+function switchedMode(messages: readonly ChatMessage[], index: number): boolean {
+  const mode = messages[index]?.mode
+  const previous = messages.slice(0, index).reverse().find((message) => message.role === 'user')?.mode
+  return !!mode && !!previous && mode !== previous
+}
+
+/** 마지막 턴이 계획 모드로 잘 끝났나 — "이 계획대로 실행" 자리 */
+function planEnded(messages: readonly ChatMessage[]): boolean {
+  const last = messages.at(-1)
+  const asked = messages.at(-2)
+  return last?.role === 'assistant' && !last.failed && !last.declined && asked?.role === 'user' && asked.mode === 'plan'
 }

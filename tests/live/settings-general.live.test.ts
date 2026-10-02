@@ -115,7 +115,7 @@ describe('설정 > 일반', () => {
     await openGeneral({ settings: 'Settings', general: 'General' })
     expect(await dialog().locator('.settings-nav__item').allTextContents()).toEqual(['General', 'Models'])
     expect(await dialog().getByRole('button', { name: 'General', exact: true }).getAttribute('aria-current')).toBe('page')
-    expect(await dialog().locator('.settings-row__title').allTextContents()).toEqual(['Language', 'Appearance', 'Font size', 'Show coding view', 'Notifications'])
+    expect(await dialog().locator('.settings-row__title').allTextContents()).toEqual(['Default mode for new chats', 'Language', 'Appearance', 'Font size', 'Show coding view', 'Notifications'])
     const panel = page.locator('.settings-panel')
     expect(await panel.evaluate((el) => [getComputedStyle(el).borderRadius, el.getBoundingClientRect().width])).toEqual(['28px', 800])
     expect(await dialog().getByRole('button', { name: 'Open configuration file' }).isVisible()).toBe(true)
@@ -129,7 +129,7 @@ describe('설정 > 일반', () => {
 
     await expect.poll(() => dialog().locator('.settings-nav__item').allTextContents(), { timeout: 5_000 }).toEqual(['일반', '모델'])
     expect(await page.getByRole('dialog', { name: '설정' }).count()).toBe(1)
-    expect(await dialog().locator('.settings-row__title').allTextContents()).toEqual(['언어', '테마', '글자 크기', '코딩 뷰 보기', '알림'])
+    expect(await dialog().locator('.settings-row__title').allTextContents()).toEqual(['새 대화 기본 모드', '언어', '테마', '글자 크기', '코딩 뷰 보기', '알림'])
     expect(await dialog().getByRole('button', { name: '설정 파일 열기' }).isVisible()).toBe(true)
     expect(await page.locator('.settings-trigger').textContent()).toBe('설정')
     expect(await page.locator('.new-chat').textContent()).toBe('+ 새 대화')

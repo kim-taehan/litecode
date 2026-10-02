@@ -74,6 +74,17 @@ describe('SessionsService', () => {
     expect(removed).toEqual([['c1'], ['c2']])
   })
 
+  it('대화별 모드를 저장해 다시 열어도 그대로다 — 손으로 고친 모르는 모드 값은 버린다 (기본 모드로 시작)', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1', { mode: 'plan' }))
+    await sessions.save(conversation('c2'))
+    expect((await (await start()).sessions.list()).map((entry) => [entry.id, entry.mode])).toEqual([['c2', undefined], ['c1', 'plan']])
+    const stored = JSON.parse(await fs.readFile(file, 'utf8')) as { conversations: Conversation[] }
+    stored.conversations[1]!.mode = 'yolo' as never
+    await fs.writeFile(file, JSON.stringify(stored))
+    expect((await (await start()).sessions.list()).find((entry) => entry.id === 'c1')!.mode).toBeUndefined()
+  })
+
   it('처음(파일 없음)에는 빈 목록이다', async () => {
     expect(await (await start()).sessions.list()).toEqual([])
   })

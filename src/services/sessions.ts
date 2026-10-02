@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { History } from './llm.ts'
 import { shellContext, type ShellResult } from './shell.ts'
+import { isMode, type Mode } from '../../shared/modes.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
 
@@ -37,6 +38,8 @@ export interface Conversation {
   updatedAt: number
   /** 이 대화에서 고른 모델 */
   model?: { providerId: string; modelId: string }
+  /** 이 대화의 모드 (입력창 칩). 없으면 새 대화 기본 모드(설정)를 따른다 — 보낼 때 ctx.llm 이 엔진 세션의 에이전트를 맞춘다 */
+  mode?: Mode
   /** 화면이 턴마다 더한 통계 합계 — 모양은 화면(renderer/stats.ts)이 정하고 여기는 그대로 보관한다 */
   usage?: unknown
   /** 엔진 메시지 id → 말풍선에 보일 글. `/` 명령처럼 보낸 본문(풀어 쓴 template)과 사용자가 친 글이 다른 입력만 (label) */
@@ -244,8 +247,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, updatedAt, model, usage, labels, shells }: Conversation): Conversation {
-  return { id, project, engineSessionId, title, updatedAt, model, usage, labels, shells }
+function pick({ id, project, engineSessionId, title, updatedAt, model, mode, usage, labels, shells }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, shells }
 }
 
 function isConversation(value: unknown): value is Conversation {

@@ -2,7 +2,8 @@
 // 타입은 서비스 쪽 정의를 그대로 재수출한다 — 같은 모양을 두 곳에 베끼지 않는다.
 
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
-import type { ChatResult, History } from '../src/services/llm.ts'
+import type { Attention, AttentionAnswer, ChatResult, History } from '../src/services/llm.ts'
+import type { Mode } from './modes.ts'
 import type { Project } from '../src/services/projects.ts'
 import type { Conversation, ShellCard } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
@@ -12,7 +13,8 @@ import type { Settings } from '../src/services/settings.ts'
 import type { NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
-export type { ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
+export type { Attention, AttentionAnswer, AttentionQuestion, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
+export type { Mode } from './modes.ts'
 export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { TurnItem } from '../src/services/turnProgress.ts'
 export type { Project } from '../src/services/projects.ts'
@@ -52,6 +54,9 @@ export const Channel = {
   LOAD_TRAJECTORY: 'trajectory:load',
   /** 메인 → 화면 (conversationId, item) — 답을 기다리는 턴의 진행 줄 */
   TURN_PROGRESS: 'chat:progress',
+  /** 메인 → 화면 (conversationId, Attention[]) — 답을 기다리는 턴의 승인·질문 목록 (빈 목록 = 없음) */
+  TURN_ATTENTION: 'chat:attention',
+  REPLY_ATTENTION: 'chat:reply-attention',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   RUN_SHELL: 'shell:run',
@@ -83,7 +88,8 @@ export interface LitecodeBridge {
   fetchProviderModels(draft: { id?: string; baseURL: string; apiKey?: string }): Promise<ModelCatalogEntry[]>
   /** sessionId 를 안 주면 directory(작업 디렉터리)에서 세션을 새로 만든다 — 결과의 sessionId 를 다음 호출에 넘긴다.
    *  conversationId 는 저장된 대화(saveConversation) — 새 세션이 생기자마자 거기에 붙인다 (답 대기 중 앱이 꺼져도 다시 열리게).
-   *  display 를 주면 다시 열었을 때 prompt 대신 그 글이 말풍선에 보인다 (`/` 명령: prompt 는 풀어 쓴 template) */
+   *  display 를 주면 다시 열었을 때 prompt 대신 그 글이 말풍선에 보인다 (`/` 명령: prompt 는 풀어 쓴 template).
+   *  mode 는 이 턴을 돌릴 모드 (입력창 칩) — 엔진 세션을 그 모드로 맞추고 보낸다 */
   sendMessage(
     conversationId: string,
     providerId: string,
@@ -92,6 +98,7 @@ export interface LitecodeBridge {
     prompt: string,
     sessionId?: string,
     display?: string,
+    mode?: Mode,
   ): Promise<ChatResult>
   /** 최근 프로젝트 — 맨 앞이 마지막으로 연 프로젝트 */
   listProjects(): Promise<Project[]>
@@ -132,6 +139,10 @@ export interface LitecodeBridge {
   loadTrajectory(directory: string, sessionId: string): Promise<Trajectory>
   /** 답을 기다리는 턴의 진행 줄(생각·도구·글)이 바뀔 때마다 — 같은 id 는 바꿔 끼운다. 해제 함수를 준다 */
   onTurnProgress(listener: (conversationId: string, item: TurnItem) => void): () => void
+  /** 답을 기다리는 턴이 기다리는 승인·질문 목록이 바뀔 때마다 (빈 목록 = 없음) — 대화 안 카드 */
+  onTurnAttention(listener: (conversationId: string, requests: Attention[]) => void): () => void
+  /** 카드의 답 — 권한 'once'|'reject', 질문은 질문 순서대로 고른 답 또는 'reject'. 이미 풀린 요청·빈 답이면 거절 */
+  replyAttention(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void>
   /** 답의 인라인 코드 중 그 프로젝트 안의 실제 파일인 것만 (받은 글자 그대로) — 파일 언급 칩 */
   resolveFiles(directory: string, tokens: string[]): Promise<string[]>
   /** 프로젝트 안의 그 파일을 OS 파일 관리자에서 보여 준다 (열지·실행하지 않는다). 프로젝트 밖·없는 파일이면 false */

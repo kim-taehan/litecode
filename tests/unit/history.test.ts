@@ -100,4 +100,28 @@ describe('historyMessages', () => {
     const hanging = { type: 'assistant', time: { created: 2 }, content: [] }
     expect(historyMessages([user('a'), hanging], true)[1]!.duration).toBeUndefined()
   })
+
+  // 라운드 A (2026-10-02 실측): 생성 때 고른 에이전트는 기록이 없고, 바꾸면 agent-switched 가, 답마다 agent 가 남는다
+  it('내 말에 그 턴의 모드를 싣는다 — 답의 agent 가 정하고, 답이 없으면 앞서 바꾼 에이전트. 모르는 에이전트는 없음', () => {
+    const switched = (agent: string) => ({ type: 'agent-switched', agent })
+    const messages = historyMessages(
+      [user('a'), assistant('1', { agent: 'build' }), switched('plan'), user('b'), assistant('2', { agent: 'plan' }), switched('litecode-ask'), user('c'), assistant('3', { agent: 'litecode-ask' }), switched('explore'), user('d')],
+      true,
+    )
+    expect(messages.filter((message) => message.role === 'user').map((message) => message.mode)).toEqual(['build', 'plan', 'ask', undefined])
+  })
+
+  it('거절로 끝난 턴(완료 시각 없이 마지막 도구가 오류)은 "중단됨" 이 아니라 거절함이다 — 끊긴 도구는 running 으로 남는다', () => {
+    const declined = { type: 'assistant', time: { created: 2 }, content: [{ type: 'tool', name: 'bash', state: { status: 'error', error: { message: 'Tool execution interrupted' } } }] }
+    expect(historyMessages([user('[bash:ls]'), declined], false)[1]).toMatchObject({ role: 'assistant', declined: true })
+    expect(historyMessages([user('[bash:ls]'), declined], false)[1]!.interrupted).toBeUndefined()
+    const cut = { ...declined, content: [{ type: 'tool', name: 'bash', state: { status: 'running' } }] }
+    expect(historyMessages([user('[bash:ls]'), cut], false)[1]).toMatchObject({ interrupted: true })
+
+    // 다음 턴이 지나면 opencode 가 완료 시각을 채운다 — 가운데 턴도 거절함. 실패한 도구 뒤에 이어 답한 턴은 거절이 아니다
+    const later = historyMessages([user('[bash:ls]'), { ...declined, time: { created: 2, completed: 3 } }, user('b'), assistant('echo: b')], false)
+    expect(later[1]).toMatchObject({ declined: true })
+    const failedThenAnswered = historyMessages([user('[call:write]'), { ...declined, time: { created: 2, completed: 3 } }, assistant('tool: Unknown tool')], false)
+    expect(failedThenAnswered[1]!.declined).toBeUndefined()
+  })
 })

@@ -64,6 +64,7 @@ describe('글자', () => {
     expect(turnHeadText(ko, 1_000, true)).toBe('실패 · 1초')
     expect(turnHeadText(ko, 3_000, true, true)).toBe('중단됨 · 3초') // 끊긴 턴은 실패와 가른다
     expect(turnHeadText(ko, undefined, true, true)).toBe('중단됨')
+    expect(turnHeadText(ko, 4_000, false, false, true)).toBe('거절함 · 4초') // 승인·질문 거절은 실패가 아니다
   })
 
   it('영어 사전으로도 같은 자리가 채워진다', () => {

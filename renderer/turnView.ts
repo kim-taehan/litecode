@@ -48,9 +48,11 @@ export function formatDuration(t: Translate, ms: number): string {
 }
 
 /** 끝난 턴 머리 글 — 끊긴 턴(엔진 재시작 등)은 실패와 갈라 "중단됨" */
-export function turnHeadText(t: Translate, duration: number | undefined, failed: boolean, interrupted = false): string {
+export function turnHeadText(t: Translate, duration: number | undefined, failed: boolean, interrupted = false, declined = false): string {
   if (interrupted) return duration === undefined ? t('chat.interrupted') : t('chat.interruptedAfter', { duration: formatDuration(t, duration) })
   if (failed) return duration === undefined ? t('chat.failed') : t('chat.failedAfter', { duration: formatDuration(t, duration) })
+  // 승인·질문을 거절해 끝난 턴 — 실패가 아니다 (라운드 A)
+  if (declined) return duration === undefined ? t('chat.declined') : t('chat.declinedAfter', { duration: formatDuration(t, duration) })
   return duration === undefined ? t('chat.completed') : t('chat.completedIn', { duration: formatDuration(t, duration) })
 }
 

@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { engineConfig, engineEnv, isOurServer } from '../../src/services/engine.ts'
+import { ENGINE_AGENTS, engineConfig, engineEnv, isOurServer, MODE_AGENT } from '../../src/services/engine.ts'
+import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
 
@@ -24,7 +25,32 @@ describe('engineConfig — 앱이 생성하는 opencode.json', () => {
         a: { npm: '@ai-sdk/openai-compatible', name: 'A', options: { baseURL: 'http://127.0.0.1:9/a', apiKey: 'proxy-token' }, models: { m1: { name: 'Model 1' } } },
         b: { npm: '@ai-sdk/openai-compatible', name: 'B', options: { baseURL: 'http://127.0.0.1:9/b', apiKey: 'proxy-token' }, models: { m1: { name: 'Model 1' } } },
       },
+      agent: ENGINE_AGENTS,
     })
+  })
+})
+
+// 모드 = opencode 에이전트 (01f·01k, 2026-10-02 실측: plan 에 edit·bash·webfetch deny 를 덧붙이면 도구가 빠지고 .opencode/plans 예외도 막힌다)
+describe('engineConfig — 모드 에이전트', () => {
+  const agent = engineConfig([], { token: 't', baseURLFor: () => '' }).agent as Record<string, { mode?: string; prompt?: string; permission: Record<string, string> }>
+
+  it('모든 모드에 에이전트가 있다 — build 는 opencode 기본, 나머지는 생성한 opencode.json 에 정의', () => {
+    for (const mode of MODES) if (mode !== 'build') expect(agent[MODE_AGENT[mode]], mode).toBeDefined()
+    expect(MODE_AGENT.build).toBe('build')
+    expect(agent['build']).toBeUndefined()
+  })
+
+  it('계획은 opencode plan 을 덮어써 편집·명령·웹을 막고 계획 프롬프트를 준다', () => {
+    expect(MODE_AGENT.plan).toBe('plan')
+    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny' })
+    expect(agent['plan']!.prompt).toMatch(/plan mode/)
+  })
+
+  it('매번 묻기는 편집·명령·웹을 묻고 질문 도구를 다시 허용한다, 전체 권한은 모두 허용 — 둘 다 primary 에 build 첫 줄 프롬프트', () => {
+    expect(agent[MODE_AGENT.ask]).toMatchObject({ mode: 'primary', permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', question: 'allow' } })
+    expect(agent[MODE_AGENT.full]).toMatchObject({ mode: 'primary', permission: { '*': 'allow' } })
+    expect(agent[MODE_AGENT.ask]!.prompt).toMatch(/^You are an AI coding agent\./)
+    expect(agent[MODE_AGENT.full]!.prompt).toBe(agent[MODE_AGENT.ask]!.prompt)
   })
 })
 

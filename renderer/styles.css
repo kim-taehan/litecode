@@ -26,6 +26,9 @@
   --danger: #e5484d;
   --danger-bg: #fdecec;
   --ok: #3fa66b;
+  --warn: #f59e0b;                     /* state-warn-primary (amber-500) — 승인·질문 카드, 전체 권한 칩 */
+  --warn-soft: #fef5e7;                /* state-warn-tertiary (amber-100) */
+  --warn-border: #f7ad31;              /* state-warn-secondary (amber-400) */
   /* 설정 > 일반 라운드에서 하드코딩 색을 토큰으로 (01f 3절) */
   --surface: #ffffff;                  /* bg-layer-1 — 카드·입력칸·말풍선 */
   --surface-panel: #ffffff;            /* bg-layer-2 — 설정 판 */
@@ -82,6 +85,7 @@
     --danger: #f25a5a;
     --danger-bg: rgba(242, 90, 90, 0.15);
     --ok: #22c55e;
+    --warn-soft: #27241f;              /* amber-900 — warn·warn-border 는 두 테마 같다 */
     --surface: #232324;
     --surface-panel: #2c2c2e;
     --on-text: #0f1115;

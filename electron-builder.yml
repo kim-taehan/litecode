@@ -1,5 +1,5 @@
 # electron-builder 설정 — 폐쇄망 PC 에 설치본 하나로 들어가게 opencode·rg 를 싣는다 (closed-code/desktop 설정을 옮겼다).
-# 코드 서명·공증은 없다. mac 은 build/afterPack.cjs 가 ad-hoc 서명만 건다.
+# 공증은 없다. mac 은 build/afterPack.cjs 가 키체인의 "litecode-dev"(개발 Mac 자체 서명) 또는 ad-hoc 으로 서명한다.
 # Electron 바이너리는 ~/Library/Caches/electron 의 electron-v33.4.11-<os>-<arch>.zip 을 쓴다 (이 머신은 electron 다운로드가 막혀 있다).
 appId: com.litecode.desktop
 productName: litecode
@@ -35,7 +35,7 @@ mac:
     - target: zip
       arch: [arm64, x64]
   category: public.app-category.developer-tools
-  # 신원 서명은 건너뛴다(인증서 없음) — afterPack 이 ad-hoc 서명을 건다
+  # electron-builder 의 신원 서명은 건너뛴다 — afterPack 이 서명한다
   identity: null
 
 win:

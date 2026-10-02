@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { TurnItem } from '../shared/ipc.ts'
+import type { Attention, AttentionAnswer, TurnItem } from '../shared/ipc.ts'
+import { AttentionCard } from './Attention.tsx'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
@@ -52,6 +53,8 @@ interface AssistantTurnProps {
   failed?: boolean
   /** 실패 중에서도 끊겨서 끝났다 — 머리가 "중단됨" */
   interrupted?: boolean
+  /** 승인·질문을 거절해 끝났다 — 실패가 아니다, 머리가 "거절함" */
+  declined?: boolean
   /** 끝난 턴의 걸린 시간(ms) */
   duration?: number
   /** 답을 기다리는 중 — startedAt 부터 시계가 돈다 */
@@ -59,9 +62,12 @@ interface AssistantTurnProps {
   startedAt?: number
   /** 파일 언급 칩을 찾을 프로젝트 */
   directory: string
+  /** 진행 중 턴이 기다리는 승인·질문 — 작업 줄 아래 카드로 */
+  attention?: readonly Attention[]
+  onAnswer?(request: Attention, answer: AttentionAnswer): Promise<void>
 }
 
-export function AssistantTurn({ items, text, failed = false, interrupted = false, duration, running = false, startedAt, directory }: AssistantTurnProps) {
+export function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = [], onAnswer }: AssistantTurnProps) {
   const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(items)
   const foldable = !running && !failed && work.length > 0
   const [open, setOpen] = useState(false)
@@ -79,12 +85,12 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
             title={open ? t('chat.hideWork') : t('chat.showWork')}
             onClick={() => setOpen((now) => !now)}
           >
-            <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted)}</span>
+            <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted, declined)}</span>
             <Chevron />
           </button>
         ) : (
           <div className="turn__head">
-            <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted)}</span>
+            <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted, declined)}</span>
           </div>
         ))}
       {showWork && work.length > 0 && (
@@ -100,6 +106,8 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
           {failed ? text : <Markdown text={answerText(answer, text).trim()} directory={directory} />}
         </div>
       )}
+      {running &&
+        attention.map((request) => <AttentionCard key={request.id} request={request} onAnswer={(answer) => onAnswer?.(request, answer) ?? Promise.resolve()} />)}
       {running && <RunningStatus startedAt={startedAt} />}
     </div>
   )

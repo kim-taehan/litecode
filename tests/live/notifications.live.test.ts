@@ -11,8 +11,8 @@ import { alive, freePort, isolatedEnv } from './support/opencodeServer.ts'
 
 // 알림 실물 테스트 — 진짜 Electron 창·IPC·ctx.notifications 를 관통한다: 메인 판정 → PC 알림(기록) / 토스트·점(화면) → 누르면 그 프로젝트·대화.
 // 테스트 모드(LITECODE_TEST_HIDDEN=1)는 OS 알림·배지·창 앞으로 부르기를 기록으로 바꾸고(사용자 화면에 알림 0), 앞/뒤 판정을 주입받는다
-// (globalThis.__litecodeNotifyTest — electron/main.ts). 끝남·실패·중단·실행 중은 실제 턴(가짜 LLM 의 `[late]`·`[fail]`·`[slow]`)으로 만든다.
-// 질문 대기(llm/attention*)는 아직 실제 턴이 없어(라운드 A) 그 길로 쏘고, 알림 설정·거두기 시나리오의 끝남도 그 길로 쏜다 (판정만 본다).
+// (globalThis.__litecodeNotifyTest — electron/main.ts). 끝남·실패·중단·실행 중·질문 대기는 실제 턴(가짜 LLM 의 `[late]`·`[fail]`·`[slow]`·
+// `[call:question …]`)으로 만든다. 알림 설정·거두기 시나리오의 끝남만 ctx.llm 이벤트를 흉내 내 쏜다 (판정만 본다).
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -218,15 +218,26 @@ describe('알림', () => {
     expect(await state()).toEqual({})
   })
 
-  it('질문 대기는 "답 필요" 점과 PC 알림(질문 내용 없음) — 풀리면 점과 그 알림이 사라진다', async () => {
+  it('질문 대기(실제 question 턴)는 "답 필요" 점과 PC 알림(질문 내용 없음) — 카드로 답하면 그 알림이 닫힌다', async () => {
     await setForeground(false)
     await resetRecord()
-    await emit('llm/attention', { sessionId: conv['hello one']!.session, directory: alpha, kind: 'question', title: 'Which DB?' })
-    await expect.poll(shown, { timeout: 5_000 }).toEqual([{ title: 'hello one', body: 'alpha-app · 질문에 답을 기다립니다', closed: false }])
-    await expect.poll(() => switchDot().getAttribute('data-status'), { timeout: 5_000 }).toBe('attention')
-    await emit('llm/attention-resolved', { sessionId: conv['hello one']!.session, directory: alpha })
-    await expect.poll(async () => (await shown())[0]!.closed, { timeout: 5_000 }).toBe(true)
-    await expect.poll(() => switchDot().count(), { timeout: 5_000 }).toBe(0)
+    // 지금 보는 beta 의 hello three — 뒤(포커스 없음)라 보고 있어도 PC 알림이다
+    await submit('[call:question {"questions":[{"question":"Which DB?","header":"DB","options":[{"label":"Postgres","description":"pg"},{"label":"SQLite","description":"file"}]}]}]')
+    await expect.poll(shown, { timeout: 30_000 }).toEqual([{ title: 'hello three', body: 'beta-app · 질문에 답을 기다립니다', closed: false }])
+    expect(JSON.stringify(await shown())).not.toContain('Which DB')
+    await expect.poll(() => rowDot('hello three').getAttribute('data-status'), { timeout: 5_000 }).toBe('attention')
+    expect(await lastBadge()).toBe(1)
+    const card = page.locator('.attention-card[data-kind="question"]')
+    await card.locator('.attention-question__option', { hasText: 'SQLite' }).click()
+    await card.getByRole('button', { name: '답 보내기' }).click()
+    await expect.poll(async () => (await shown())[0]!.closed, { timeout: 10_000 }).toBe(true)
+    await page.locator('.bubble--assistant', { hasText: '"Which DB?"="SQLite"' }).waitFor({ timeout: 30_000 })
+    // 뒤에서 끝났으니 끝남 점이 남는다 — 다음 시나리오가 다른 프로젝트 점을 보므로 앞으로 와서 그 대화를 읽음으로
+    await expect.poll(() => rowDot('hello three').getAttribute('data-status'), { timeout: 5_000 }).toBe('done')
+    await setForeground(true)
+    await page.evaluate((id) => window.litecode.viewConversation(id), conv['hello three']!.id)
+    await expect.poll(() => rowDot('hello three').count(), { timeout: 5_000 }).toBe(0)
+    await setForeground(false)
   })
 
   it('중단(답을 기다리는 중 provider 저장으로 엔진 재시작)은 PC 알림 없이 앱 안 점만', async () => {

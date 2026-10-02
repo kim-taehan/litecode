@@ -1,7 +1,7 @@
 import { Context, Service } from 'cordis'
 import path from 'node:path'
 import type { Conversation } from './sessions.ts'
-import type { TurnInfo } from './llm.ts'
+import './llm.ts' // 'llm/turn-*'·'llm/attention*' 이벤트 선언
 import { tr } from '../i18n.ts'
 
 // 알림 (ctx.notifications) — ctx.llm 이 내는 턴 이벤트를 받아 앱 알림(토스트·점)이나 PC 알림(OS 알림)으로 바꾼다.
@@ -74,9 +74,6 @@ declare module 'cordis' {
     'notifications/toast'(toast: Toast): void
     /** PC 알림을 눌렀다 — 화면이 takePendingOpen 으로 열 곳을 당겨 간다 */
     'notifications/open'(): void
-    // ↓ 라운드 A 가 llm.ts 에 선언하면 이 두 줄을 지운다 (turn-* 는 llm.ts 에 있다)
-    'llm/attention'(info: TurnInfo & { kind: 'permission' | 'question'; title: string }): void
-    'llm/attention-resolved'(info: TurnInfo): void
   }
 }
 

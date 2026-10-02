@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
 import { ProviderRegistry, type ProviderInput } from '../src/services/providers.ts'
-import { LlmService } from '../src/services/llm.ts'
+import { LlmService, type Attention, type AttentionAnswer } from '../src/services/llm.ts'
 import type { TurnItem } from '../src/services/turnProgress.ts'
 import { EngineService } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
@@ -23,6 +23,7 @@ import { recordingHost, systemHost, type NotifyTestRecord, type WindowAccess } f
 import { tr } from '../src/i18n.ts'
 import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
+import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -123,7 +124,7 @@ function bootstrap(ctx: Context): void {
   handle(
     ctx,
     Channel.SEND_MESSAGE,
-    async (_event, conversationId: string, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string, display?: string) => {
+    async (_event, conversationId: string, providerId: string, modelId: string, directory: string, prompt: string, sessionId?: string, display?: string, mode?: Mode) => {
       // 보낸 본문과 보일 글이 다르면(`/` 명령) 엔진 메시지 id 를 정해 보일 글을 적어 둔다 — 다시 열어도 친 글이 보이게
       const messageId = display ? ctx.llm.newMessageId() : undefined
       if (messageId) await ctx.sessions.label(conversationId, messageId, display!)
@@ -131,9 +132,25 @@ function bootstrap(ctx: Context): void {
       const progress = (item: TurnItem) => {
         for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TURN_PROGRESS, conversationId, item)
       }
-      return ctx.llm.chat(providerId, modelId, directory, prompt, sessionId, (created) => ctx.sessions.attach(conversationId, created), messageId, progress)
+      // 승인·질문 카드도 같은 방식 — 대화 id 를 붙여 흘린다
+      const attention = (requests: Attention[]) => {
+        for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TURN_ATTENTION, conversationId, requests)
+      }
+      return ctx.llm.chat(
+        providerId,
+        modelId,
+        directory,
+        prompt,
+        sessionId,
+        (created) => ctx.sessions.attach(conversationId, created),
+        messageId,
+        progress,
+        isMode(mode) ? mode : undefined,
+        attention,
+      )
     },
   )
+  handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer) => ctx.llm.reply(sessionId, requestId, answer))
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
   handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))
   handle(ctx, Channel.REMOVE_CONVERSATION, async (_event, id: string) => ctx.sessions.remove(id))

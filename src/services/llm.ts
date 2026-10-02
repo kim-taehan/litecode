@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { normalizeBaseURL } from './providers.ts'
-import type { EngineConnection } from './engine.ts'
+import { MODE_AGENT, type EngineConnection } from './engine.ts'
+import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
 import { contextText, messageItems, TurnTracker, type TurnItem } from './turnProgress.ts'
@@ -20,7 +21,14 @@ import './engine.ts'
 // 바뀌면(구독 전에 prompt) 초반 이벤트를 놓친다.
 // 텍스트는 session.next.text.ended 의 data.text 에 완성된 조각으로 온다(델타 아님).
 // 턴 종료는 session.next.step.ended(finish !== 'tool-calls') 또는
-// session.next.step.failed.
+// session.next.step.failed. 그리고 앱이 거절한 도구의 session.next.tool.failed — 권한·질문 거절은 그것 하나로 끝나고 step.* 가 안 온다
+// (01f 1-d 6/6, 01i 2-c 5/5).
+//
+// 승인 요청(권한)·AI 질문(question 도구)은 세션 SSE 에 안 온다 (01f 1-c) — 턴 동안 전역 /api/event 의 permission.*·question.* 를 신호로,
+// 정본 목록(GET /api/session/{id}/permission·question)을 다시 읽어 카드(onAttention)와 'llm/attention*' 이벤트로 낸다. 답은 reply.
+//
+// 모드 = opencode 에이전트 (ctx.engine 이 정의, MODE_AGENT). 세션을 만들 때·이어갈 때 그 에이전트로 맞춘다 — 없는 이름도 opencode 는 받고
+// 모든 도구 허용으로 돌므로 /api/agent 목록에 나올 때까지 확인한다 (01f).
 //
 // opencode 서버는 ctx.engine 이 띄우고 관리한다 — 여기서는 주소·인증(connection())만 받아 모든 요청에 싣는다.
 // 서버가 재시작·크래시로 끝나면 진행 중 턴은 끝 이벤트 없이 사라진다(01_probe Q3) → connection().closed 를 보고 "중단됨" 으로 끝낸다.
@@ -38,8 +46,46 @@ declare module 'cordis' {
     'llm/turn-started'(info: TurnInfo): void
     /** 받아들여진 턴이 끝났다 (started 마다 정확히 한 번). 받아들여지기 전에 거절된 턴(모델 없음 등)은 둘 다 안 나간다 */
     'llm/turn-ended'(info: TurnInfo & { outcome: 'done' | 'failed' | 'interrupted'; error?: string }): void
+    /** 턴이 사람을 기다린다 — 승인 요청(permission)이나 AI 의 질문(question). 요청마다 한 번. title 은 짧은 설명(명령·질문 문장) */
+    'llm/attention'(info: TurnInfo & { kind: Attention['kind']; title: string }): void
+    /** 그 세션에 기다리는 것이 더는 없다 (답했다). 턴이 끝나면 따로 안 나간다 — turn-ended 가 덮는다 */
+    'llm/attention-resolved'(info: TurnInfo): void
   }
 }
+
+/** 턴이 기다리는 사람의 답 하나 — 승인 요청(권한) 또는 AI 의 질문. 화면이 카드로 그리고 reply 로 답한다 */
+export type Attention = PermissionAttention | QuestionAttention
+
+export interface PermissionAttention {
+  kind: 'permission'
+  /** 답할 때 쓰는 요청 id (per_…) */
+  id: string
+  sessionId: string
+  /** opencode 권한 이름 — bash·edit·read·external_directory·webfetch 등 */
+  action: string
+  /** 명령·파일·폴더 패턴 (edit 요청엔 diff 가 없다 — 01f 1-c) */
+  resources: string[]
+}
+
+export interface QuestionAttention {
+  kind: 'question'
+  /** que_… */
+  id: string
+  sessionId: string
+  questions: AttentionQuestion[]
+}
+
+/** opencode QuestionV2Info (01i 2-a) */
+export interface AttentionQuestion {
+  question: string
+  header?: string
+  options: { label: string; description?: string }[]
+  /** 여럿 고르기 */
+  multiple?: boolean
+}
+
+/** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'. "항상 허용" 은 없다(사용자 결정) */
+export type AttentionAnswer = 'once' | 'reject' | string[][]
 
 export interface TurnInfo {
   sessionId: string
@@ -55,6 +101,8 @@ export interface ChatResult {
   usage?: TurnUsage
   /** 실패가 아니라 엔진 재시작·크래시·스트림 끊김으로 끝났다 (error 는 "중단됨 …") */
   interrupted?: boolean
+  /** 사용자가 승인·질문을 거절해 끝났다 — 실패가 아니다 (ok 는 true) */
+  declined?: boolean
 }
 
 /** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */
@@ -66,12 +114,16 @@ export interface HistoryMessage {
   error?: string
   /** user: 보낸 시각(ms) */
   at?: number
+  /** user: 이 턴을 돌린 모드 (그 턴 답의 에이전트, 없으면 앞서 바꾼 에이전트) — 화면이 모드가 바뀐 자리에 구분선을 긋는다 */
+  mode?: Mode
   /** assistant: 그 턴의 진행 줄 (생각·도구·글·지시문) — 실시간 턴의 chat onProgress 와 같은 모양 */
   items?: TurnItem[]
   /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
   duration?: number
   /** assistant: 끊겨서 끝났다 (error 는 interruptedError()) — 실패와 가른다 */
   interrupted?: boolean
+  /** assistant: 승인·질문을 거절해 끝났다 */
+  declined?: boolean
 }
 
 export interface History {
@@ -87,6 +139,8 @@ interface OpencodeMessage {
   id?: string
   type: string
   text?: string
+  /** assistant: 그 메시지를 낸 에이전트. agent-switched: 바꾼 에이전트 (01k) */
+  agent?: string
   time?: { created?: number; completed?: number }
   content?: Parameters<typeof messageItems>[1][number][]
   error?: { message?: string }
@@ -115,6 +169,7 @@ interface TurnOutcome {
   error?: string
   usage?: TurnUsage
   interrupted?: boolean
+  declined?: boolean
 }
 
 interface OpencodeEventEnvelope {
@@ -130,6 +185,8 @@ interface CatalogModel {
 }
 
 export const MODEL_CATALOG_TIMEOUT_MS = 10_000
+/** 에이전트 목록도 지연 로드된다(01f: 첫 응답 빈 목록, ~1.5초) — 모델 카탈로그와 같은 기한 */
+export const AGENT_LIST_TIMEOUT_MS = 10_000
 /** 엔진 재시작·크래시로 끊긴 턴의 사유 — 지금 언어로 (그래서 상수가 아니다. 중단 판정은 문구가 아니라 interrupted 로 한다) */
 export function interruptedError(): string {
   return tr('error.interrupted')
@@ -143,6 +200,12 @@ export class LlmService extends Service {
   private purgeWanted = false
   /** 턴이 도는 세션 — addContext 가 막는다 */
   private busy = new Set<string>()
+  /** 기다리는 요청 id → 그 세션·종류·도구 호출 (reply 가 쓴다). 턴이 끝나면 지운다 */
+  private requests = new Map<string, { sessionId: string; kind: Attention['kind']; callID?: string }>()
+  /** 턴이 도는 세션 → 앱이 거절한 도구 호출 id. 그 호출의 tool.failed 가 그 턴의 끝이다 */
+  private declined = new Map<string, Set<string>>()
+  /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
+  private watchers = new Map<string, { answered(requestId: string): void }>()
 
   constructor(ctx: Context) {
     super(ctx, 'llm')
@@ -151,11 +214,11 @@ export class LlmService extends Service {
   // model 을 꼭 명시한다 — {} 로 보내면 opencode 가 opencode.json 의 model 을 무시하고 models.dev 카탈로그의
   // 외부 provider(실측: nano-gpt/...)로 세션을 만들 때가 있다 (2026-09-30 실측, 5회 중 2~5회).
   // 우리 provider/모델 id 를 opencode 의 providerID/모델 id 로 그대로 쓴다 — 매핑 설정 화면이 생기면 이 자리만 바꾼다.
-  private async createSession(conn: EngineConnection, providerId: string, modelId: string, directory: string): Promise<string> {
+  private async createSession(conn: EngineConnection, providerId: string, modelId: string, directory: string, agent?: string): Promise<string> {
     const res = await fetch(`${conn.url}/api/session`, {
       method: 'POST',
       headers: { ...conn.headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: { providerID: providerId, id: modelId }, location: { directory } }),
+      body: JSON.stringify({ model: { providerID: providerId, id: modelId }, location: { directory }, ...(agent && { agent }) }),
     })
     if (!res.ok) throw new Error(tr('error.sessionCreate', { status: res.status }))
     const body = (await res.json()) as { data: { id: string } }
@@ -195,29 +258,58 @@ export class LlmService extends Service {
     return ((await res.json()) as { data: CatalogModel[] }).data
   }
 
+  // 모드의 에이전트가 그 폴더의 에이전트 목록에 있는지 — **없는 이름도 opencode 는 세션 생성 200·전환 204 로 받고 모든 도구 허용 + 기본
+  // system 없이 돌린다** (01f — 오타가 곧 전체 권한). 목록은 지연 로드라 첫 응답이 빈 목록일 수 있다(01f ~1.5초, 01k 는 바로 옴) — 모델처럼
+  // 나올 때까지 묻는다. subagent·hidden 은 primary 로 못 쓴다
+  private async waitForAgent(conn: EngineConnection, agent: string, directory: string): Promise<boolean> {
+    const deadline = Date.now() + AGENT_LIST_TIMEOUT_MS
+    const query = new URLSearchParams({ 'location[directory]': directory })
+    while (true) {
+      const res = await fetch(`${conn.url}/api/agent?${query}`, { headers: conn.headers })
+      if (!res.ok) throw new Error(tr('error.agentList', { status: res.status }))
+      const agents = ((await res.json()) as { data: { id: string; mode?: string; hidden?: boolean }[] }).data
+      if (agents.some((entry) => entry.id === agent && entry.mode !== 'subagent' && !entry.hidden)) return true
+      if (Date.now() >= deadline) return false
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+  }
+
   // 이어가는 세션의 모델 바꾸기 — prompt 본문엔 model 이 없고(additionalProperties:false), 이 호출(204)이 다음 턴부터 바꾼다.
   // 앞 턴 맥락은 그대로 실린다 (2026-10-01 실측 5/5, _workspace/01_probe.md). 세션의 지금 모델은 GET 으로 본다 — SSE 의
   // model.switched 가 이전 턴 step.started 보다 먼저 올 수 있어 이벤트 순서로 추론하지 않는다.
   // opencode 는 모델이 있는지 검증하지 않는다(없어도 204, 다음 턴이 step.* 없이 매달린다) — 그래서 chat 이 모델·주소 확인을
   // 통과한 뒤에만 부른다.
-  private async useModel(conn: EngineConnection, sessionId: string, providerId: string, modelId: string): Promise<void> {
+  // 에이전트(모드)도 같은 자리에서 맞춘다 — POST /api/session/{id}/agent(204)는 다음 스텝부터 먹고 기록에 agent-switched 를 남긴다 (01k 5/5).
+  // agent 를 안 주고 만든 세션엔 agent 필드가 없다 = build. agent 를 안 넘기면(addContext) 에이전트는 그대로 둔다
+  private async alignSession(conn: EngineConnection, sessionId: string, providerId: string, modelId: string, agent?: string): Promise<void> {
     const res = await fetch(`${conn.url}/api/session/${sessionId}`, { headers: conn.headers })
     if (!res.ok) throw new Error(tr('error.sessionRead', { status: res.status }))
-    const current = ((await res.json()) as { data: { model?: { providerID?: string; id?: string } } }).data.model
-    if (current?.providerID === providerId && current.id === modelId) return
-    const switched = await fetch(`${conn.url}/api/session/${sessionId}/model`, {
-      method: 'POST',
-      headers: { ...conn.headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: { providerID: providerId, id: modelId } }),
-    })
-    if (!switched.ok) throw new Error(tr('error.modelSwitch', { status: switched.status }))
+    const current = ((await res.json()) as { data: { model?: { providerID?: string; id?: string }; agent?: string } }).data
+    if (current.model?.providerID !== providerId || current.model.id !== modelId) {
+      const switched = await fetch(`${conn.url}/api/session/${sessionId}/model`, {
+        method: 'POST',
+        headers: { ...conn.headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: { providerID: providerId, id: modelId } }),
+      })
+      if (!switched.ok) throw new Error(tr('error.modelSwitch', { status: switched.status }))
+    }
+    if (agent && (current.agent ?? MODE_AGENT.build) !== agent) {
+      const switched = await fetch(`${conn.url}/api/session/${sessionId}/agent`, {
+        method: 'POST',
+        headers: { ...conn.headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ agent }),
+      })
+      if (!switched.ok) throw new Error(tr('error.agentSwitch', { status: switched.status }))
+    }
   }
 
   /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더를 따르고, 모델이 다르면
    *  보내기 전에 그 세션의 모델을 바꾼다 — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다).
    *  onSession 은 새 세션을 만든 직후, 프롬프트를 보내기 전에 불린다 — 답을 기다리는 중에 앱이 꺼져도 그 대화를 다시 열 수 있게.
    *  messageId(newMessageId)를 주면 이 입력의 엔진 메시지 id 가 그것이 된다 — history 의 id 로 돌아온다.
-   *  onProgress 는 턴 중 진행 줄(생각·도구·글)이 바뀔 때마다 불린다 — 화면의 실시간 진행 표시용. 턴 끝은 여전히 반환값이 정본이다 */
+   *  onProgress 는 턴 중 진행 줄(생각·도구·글)이 바뀔 때마다 불린다 — 화면의 실시간 진행 표시용. 턴 끝은 여전히 반환값이 정본이다.
+   *  mode 는 이 턴을 돌릴 모드 — 엔진 세션의 에이전트를 그것으로 맞추고 보낸다(이어가는 세션도). 안 주면 기본 모드.
+   *  onAttention 은 턴이 기다리는 승인·질문 목록이 바뀔 때마다 (빈 목록 = 더 기다리는 것 없음) — 화면의 카드. 답은 reply */
   async chat(
     providerId: string,
     modelId: string,
@@ -227,12 +319,14 @@ export class LlmService extends Service {
     onSession?: (sessionId: string) => Promise<void>,
     messageId?: string,
     onProgress?: (item: TurnItem) => void,
+    mode: Mode = DEFAULT_MODE,
+    onAttention?: (requests: Attention[]) => void,
   ): Promise<ChatResult> {
     this.turns++
     /** busy: 이 턴이 쥔 세션(addContext 를 막는다), sessionId: 받아들여진 턴의 세션 — 그때만 turn-started/ended 를 낸다 */
     const admitted: { busy?: string; sessionId?: string } = {}
     try {
-      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted)
+      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention)
       const interrupted = !result.ok && !!result.interrupted
       if (admitted.sessionId) {
         this.ctx.emit('llm/turn-ended', {
@@ -250,8 +344,8 @@ export class LlmService extends Service {
     }
   }
 
-  /** 세션을 쓸 준비 — 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 보고, 이어가는 세션은 모델을 맞추고, 없으면 만든다.
-   *  이어가는 세션도 directory(그 대화의 프로젝트)로 본다 */
+  /** 세션을 쓸 준비 — 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 보고, 이어가는 세션은 모델(과 모드를 주면 에이전트)을 맞추고,
+   *  없으면 만든다. 이어가는 세션도 directory(그 대화의 프로젝트)로 본다 */
   private async prepare(
     conn: EngineConnection,
     providerId: string,
@@ -259,6 +353,7 @@ export class LlmService extends Service {
     directory: string,
     sessionId: string | undefined,
     onSession?: (sessionId: string) => Promise<void>,
+    mode?: Mode,
   ): Promise<{ id: string } | { error: string }> {
     const workdir = await realDirectory(directory)
     if (!workdir) return { error: tr('error.noWorkdir', { dir: directory }) }
@@ -270,11 +365,13 @@ export class LlmService extends Service {
     if (normalizeBaseURL(model.api?.url ?? '') !== normalizeBaseURL(conn.providerBaseURL(providerId))) {
       return { error: tr('error.baseUrlOverridden', { url: String(model.api?.url) }) }
     }
+    const agent = mode && MODE_AGENT[mode]
+    if (agent && !(await this.waitForAgent(conn, agent, workdir))) return { error: tr('error.noAgent', { agent }) }
     if (sessionId) {
-      await this.useModel(conn, sessionId, providerId, modelId)
+      await this.alignSession(conn, sessionId, providerId, modelId, agent)
       return { id: sessionId }
     }
-    const id = await this.createSession(conn, providerId, modelId, workdir)
+    const id = await this.createSession(conn, providerId, modelId, workdir, agent)
     await onSession?.(id)
     return { id }
   }
@@ -322,6 +419,8 @@ export class LlmService extends Service {
     messageId: string | undefined,
     onProgress: ((item: TurnItem) => void) | undefined,
     admittedTurn: { busy?: string; sessionId?: string },
+    mode: Mode,
+    onAttention: ((requests: Attention[]) => void) | undefined,
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
@@ -330,20 +429,29 @@ export class LlmService extends Service {
     let id = sessionId
     try {
       conn = await this.ctx.engine.connection()
-      const ready = await this.prepare(conn, providerId, modelId, directory, id, onSession)
+      const ready = await this.prepare(conn, providerId, modelId, directory, id, onSession, mode)
       if ('error' in ready) return { ok: false, sessionId: id, error: ready.error }
       id = ready.id
+      const turnSession = id
       this.busy.add(id) // addContext 가 이 세션을 막는다 (prompt 보내기 전부터 — 그 사이에 끼어들지 않게)
       admittedTurn.busy = id
+      const declined = new Set<string>()
+      this.declined.set(id, declined)
 
       let admitted!: (seq: number) => void
       const tracker = new TurnTracker()
       const report = (item: TurnItem | undefined) => {
         if (item) onProgress?.(item)
       }
-      const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)), tracker, report)
-      // 조각(생각·글이 쓰이는 중)은 전역 스트림에만 온다 — 장식이다: 끊기거나 실패해도 턴은 세션 SSE 로 끝난다 (01g)
-      const pieces = onProgress ? this.followPieces(conn, id, tracker, report) : undefined
+      const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)), tracker, report, declined)
+      const attention = this.watchAttention(conn, id, directory, onAttention)
+      // 조각(생각·글이 쓰이는 중)과 승인·질문 요청은 전역 스트림에만 온다. 조각은 장식이다: 끊기거나 실패해도 턴은 세션 SSE 로 끝난다 (01g).
+      // 요청은 신호로만 쓰고 정본 목록을 다시 읽는다 — 구독이 붙기 전에 생긴 요청도 붙은 직후 한 번 읽어 잡는다 (01f 1-c)
+      const global = this.followGlobal(conn, id, (event) => {
+        if (event.type.endsWith('.delta')) {
+          if (onProgress) report(tracker.observe(event.type, event.data))
+        } else if (event.type.startsWith('permission.') || event.type.startsWith('question.')) attention.refresh()
+      }, () => attention.refresh())
       try {
         const admit = await fetch(`${conn.url}/api/session/${id}/prompt`, {
           method: 'POST',
@@ -363,9 +471,19 @@ export class LlmService extends Service {
 
         const result = await events.result
         const usage = result.usage && { ...result.usage, messageTokens: await this.messageTokens(conn, id) }
-        return { ok: result.ok, sessionId: id, text: result.text, error: result.error, usage, ...(result.interrupted && { interrupted: true }) }
+        return {
+          ok: result.ok,
+          sessionId: id,
+          text: result.text,
+          error: result.error,
+          usage,
+          ...(result.interrupted && { interrupted: true }),
+          ...(result.declined && { declined: true }),
+        }
       } finally {
-        pieces?.()
+        global()
+        attention.stop()
+        this.declined.delete(turnSession)
       }
     } catch (error) {
       if (conn?.closed.aborted) return { ok: false, sessionId: id, error: interruptedError(), interrupted: true }
@@ -493,6 +611,7 @@ export class LlmService extends Service {
     admittedSeq: Promise<number>,
     tracker: TurnTracker,
     report: (item: TurnItem | undefined) => void,
+    declined: ReadonlySet<string>,
   ): { result: Promise<TurnOutcome>; stop: () => void } {
     const controller = new AbortController()
     const result = (async () => {
@@ -522,7 +641,7 @@ export class LlmService extends Service {
           while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
             const frame = buffer.slice(0, frameEnd)
             buffer = buffer.slice(frameEnd + 2)
-            const outcome = this.handleFrame(frame, texts, meter, await admittedSeq, tracker, report)
+            const outcome = this.handleFrame(frame, texts, meter, await admittedSeq, tracker, report, declined)
             if (outcome) return outcome
           }
         }
@@ -542,6 +661,7 @@ export class LlmService extends Service {
     admittedSeq: number,
     tracker: TurnTracker,
     report: (item: TurnItem | undefined) => void,
+    declined: ReadonlySet<string>,
   ): TurnOutcome | undefined {
     const event = parseFrame(frame)
     if (!event) return undefined
@@ -562,17 +682,107 @@ export class LlmService extends Service {
       const error = event.data['error'] as { message?: string } | undefined
       return { ok: false, text: texts.join(''), error: error?.message ?? tr('error.unknown'), usage: meter.usage() }
     }
+    // 앱이 거절한 승인·질문 — 그 도구의 tool.failed("Tool execution interrupted") 하나로 끝나고 step.* 가 안 온다 (01f 1-d, 01i 2-c)
+    if (event.type === 'session.next.tool.failed' && declined.has(String(event.data['callID']))) {
+      return { ok: true, text: texts.join(''), usage: meter.usage(), declined: true }
+    }
     return undefined
   }
 
-  /** 전역 `GET /api/event` 에서 이 세션의 조각(`*.delta`)만 골라 tracker 에 얹는다. 해제 함수를 준다.
-   *  전역 스트림은 서버 전체 이벤트라 data.sessionID 로 거른다. 조각이 아닌 이벤트는 세션 SSE 가 정본이라 버린다 — 둘 다 쓰면
-   *  같은 이벤트를 두 번 본다. 구독 응답을 기다리지 않는다(프롬프트를 늦추지 않게) — 그 사이 조각은 *.ended 가 덮는다 */
-  private followPieces(conn: EngineConnection, sessionId: string, tracker: TurnTracker, report: (item: TurnItem | undefined) => void): () => void {
+  /** 승인·질문 대기 목록을 지켜본다. refresh 마다 정본 목록(세션별 permission·question)을 다시 읽어, 바뀌었으면 onAttention 을 부르고
+   *  새 요청마다 'llm/attention', 다 풀렸으면 'llm/attention-resolved' 를 낸다. 읽기는 한 줄로 세운다(뒤늦은 응답이 새 목록을 덮지 않게) */
+  private watchAttention(
+    conn: EngineConnection,
+    sessionId: string,
+    directory: string,
+    onAttention: ((requests: Attention[]) => void) | undefined,
+  ): { refresh(): void; stop(): void } {
+    let pending: Attention[] = []
+    let stopped = false
+    /** 목록을 바꾸고 알린다 — 새 요청마다 attention, 다 풀리면 resolved */
+    const publish = (next: Attention[]): void => {
+      const before = new Set(pending.map((entry) => entry.id))
+      const changed = next.length !== pending.length || next.some((entry) => !before.has(entry.id))
+      const resolved = pending.length > 0 && next.length === 0
+      pending = next
+      if (!changed) return
+      onAttention?.(next)
+      for (const entry of next) if (!before.has(entry.id)) this.ctx.emit('llm/attention', { sessionId, directory, kind: entry.kind, title: attentionTitle(entry) })
+      if (resolved) this.ctx.emit('llm/attention-resolved', { sessionId, directory })
+    }
+    let chain: Promise<void> = Promise.resolve()
+    const list = async <T>(kind: Attention['kind']): Promise<T[]> => {
+      const res = await fetch(`${conn.url}/api/session/${sessionId}/${kind}`, { headers: conn.headers, signal: conn.closed })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return ((await res.json()) as { data: T[] }).data
+    }
+    const read = async (): Promise<void> => {
+      if (stopped) return
+      const [permissions, questions] = await Promise.all([
+        list<{ id: string; action: string; resources?: string[]; source?: { callID?: string } }>('permission'),
+        list<{ id: string; questions: AttentionQuestion[]; tool?: { callID?: string } }>('question'),
+      ])
+      if (stopped) return
+      const next: Attention[] = [
+        ...permissions.map((entry): Attention => ({ kind: 'permission', id: entry.id, sessionId, action: entry.action, resources: entry.resources ?? [] })),
+        ...questions.map((entry): Attention => ({ kind: 'question', id: entry.id, sessionId, questions: entry.questions })),
+      ]
+      for (const entry of permissions) this.requests.set(entry.id, { sessionId, kind: 'permission', callID: entry.source?.callID })
+      for (const entry of questions) this.requests.set(entry.id, { sessionId, kind: 'question', callID: entry.tool?.callID })
+      publish(next)
+    }
+    // 답한 요청은 목록 읽기를 기다리지 않고 바로 뺀다 — 카드가 곧장 사라지고, 답 직후 턴이 끝나도(stop) resolved 를 놓치지 않는다
+    this.watchers.set(sessionId, { answered: (requestId) => !stopped && publish(pending.filter((entry) => entry.id !== requestId)) })
+    return {
+      refresh: () => {
+        chain = chain.then(read).catch(() => {}) // 못 읽으면 다음 신호에 다시 — 턴 끝은 세션 SSE 가 정한다
+      },
+      stop: () => {
+        stopped = true
+        this.watchers.delete(sessionId)
+        for (const [id, request] of this.requests) if (request.sessionId === sessionId) this.requests.delete(id)
+      },
+    }
+  }
+
+  /** 카드의 답을 엔진에 보낸다 (01f 1-d·01i 2-b·2-c). 권한: once|reject. 질문: 질문마다 고른 답(빈 답은 막는다 — opencode 는 검증하지 않는다)
+   *  또는 reject. 거절은 그 도구 호출을 적어 둔다 — 그 tool.failed 가 턴의 끝이다. 이미 풀렸거나 모르는 요청이면 던진다 */
+  async reply(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void> {
+    const request = this.requests.get(requestId)
+    if (!request || request.sessionId !== sessionId) throw new Error(tr('error.attentionGone'))
+    const valid =
+      answer === 'reject' ||
+      (request.kind === 'permission'
+        ? answer === 'once'
+        : Array.isArray(answer) && answer.length > 0 && answer.every((entry) => Array.isArray(entry) && entry.length > 0 && entry.every((label) => typeof label === 'string' && label.trim() !== '')))
+    if (!valid) throw new Error(tr('error.attentionAnswer'))
+    const conn = await this.ctx.engine.connection()
+    const declined = answer === 'reject' && request.callID ? this.declined.get(sessionId) : undefined
+    declined?.add(request.callID!) // 보내기 전에 — tool.failed 가 응답보다 먼저 올 수 있다
+    const base = `${conn.url}/api/session/${sessionId}/${request.kind}/${requestId}`
+    const res =
+      request.kind === 'permission'
+        ? await fetch(`${base}/reply`, { method: 'POST', headers: { ...conn.headers, 'content-type': 'application/json' }, body: JSON.stringify({ reply: answer }) })
+        : answer === 'reject'
+          ? await fetch(`${base}/reject`, { method: 'POST', headers: conn.headers })
+          : await fetch(`${base}/reply`, { method: 'POST', headers: { ...conn.headers, 'content-type': 'application/json' }, body: JSON.stringify({ answers: answer }) })
+    if (!res.ok) {
+      declined?.delete(request.callID!)
+      throw new Error(tr('error.attentionReply', { status: res.status }))
+    }
+    this.requests.delete(requestId)
+    this.watchers.get(sessionId)?.answered(requestId)
+  }
+
+  /** 전역 `GET /api/event` 에서 이 세션(data.sessionID)의 이벤트만 onEvent 로 넘긴다. 해제 함수를 준다. 쓰는 쪽은 세션 SSE 에 없는 것만
+   *  골라 쓴다(조각 `*.delta`, 승인·질문 요청) — 둘 다 쓰면 같은 이벤트를 두 번 본다. 구독 응답을 기다리지 않는다(프롬프트를 늦추지
+   *  않게) — 그 사이 조각은 *.ended 가 덮고, 요청은 붙은 직후 onConnected 에서 목록을 읽어 잡는다 */
+  private followGlobal(conn: EngineConnection, sessionId: string, onEvent: (event: OpencodeEventEnvelope) => void, onConnected: () => void): () => void {
     const controller = new AbortController()
     void (async () => {
       const res = await fetch(`${conn.url}/api/event`, { headers: conn.headers, signal: AbortSignal.any([controller.signal, conn.closed]) })
       if (!res.ok || !res.body) return
+      onConnected()
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -585,15 +795,25 @@ export class LlmService extends Service {
           while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
             const event = parseFrame(buffer.slice(0, frameEnd))
             buffer = buffer.slice(frameEnd + 2)
-            if (event?.type.endsWith('.delta') && event.data?.['sessionID'] === sessionId) report(tracker.observe(event.type, event.data))
+            if (event && event.data?.['sessionID'] === sessionId) onEvent(event)
           }
         }
       } finally {
         void reader.cancel().catch(() => {})
       }
-    })().catch(() => {}) // 장식 — 끊겨도 턴은 끝난다
+    })().catch(() => {}) // 끊겨도 턴은 세션 SSE 로 끝난다
     return () => controller.abort()
   }
+}
+
+/** 'llm/attention' 의 짧은 설명 — 명령·파일(권한) 또는 첫 질문 */
+function attentionTitle(request: Attention): string {
+  return request.kind === 'permission' ? `${request.action} ${request.resources.join(', ')}`.trim() : (request.questions[0]?.question ?? '')
+}
+
+/** opencode 에이전트 → 모드 (모르는 에이전트면 없음) */
+function modeOf(agent: string | undefined): Mode | undefined {
+  return agent === undefined ? undefined : MODES.find((mode) => MODE_AGENT[mode] === agent)
 }
 
 /** SSE 프레임 하나의 `data:` JSON. 없거나 깨졌으면 undefined (전역 스트림의 `: heartbeat` 주석 프레임 포함) */
@@ -615,10 +835,19 @@ export function historyMessages(raw: OpencodeMessage[], running: boolean): Histo
   let sentAt: number | undefined
   /** 지시문 바뀜(system 메시지)은 다음 답의 진행 줄 맨 앞에 — 실시간 턴에서 context.updated 가 오는 자리 */
   let context: TurnItem[] = []
+  /** 지금 에이전트 — agent-switched 로 바뀌고 답의 agent 가 확정한다 (01k: 생성 때 고른 에이전트는 기록이 없다) */
+  let agent: string | undefined
+  let asked: HistoryMessage | undefined
   for (const message of raw) {
+    if (message.type === 'agent-switched') {
+      agent = message.agent
+      continue
+    }
     if (message.type === 'user') {
       sentAt = message.time?.created
-      messages.push({ id: message.id, role: 'user', text: message.text ?? '', ...(sentAt !== undefined && { at: sentAt }) })
+      const mode = modeOf(agent)
+      asked = { id: message.id, role: 'user', text: message.text ?? '', ...(sentAt !== undefined && { at: sentAt }), ...(mode && { mode }) }
+      messages.push(asked)
       continue
     }
     if (message.type === 'system') {
@@ -626,6 +855,11 @@ export function historyMessages(raw: OpencodeMessage[], running: boolean): Histo
       continue
     }
     if (message.type !== 'assistant') continue // 모델 바꿈·압축 등은 말풍선이 아니다
+    if (message.agent) {
+      agent = message.agent
+      const mode = modeOf(agent)
+      if (asked && mode) asked.mode = mode
+    }
     const previous = messages.at(-1)
     const reply: HistoryMessage = previous?.role === 'assistant' ? previous : { role: 'assistant', text: '', items: [] }
     if (reply !== previous) messages.push(reply)
@@ -636,15 +870,28 @@ export function historyMessages(raw: OpencodeMessage[], running: boolean): Histo
     if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
     else delete reply.duration // 마지막 스텝이 안 끝났다
     if (message.error) reply.error = message.error.message ?? tr('error.unknown')
+    // 턴의 마지막 답 메시지가 정한다 — 앞 스텝의 실패한 도구(예: 계획의 "Unknown tool")는 다음 스텝이 이어 덮는다
+    if (endedByDecline(message)) reply.declined = true
+    else delete reply.declined
   }
 
   const last = raw.filter((message) => message.type === 'user' || message.type === 'assistant').at(-1)
-  if (!running && last && (last.type === 'user' || !last.time?.completed)) {
+  // 거절로 끝난 턴도 (다음 턴 전까지) 완료 시각이 없다(2026-10-02 실측) — 마지막 도구가 오류로 끝났으면 끊긴 게 아니다(끊긴 도구는 running 으로
+  // 남는다, 01i 2-e)
+  if (!running && last && !endedByDecline(last) && (last.type === 'user' || !last.time?.completed)) {
     const reply = messages.at(-1)
     if (reply?.role === 'assistant') Object.assign(reply, { error: interruptedError(), interrupted: true })
     else messages.push({ role: 'assistant', text: '', error: interruptedError(), interrupted: true })
   }
   return messages
+}
+
+/** 답 메시지의 마지막이 오류로 끝난 도구인가 — 턴의 마지막 메시지가 이러면 승인·질문 거절이다 (tool.failed 하나로 턴이 끝나고 다음 스텝이 없다).
+ *  거절 직후엔 완료 시각이 없고 다음 턴 때 채워진다 (2026-10-02 실측) — 완료 시각으로 가르지 않는다 */
+function endedByDecline(message: OpencodeMessage): boolean {
+  if (message.type !== 'assistant') return false
+  const part = message.content?.at(-1) as { type?: string; state?: { status?: string } } | undefined
+  return part?.type === 'tool' && part.state?.status === 'error'
 }
 
 /** 끝 이벤트 없이 스트림이 끊겼을 때의 사유. 서버가 끝나면 소켓이 exit 보다 먼저 닫혀(실측 2026-09-30, 앱 실물 테스트에서

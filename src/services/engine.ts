@@ -7,6 +7,7 @@ import path from 'node:path'
 import { findOpencodeBinary, notFoundMessage } from './opencodeBinary.ts'
 import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
 import type { ProviderConfig } from './providers.ts'
+import type { Mode } from '../../shared/modes.ts'
 import { tr } from '../i18n.ts'
 import './providers.ts'
 
@@ -88,6 +89,30 @@ const PURGE_SCRIPT = [
   'db.close()',
   'console.log(JSON.stringify({ busy: before.busy || after.busy }))',
 ].join(';')
+// 모드 = opencode primary 에이전트 하나 (01k). 세션마다 POST /api/session 의 agent 로 고르고, 바꿀 땐 POST /api/session/{id}/agent.
+// 정의는 이 파일이 생성하는 opencode.json 에만 있다 — 위층은 모드 이름(shared/modes.ts)만 안다.
+// - plan: opencode 기본 plan 을 덮어쓴다. 기본 plan 은 편집만 막고(bash 허용, .opencode/plans/*.md 쓰기 허용) "계획만 세워라" 프롬프트도
+//   신규 세대엔 없다(01k). 규칙은 뒤가 이긴다 — edit·bash·webfetch deny 를 덧붙이면 그 도구들이 LLM 요청에서 빠지고 plans 예외도 막힌다
+//   (2026-10-02 실측 3/3: tools = glob·grep·question·read·skill·todowrite·websearch, plans md 안 생김)
+// - build: opencode 기본 그대로 (폴더 밖·.env 읽기는 묻는다)
+// - litecode-ask / litecode-full: 사용자 정의 에이전트. build 의 system 첫 줄을 못 받으므로 prompt 로 준다(01f). 기본 규칙에 question deny 가
+//   있어 ask 는 다시 허용한다. full 은 "*":"allow" — 폴더 밖·.env 도 안 묻는다(01f)
+// ⚠️ 없는 에이전트 이름도 opencode 는 200/204 로 받고 모든 도구 허용으로 돈다 — ctx.llm 이 /api/agent 로 먼저 확인한다
+export const MODE_AGENT: Record<Mode, string> = { plan: 'plan', build: 'build', ask: 'litecode-ask', full: 'litecode-full' }
+/** opencode 1.18.18 build 에이전트의 system (GET /api/agent) 그대로 */
+const BUILD_PROMPT =
+  'You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.'
+const PLAN_PROMPT = [
+  'You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools.',
+  'Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode.',
+  'Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.',
+].join(' ')
+export const ENGINE_AGENTS = {
+  plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny' } },
+  [MODE_AGENT.ask]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', question: 'allow' } },
+  [MODE_AGENT.full]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { '*': 'allow' } },
+}
+
 const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 초 무응답인 때가 있다 (live-test 스킬 기록)
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
@@ -110,7 +135,7 @@ export function engineConfig(providers: ProviderConfig[], proxy: Pick<KeyProxy, 
       ),
     }
   }
-  return { $schema: 'https://opencode.ai/config.json', provider }
+  return { $schema: 'https://opencode.ai/config.json', provider, agent: ENGINE_AGENTS }
 }
 
 /** opencode 자식 프로세스 env — 진짜 키는 없다 (키 프록시) */

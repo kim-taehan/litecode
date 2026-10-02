@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import type { Appearance, Settings } from '../shared/ipc.ts'
+import type { Appearance, Mode, Settings } from '../shared/ipc.ts'
 import { LANGUAGES } from '../shared/i18n/index.ts'
+import { MODES } from '../shared/modes.ts'
+import { ConfirmFullAccess } from './ModeChip.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../shared/fontSize.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 
@@ -58,6 +60,8 @@ export function GeneralPage() {
   const t = useT()
   const settings = useSettings()
   const [error, setError] = useState<string>()
+  /** 새 대화 기본 모드로 전체 권한을 고르는 중 — 확인 대화상자 (dsh PermissionRow) */
+  const [confirmingFull, setConfirmingFull] = useState(false)
   const save = (patch: Partial<Settings>): void =>
     void updateSettings(patch).then(
       () => setError(undefined),
@@ -71,11 +75,33 @@ export function GeneralPage() {
           {error}
         </p>
       )}
+      {/* 새 대화의 입력창 칩 처음 값 (01k §6 — dsh "새 세션의 기본 권한 모드" 행 — dsh 처럼 맨 위). 전체 권한은 확인 뒤에 */}
+      <div className="settings-row">
+        <div className="settings-row__text">
+          <div className="settings-row__title">{t('settings.defaultMode')}</div>
+          <div className="settings-row__description">{t('settings.defaultMode.description')}</div>
+        </div>
+        <OptionSelect<Mode>
+          value={settings.defaultMode}
+          options={MODES.map((mode) => ({ id: mode, label: t(`mode.${mode}`) }))}
+          onChange={(defaultMode) => (defaultMode === 'full' ? setConfirmingFull(true) : save({ defaultMode }))}
+        />
+      </div>
+      {confirmingFull && (
+        <ConfirmFullAccess
+          onCancel={() => setConfirmingFull(false)}
+          onConfirm={() => {
+            setConfirmingFull(false)
+            save({ defaultMode: 'full' })
+          }}
+        />
+      )}
+
       <div className="settings-row">
         <div className="settings-row__text">
           <div className="settings-row__title">{t('settings.language')}</div>
         </div>
-        <LanguageSelect value={settings.language} onChange={(language) => save({ language })} />
+        <OptionSelect value={settings.language} options={LANGUAGES} onChange={(language) => save({ language })} />
       </div>
 
       <div className="settings-row settings-row--stacked">
@@ -167,9 +193,9 @@ export function GeneralPage() {
   )
 }
 
-/** 언어 드롭다운 (dsh LanguageRow + ui-primitives Menu): 버튼 오른쪽 끝에 맞춘 메뉴, 고른 줄은 바탕 없이 오른쪽 ✓.
+/** 설정 드롭다운 — 언어·새 대화 기본 모드 (dsh LanguageRow + ui-primitives Menu): 버튼 오른쪽 끝에 맞춘 메뉴, 고른 줄은 바탕 없이 오른쪽 ✓.
  *  열면 고른 줄에 포커스, ↑/↓ 로 옮기고 Enter·클릭으로 고른다. Esc 는 메뉴만 닫는다(모달은 그대로), 바깥 클릭은 닫는다 */
-function LanguageSelect({ value, onChange }: { value: Settings['language']; onChange(language: Settings['language']): void }) {
+function OptionSelect<T extends string>({ value, options, onChange }: { value: T; options: readonly { id: T; label: string }[]; onChange(next: T): void }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -219,25 +245,25 @@ function LanguageSelect({ value, onChange }: { value: Settings['language']; onCh
         aria-expanded={open}
         onClick={() => setOpen((now) => !now)}
       >
-        {LANGUAGES.find((language) => language.id === value)?.label}
+        {options.find((option) => option.id === value)?.label}
         <ChevronDown />
       </button>
       {open && (
         <div className="settings-menu" role="menu" ref={menuRef} onKeyDown={onMenuKeyDown}>
-          {LANGUAGES.map((language) => (
+          {options.map((option) => (
             <button
-              key={language.id}
+              key={option.id}
               type="button"
               role="menuitemradio"
               className="settings-menu__item"
-              aria-checked={language.id === value}
+              aria-checked={option.id === value}
               onClick={() => {
                 close()
-                if (language.id !== value) onChange(language.id)
+                if (option.id !== value) onChange(option.id)
               }}
             >
-              <span>{language.label}</span>
-              {language.id === value && <Check />}
+              <span>{option.label}</span>
+              {option.id === value && <Check />}
             </button>
           ))}
         </div>

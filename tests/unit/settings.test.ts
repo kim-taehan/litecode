@@ -30,7 +30,7 @@ afterEach(async () => {
 describe('SettingsService', () => {
   it('파일이 없으면 기본값 — 영어·라이트·14px·코딩 뷰 켬 (사용자 결정 2026-10-01)', async () => {
     const { settings } = await service({ file })
-    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true })
+    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
   })
 
   it('넘긴 기본값이 이긴다 (실물 테스트의 한국어 고정)', async () => {
@@ -42,12 +42,12 @@ describe('SettingsService', () => {
     const { ctx, settings } = await service({ file })
     const seen: unknown[] = []
     ctx.on('settings/changed', (next) => void seen.push(next))
-    expect(settings.set({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false })).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false })
-    expect(seen).toEqual([{ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false }])
-    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false })
+    expect(settings.set({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })
+    expect(seen).toEqual([{ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' }])
+    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })
 
     const again = await service({ file })
-    expect(again.settings.get()).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false })
+    expect(again.settings.get()).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })
   })
 
   it('잘못된 값은 저장하지 않고 거절한다 — 글자 크기는 12~17 정수', async () => {
@@ -58,15 +58,16 @@ describe('SettingsService', () => {
     expect(() => settings.set({ language: 'fr' as never })).toThrow()
     expect(() => settings.set({ appearance: 'blue' as never })).toThrow()
     expect(() => settings.set({ codingView: 'yes' as never })).toThrow()
+    expect(() => settings.set({ defaultMode: 'yolo' as never })).toThrow()
     expect(() => settings.set({ notifications: 'on' as never })).toThrow()
-    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true })
+    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
     await expect(fs.stat(file)).rejects.toThrow()
   })
 
   it('손으로 고친 파일의 잘못된 값·모르는 키는 그 값만 기본값으로 돌린다', async () => {
     await fs.writeFile(file, JSON.stringify({ language: 'ko', appearance: 'purple', fontSize: 99, extra: 1 }))
     const { settings } = await service({ file })
-    expect(settings.get()).toEqual({ language: 'ko', appearance: 'light', fontSize: 14, codingView: true, notifications: true })
+    expect(settings.get()).toEqual({ language: 'ko', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
   })
 
   it('손상된 파일이면 기본값으로 뜬다', async () => {
@@ -78,7 +79,7 @@ describe('SettingsService', () => {
   it('설정 파일 열기 — 없으면 지금 값으로 만들어 경로를 준다', async () => {
     const { settings } = await service({ file })
     expect(await settings.ensureFile()).toBe(file)
-    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true })
+    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
   })
 
   it('메인 프로세스 문구는 설정 언어를 따른다 — 올라올 때와 바꿀 때', async () => {

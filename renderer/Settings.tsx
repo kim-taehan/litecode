@@ -13,7 +13,7 @@ import './settings.css'
 // 처음 여는 페이지는 모델이다 — 일반 페이지가 생기기 전부터 설정 버튼이 모델을 열었다(실물 테스트가 그 동작을 지킨다). dsh 는 일반을 먼저 연다
 
 /** Electron 이 IPC 오류 앞에 붙이는 "Error invoking remote method '…': Error: " 를 떼고 사유만 */
-function reason(error: unknown): string {
+export function reason(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
