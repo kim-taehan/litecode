@@ -93,12 +93,21 @@ function withBlankFor(project: string) {
     current.some((session) => session.project === project && isBlank(session)) ? current : [newSession(project), ...current]
 }
 
-/** 20px 외곽선 톱니 — dsh 사이드바 설정 줄의 아이콘 자리 */
+/** 16px 외곽선 톱니 — dsh 사이드바 설정 줄의 아이콘 자리 */
 function GearIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
       <path d="M15.64 8.26L17.35 8.51L17.35 11.49L15.64 11.74L15.22 12.75L16.25 14.14L14.14 16.25L12.75 15.22L11.74 15.64L11.49 17.35L8.51 17.35L8.26 15.64L7.25 15.22L5.86 16.25L3.75 14.14L4.78 12.75L4.36 11.74L2.65 11.49L2.65 8.51L4.36 8.26L4.78 7.25L3.75 5.86L5.86 3.75L7.25 4.78L8.26 4.36L8.51 2.65L11.49 2.65L11.74 4.36L12.75 4.78L14.14 3.75L16.25 5.86L15.22 7.25Z" />
       <circle cx="10" cy="10" r="2.5" />
+    </svg>
+  )
+}
+
+/** 팝오버의 지금 프로젝트 표시 — dsh Menu 선택 항목의 14px ✓ */
+function CheckIcon() {
+  return (
+    <svg className="project-item__check" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 7.5L5.5 10.5L11.5 3.5" />
     </svg>
   )
 }
@@ -218,7 +227,7 @@ function LogoMark() {
 
 type HoverCardContent = { title: string; detail?: string }
 
-/** 잘린 행에 500ms 머물면 행 오른쪽 8px 에 전체 내용 카드 (dsh ui-primitives HoverCard). 흘러가는 글자도 함께 켜고 끈다 */
+/** 잘린 행에 800ms 머물면 행 오른쪽 8px 에 전체 내용 카드 (dsh ui-primitives HoverCard). 흘러가는 글자도 함께 켜고 끈다 */
 function useHoverCard() {
   const [card, setCard] = useState<HoverCardContent & { top: number; left: number }>()
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -234,7 +243,7 @@ function useHoverCard() {
         // 행에 딸린 버튼(☆·✎·× 등)까지 포함한 줄 전체의 오른쪽 바깥에 붙인다 — 버튼을 덮지 않게
         const rect = (row.closest<HTMLElement>('[data-hover-row]') ?? row).getBoundingClientRect()
         setCard({ ...content, top: rect.top, left: rect.right + 8 })
-      }, 500)
+      }, 800) // dsh HoverCard 열림 지연
     },
     leave(row: HTMLElement): void {
       stopMarquee(row)
@@ -788,8 +797,11 @@ export function App() {
                 }
                 onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
               >
+                {/* 상태 점 자리는 늘 있다 — 점이 생기고 사라져도 제목이 안 움직인다 (dsh 세션 행) */}
+                <span className="session-item__slot">
+                  {notices.state[session.id] && <StatusDot status={notices.state[session.id]!.status} className="session-item__notice" />}
+                </span>
                 <span className="session-item__title marquee">{titleOf(session)}</span>
-                {notices.state[session.id] && <StatusDot status={notices.state[session.id]!.status} className="session-item__notice" />}
                 {!isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
               </button>
               {!isBlank(session) && !session.pending && (
@@ -821,12 +833,13 @@ export function App() {
             </div>
           ))}
         </div>
+        <div className="sidebar__fade" aria-hidden="true" />
         <HoverCard card={sessionHover.card} />
 
         <div className="sidebar__foot">
           <button
             type="button"
-            className={`settings-trigger${settingsOpen ? ' settings-trigger--active' : ''}`}
+            className="settings-trigger"
             ref={settingsRef}
             onClick={() => setSettingsOpen(true)}
           >
@@ -1162,7 +1175,7 @@ function ProjectPopover({ projects, current, statusOf, busy, error, onPick, onOp
                         <span className="project-switch__path marquee">{project.displayPath}</span>
                       </span>
                       {statusOf(project.path) && <StatusDot status={statusOf(project.path)!} />}
-                      {project.path === current && <span className="project-item__dot" />}
+                      {project.path === current && <CheckIcon />}
                     </button>
                     )}
                     {project.favorite && (

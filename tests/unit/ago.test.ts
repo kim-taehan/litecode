@@ -19,4 +19,14 @@ describe('ago', () => {
     expect(ago(now - 24 * 60 * min, now)).toBe('1d')
     expect(ago(now - 9 * 24 * 60 * min, now)).toBe('9d')
   })
+
+  // dsh ui-primitives relative-time — 30일부터 달(30일 단위), 365일부터 해 (01j)
+  it('30일부터 mo, 365일부터 y', () => {
+    const day = 24 * 60 * min
+    expect(ago(now - 29 * day, now)).toBe('29d')
+    expect(ago(now - 30 * day, now)).toBe('1mo')
+    expect(ago(now - 364 * day, now)).toBe('12mo')
+    expect(ago(now - 365 * day, now)).toBe('1y')
+    expect(ago(now - 800 * day, now)).toBe('2y')
+  })
 })
