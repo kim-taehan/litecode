@@ -33,6 +33,7 @@ const Channel = {
   TURN_PROGRESS: 'chat:progress',
   TURN_ATTENTION: 'chat:attention',
   REPLY_ATTENTION: 'chat:reply-attention',
+  STOP_TURN: 'chat:stop',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   RUN_SHELL: 'shell:run',
@@ -102,6 +103,7 @@ const bridge: LitecodeBridge = {
   },
   onTurnAttention: (listener) => listen(Channel.TURN_ATTENTION, listener),
   replyAttention: (sessionId, requestId, answer) => ipcRenderer.invoke(Channel.REPLY_ATTENTION, sessionId, requestId, answer),
+  stopTurn: (conversationId) => ipcRenderer.invoke(Channel.STOP_TURN, conversationId),
   resolveFiles: (directory, tokens) => ipcRenderer.invoke(Channel.RESOLVE_FILES, directory, tokens),
   revealFile: (directory, token) => ipcRenderer.invoke(Channel.REVEAL_FILE, directory, token),
   runShell: (conversationId, runId, directory, command, position) =>

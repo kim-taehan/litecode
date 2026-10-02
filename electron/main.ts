@@ -123,6 +123,8 @@ function bootstrap(ctx: Context): void {
   handle(ctx, Channel.FETCH_PROVIDER_MODELS, async (_event, draft: { id?: string; baseURL: string; apiKey?: string }) =>
     ctx.providers.fetchAvailableModels(draft),
   )
+  /** 대화 id → 도는 턴의 중지 (STOP_TURN) */
+  const stopping = new Map<string, AbortController>()
   handle(
     ctx,
     Channel.SEND_MESSAGE,
@@ -138,6 +140,8 @@ function bootstrap(ctx: Context): void {
       const attention = (requests: Attention[]) => {
         for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TURN_ATTENTION, conversationId, requests)
       }
+      const stop = new AbortController() // 답변 중지 (STOP_TURN) — 첫 턴은 아직 엔진 세션이 없어 대화 id 로 쥔다
+      stopping.set(conversationId, stop)
       return ctx.llm.chat(
         providerId,
         modelId,
@@ -149,9 +153,15 @@ function bootstrap(ctx: Context): void {
         progress,
         isMode(mode) ? mode : undefined,
         attention,
-      )
+        stop.signal,
+      ).finally(() => stopping.get(conversationId) === stop && stopping.delete(conversationId))
     },
   )
+  handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => {
+    const stop = stopping.get(conversationId)
+    stop?.abort()
+    return !!stop
+  })
   handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer) => ctx.llm.reply(sessionId, requestId, answer))
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
   handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))

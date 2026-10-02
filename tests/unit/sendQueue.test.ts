@@ -91,3 +91,38 @@ describe('SendQueues', () => {
     expect(calls).toBe(2)
   })
 })
+
+describe('SendQueues — 사용자가 멈춘 턴 (이슈 #3)', () => {
+  it('멈춘(hold) 대화는 턴이 끝나도 보내지 않고 쌓인 것을 남긴다 — 되돌리기(take)로 가져가면 풀린다', () => {
+    const queues = new SendQueues()
+    queues.observe('c1', true)
+    queues.submit('c1', { text: 'a' }, true)
+    queues.submit('c1', { text: 'b' }, true)
+    queues.hold('c1')
+    expect(queues.held('c1')).toBe(true)
+    expect(queues.observe('c1', false)).toBeUndefined()
+    expect(queues.items('c1').map((item) => item.text)).toEqual(['a', 'b'])
+    expect(queues.take('c1')).toEqual({ text: 'a\nb' })
+    expect(queues.held('c1')).toBe(false)
+  })
+
+  it('쌓인 것이 없으면 멈춰도 붙잡지 않는다 — 다음 턴 끝은 평소대로', () => {
+    const queues = new SendQueues()
+    queues.observe('c1', true)
+    queues.hold('c1')
+    expect(queues.held('c1')).toBe(false)
+    queues.observe('c1', false)
+    queues.observe('c1', true)
+    queues.submit('c1', { text: 'next' }, true)
+    expect(queues.observe('c1', false)).toEqual({ text: 'next' })
+  })
+
+  it('다른 대화는 붙잡지 않는다', () => {
+    const queues = new SendQueues()
+    queues.observe('c2', true)
+    queues.submit('c2', { text: 'x' }, true)
+    queues.submit('c1', { text: 'y' }, true)
+    queues.hold('c1')
+    expect(queues.observe('c2', false)).toEqual({ text: 'x' })
+  })
+})

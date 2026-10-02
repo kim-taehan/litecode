@@ -323,7 +323,9 @@ export class LlmService extends Service {
    *  messageId(newMessageId)를 주면 이 입력의 엔진 메시지 id 가 그것이 된다 — history 의 id 로 돌아온다.
    *  onProgress 는 턴 중 진행 줄(생각·도구·글)이 바뀔 때마다 불린다 — 화면의 실시간 진행 표시용. 턴 끝은 여전히 반환값이 정본이다.
    *  mode 는 이 턴을 돌릴 모드 — 엔진 세션의 에이전트를 그것으로 맞추고 보낸다(이어가는 세션도). 안 주면 기본 모드.
-   *  onAttention 은 턴이 기다리는 승인·질문 목록이 바뀔 때마다 (빈 목록 = 더 기다리는 것 없음) — 화면의 카드. 답은 reply */
+   *  onAttention 은 턴이 기다리는 승인·질문 목록이 바뀔 때마다 (빈 목록 = 더 기다리는 것 없음) — 화면의 카드. 답은 reply.
+   *  stop 이 걸리면 사용자가 멈춘 것이다 — 보내기 전이면 안 보내고, 받아들여진 뒤면 opencode 턴도 멈추고(interrupt) "중단됨" 으로 끝낸다.
+   *  세션이 아직 없을 때(첫 턴)도 멈출 수 있게 세션 id 가 아니라 신호로 받는다 */
   async chat(
     providerId: string,
     modelId: string,
@@ -335,12 +337,13 @@ export class LlmService extends Service {
     onProgress?: (item: TurnItem) => void,
     mode: Mode = DEFAULT_MODE,
     onAttention?: (requests: Attention[]) => void,
+    stop?: AbortSignal,
   ): Promise<ChatResult> {
     this.turns++
     /** busy: 이 턴이 쥔 세션(addContext 를 막는다), sessionId: 받아들여진 턴의 세션 — 그때만 turn-started/ended 를 낸다 */
     const admitted: { busy?: string; sessionId?: string } = {}
     try {
-      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention)
+      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention, stop)
       const interrupted = !result.ok && !!result.interrupted
       if (admitted.sessionId) {
         this.ctx.emit('llm/turn-ended', {
@@ -435,6 +438,7 @@ export class LlmService extends Service {
     admittedTurn: { busy?: string; sessionId?: string },
     mode: Mode,
     onAttention: ((requests: Attention[]) => void) | undefined,
+    stop: AbortSignal | undefined,
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
@@ -446,6 +450,7 @@ export class LlmService extends Service {
       const ready = await this.prepare(conn, providerId, modelId, directory, id, onSession, mode)
       if ('error' in ready) return { ok: false, sessionId: id, error: ready.error }
       id = ready.id
+      if (stop?.aborted) return { ok: false, sessionId: id, error: tr('error.stopped'), interrupted: true } // 보내기 전에 멈췄다
       const turnSession = id
       this.busy.add(id) // addContext 가 이 세션을 막는다 (prompt 보내기 전부터 — 그 사이에 끼어들지 않게)
       admittedTurn.busy = id
@@ -457,7 +462,7 @@ export class LlmService extends Service {
       const report = (item: TurnItem | undefined) => {
         if (item) onProgress?.(item)
       }
-      const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)), tracker, report, declined)
+      const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)), tracker, report, declined, stop)
       const attention = this.watchAttention(conn, id, directory, onAttention)
       // 조각(생각·글이 쓰이는 중)과 승인·질문 요청은 전역 스트림에만 온다. 조각은 장식이다: 끊기거나 실패해도 턴은 세션 SSE 로 끝난다 (01g).
       // 요청은 신호로만 쓰고 정본 목록을 다시 읽는다 — 구독이 붙기 전에 생긴 요청도 붙은 직후 한 번 읽어 잡는다 (01f 1-c)
@@ -613,6 +618,15 @@ export class LlmService extends Service {
     }
   }
 
+  /** opencode 의 그 세션 턴을 멈춘다 — `POST /api/session/{id}/interrupt` 는 204 후 즉시 idle (01q 10/10). 실패는 삼킨다(결과는 어차피 "중단됨") */
+  private async interrupt(conn: EngineConnection, sessionId: string): Promise<void> {
+    await fetch(`${conn.url}/api/session/${sessionId}/interrupt`, {
+      method: 'POST',
+      headers: { ...conn.headers, 'content-type': 'application/json' },
+      body: '{}',
+    }).catch(() => {})
+  }
+
   /** SSE 를 구독하고, 턴이 끝나면(성공/실패 모두) 풀리는 결과를 준다.
    *
    *  구독은 그 세션의 과거 이벤트를 seq 1 부터 재생한다 (2026-09-30 실측) — 거르지 않으면 이어가는 세션에서
@@ -626,21 +640,34 @@ export class LlmService extends Service {
     tracker: TurnTracker,
     report: (item: TurnItem | undefined) => void,
     declined: ReadonlySet<string>,
+    userStop?: AbortSignal,
   ): { result: Promise<TurnOutcome>; stop: () => void } {
     const controller = new AbortController()
+    const texts: string[] = []
+    const meter = new TurnMeter()
+    /** 사용자가 멈췄다 — 프롬프트가 받아들여진 뒤에 opencode 턴을 멈춘다(먼저 보내면 뒤에 받아들여진 프롬프트가 그대로 돈다).
+     *  승인·질문 대기 중 interrupt 는 step.ended(tool-calls) 로 끝나 끝 판정이 "계속" 으로 보므로(01f 1-d, 01i 2-d) 이벤트를 기다리지 않고
+     *  interrupt 응답(204 = 즉시 idle, 01q)으로 끝낸다. 그 뒤의 이 턴 이벤트는 다음 턴의 admittedSeq 이하라 다음 턴에 안 섞인다 */
+    const stopped = async (): Promise<TurnOutcome> => {
+      await admittedSeq
+      await this.interrupt(conn, sessionId)
+      return { ok: false, text: texts.join(''), error: tr('error.stopped'), usage: meter.usage(), interrupted: true }
+    }
     const result = (async () => {
       const res = await fetch(`${conn.url}/api/session/${sessionId}/event`, {
         headers: conn.headers,
-        signal: AbortSignal.any([controller.signal, conn.closed]), // 서버가 끝나면 읽기를 바로 멈춘다
+        signal: AbortSignal.any([controller.signal, conn.closed, ...(userStop ? [userStop] : [])]), // 서버가 끝나거나 사용자가 멈추면 읽기를 바로 멈춘다
         dispatcher: this.streamDispatcher,
-      } as RequestInit) // dispatcher 는 Node(undici) fetch 확장이라 DOM RequestInit 타입에 없다
+      } as RequestInit).catch((error: unknown) => {
+        if (userStop?.aborted && !controller.signal.aborted) return undefined // 첫 이벤트 전(헤더도 안 옴)에 멈췄다
+        throw error
+      }) // dispatcher 는 Node(undici) fetch 확장이라 DOM RequestInit 타입에 없다
+      if (!res) return stopped()
       if (!res.ok || !res.body) throw new Error(tr('error.subscribe', { status: res.status }))
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      const texts: string[] = []
-      const meter = new TurnMeter()
 
       try {
         while (true) {
@@ -648,17 +675,12 @@ export class LlmService extends Service {
             if (controller.signal.aborted) throw error // 우리가 멈췄다 (stop)
             return undefined // 연결이 잘렸다 (undici: "terminated")
           })
+          if (userStop?.aborted) return await stopped()
           if (!read || read.done) {
             const error = await interruption(conn.closed)
             // 엔진이 살아 있으면 opencode 의 턴은 계속 돈다 — 그대로 두면 다음 프롬프트가 그 뒤에 줄 서고 이 턴의 답을 받는다(답이 한 칸 밀림, 01q 5/5).
             // interrupt 는 204 후 즉시 idle (01q 10/10)
-            if (!conn.closed.aborted) {
-              await fetch(`${conn.url}/api/session/${sessionId}/interrupt`, {
-                method: 'POST',
-                headers: { ...conn.headers, 'content-type': 'application/json' },
-                body: '{}',
-              }).catch(() => {})
-            }
+            if (!conn.closed.aborted) await this.interrupt(conn, sessionId)
             return { ok: false, text: texts.join(''), error, usage: meter.usage(), interrupted: true }
           }
           const { value } = read
