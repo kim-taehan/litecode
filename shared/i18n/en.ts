@@ -59,6 +59,7 @@ export const en = {
   'chat.messageCopied': 'Copied',
   'chat.minimap': 'Conversation position',
   'chat.minimapTurn': '{index}. {text}',
+  'chat.toBottom': 'Scroll to bottom',
   'markdown.codeBlock': 'Code block',
   'markdown.wrapOff': 'Turn off wrapping',
   'markdown.wrapOn': 'Turn on wrapping',

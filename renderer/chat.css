@@ -400,3 +400,39 @@ button.turn-row__line:disabled { cursor: default; }
   font-size: 12px;
   color: var(--danger);
 }
+
+/* 맨 아래로 버튼 (dsh ui-chat ChatView .toBottomSlot·.toBottom) — 맨 아래가 아닐 때만. 오른쪽 끝은 대화 열(.chat-column) 오른쪽 끝,
+   아래는 입력 카드 위 16px (대화 칸 바닥 = .composer 위, 카드는 그 padding-top 6 아래). 높이 0 칸에 걸어 글을 가리지 않는다 */
+.scroll-bottom {
+  position: absolute;
+  right: 0;
+  bottom: 10px;
+  left: 0;
+  z-index: 3;
+  height: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding-right: calc((100cqw - min(100cqw - 32px, clamp(680px, 64cqw, 920px))) / 2);
+  pointer-events: none;
+}
+
+.scroll-bottom__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-top: -34px;
+  padding: 0;
+  border: 0;
+  border-radius: 100px;
+  color: var(--text);
+  background: var(--fill-floating);
+  box-shadow: var(--shadow-panel);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.scroll-bottom__button:hover { background: var(--fill-floating-hover); }
+
+/* 맨 아래를 따라가는 동안 스크롤 고정을 끈다 (dsh ChatView .root[data-chat-following-tail] .scroll) — useFollowBottom 이 붙인다 */
+.main__messages[data-following] { overflow-anchor: none; }

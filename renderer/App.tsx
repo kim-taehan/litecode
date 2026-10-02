@@ -4,6 +4,7 @@ import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap, useFollowBottom } from './Minimap.tsx'
+import { ScrollToBottom } from './ScrollToBottom.tsx'
 import { upsertItem } from './turnView.ts'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
 import { ModelSelect } from './ModelSelect.tsx'
@@ -936,6 +937,7 @@ export function App() {
               </div>
             </div>
             <Minimap scroller={listRef} turns={active.messages.filter((message) => message.role === 'user').map((message) => message.text)} />
+            <ScrollToBottom scroller={listRef} following={following} />
             </div>
             )}
 

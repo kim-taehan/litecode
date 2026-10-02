@@ -63,6 +63,7 @@ export const ko = {
   'chat.messageCopied': '복사됨',
   'chat.minimap': '대화 위치',
   'chat.minimapTurn': '{index}. {text}',
+  'chat.toBottom': '맨 아래로',
   'markdown.codeBlock': '코드 블록',
   'markdown.wrapOff': '줄바꿈 끄기',
   'markdown.wrapOn': '줄바꿈 켜기',
