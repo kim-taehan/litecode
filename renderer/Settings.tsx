@@ -56,7 +56,7 @@ function CloseIcon() {
 
 export function SettingsModal({ providers, onProvidersChange, onClose }: SettingsModalProps) {
   const t = useT()
-  const [page, setPage] = useState<Page>('models')
+  const [page, setPage] = useState<Page>('general') // 첫 페이지는 일반 (dsh)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') onClose()

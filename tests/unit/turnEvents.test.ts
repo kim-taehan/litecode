@@ -3,7 +3,9 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import { Context, Service } from 'cordis'
 import { afterEach, describe, expect, it } from 'vitest'
-import { INTERRUPTED, LlmService, type TurnInfo } from '../../src/services/llm.ts'
+import { interruptedError, LlmService, type TurnInfo } from '../../src/services/llm.ts'
+import { setMainLanguage } from '../../src/i18n.ts'
+import { translate } from '../../shared/i18n/index.ts'
 
 // ctx.llm 의 턴 수명 Cordis 이벤트 ('llm/turn-started'·'llm/turn-ended') — 알림 플러그인이 받아 쓸 계약.
 // 받아들여진 턴마다 정확히 한 번씩, outcome 이 맞는지만 고정한다. opencode 는 이 시험에 필요한 엔드포인트만 흉내 낸 HTTP 서버다
@@ -112,8 +114,19 @@ describe("ctx.llm 턴 수명 이벤트", () => {
 
   it('엔진이 끝나 끊긴 턴: ended interrupted', async () => {
     const { llm, seen } = await start(await fakeOpencode('cut'))
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ error: INTERRUPTED, interrupted: true })
-    expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} interrupted (${INTERRUPTED})`])
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ error: interruptedError(), interrupted: true })
+    expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} interrupted (${interruptedError()})`])
+  })
+
+  it('영어에서도 끊긴 턴은 interrupted — 판정이 한국어 문구("중단됨")에 기대지 않는다', async () => {
+    setMainLanguage('en')
+    try {
+      const { llm, seen } = await start(await fakeOpencode('cut'))
+      expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ error: translate('en', 'error.interrupted'), interrupted: true })
+      expect(seen.at(-1)).toMatch(/ interrupted \(Interrupted — /)
+    } finally {
+      setMainLanguage('ko')
+    }
   })
 
   it('받아들여지기 전에 거절된 턴(프롬프트 500·없는 폴더)은 둘 다 안 나간다', async () => {

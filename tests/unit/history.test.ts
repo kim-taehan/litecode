@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { historyMessages, INTERRUPTED } from '../../src/services/llm.ts'
+import { historyMessages, interruptedError } from '../../src/services/llm.ts'
 
 // opencode `GET /api/session/{id}/message?order=asc` 의 메시지 → 화면이 그리는 중립 모양 (user/assistant 말풍선).
 // 모양은 01c 실측: user 는 text, assistant 는 content[](text·tool)·finish·error·time.completed. 도구 턴은 assistant 둘로 온다.
@@ -60,7 +60,7 @@ describe('historyMessages', () => {
       { role: 'user', text: 'a' },
       { role: 'assistant', text: 'b' },
       { role: 'user', text: '[slow] c' },
-      { role: 'assistant', text: '', error: INTERRUPTED, interrupted: true },
+      { role: 'assistant', text: '', error: interruptedError(), interrupted: true },
     ])
   })
 
@@ -68,7 +68,7 @@ describe('historyMessages', () => {
     const hanging = { type: 'assistant', time: { created: 2 }, content: [{ type: 'text', text: '' }] }
     expect(historyMessages([user('[drip] a'), hanging], false)).toMatchObject([
       { role: 'user', text: '[drip] a' },
-      { role: 'assistant', text: '', error: INTERRUPTED, interrupted: true },
+      { role: 'assistant', text: '', error: interruptedError(), interrupted: true },
     ])
   })
 

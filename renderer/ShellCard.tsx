@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ShellCard as ShellCardData } from '../shared/ipc.ts'
-import { chatStrings } from './chatStrings.ts'
+import { useT, type Translate } from './settingsStore.ts'
 import './chat.css'
 
 // 대화 안의 `!명령` 결과 카드 (closed-code shellRecord·TurnExtras 참조) — 명령 · 끝난 사정(종료 코드) · 고정폭 출력(길면 접기).
@@ -22,6 +22,7 @@ interface ShellCardProps {
 }
 
 export function ShellCard({ card, shareBlocked, onStop, onShare }: ShellCardProps) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [error, setError] = useState<string>()
@@ -35,9 +36,9 @@ export function ShellCard({ card, shareBlocked, onStop, onShare }: ShellCardProp
       <div className="shell-card__head">
         <span className="shell-card__prompt" aria-hidden="true">$</span>
         <code className="shell-card__command">{card.command}</code>
-        <span className="shell-card__badge">{badge(card)}</span>
+        <span className="shell-card__badge">{badge(t, card)}</span>
         {card.running && (
-          <button type="button" className="shell-card__stop" aria-label={chatStrings.shellStop} title={chatStrings.shellStop} onClick={onStop}>
+          <button type="button" className="shell-card__stop" aria-label={t('shellCard.stop')} title={t('shellCard.stop')} onClick={onStop}>
             <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
               <rect width="10" height="10" rx="1.5" fill="currentColor" />
             </svg>
@@ -45,17 +46,17 @@ export function ShellCard({ card, shareBlocked, onStop, onShare }: ShellCardProp
         )}
       </div>
       <pre className="shell-card__output" data-collapsed={long && !expanded ? true : undefined}>
-        {output || (card.running ? '' : chatStrings.shellNoOutput)}
+        {output || (card.running ? '' : t('shellCard.noOutput'))}
       </pre>
       {long && (
         <button type="button" className="shell-card__more" aria-expanded={expanded} onClick={() => setExpanded((now) => !now)}>
-          {expanded ? chatStrings.shellCollapse : chatStrings.shellExpand}
+          {expanded ? t('shellCard.collapse') : t('shellCard.expand')}
         </button>
       )}
-      {card.truncated && <div className="shell-card__note">{chatStrings.shellTruncated(OUTPUT_KB)}</div>}
+      {card.truncated && <div className="shell-card__note">{t('shellCard.truncated', { kb: OUTPUT_KB })}</div>}
       {!card.running && (
         <div className="shell-card__foot">
-          <span className="shell-card__note">{shared ? chatStrings.shellSharedNote : chatStrings.shellLocalOnly}</span>
+          <span className="shell-card__note">{shared ? t('shellCard.sharedNote') : t('shellCard.localOnly')}</span>
           {/* 막힌 버튼은 툴팁을 못 띄워 감싼 쪽에 둔다 */}
           <span title={!shared && shareBlocked ? shareBlocked : undefined}>
             <button
@@ -71,24 +72,24 @@ export function ShellCard({ card, shareBlocked, onStop, onShare }: ShellCardProp
                 })
               }}
             >
-              {shared ? chatStrings.shellShared : chatStrings.shellShare}
+              {shared ? t('shellCard.shared') : t('shellCard.share')}
             </button>
           </span>
         </div>
       )}
       {error && (
         <div className="shell-card__error" role="alert">
-          {chatStrings.shellShareFailed(error)}
+          {t('shellCard.shareFailed', { reason: error })}
         </div>
       )}
     </div>
   )
 }
 
-function badge(card: ShellCardView): string {
-  if (card.running) return chatStrings.shellRunning
-  if (card.status === 'stopped') return chatStrings.shellStopped
-  if (card.status === 'timeout') return chatStrings.shellTimeout(60)
-  if (card.status === 'error') return chatStrings.shellError(card.error ?? '')
-  return card.exitCode === null ? chatStrings.shellStopped : chatStrings.shellExit(card.exitCode)
+function badge(t: Translate, card: ShellCardView): string {
+  if (card.running) return t('shellCard.running')
+  if (card.status === 'stopped') return t('shellCard.stopped')
+  if (card.status === 'timeout') return t('shellCard.timeout', { seconds: 60 })
+  if (card.status === 'error') return t('shellCard.error', { reason: card.error ?? '' })
+  return card.exitCode === null ? t('shellCard.stopped') : t('shellCard.exit', { code: card.exitCode })
 }

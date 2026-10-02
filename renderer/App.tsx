@@ -15,7 +15,6 @@ import { useTriggers } from './useTriggers.ts'
 import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
 import { ShellCard, type ShellCardView } from './ShellCard.tsx'
-import { chatStrings } from './chatStrings.ts'
 import { useSettings, useT } from './settingsStore.ts'
 import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
@@ -640,7 +639,7 @@ export function App() {
 
   /** 카드를 AI 에게 — 맥락에만 넣는다. 세션이 없었으면 생긴 세션·모델을 이 대화에 붙인다. 실패하면 사유를 준다 */
   async function shareShell(target: Session, cardId: string): Promise<string | undefined> {
-    if (!selected) return chatStrings.shellShareNoModel
+    if (!selected) return t('shellCard.shareNoModel')
     const result = await window.litecode.shareShell(target.id, cardId, selected.providerId, selected.modelId)
     if (!result.ok) return result.error
     updateSession(target.id, (session) => ({
@@ -661,7 +660,7 @@ export function App() {
         <ShellCard
           key={card.id}
           card={card}
-          shareBlocked={session.pending ? chatStrings.shellShareBusy : !chosen ? chatStrings.shellShareNoModel : undefined}
+          shareBlocked={session.pending ? t('shellCard.shareBusy') : !chosen ? t('shellCard.shareNoModel') : undefined}
           onStop={() => void window.litecode.stopShell(card.id)}
           onShare={() => shareShell(session, card.id)}
         />
@@ -891,12 +890,12 @@ export function App() {
               <div className="chat-column">
               {active.history === 'missing' ? (
                 <div className="empty" role="alert">
-                  폴더가 없습니다: {active.project}
+                  {t('chat.missingFolder', { dir: active.project })}
                 </div>
               ) : active.history === 'unloaded' || active.history === 'loading' ? (
-                <div className="empty">불러오는 중…</div>
+                <div className="empty">{t('chat.loading')}</div>
               ) : (
-                active.messages.length === 0 && <div className="empty">무엇을 도와드릴까요?</div>
+                active.messages.length === 0 && <div className="empty">{t('chat.empty')}</div>
               )}
               {/* 내 말은 말풍선, 답은 본문 폭 전체의 글 + 턴 머리 (ChatTurn.tsx) */}
               {active.messages.map((message, index) => (

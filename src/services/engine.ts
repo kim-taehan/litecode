@@ -7,6 +7,7 @@ import path from 'node:path'
 import { findOpencodeBinary, notFoundMessage } from './opencodeBinary.ts'
 import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
 import type { ProviderConfig } from './providers.ts'
+import { tr } from '../i18n.ts'
 import './providers.ts'
 
 // 앱이 띄우는 opencode 서버 하나의 수명 (ctx.engine). ctx.llm 은 이 서비스에서 주소·인증을 받아 쓰고, 그 밖의 누구도
@@ -157,7 +158,7 @@ export class EngineService extends Service {
 
   /** 떠 있는 서버의 연결. 없거나 죽었으면 띄운다 (동시에 불러도 한 번만) */
   connection(): Promise<EngineConnection> {
-    if (this.disposed) return Promise.reject(new Error('앱이 종료 중입니다'))
+    if (this.disposed) return Promise.reject(new Error(tr('error.appQuitting')))
     if (!this.current) {
       const launching: Promise<RunningServer> = this.stopping.then(() => this.launch(() => this.forget(launching)))
       launching.catch(() => this.forget(launching))
@@ -240,7 +241,7 @@ export class EngineService extends Service {
     const closer = new AbortController()
     const exited = new Promise<void>((resolve) =>
       child.once('exit', (code, signal) => {
-        closer.abort(new Error(`opencode 가 끝났습니다 (code=${code} signal=${signal})`))
+        closer.abort(new Error(tr('error.opencodeExited', { code: String(code), signal: String(signal) })))
         forgetRecord(this.opts.pidFile, child.pid)
         onExit()
         resolve()
@@ -248,7 +249,7 @@ export class EngineService extends Service {
     )
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve)
-      child.once('error', (error) => reject(new Error(`opencode 를 실행하지 못했습니다 (${bin}): ${error.message}`)))
+      child.once('error', (error) => reject(new Error(tr('error.opencodeSpawn', { bin, message: error.message }))))
     })
 
     const url = `http://127.0.0.1:${port}`
@@ -290,7 +291,7 @@ async function waitUntilReady(url: string, headers: Record<string, string>, clos
   const deadline = Date.now() + READY_TIMEOUT_MS
   let last = ''
   while (Date.now() < deadline) {
-    if (closed.aborted) throw new Error(`opencode 가 준비 전에 끝났습니다 — ${(closed.reason as Error).message}`)
+    if (closed.aborted) throw new Error(tr('error.opencodeExitedEarly', { message: (closed.reason as Error).message }))
     try {
       const res = await fetch(`${url}/doc`, { headers, signal: AbortSignal.timeout(2_000) })
       if (res.ok) return
@@ -300,7 +301,7 @@ async function waitUntilReady(url: string, headers: Record<string, string>, clos
     }
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
-  throw new Error(`opencode 가 ${READY_TIMEOUT_MS / 1000}초 안에 준비되지 않았습니다 (마지막 응답: ${last})`)
+  throw new Error(tr('error.opencodeNotReady', { seconds: READY_TIMEOUT_MS / 1000, last }))
 }
 
 async function freePort(): Promise<number> {

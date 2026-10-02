@@ -7,6 +7,7 @@ import type { EngineConnection } from './engine.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
 import { contextText, messageItems, TurnTracker, type TurnItem } from './turnProgress.ts'
+import { tr } from '../i18n.ts'
 import './engine.ts'
 
 // opencode 를 감싸는 서비스 — 위층(세션·UI)은 이 ctx.llm 키만 알고 opencode 를 직접 모른다.
@@ -69,7 +70,7 @@ export interface HistoryMessage {
   items?: TurnItem[]
   /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
   duration?: number
-  /** assistant: 끊겨서 끝났다 (error 는 INTERRUPTED) — 실패와 가른다 */
+  /** assistant: 끊겨서 끝났다 (error 는 interruptedError()) — 실패와 가른다 */
   interrupted?: boolean
 }
 
@@ -113,6 +114,7 @@ interface TurnOutcome {
   text: string
   error?: string
   usage?: TurnUsage
+  interrupted?: boolean
 }
 
 interface OpencodeEventEnvelope {
@@ -128,7 +130,10 @@ interface CatalogModel {
 }
 
 export const MODEL_CATALOG_TIMEOUT_MS = 10_000
-export const INTERRUPTED = '중단됨 — 엔진(opencode)이 재시작되거나 끝나서 답을 끝까지 받지 못했습니다. 다시 보내 주세요'
+/** 엔진 재시작·크래시로 끊긴 턴의 사유 — 지금 언어로 (그래서 상수가 아니다. 중단 판정은 문구가 아니라 interrupted 로 한다) */
+export function interruptedError(): string {
+  return tr('error.interrupted')
+}
 
 export class LlmService extends Service {
   static readonly inject = ['providers', 'engine']
@@ -152,7 +157,7 @@ export class LlmService extends Service {
       headers: { ...conn.headers, 'content-type': 'application/json' },
       body: JSON.stringify({ model: { providerID: providerId, id: modelId }, location: { directory } }),
     })
-    if (!res.ok) throw new Error(`세션 생성 실패 (${res.status})`)
+    if (!res.ok) throw new Error(tr('error.sessionCreate', { status: res.status }))
     const body = (await res.json()) as { data: { id: string } }
     return body.data.id
   }
@@ -186,7 +191,7 @@ export class LlmService extends Service {
   private async listModels(conn: EngineConnection, directory: string): Promise<CatalogModel[]> {
     const query = new URLSearchParams({ 'location[directory]': directory })
     const res = await fetch(`${conn.url}/api/model?${query}`, { headers: conn.headers })
-    if (!res.ok) throw new Error(`모델 목록 조회 실패 (${res.status})`)
+    if (!res.ok) throw new Error(tr('error.modelList', { status: res.status }))
     return ((await res.json()) as { data: CatalogModel[] }).data
   }
 
@@ -197,7 +202,7 @@ export class LlmService extends Service {
   // 통과한 뒤에만 부른다.
   private async useModel(conn: EngineConnection, sessionId: string, providerId: string, modelId: string): Promise<void> {
     const res = await fetch(`${conn.url}/api/session/${sessionId}`, { headers: conn.headers })
-    if (!res.ok) throw new Error(`세션 조회 실패 (${res.status})`)
+    if (!res.ok) throw new Error(tr('error.sessionRead', { status: res.status }))
     const current = ((await res.json()) as { data: { model?: { providerID?: string; id?: string } } }).data.model
     if (current?.providerID === providerId && current.id === modelId) return
     const switched = await fetch(`${conn.url}/api/session/${sessionId}/model`, {
@@ -205,7 +210,7 @@ export class LlmService extends Service {
       headers: { ...conn.headers, 'content-type': 'application/json' },
       body: JSON.stringify({ model: { providerID: providerId, id: modelId } }),
     })
-    if (!switched.ok) throw new Error(`모델 바꾸기 실패 (${switched.status})`)
+    if (!switched.ok) throw new Error(tr('error.modelSwitch', { status: switched.status }))
   }
 
   /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더를 따르고, 모델이 다르면
@@ -228,8 +233,7 @@ export class LlmService extends Service {
     const admitted: { busy?: string; sessionId?: string } = {}
     try {
       const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted)
-      const interrupted = !result.ok && (result.error === INTERRUPTED || !!result.error?.startsWith('중단됨'))
-      if (interrupted) result.interrupted = true
+      const interrupted = !result.ok && !!result.interrupted
       if (admitted.sessionId) {
         this.ctx.emit('llm/turn-ended', {
           sessionId: admitted.sessionId,
@@ -257,14 +261,14 @@ export class LlmService extends Service {
     onSession?: (sessionId: string) => Promise<void>,
   ): Promise<{ id: string } | { error: string }> {
     const workdir = await realDirectory(directory)
-    if (!workdir) return { error: `작업 디렉터리가 없다: ${directory}` }
+    if (!workdir) return { error: tr('error.noWorkdir', { dir: directory }) }
     const model = await this.waitForModel(conn, providerId, modelId, workdir)
-    if (!model) return { error: `opencode 에 모델 ${providerId}/${modelId} 없음` }
+    if (!model) return { error: tr('error.noModel', { provider: providerId, model: modelId }) }
     // 세션 폴더의 opencode.json 은 우리 provider 의 baseURL 까지 덮는다 — 그러면 프롬프트(와 프록시 토큰)가 그 주소로 간다.
     // OPENCODE_DISABLE_PROJECT_CONFIG 로는 못 막는다 — 대신 그 폴더 카탈로그의 api.url 에 덮인 주소가 보인다 (01_probe Q4, 5/5).
     // 우리가 적은 주소는 키 프록시 주소다 (engine.ts)
     if (normalizeBaseURL(model.api?.url ?? '') !== normalizeBaseURL(conn.providerBaseURL(providerId))) {
-      return { error: `이 프로젝트의 opencode.json 이 provider 주소를 바꿉니다 (${model.api?.url}) — 대화 내용이 그 주소로 갈 수 있어 보내지 않았습니다` }
+      return { error: tr('error.baseUrlOverridden', { url: String(model.api?.url) }) }
     }
     if (sessionId) {
       await this.useModel(conn, sessionId, providerId, modelId)
@@ -287,24 +291,24 @@ export class LlmService extends Service {
     sessionId?: string,
     onSession?: (sessionId: string) => Promise<void>,
   ): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
-    if (sessionId && this.busy.has(sessionId)) return { ok: false, sessionId, error: '답을 기다리는 중에는 맥락에 넣을 수 없습니다' }
-    if (!this.ctx.providers.get(providerId)) return { ok: false, sessionId, error: `provider ${providerId} 없음` }
+    if (sessionId && this.busy.has(sessionId)) return { ok: false, sessionId, error: tr('error.contextBusy') }
+    if (!this.ctx.providers.get(providerId)) return { ok: false, sessionId, error: tr('error.noProvider', { id: providerId }) }
     let id = sessionId
     try {
       const conn = await this.ctx.engine.connection()
       const ready = await this.prepare(conn, providerId, modelId, directory, sessionId, onSession)
       if ('error' in ready) return { ok: false, sessionId, error: ready.error }
       id = ready.id
-      if (this.busy.has(id)) return { ok: false, sessionId: id, error: '답을 기다리는 중에는 맥락에 넣을 수 없습니다' }
+      if (this.busy.has(id)) return { ok: false, sessionId: id, error: tr('error.contextBusy') }
       const res = await fetch(`${conn.url}/api/session/${id}/prompt`, {
         method: 'POST',
         headers: { ...conn.headers, 'content-type': 'application/json' },
         body: JSON.stringify({ id: messageId, prompt: { text }, resume: false }),
       })
-      if (!res.ok) return { ok: false, sessionId: id, error: `맥락에 넣지 못했습니다 (${res.status})` }
+      if (!res.ok) return { ok: false, sessionId: id, error: tr('error.contextAdd', { status: res.status }) }
       return { ok: true, sessionId: id }
     } catch (error) {
-      return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
+      return { ok: false, sessionId: id, error: tr('error.opencodeConnect', { message: (error as Error).message }) }
     }
   }
 
@@ -320,7 +324,7 @@ export class LlmService extends Service {
     admittedTurn: { busy?: string; sessionId?: string },
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
-    if (!provider) return { ok: false, error: `provider ${providerId} 없음` }
+    if (!provider) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
 
     let conn: EngineConnection | undefined
     let id = sessionId
@@ -351,7 +355,7 @@ export class LlmService extends Service {
         })
         if (!admit.ok) {
           events.stop()
-          return { ok: false, sessionId: id, error: `프롬프트 전송 실패 (${admit.status})` }
+          return { ok: false, sessionId: id, error: tr('error.promptSend', { status: admit.status }) }
         }
         admitted(((await admit.json()) as { data: { admittedSeq: number } }).data.admittedSeq)
         admittedTurn.sessionId = id
@@ -359,13 +363,13 @@ export class LlmService extends Service {
 
         const result = await events.result
         const usage = result.usage && { ...result.usage, messageTokens: await this.messageTokens(conn, id) }
-        return { ok: result.ok, sessionId: id, text: result.text, error: result.error, usage }
+        return { ok: result.ok, sessionId: id, text: result.text, error: result.error, usage, ...(result.interrupted && { interrupted: true }) }
       } finally {
         pieces?.()
       }
     } catch (error) {
-      if (conn?.closed.aborted) return { ok: false, sessionId: id, error: INTERRUPTED }
-      return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
+      if (conn?.closed.aborted) return { ok: false, sessionId: id, error: interruptedError(), interrupted: true }
+      return { ok: false, sessionId: id, error: tr('error.opencodeConnect', { message: (error as Error).message }) }
     }
   }
 
@@ -399,17 +403,17 @@ export class LlmService extends Service {
   /** 그 폴더에서 셸 하나를 띄워 붙는다 (opencode pty — opencodePty.ts) */
   async openTerminal(directory: string, on: TerminalEvents): Promise<TerminalHandle> {
     const workdir = await realDirectory(directory)
-    if (!workdir) throw new Error(`작업 디렉터리가 없다: ${directory}`)
+    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
     return openPty(await this.ctx.engine.connection(), workdir, on)
   }
 
   private async engineGet<T>(route: string, directory: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
     const workdir = await realDirectory(directory)
-    if (!workdir) throw new Error(`작업 디렉터리가 없다: ${directory}`)
+    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
     const conn = await this.ctx.engine.connection()
     const query = new URLSearchParams({ 'location[directory]': workdir, ...params })
     const res = await fetch(`${conn.url}${route}?${query}`, { headers: conn.headers, signal })
-    if (!res.ok) throw new Error(`${route} 실패 (${res.status})`)
+    if (!res.ok) throw new Error(tr('error.engineRoute', { route, status: res.status }))
     return ((await res.json()) as { data: T }).data
   }
 
@@ -423,11 +427,11 @@ export class LlmService extends Service {
       const conn = await this.ctx.engine.connection()
       const raw = await this.readMessages(conn, sessionId)
       const active = await fetch(`${conn.url}/api/session/active`, { headers: conn.headers })
-      if (!active.ok) throw new Error(`진행 중 세션 조회 실패 (${active.status})`)
+      if (!active.ok) throw new Error(tr('error.activeSessions', { status: active.status }))
       const running = sessionId in ((await active.json()) as { data: Record<string, unknown> }).data
       return { messages: historyMessages(raw.filter((message) => !message.id || !hidden.has(message.id)), running) }
     } catch (error) {
-      return { messages: [], error: `대화를 불러오지 못했습니다: ${(error as Error).message}` }
+      return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
     }
   }
 
@@ -438,7 +442,7 @@ export class LlmService extends Service {
     let query = `order=asc&limit=${MESSAGE_PAGE}`
     while (true) {
       const res = await fetch(`${conn.url}/api/session/${sessionId}/message?${query}`, { headers: conn.headers })
-      if (!res.ok) throw new Error(`메시지 조회 실패 (${res.status})`)
+      if (!res.ok) throw new Error(tr('error.messageRead', { status: res.status }))
       const page = (await res.json()) as { data: OpencodeMessage[]; cursor?: { next?: string | null } }
       messages.push(...page.data)
       if (page.data.length < MESSAGE_PAGE || !page.cursor?.next) return messages
@@ -464,7 +468,7 @@ export class LlmService extends Service {
   async deleteSession(sessionId: string): Promise<void> {
     const conn = await this.ctx.engine.connection()
     const res = await fetch(`${conn.url}/session/${sessionId}`, { method: 'DELETE', headers: conn.headers })
-    if (!res.ok && res.status !== 404) throw new Error(`세션 삭제 실패 (${res.status})`)
+    if (!res.ok && res.status !== 404) throw new Error(tr('error.sessionDelete', { status: res.status }))
   }
 
   /** 컨텍스트 중 대화 메시지 몫 (추정). 통계용이라 못 구해도 턴은 그대로 돌려준다 */
@@ -496,7 +500,7 @@ export class LlmService extends Service {
         headers: conn.headers,
         signal: AbortSignal.any([controller.signal, conn.closed]), // 서버가 끝나면 읽기를 바로 멈춘다
       })
-      if (!res.ok || !res.body) throw new Error(`이벤트 구독 실패 (${res.status})`)
+      if (!res.ok || !res.body) throw new Error(tr('error.subscribe', { status: res.status }))
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -510,7 +514,7 @@ export class LlmService extends Service {
             if (controller.signal.aborted) throw error // 우리가 멈췄다 (stop)
             return undefined // 연결이 잘렸다 (undici: "terminated")
           })
-          if (!read || read.done) return { ok: false, text: texts.join(''), error: await interruption(conn.closed), usage: meter.usage() }
+          if (!read || read.done) return { ok: false, text: texts.join(''), error: await interruption(conn.closed), usage: meter.usage(), interrupted: true }
           const { value } = read
           buffer += decoder.decode(value, { stream: true })
 
@@ -556,7 +560,7 @@ export class LlmService extends Service {
     }
     if (event.type === 'session.next.step.failed') {
       const error = event.data['error'] as { message?: string } | undefined
-      return { ok: false, text: texts.join(''), error: error?.message ?? '알 수 없는 오류', usage: meter.usage() }
+      return { ok: false, text: texts.join(''), error: error?.message ?? tr('error.unknown'), usage: meter.usage() }
     }
     return undefined
   }
@@ -631,14 +635,14 @@ export function historyMessages(raw: OpencodeMessage[], running: boolean): Histo
     const completed = message.time?.completed
     if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
     else delete reply.duration // 마지막 스텝이 안 끝났다
-    if (message.error) reply.error = message.error.message ?? '알 수 없는 오류'
+    if (message.error) reply.error = message.error.message ?? tr('error.unknown')
   }
 
   const last = raw.filter((message) => message.type === 'user' || message.type === 'assistant').at(-1)
   if (!running && last && (last.type === 'user' || !last.time?.completed)) {
     const reply = messages.at(-1)
-    if (reply?.role === 'assistant') Object.assign(reply, { error: INTERRUPTED, interrupted: true })
-    else messages.push({ role: 'assistant', text: '', error: INTERRUPTED, interrupted: true })
+    if (reply?.role === 'assistant') Object.assign(reply, { error: interruptedError(), interrupted: true })
+    else messages.push({ role: 'assistant', text: '', error: interruptedError(), interrupted: true })
   }
   return messages
 }
@@ -652,7 +656,7 @@ async function interruption(closed: AbortSignal): Promise<string> {
       closed.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true })
     })
   }
-  return closed.aborted ? INTERRUPTED : '중단됨 — 이벤트 스트림이 끊겼습니다. 다시 보내 주세요'
+  return closed.aborted ? interruptedError() : tr('error.streamBroken')
 }
 
 /** 폴더면 realpath 를, 아니면(없는 경로·파일·상대 경로) undefined 를 준다.

@@ -11,8 +11,8 @@ import { alive, freePort, isolatedEnv } from './support/opencodeServer.ts'
 
 // 알림 실물 테스트 — 진짜 Electron 창·IPC·ctx.notifications 를 관통한다: 메인 판정 → PC 알림(기록) / 토스트·점(화면) → 누르면 그 프로젝트·대화.
 // 테스트 모드(LITECODE_TEST_HIDDEN=1)는 OS 알림·배지·창 앞으로 부르기를 기록으로 바꾸고(사용자 화면에 알림 0), 앞/뒤 판정을 주입받는다
-// (globalThis.__litecodeNotifyTest — electron/main.ts). 턴 이벤트(llm/turn-*·llm/attention*)는 지금 테스트가 그 길로 쏜다 —
-// 채팅 라운드·라운드 A 를 합친 뒤엔 실제 턴이 같은 이벤트를 낸다(합칠 때 실제 턴으로 바꿀 시나리오는 보고서에). 대화·엔진 세션은 실제 턴으로 만든다.
+// (globalThis.__litecodeNotifyTest — electron/main.ts). 끝남·실패·중단·실행 중은 실제 턴(가짜 LLM 의 `[late]`·`[fail]`·`[slow]`)으로 만든다.
+// 질문 대기(llm/attention*)는 아직 실제 턴이 없어(라운드 A) 그 길로 쏘고, 알림 설정·거두기 시나리오의 끝남도 그 길로 쏜다 (판정만 본다).
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -83,10 +83,23 @@ async function pickFolderNextTime(dir: string): Promise<void> {
 
 async function send(text: string): Promise<void> {
   const before = await page.locator('.bubble--assistant').count()
-  await page.getByPlaceholder('메시지를 입력하세요…').fill(text)
-  await page.keyboard.press('Enter')
+  await submit(text)
   await page.locator('.bubble--assistant').nth(before).waitFor({ timeout: 30_000 }) // beforeAll 에서도 쓴다 — expect.poll 은 테스트 안에서만
 }
+
+/** 보내기만 하고 답을 기다리지 않는다 — 턴이 도는 동안 다른 대화·프로젝트로 옮겨 간다 */
+async function submit(text: string): Promise<void> {
+  await page.getByPlaceholder('메시지를 입력하세요…').fill(text)
+  await page.keyboard.press('Enter')
+}
+
+/** 지금 프로젝트의 그 대화를 연다 */
+async function openChat(title: string): Promise<void> {
+  await page.locator('.session-item', { hasText: title }).click()
+  await expect.poll(activeTitle, { timeout: 5_000 }).toBe(title)
+}
+
+const fakeLlmCount = async () => ((await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { count: number }).count
 
 const currentName = () => page.locator('.project-switch__name').textContent({ timeout: 1_000 })
 const activeTitle = () => page.locator('.session-item--active .session-item__title').textContent({ timeout: 1_000 })
@@ -130,10 +143,13 @@ async function switchTo(name: string): Promise<void> {
 describe('알림', () => {
   it('뒤(포커스 없음)에서 끝나면 PC 알림 — 제목은 대화 제목, 본문은 "프로젝트 · 상태"(답 없음). 다른 프로젝트라 전환 버튼·팝오버 행에 점, 배지 1', async () => {
     await setForeground(false)
+    await switchTo('alpha-app')
+    await openChat('hello one')
     await resetRecord()
-    expect(await currentName()).toBe('beta-app')
-    await ended('hello one', 'done')
-    await expect.poll(shown, { timeout: 5_000 }).toEqual([{ title: 'hello one', body: 'alpha-app · 끝났습니다', closed: false }])
+    await submit('[late] one again') // 답이 3초 늦다 — 그 사이 다른 프로젝트로
+    await switchTo('beta-app')
+    await page.keyboard.press('Escape')
+    await expect.poll(shown, { timeout: 15_000 }).toEqual([{ title: 'hello one', body: 'alpha-app · 끝났습니다', closed: false }])
     expect(JSON.stringify(await shown())).not.toContain('echo')
     await expect.poll(() => switchDot().getAttribute('data-status'), { timeout: 5_000 }).toBe('done')
     expect(await lastBadge()).toBe(1)
@@ -157,11 +173,13 @@ describe('알림', () => {
   it('앞에서 같은 프로젝트의 다른 대화가 끝나면 PC 알림 없이 토스트 + 행 점. 토스트를 누르면 그 대화로', async () => {
     await setForeground(true)
     await resetRecord()
-    await ended('hello two', 'done')
+    await openChat('hello two')
+    await submit('[late] two again')
+    await openChat('hello one')
     const toast = page.locator('.toast', { hasText: 'hello two' })
-    await toast.waitFor({ timeout: 5_000 })
+    await toast.waitFor({ timeout: 15_000 })
     expect(await toast.textContent()).toContain('alpha-app · 끝났습니다')
-    expect(await rowDot('hello two').getAttribute('data-status')).toBe('done')
+    await expect.poll(() => rowDot('hello two').getAttribute('data-status'), { timeout: 5_000 }).toBe('done')
     expect(await rowDot('hello one').count()).toBe(0)
     expect(await shown()).toEqual([])
     await toast.click()
@@ -170,12 +188,17 @@ describe('알림', () => {
   })
 
   it('앞에서 다른 프로젝트 대화가 실패하면 토스트 — 누르면 그 프로젝트로 넘어가 그 대화가 열린다. 실패 사유는 싣지 않는다', async () => {
-    await emit('llm/turn-ended', { sessionId: conv['hello three']!.session, directory: beta, outcome: 'failed', error: 'HTTP 500 gateway-secret' })
+    await switchTo('beta-app')
+    await page.keyboard.press('Escape')
+    await openChat('hello three')
+    await submit('[late][fail] three fails') // 가짜 LLM 이 3초 뒤 500 (사유 "fake-llm: 요청된 실패")
+    await switchTo('alpha-app')
+    await page.keyboard.press('Escape')
     const toast = page.locator('.toast', { hasText: 'hello three' })
-    await toast.waitFor({ timeout: 5_000 })
+    await toast.waitFor({ timeout: 15_000 })
     expect(await toast.textContent()).toContain('beta-app · 실패했습니다')
-    expect(await toast.textContent()).not.toContain('gateway-secret')
-    expect(await switchDot().getAttribute('data-status')).toBe('failed')
+    expect(await toast.textContent()).not.toContain('fake-llm')
+    await expect.poll(() => switchDot().getAttribute('data-status'), { timeout: 5_000 }).toBe('failed')
     await toast.click()
     await expect.poll(currentName, { timeout: 10_000 }).toBe('beta-app')
     await expect.poll(activeTitle, { timeout: 5_000 }).toBe('hello three')
@@ -186,9 +209,9 @@ describe('알림', () => {
   it('앞에서 보고 있는 그 대화는 실행 중 점만 — 끝나도 토스트·PC 알림·점이 없다', async () => {
     await page.locator('.toast').first().waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {})
     const toastsBefore = await page.locator('.toast').count()
-    await emit('llm/turn-started', { sessionId: conv['hello three']!.session, directory: beta })
-    await expect.poll(() => rowDot('hello three').getAttribute('data-status'), { timeout: 5_000 }).toBe('running')
-    await ended('hello three', 'done')
+    await submit('[late] three again')
+    await expect.poll(() => rowDot('hello three').getAttribute('data-status'), { timeout: 10_000 }).toBe('running')
+    await page.locator('.bubble--assistant', { hasText: 'echo: [late] three again' }).waitFor({ timeout: 15_000 })
     await expect.poll(() => rowDot('hello three').count(), { timeout: 5_000 }).toBe(0)
     expect(await page.locator('.toast').count()).toBe(toastsBefore)
     expect(await shown()).toEqual([])
@@ -206,10 +229,24 @@ describe('알림', () => {
     await expect.poll(() => switchDot().count(), { timeout: 5_000 }).toBe(0)
   })
 
-  it('중단은 PC 알림 없이 앱 안 점만', async () => {
+  it('중단(답을 기다리는 중 provider 저장으로 엔진 재시작)은 PC 알림 없이 앱 안 점만', async () => {
     await resetRecord()
-    await ended('hello two', 'interrupted')
-    await expect.poll(() => switchDot().getAttribute('data-status'), { timeout: 5_000 }).toBe('interrupted')
+    await switchTo('alpha-app')
+    await page.keyboard.press('Escape')
+    await openChat('hello two')
+    const before = await fakeLlmCount()
+    await submit('[slow] two slow')
+    await expect.poll(fakeLlmCount, { timeout: 20_000 }).toBe(before + 1) // LLM 이 답을 쥐고 있다
+    await switchTo('beta-app')
+    await page.keyboard.press('Escape')
+    const engine = async () => (JSON.parse(await fs.readFile(path.join(userData, 'opencode-server.json'), 'utf8')) as { pid: number }).pid
+    const pid = await engine()
+    await page.evaluate(async () => {
+      const [provider] = await window.litecode.listProviders()
+      await window.litecode.saveProvider({ id: provider!.id, displayName: provider!.displayName, baseURL: provider!.baseURL, protocol: provider!.protocol, models: provider!.models })
+    })
+    await expect.poll(() => engine().catch(() => pid), { timeout: 30_000 }).not.toBe(pid)
+    await expect.poll(() => switchDot().getAttribute('data-status'), { timeout: 15_000 }).toBe('interrupted')
     expect(await shown()).toEqual([])
     await switchTo('alpha-app')
     await expect.poll(() => rowDot('hello two').getAttribute('data-status'), { timeout: 5_000 }).toBe('interrupted')

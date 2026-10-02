@@ -521,9 +521,11 @@ const field = (label: string) => dialog().getByLabel(label, { exact: true })
 const modelIds = () => dialog().locator('.model-row input[aria-label^="모델 id"]').evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))
 const fakeLlm = async () => (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { count: number; modelsAuth?: string; chatAuth?: string; chatModels: string[] }
 
+/** 설정 > 모델 을 연다 — 설정은 일반 페이지로 열린다(dsh) */
 async function openSettings(): Promise<void> {
   if (!(await dialog().isVisible())) await settingsButton().click()
   await dialog().waitFor({ timeout: 5_000 })
+  await dialog().getByRole('button', { name: '모델', exact: true }).click()
 }
 
 /** userData 아래 모든 파일에서 needle 을 찾는다 (Chromium 이 만든 파일 포함) */
@@ -542,10 +544,12 @@ async function filesContaining(dir: string, needle: string): Promise<string[]> {
 describe('설정 > 모델', () => {
   const SECRET = 'sk-live-SECRET-4242'
 
-  it('사이드바 하단의 설정은 모델 페이지로 모달을 열고, × 와 Esc 로 닫힌다', async () => {
+  it('사이드바 하단의 설정은 일반 페이지로 모달을 열고(dsh), 모델로 옮겨 가며, × 와 Esc 로 닫힌다', async () => {
     expect(await page.getByText('연결됨').count()).toBe(0)
     await settingsButton().click()
     await dialog().waitFor({ timeout: 5_000 })
+    expect(await dialog().getByRole('button', { name: '일반', exact: true }).getAttribute('aria-current')).toBe('page')
+    await dialog().getByRole('button', { name: '모델', exact: true }).click()
     expect(await dialog().getByRole('button', { name: '모델', exact: true }).getAttribute('aria-current')).toBe('page')
     expect(await cardNames()).toEqual(['Internal LiteLLM Gateway'])
 

@@ -139,6 +139,7 @@ describe('설치본 (.app) — 동봉 opencode·rg', () => {
     const before = await enginePid()
     await page.getByRole('button', { name: '⚙ 설정' }).click()
     await dialog().waitFor({ timeout: 5_000 })
+    await dialog().getByRole('button', { name: '모델', exact: true }).click() // 설정은 일반 페이지로 열린다
     await dialog().locator('.provider-card', { hasText: 'Internal LiteLLM Gateway' }).getByRole('button', { name: '편집' }).click()
     await field('Base URL').fill(`${inject('fakeLlmUrl')}/v1`)
     await dialog().getByRole('button', { name: '적용' }).click()

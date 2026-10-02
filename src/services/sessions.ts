@@ -148,7 +148,7 @@ export class SessionsService extends Service {
   async shareShell(id: string, cardId: string, providerId: string, modelId: string): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
     const conversation = (await this.read()).conversations.find((entry) => entry.id === id)
     const card = conversation?.shells?.find((entry) => entry.id === cardId)
-    if (!conversation || !card) return { ok: false, error: '없는 카드입니다' }
+    if (!conversation || !card) return { ok: false, error: tr('error.noCard') }
     if (card.sharedMessageId) return { ok: true, sessionId: conversation.engineSessionId }
     const messageId = this.ctx.llm.newMessageId()
     const mark = (sharedMessageId: string | undefined) =>

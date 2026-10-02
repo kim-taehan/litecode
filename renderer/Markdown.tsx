@@ -5,7 +5,7 @@ import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { cjkStrong } from './cjkStrong.ts'
-import { chatStrings } from './chatStrings.ts'
+import { useT } from './settingsStore.ts'
 import { looksLikePath } from './turnView.ts'
 import './markdown.css'
 
@@ -170,12 +170,13 @@ function renderTable(table: Md.Table, key: number, defs: Definitions): ReactNode
  *  (dsh 는 오른쪽 사이드바 미리보기로 연다 — litecode 엔 그 칸이 없다) */
 function InlineCode({ value }: { value: string }) {
   const mentions = useContext(FileMentions)
+  const t = useT()
   if (!mentions?.files.has(value)) return <code>{value}</code>
   return (
     <button
       type="button"
       className="md-file"
-      title={chatStrings.revealFile(value)}
+      title={t('markdown.revealFile', { file: value })}
       onClick={() => void window.litecode.revealFile(mentions.directory, value)}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
@@ -206,7 +207,8 @@ function ExternalLink({ url, children }: { url: string; children: ReactNode }) {
 
 /** 이미지는 불러오지 않고 대체 글자만 — 주소는 마우스를 올리면 보인다 */
 function BlockedImage({ alt, url }: { alt: string; url: string }) {
-  return <span className="md-image" title={url ? `이미지는 표시하지 않습니다: ${url}` : undefined}>{alt || '이미지'}</span>
+  const t = useT()
+  return <span className="md-image" title={url ? t('markdown.imageHidden', { url }) : undefined}>{alt || t('markdown.image')}</span>
 }
 
 const COPIED_MS = 1_500
@@ -216,23 +218,24 @@ const COPIED_MS = 1_500
 function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   const [copied, setCopied] = useState(false)
   const [wrap, setWrap] = useState(true)
+  const t = useT()
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), COPIED_MS)
     return () => clearTimeout(timer)
   }, [copied])
-  const copyLabel = copied ? '복사됨' : '복사'
+  const copyLabel = copied ? t('markdown.copied') : t('markdown.copy')
   return (
     <div className="md-code" data-wrap={wrap}>
       <div className="md-code__head">
-        <span className="md-code__lang">{lang || chatStrings.codeBlock}</span>
+        <span className="md-code__lang">{lang || t('markdown.codeBlock')}</span>
         <span className="md-code__tools">
           <button
             type="button"
             className="md-code__tool md-code__wrap"
             aria-pressed={wrap}
-            aria-label={wrap ? chatStrings.wrapOff : chatStrings.wrapOn}
-            title={wrap ? chatStrings.wrapOff : chatStrings.wrapOn}
+            aria-label={wrap ? t('markdown.wrapOff') : t('markdown.wrapOn')}
+            title={wrap ? t('markdown.wrapOff') : t('markdown.wrapOn')}
             onClick={() => setWrap((now) => !now)}
           >
             {/* |→| : 줄 끝까지 가서 접힌다 */}

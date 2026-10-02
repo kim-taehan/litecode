@@ -1,8 +1,12 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Markdown } from '../../renderer/Markdown.tsx'
+import { translate } from '../../shared/i18n/index.ts'
 import { isWebUrl } from '../../shared/webUrl.ts'
+
+// 화면 설정 저장소는 메인에서 값을 받아야 해서 여기선 한국어 사전으로 바로 번역한다
+vi.mock('../../renderer/settingsStore.ts', () => ({ useT: () => (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('ko', key, vars) }))
 
 // 답 말풍선 마크다운 — mdast → React 요소. 원문 HTML 은 DOM 에 들어가지 않고 글자로만 보인다 (dsh ui-primitives markdown 방식).
 const html = (text: string) => renderToStaticMarkup(createElement(Markdown, { text }))

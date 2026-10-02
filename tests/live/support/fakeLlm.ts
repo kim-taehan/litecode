@@ -8,6 +8,8 @@ import type { AddressInfo } from 'node:net'
 // - 마지막 user 메시지에 `[fail]` 이 있으면 HTTP 500 → opencode 는 session.next.step.failed 를 낸다
 // - 마지막 user 메시지에 `[slow]` 가 있으면 SLOW_MS 동안 답을 미룬 뒤 echo 한다 — "답을 기다리는 중" 을 만든다.
 //   그 사이 opencode 가 끊으면(재시작) 타이머를 버린다
+// - 마지막 user 메시지에 `[late]` 가 있으면 답(`[fail]` 의 500 포함)을 LATE_MS 미룬다 — 보낸 뒤 다른 대화·프로젝트로 옮겨 가서
+//   "보고 있지 않은 대화가 끝남" 을 실제 턴으로 만든다 (notifications.live.test.ts)
 // - 마지막 user 메시지에 `[drip]` 이 있으면 두 조각 사이를 DRIP_MS 벌린다 — 중간(키 프록시)이 스트림을 버퍼링하지 않는지 본다
 // - 마지막 메시지가 도구 결과(role: tool)면 `tool: <그 결과>` 를 텍스트로 스트리밍한다
 // - 마지막 user 메시지에 `[bash:<cmd>]` 가 있으면 bash 도구 호출(command=<cmd>)을 낸다 — opencode 가 도구를 실행하고
@@ -36,6 +38,8 @@ import type { AddressInfo } from 'node:net'
 export const FAKE_MODELS = ['fake-alpha', 'fake-beta']
 /** `[slow]` 답을 미루는 시간 — 테스트가 그 사이에 재시작을 일으킨다 */
 export const SLOW_MS = 30_000
+/** `[late]` 답을 미루는 시간 */
+export const LATE_MS = 3_000
 /** `[drip]` 두 조각 사이 간격 */
 export const DRIP_MS = 1_500
 /** `[think]` 의 생각 두 조각 — 첫 조각이 첫 문단(굵게 포함)이다 */
@@ -140,8 +144,13 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       lastChatText = messages.map(contentText).join('\n')
       const text = lastUserText(messages)
       if (text.includes('[fail]')) {
-        res.writeHead(500, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: 'fake-llm: 요청된 실패' } }))
+        const fail = (): void => {
+          res.writeHead(500, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: { message: 'fake-llm: 요청된 실패' } }))
+        }
+        if (!text.includes('[late]')) return fail()
+        const timer = setTimeout(fail, LATE_MS)
+        res.on('close', () => clearTimeout(timer))
         return
       }
       const last = messages[messages.length - 1]
@@ -185,8 +194,8 @@ export async function startFakeLlm(): Promise<FakeLlm> {
         if (text.includes('[drip]')) setTimeout(rest, DRIP_MS)
         else rest()
       })
-      if (last?.role !== 'tool' && text.includes('[slow]')) {
-        const timer = setTimeout(answer, SLOW_MS)
+      if (last?.role !== 'tool' && (text.includes('[slow]') || text.includes('[late]'))) {
+        const timer = setTimeout(answer, text.includes('[slow]') ? SLOW_MS : LATE_MS)
         res.on('close', () => clearTimeout(timer))
         return
       }

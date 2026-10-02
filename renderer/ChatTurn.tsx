@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { TurnItem } from '../shared/ipc.ts'
-import { chatStrings } from './chatStrings.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
+import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
 import './chat.css'
 
@@ -13,6 +13,7 @@ import './chat.css'
 
 /** 내 말 — 말풍선 아래에 보낸 시각과 복사 */
 export function UserMessage({ text, at }: { text: string; at?: number }) {
+  const t = useT()
   const [copied, setCopied] = useCopied()
   return (
     <div className="user-turn">
@@ -22,8 +23,8 @@ export function UserMessage({ text, at }: { text: string; at?: number }) {
         <button
           type="button"
           className="user-turn__copy"
-          aria-label={copied ? chatStrings.messageCopied : chatStrings.copyMessage}
-          title={copied ? chatStrings.messageCopied : chatStrings.copyMessage}
+          aria-label={copied ? t('chat.messageCopied') : t('chat.copyMessage')}
+          title={copied ? t('chat.messageCopied') : t('chat.copyMessage')}
           onClick={() => void navigator.clipboard.writeText(text.trim()).then(() => setCopied(true), () => {})}
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
@@ -64,6 +65,7 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
   const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(items)
   const foldable = !running && !failed && work.length > 0
   const [open, setOpen] = useState(false)
+  const t = useT()
   const showWork = running || failed || open
 
   return (
@@ -74,15 +76,15 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
             type="button"
             className="turn__head"
             aria-expanded={open}
-            title={open ? chatStrings.hideWork : chatStrings.showWork}
+            title={open ? t('chat.hideWork') : t('chat.showWork')}
             onClick={() => setOpen((now) => !now)}
           >
-            <span className="turn__head-label">{turnHeadText(duration, failed, interrupted)}</span>
+            <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted)}</span>
             <Chevron />
           </button>
         ) : (
           <div className="turn__head">
-            <span className="turn__head-label">{turnHeadText(duration, failed, interrupted)}</span>
+            <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted)}</span>
           </div>
         ))}
       {showWork && work.length > 0 && (
@@ -106,6 +108,7 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운 */
 function WorkRow({ item, directory }: { item: TurnItem; directory: string }) {
   const [open, setOpen] = useState(false)
+  const t = useT()
   if (item.kind === 'text') {
     if (!item.text.trim()) return null
     return (
@@ -126,10 +129,10 @@ function WorkRow({ item, directory }: { item: TurnItem; directory: string }) {
   }
 
   const think = item.kind === 'think'
-  const title = think ? chatStrings.think : toolTitle(item.name)
+  const title = think ? t('chat.think') : toolTitle(item.name)
   const summary = think
-    ? thinkSummary(item.text, item.done) || (item.done ? '' : chatStrings.thinking)
-    : (item.summary ?? (item.status === 'preparing' ? chatStrings.toolPreparing : ''))
+    ? thinkSummary(item.text, item.done) || (item.done ? '' : t('chat.thinking'))
+    : (item.summary ?? (item.status === 'preparing' ? t('chat.toolPreparing') : ''))
   const live = think ? !item.done : item.status === 'preparing' || item.status === 'running'
   const body: ReactNode = think ? (
     item.text.trim() && <Markdown text={item.text.trim()} />
@@ -167,6 +170,7 @@ function WorkRow({ item, directory }: { item: TurnItem; directory: string }) {
 
 /** 진행 중 맨 아래 파란 줄 — 보낸 시각부터 초가 올라가고 점이 움직인다 (dsh RunningStatus). 시계는 이 줄만 다시 그린다 */
 function RunningStatus({ startedAt }: { startedAt?: number }) {
+  const t = useT()
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1_000)
@@ -178,7 +182,7 @@ function RunningStatus({ startedAt }: { startedAt?: number }) {
       <span className="turn-running__content">
         <SparkIcon />
         <span className="turn-running__text">
-          {startedAt === undefined ? chatStrings.working : chatStrings.workingFor(formatDuration(now - startedAt))}
+          {startedAt === undefined ? t('chat.working') : t('chat.workingFor', { duration: formatDuration(t, now - startedAt) })}
         </span>
         <span className="turn-running__dots" aria-hidden="true">
           <span>·</span>

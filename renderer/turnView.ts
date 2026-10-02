@@ -1,5 +1,5 @@
 import type { TurnItem } from '../shared/ipc.ts'
-import { chatStrings } from './chatStrings.ts'
+import type { Translate } from './settingsStore.ts'
 
 // 답 한 턴의 화면 모양 — 진행 줄(TurnItem)을 "작업"(접히는 부분)과 "답"(늘 보이는 끝 글)으로 가르고 줄 글자를 만든다.
 // 규칙은 dsh ui-chat conversation-nodes 를 따른다 (참조만): 답 = 마지막 도구·생각 뒤의 글. 도구 앞에 쓴 글·답에 붙은 생각은 작업이다
@@ -40,18 +40,18 @@ export function toolTitle(name: string): string {
 }
 
 /** 걸린 시간 — 최소 1초, 1분부터 분·초, 1시간부터 시간·분 (dsh message-chrome) */
-export function formatDuration(ms: number): string {
+export function formatDuration(t: Translate, ms: number): string {
   const total = Math.max(1, Math.floor(ms / 1000))
-  if (total < 60) return chatStrings.seconds(total)
-  if (total < 3600) return chatStrings.minutes(Math.floor(total / 60), total % 60)
-  return chatStrings.hours(Math.floor(total / 3600), Math.floor((total % 3600) / 60))
+  if (total < 60) return t('chat.seconds', { s: total })
+  if (total < 3600) return t('chat.minutes', { m: Math.floor(total / 60), s: total % 60 })
+  return t('chat.hours', { h: Math.floor(total / 3600), m: Math.floor((total % 3600) / 60) })
 }
 
 /** 끝난 턴 머리 글 — 끊긴 턴(엔진 재시작 등)은 실패와 갈라 "중단됨" */
-export function turnHeadText(duration: number | undefined, failed: boolean, interrupted = false): string {
-  if (interrupted) return duration === undefined ? chatStrings.interrupted : chatStrings.interruptedAfter(formatDuration(duration))
-  if (failed) return duration === undefined ? chatStrings.failed : chatStrings.failedAfter(formatDuration(duration))
-  return duration === undefined ? chatStrings.completed : chatStrings.completedIn(formatDuration(duration))
+export function turnHeadText(t: Translate, duration: number | undefined, failed: boolean, interrupted = false): string {
+  if (interrupted) return duration === undefined ? t('chat.interrupted') : t('chat.interruptedAfter', { duration: formatDuration(t, duration) })
+  if (failed) return duration === undefined ? t('chat.failed') : t('chat.failedAfter', { duration: formatDuration(t, duration) })
+  return duration === undefined ? t('chat.completed') : t('chat.completedIn', { duration: formatDuration(t, duration) })
 }
 
 /** 내 말 아래 시각 (HH:MM, 24시간) */
