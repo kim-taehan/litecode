@@ -4,7 +4,7 @@ import os from 'node:os'
 import { Context, Service } from 'cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import { interruptedError, LlmService, type Attention, type TurnInfo } from '../../src/services/llm.ts'
-import { setMainLanguage } from '../../src/i18n.ts'
+import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
 
 // ctx.llm 의 턴 수명 Cordis 이벤트 ('llm/turn-started'·'llm/turn-ended') — 알림 플러그인이 받아 쓸 계약.
@@ -92,7 +92,15 @@ async function fakeOpencode(ending: Ending): Promise<string> {
         frame(5, 'step.ended', { finish: 'stop' })
       })
     }
-    if (url === '/api/session/ses_1/interrupt') return void req.on('end', () => res.writeHead(204).end())
+    // 승인·질문 대기 중 interrupt 는 tool.failed + step.ended(tool-calls) 로 끝난다 — 끝 판정으로는 "계속" 이다 (01f 1-d, 01i 2-d)
+    if (url === '/api/session/ses_1/interrupt') {
+      return void req.on('end', () => {
+        res.writeHead(204).end()
+        if (ending !== 'permission') return
+        frame(4, 'tool.failed', { callID: 'call_1', error: { message: 'Tool execution interrupted' } })
+        frame(5, 'step.ended', { finish: 'tool-calls' })
+      })
+    }
     if (url === '/api/session/ses_1/event') {
       events = res
       return void res.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -305,6 +313,47 @@ describe('ctx.llm 모드 = opencode 에이전트 (라운드 A)', () => {
     expect(calls.filter((call) => call.startsWith('/api/session/ses_1/agent'))).toEqual([])
     await llm.chat('p', 'm', directory, 'hi', 'ses_1', undefined, undefined, undefined, 'ask').catch(() => {})
     expect(calls.filter((call) => call.startsWith('/api/session/ses_1/agent'))).toEqual(['/api/session/ses_1/agent {"agent":"litecode-ask"}'])
+  })
+})
+
+describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
+  it('도는 턴을 멈추면 opencode 턴도 멈추고(POST /interrupt) "중단됨" 으로 끝난다 — turn-ended interrupted', async () => {
+    const { llm, seen } = await start(await fakeOpencode('hold'))
+    const stop = new AbortController()
+    const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, undefined, undefined, stop.signal)
+    await expect.poll(() => seen.length).toBe(1) // started — 프롬프트가 받아들여졌다
+    stop.abort()
+    expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped'), sessionId: 'ses_1' })
+    expect(calls).toContain('/api/session/ses_1/interrupt {}')
+    expect(seen.at(-1)).toBe(`ended ses_1@${directory} interrupted (${tr('error.stopped')})`)
+  })
+
+  it('보내기 전에 멈추면 프롬프트를 보내지 않는다 — interrupt·턴 이벤트도 없다', async () => {
+    const { llm, seen } = await start(await fakeOpencode('done'))
+    const stop = new AbortController()
+    stop.abort()
+    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, undefined, undefined, stop.signal)).toMatchObject({
+      ok: false,
+      interrupted: true,
+      error: tr('error.stopped'),
+    })
+    expect(prompts).toEqual([])
+    expect(calls.filter((call) => call.includes('/interrupt'))).toEqual([])
+    expect(seen).toEqual([])
+  })
+
+  it('승인 대기 중 멈추면 — interrupt 뒤 오는 step.ended(tool-calls) 를 기다리지 않고 "중단됨" 으로 끝난다', async () => {
+    const { llm } = await start(await fakeOpencode('permission'))
+    const stop = new AbortController()
+    const shown: Attention[][] = []
+    const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      shown.push(requests)
+      if (requests[0]) stop.abort()
+    }, stop.signal)
+    expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped') })
+    expect(shown[0]?.[0]).toMatchObject({ kind: 'permission' })
+    expect(calls).toContain('/api/session/ses_1/interrupt {}')
+    await expect(llm.reply('ses_1', 'per_1', 'once')).rejects.toThrow() // 끝난 턴의 카드는 더 답할 수 없다
   })
 })
 

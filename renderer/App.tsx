@@ -25,6 +25,7 @@ import { useSendQueue } from './useSendQueue.ts'
 import { QueueDock } from './QueueDock.tsx'
 import { RunningCount, RunningFilter } from './Background.tsx'
 import { runningIn, runningOutside } from './backgroundView.ts'
+import { StopIcon, useEscapeTwice, useStopTurn } from './stopTurn.tsx'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -442,6 +443,9 @@ export function App() {
     const target = sessionsRef.current.find((session) => session.id === id)
     if (target) void send(merged, { queued: target })
   })
+  /** 답변 중지 — 입력창 ■·행 ■·Esc 두 번 (이슈 #3). 큐는 보내지 않고 입력창으로 되돌린다 */
+  const stopTurn = useStopTurn(queue, active?.id, setDraft)
+  useEscapeTwice('.chat-pane, .composer', active?.pending ? active.id : undefined, stopTurn)
 
   /** 알림(토스트·PC 알림)을 누르면 — 기존 프로젝트 열기 경로로 그 프로젝트를 열고(목록에서 빠졌으면 다시 넣는다) 그 대화를 고른다.
    *  대화가 지워졌으면 프로젝트만 열고 안내, 폴더가 없으면 팝오버에 "폴더를 열 수 없습니다" (결정 Q8) */
@@ -857,6 +861,20 @@ export function App() {
                 <span className="session-item__title marquee">{titleOf(session)}</span>
                 {!isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
               </button>
+              {/* 도는 대화는 휴지통 자리에 ■ — 답변 중지 (01l A4) */}
+              {session.pending && (
+                <span className="session-item__actions">
+                  <button
+                    type="button"
+                    className="session-item__action session-item__stop"
+                    aria-label={t('sidebar.stopChat')}
+                    title={t('sidebar.stopChat')}
+                    onClick={() => stopTurn(session.id)}
+                  >
+                    <StopIcon size={14} />
+                  </button>
+                </span>
+              )}
               {!isBlank(session) && !session.pending && (
                 <span className="session-item__actions">
                   {confirming === session.id ? (
@@ -1074,6 +1092,18 @@ export function App() {
                   <ModeChip value={mode} locked={!!active.pending} onChange={chooseMode} />
                   <div className="composer__trailing">
                     <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
+                    {/* dsh InputBar: 턴이 도는 동안 입력이 비면 보내기 자리가 ■, 글을 쓰면 다시 보내기(=큐) */}
+                    {active.pending && !draft.trim() ? (
+                      <button
+                        type="button"
+                        className="composer__send composer__stop"
+                        aria-label={t('composer.stop')}
+                        title={t('composer.stopTitle')}
+                        onClick={() => stopTurn(active.id)}
+                      >
+                        <StopIcon />
+                      </button>
+                    ) : (
                     <button
                       type="button"
                       className="composer__send"
@@ -1090,6 +1120,7 @@ export function App() {
                         />
                       </svg>
                     </button>
+                    )}
                   </div>
                 </div>
               </div>

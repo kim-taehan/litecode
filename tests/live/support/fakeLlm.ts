@@ -30,6 +30,7 @@ import type { AddressInfo } from 'node:net'
 //   lastChat 은 마지막 요청의 model 과 messages 요약(역할·글자 앞 80자) — 모델을 바꾼 뒤에도 앞 턴 맥락이 실렸는지 본다.
 //   lastChat.tools 는 그 요청에 실린 도구 이름(정렬) — 모드(에이전트)가 도구를 뺐는지 LLM 요청 본문으로 본다 (approval.live.test.ts)
 //   lastChatText 는 마지막 요청 messages 의 글 전체를 이은 것 — 긴 맥락(`!` 카드 출력)이 실렸는지 본다
+//   cut 은 답하기 전에 끊긴 `[slow]`·`[late]` 요청의 마지막 user 글 — 답변 중지가 LLM 스트림까지 끊었는지 본다 (stop.live.test.ts)
 // - `GET /v1/models` 는 OpenAI 호환 모델 목록 FAKE_MODELS 를 준다 (설정 > 모델의 "사용 가능한 모델 가져오기")
 // - 스트림 답마다 finish 청크 뒤·[DONE] 앞에 `choices: []` + FAKE_USAGE 청크를 보낸다 (opencode 가 stream_options.include_usage
 //   를 싣는다). 요청마다 같은 값이라 스텝 수만 알면 합계를 계산할 수 있다. opencode 쪽 값은 01_probe 매핑:
@@ -118,12 +119,14 @@ export async function startFakeLlm(): Promise<FakeLlm> {
   const chatModels: string[] = []
   let lastChat: { model: string; messages: { role: string; text: string }[]; tools: string[] } | undefined
   let lastChatText = ''
+  /** 답하기 전에 끊긴 `[slow]`·`[late]` 요청의 마지막 user 글 (받은 순서) */
+  const cut: string[] = []
   const server = http.createServer((req, res) => {
     let raw = ''
     req.on('data', (part) => (raw += part))
     req.on('end', () => {
       if (req.method === 'GET' && req.url === '/requests') {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ count, modelsAuth, chatAuth, chatModels, lastChat, lastChatText }))
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ count, modelsAuth, chatAuth, chatModels, lastChat, lastChatText, cut }))
         return
       }
       if (req.method === 'GET' && req.url === '/v1/models') {
@@ -201,7 +204,10 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       })
       if (last?.role !== 'tool' && (text.includes('[slow]') || text.includes('[late]'))) {
         const timer = setTimeout(answer, text.includes('[slow]') ? SLOW_MS : LATE_MS)
-        res.on('close', () => clearTimeout(timer))
+        res.on('close', () => {
+          clearTimeout(timer)
+          if (!res.writableEnded) cut.push(text) // 답하기 전에 opencode 가 끊었다 (재시작·답변 중지)
+        })
         return
       }
       answer()

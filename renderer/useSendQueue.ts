@@ -6,7 +6,8 @@ import { useEffect, useReducer, useRef } from 'react'
 //
 // - **대화별**이다(closed-code 는 프로젝트별 — litecode 는 대화마다 엔진 세션이 따로라 대화별이 맞다)
 // - 정본은 모듈 스토어 — 다른 대화·프로젝트로 옮겨도 그 대화의 턴 끝을 놓치지 않는다. 앱을 끄면 사라진다(메모리)
-// - 실패·중단으로 끝나도 보낸다 (closed-code 와 같다 — "턴이 더는 안 돈다" 가 기준)
+// - 실패·중단으로 끝나도 보낸다 (closed-code 와 같다 — "턴이 더는 안 돈다" 가 기준). 단 사용자가 멈춘 턴(■·Esc 두 번)은 보내지 않고
+//   입력창으로 되돌린다 (hold — 이슈 #3, 사용자가 멈췄으니)
 // - 보내기는 상태 업데이터 밖에서 한다 — StrictMode 는 업데이터를 두 번 불러 질문이 두 번 간다
 
 /** 쌓이는 한 건 — 보낼 본문과(`/` 명령이면) 말풍선에 보일 글. 필드가 늘어도 mergeQueued 는 고치지 않아도 된다 */
@@ -32,6 +33,8 @@ export class SendQueues {
   private queues = new Map<string, QueuedSend[]>()
   /** 대화 id → 직전에 본 "턴이 도는 중" */
   private running = new Map<string, boolean>()
+  /** 사용자가 턴을 멈춘 대화 — 턴이 끝나도 보내지 않고 쌓인 것을 남긴다. 입력창으로 되돌리면(take) 풀린다 (이슈 #3) */
+  private holds = new Set<string>()
   private listeners = new Set<() => void>()
 
   items(id: string): QueuedSend[] {
@@ -50,15 +53,27 @@ export class SendQueues {
   take(id: string): QueuedSend | undefined {
     const current = this.items(id)
     if (current.length === 0) return undefined
+    this.holds.delete(id)
     this.set(id, [])
     return mergeQueued(current)
   }
 
-  /** 대화의 지금 "턴이 도는 중" 을 알린다 — 돌다가 멈춘 그 순간에만 보낼 것(합친 것)을 주고 큐를 비운다 */
+  /** 사용자가 멈췄다 — 쌓인 것이 있으면 턴 끝에 보내지 않고 붙잡아 둔다 (화면이 입력창으로 되돌린다) */
+  hold(id: string): void {
+    if (this.items(id).length === 0) return
+    this.holds.add(id)
+    for (const listener of this.listeners) listener()
+  }
+
+  held(id: string): boolean {
+    return this.holds.has(id)
+  }
+
+  /** 대화의 지금 "턴이 도는 중" 을 알린다 — 돌다가 멈춘 그 순간에만 보낼 것(합친 것)을 주고 큐를 비운다. 붙잡힌 대화는 주지 않는다 */
   observe(id: string, busy: boolean): QueuedSend | undefined {
     const was = this.running.get(id) ?? false
     this.running.set(id, busy)
-    if (!was || busy) return undefined
+    if (!was || busy || this.holds.has(id)) return undefined
     return this.take(id)
   }
 
@@ -95,5 +110,7 @@ export function useSendQueue(sessions: { id: string; pending?: boolean }[], flus
     items: (id: string) => QUEUES.items(id),
     submit: (id: string, item: QueuedSend, busy: boolean) => QUEUES.submit(id, item, busy),
     take: (id: string) => QUEUES.take(id),
+    hold: (id: string) => QUEUES.hold(id),
+    held: (id: string) => QUEUES.held(id),
   }
 }

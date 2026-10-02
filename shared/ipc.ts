@@ -60,6 +60,7 @@ export const Channel = {
   /** 메인 → 화면 (conversationId, Attention[]) — 답을 기다리는 턴의 승인·질문 목록 (빈 목록 = 없음) */
   TURN_ATTENTION: 'chat:attention',
   REPLY_ATTENTION: 'chat:reply-attention',
+  STOP_TURN: 'chat:stop',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   RUN_SHELL: 'shell:run',
@@ -149,6 +150,8 @@ export interface LitecodeBridge {
   onTurnAttention(listener: (conversationId: string, requests: Attention[]) => void): () => void
   /** 카드의 답 — 권한 'once'|'reject', 질문은 질문 순서대로 고른 답 또는 'reject'. 이미 풀린 요청·빈 답이면 거절 */
   replyAttention(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void>
+  /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴의 sendMessage 가 "중단됨"(interrupted) 으로 끝난다. 도는 턴이 없으면 false */
+  stopTurn(conversationId: string): Promise<boolean>
   /** 답의 인라인 코드 중 그 프로젝트 안의 실제 파일인 것만 (받은 글자 그대로) — 파일 언급 칩 */
   resolveFiles(directory: string, tokens: string[]): Promise<string[]>
   /** 프로젝트 안의 그 파일을 OS 파일 관리자에서 보여 준다 (열지·실행하지 않는다). 프로젝트 밖·없는 파일이면 false */
