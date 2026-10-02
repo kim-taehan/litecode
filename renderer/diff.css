@@ -1,0 +1,133 @@
+/* 파일 변경 카드 (DiffCard.tsx) — dsh DiffBlock 치수 (_workspace/01p_diff.md 1-b). 색은 styles.css 토큰만 */
+
+/* 도구 줄 끝 `+A −D` — mono 11px, caption 색, 앞 여백 10px */
+.diff-stat {
+  flex: none;
+  margin-left: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-caption);
+  white-space: nowrap;
+}
+
+.diff-card {
+  position: relative;
+  margin: 4px 0;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* 복사 — 몸통 위 오른쪽 구석에 떠 있다 (줄 자리를 차지하지 않는다) */
+.diff-card__bar {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 1;
+}
+
+.diff-card__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.diff-card__copy:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+/* 몸통 — 코드 블록과 같은 11px / 19px mono, 줄바꿈 없이 가로 스크롤 */
+.diff-card__body {
+  overflow-x: auto;
+  padding: 6px 0 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 19px;
+}
+
+/* 줄 바탕이 가로 스크롤 끝까지 이어지게 */
+.diff-card__lines {
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff-line {
+  padding: 0 22px;
+  white-space: pre;
+  color: var(--text-secondary);
+}
+
+.diff-line[data-kind='context']::before { content: '  '; }
+.diff-line[data-kind='add']::before { content: '+ '; }
+.diff-line[data-kind='del']::before { content: '- '; }
+
+.diff-line[data-kind='add'] {
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+  box-shadow: inset 3px 0 0 var(--diff-add);
+}
+
+.diff-line[data-kind='del'] {
+  color: var(--diff-del);
+  background: var(--diff-del-bg);
+  box-shadow: inset 3px 0 0 var(--diff-del);
+}
+
+.diff-line[data-kind='file'] {
+  font-weight: 500;
+}
+
+.diff-line[data-kind='gap'] {
+  color: var(--text-tertiary);
+}
+
+.diff-line__note {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.diff-card__more {
+  display: block;
+  width: 100%;
+  padding: 0 22px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.diff-card__more:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+/* 추론 과정 탭 — 도구 줄 끝 `+A −D` 를 누르면 그 줄 아래에 같은 카드 */
+.trajectory__diff-toggle {
+  flex: none;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.trajectory__diff-toggle .diff-stat { margin-left: 0; }
+.trajectory__diff-toggle:hover { background: var(--fill-active); }
+.trajectory__diff-toggle:hover .diff-stat { color: var(--text); }
+
+.trajectory__diff {
+  padding: 0 18px 6px 42px;
+}

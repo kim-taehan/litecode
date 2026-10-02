@@ -92,4 +92,37 @@ describe('messageItems (지난 대화)', () => {
       { kind: 'tool', id: 'm:3', name: 'read', status: 'error', input: '{"filePath":"/x"}', summary: '/x', error: 'nope' },
     ])
   })
+
+  it('파일을 바꾼 도구는 state.structured 에서 diffs 를 싣는다 — 다시 열어도 같은 카드 (01p)', () => {
+    const [item] = messageItems('m', [
+      { type: 'tool', id: 'p1', name: 'edit', state: { status: 'completed', input: { path: '/p/a.txt' }, content: [{ text: 'ok' }], structured: { files: [PATCH_FILE] } } },
+    ])
+    expect(item).toMatchObject({ kind: 'tool', status: 'done', diffs: [{ path: 'a.txt', status: 'modified', added: 1, removed: 1, patch: PATCH_FILE.patch }] })
+  })
+})
+
+const PATCH_FILE = { file: 'a.txt', patch: '@@ -1 +1 @@\n-a\n+A\n', additions: 1, deletions: 1, status: 'modified' }
+
+describe('TurnTracker — 파일 변경 (01p)', () => {
+  it('tool.success 의 structured.files 를 diffs 로 덧붙인다', () => {
+    const tracker = new TurnTracker()
+    tracker.observe(...ev('tool.called', { callID: 'c', tool: 'edit', input: { path: '/p/a.txt', oldString: 'a', newString: 'A' } }))
+    expect(tracker.observe(...ev('tool.success', { callID: 'c', content: [{ type: 'text', text: 'Edit applied' }], structured: { files: [PATCH_FILE], replacements: 1 } }))).toMatchObject({
+      status: 'done',
+      diffs: [{ path: 'a.txt', status: 'modified', added: 1, removed: 1 }],
+    })
+  })
+
+  it('write 는 tool.called 의 input.content 로 diffs 를 만든다', () => {
+    const tracker = new TurnTracker()
+    tracker.observe(...ev('tool.called', { callID: 'w', tool: 'write', input: { path: '/p/n.txt', content: 'x\n' } }))
+    const item = tracker.observe(...ev('tool.success', { callID: 'w', content: [], structured: { operation: 'write', resource: 'n.txt', existed: false } }))
+    expect(item).toMatchObject({ diffs: [{ path: 'n.txt', status: 'added', added: 1, removed: 0 }] })
+  })
+
+  it('파일을 안 바꾼 도구에는 diffs 가 없다', () => {
+    const tracker = new TurnTracker()
+    tracker.observe(...ev('tool.called', { callID: 'b', tool: 'bash', input: { command: 'ls' } }))
+    expect(tracker.observe(...ev('tool.success', { callID: 'b', content: [], structured: { exit: 0 } }))).not.toHaveProperty('diffs')
+  })
 })

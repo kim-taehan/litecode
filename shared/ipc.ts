@@ -18,6 +18,7 @@ export type { Attention, AttentionAnswer, AttentionQuestion, ChatResult, History
 export type { Mode } from './modes.ts'
 export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { TurnItem } from '../src/services/turnProgress.ts'
+export type { FileDiff } from '../src/services/toolDiffs.ts'
 export type { Project } from '../src/services/projects.ts'
 export type { Conversation, ShellCard } from '../src/services/sessions.ts'
 export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'

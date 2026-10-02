@@ -102,6 +102,15 @@ export const ko = {
   'shellCard.shareBusy': '답을 기다리는 중에는 보낼 수 없습니다 — 턴이 끝난 뒤에 보내세요',
   'shellCard.shareNoModel': '모델을 먼저 고르세요',
   'shellCard.shareFailed': '보내지 못했습니다: {reason}',
+  // 파일 변경(diff) 카드 — 도구 줄·추론 과정 탭
+  'diff.more': '{count}줄 더 보기',
+  'diff.added': '새 파일',
+  'diff.deleted': '삭제됨',
+  'diff.unknownBefore': '이전 내용 모름 · 전체를 씀',
+  'diff.copy': '변경 내용 복사',
+  'diff.copied': '복사됨',
+  'diff.show': '변경 내용 보기',
+  'diff.hide': '변경 내용 접기',
   // 입력창
   'composer.placeholder': '메시지를 입력하세요…',
   'composer.comingSoon': '준비 중',

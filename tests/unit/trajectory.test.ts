@@ -53,6 +53,16 @@ describe('trajectoryRecords', () => {
     ])
   })
 
+  it('파일을 바꾼 도구는 structured.files 에서 diffs 를 싣는다 (01p)', () => {
+    const file = { file: 'a.txt', patch: '@@ -1 +1 @@\n-a\n+A\n', additions: 1, deletions: 1, status: 'modified' }
+    const raw = [
+      user('edit', 1),
+      assistant(2, 5, [tool('edit', { path: '/p/a.txt' }, { status: 'completed', content: [{ type: 'text', text: 'ok' }], structured: { files: [file] } }, { created: 3, completed: 4 })]),
+    ]
+    expect(trajectoryRecords(raw)[2]).toMatchObject({ kind: 'tool', diffs: [{ path: 'a.txt', status: 'modified', added: 1, removed: 1, patch: file.patch }] })
+    expect(trajectoryRecords([user('x', 1), assistant(2, 5, [tool('bash', {}, { status: 'completed', structured: { exit: 0 } }, { created: 3 })])])[2]).not.toHaveProperty('diffs')
+  })
+
   it('도구 실패는 error.message 를 싣는다 (코드는 없다)', () => {
     const failed = tool('read', { filePath: '/nope' }, { status: 'error', error: { type: 'unknown', message: 'Invalid tool input: Missing key\n  at ["path"]' } }, { created: 10, ran: 11, completed: 12 })
     const [, , record] = trajectoryRecords([user('x', 1), assistant(5, 13, [failed], { finish: 'tool-calls' })])
