@@ -28,6 +28,7 @@ import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
+import { SkillsService } from '../src/services/skills.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -330,6 +331,12 @@ function openInBridge(ctx: Context): void {
 }
 openInBridge.inject = ['openIn']
 
+// 스킬 (이슈 #7) — 설정 > 스킬 목록. `/` 후보·본문 붙이기는 SlashTrigger 가 ctx.skills 를 쓴다
+function skillsBridge(ctx: Context): void {
+  handle(ctx, Channel.LIST_SKILLS, async (_event, directory: string) => ctx.skills.list(directory))
+}
+skillsBridge.inject = ['skills']
+
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게 */
 const features: FeatureDefinition[] = [
   { id: 'at', plugin: AtTrigger },
@@ -368,6 +375,14 @@ const features: FeatureDefinition[] = [
     plugin: (ctx) => {
       ctx.plugin(OpenInService, { host: openInHost })
       ctx.plugin(openInBridge)
+    },
+  },
+  {
+    // 끄면 엔진도 skill 도구를 뺀다 — ctx.engine 이 features/changed 를 듣고 재시작한다
+    id: 'skills',
+    plugin: (ctx) => {
+      ctx.plugin(SkillsService)
+      ctx.plugin(skillsBridge)
     },
   },
   // 웹 도구(web)는 묶음이 없다 — ctx.engine 이 features/changed 를 듣고 opencode.json 을 다시 써 재시작한다 (이슈 #14)

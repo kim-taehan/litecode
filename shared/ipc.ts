@@ -14,6 +14,7 @@ import type { NoticeState, OpenTarget, Toast } from '../src/services/notificatio
 import type { OpenInApp } from '../src/services/openIn.ts'
 import type { FilePreview } from '../src/services/filePreview.ts'
 import type { FeatureId } from './features.ts'
+import type { SkillInfo } from '../src/services/skills.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -30,6 +31,8 @@ export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } f
 export type { OpenInApp } from '../src/services/openIn.ts'
 export type { FilePreview } from '../src/services/filePreview.ts'
 export type { FeatureId, FeatureSwitches } from './features.ts'
+export type { SkillInfo } from '../src/services/skills.ts'
+export type { SkillSource } from './skills.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -94,6 +97,7 @@ export const Channel = {
   FEATURES_CHANGED: 'features:changed',
   /** 메인 → preload (boolean) — 창이 전체 화면인가. preload 가 html[data-fullscreen] 으로 옮긴다 (화면 코드는 CSS 만 본다) */
   WINDOW_FULLSCREEN: 'window:fullscreen',
+  LIST_SKILLS: 'skills:list',
 } as const
 
 export interface LitecodeBridge {
@@ -204,6 +208,8 @@ export interface LitecodeBridge {
   /** 켜진 기능 (ctx.features) — 꺼진 기능의 버튼·탭·메뉴·단축키는 그리지 않는다. 켜고 끄기는 setSettings({ features }) */
   getFeatures(): Promise<FeatureId[]>
   onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void
+  /** 그 프로젝트에서 모델이 쓸 수 있는 스킬 (설정 > 스킬, ctx.skills) — 이름순, 본문은 파일에서 지금 읽은 것. 스킬 기능이 꺼져 있으면 핸들러가 없다 */
+  listSkills(directory: string): Promise<SkillInfo[]>
 }
 
 declare global {

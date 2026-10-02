@@ -1,10 +1,14 @@
 import { Context, Service } from 'cordis'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { detect, TriggerRegistry, type TriggerSource } from '../../src/services/triggers.ts'
 import { AtTrigger, reference } from '../../src/triggers/at.ts'
 import { expandTemplate, SlashTrigger } from '../../src/triggers/slash.ts'
 import { BangTrigger } from '../../src/triggers/bang.ts'
-import type { EngineCommand, FileEntry } from '../../src/services/llm.ts'
+import type { EngineCommand, EngineSkill, FileEntry } from '../../src/services/llm.ts'
+import { SkillsService } from '../../src/services/skills.ts'
 
 // 입력창 트리거 — ctx.triggers 등록소 + @·/·! 플러그인 (사용자 결정 2026-10-01). 감지 규칙은 closed-code composerMode
 // (`@` 는 낱말·경로 중간이 아닐 때, `/`·`!` 는 입력 첫 글자일 때만), 실행 모양은 01d 권고안을 지킨다.
@@ -71,9 +75,14 @@ class FakeLlm extends Service {
     { name: 'init', template: 'Create AGENTS.md $ARGUMENTS', description: 'guided setup' },
     { name: 'hi', template: 'Say $ARGUMENTS first=$1 second=$2 none=$3', description: 'say hi' },
   ]
+  /** 레거시 GET /skill 자리 (이슈 #7) */
+  skills: EngineSkill[] = []
   failing = false
   constructor(ctx: Context) {
     super(ctx, 'llm')
+  }
+  async listSkills(): Promise<EngineSkill[]> {
+    return this.skills
   }
   async listDirectory(directory: string, rel: string): Promise<FileEntry[]> {
     this.calls.push(`list ${directory} ${rel}`)
@@ -188,6 +197,65 @@ describe('/ 명령', () => {
     })
     expect(await triggers.submit(scope, '/nope 인자')).toEqual({ kind: 'error', message: '모르는 명령입니다: /nope' })
     expect(await triggers.submit(scope, '/')).toMatchObject({ kind: 'error' })
+  })
+})
+
+// 스킬 (이슈 #7): `/` 에 "스킬" 그룹으로 섞는다 — 명령과 이름이 겹치면 명령, 내장(<built-in>)은 없다. 내면 SKILL.md 를 직접 읽어(엔진 본문은
+// 재시작 전까지 옛것) 본문을 붙여 보내고 말풍선엔 친 글. 스킬 기능(ctx.skills)이 꺼져 있으면 후보도 실행도 없다
+describe('/ 스킬', () => {
+  async function withSkills(): Promise<{ ctx: Context; triggers: TriggerRegistry; llm: FakeLlm; dir: string }> {
+    const started = await start()
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'litecode-unit-skills-'))
+    const write = async (folder: string, name: string, body: string) => {
+      await fs.mkdir(path.join(dir, folder, name), { recursive: true })
+      const file = path.join(dir, folder, name, 'SKILL.md')
+      await fs.writeFile(file, `---\nname: ${name}\ndescription: ${name} desc\n---\n${body}\n`)
+      return file
+    }
+    started.llm.skills = [
+      { name: 'customize-opencode', description: 'builtin', location: '<built-in>', content: 'x' },
+      { name: 'review-pr', description: 'review a PR', location: await write('cfg/skills', 'review-pr', 'BODY-REVIEW'), content: 'OLD' },
+      { name: 'hi', description: 'same name as a command', location: await write('cfg/skills', 'hi', 'BODY-HI') },
+      { name: 'proj-only', description: 'from project', location: await write('work/.opencode/skills', 'proj-only', 'BODY-PROJ') },
+    ]
+    started.ctx.plugin(SlashTrigger)
+    return { ...started, dir }
+  }
+
+  it('후보: 명령 다음에 "스킬" 그룹 — 명령과 같은 이름·내장은 빠진다', async () => {
+    const { ctx, triggers, dir } = await withSkills()
+    ctx.plugin(SkillsService)
+    await settle()
+    const candidates = (await triggers.query(scope, '/', 1))?.candidates ?? []
+    expect(candidates.map((entry) => `${entry.group}:${entry.label}`)).toEqual(['명령:/init', '명령:/hi', '스킬:/proj-only', '스킬:/review-pr'])
+    expect(candidates.at(-1)).toMatchObject({ icon: 'skill', detail: 'review a PR' })
+    expect(await triggers.pick(scope, '/', 'review-pr', 'pick')).toEqual({ kind: 'insert', text: '/review-pr ' })
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  it('내면 파일의 지금 본문을 skill_content 로 붙여 보내고 말풍선엔 친 글 — 인자가 없으면 블록만', async () => {
+    const { ctx, triggers, dir } = await withSkills()
+    ctx.plugin(SkillsService)
+    await settle()
+    const sent = await triggers.submit(scope, '/review-pr  look at #12')
+    expect(sent).toMatchObject({ kind: 'send', display: '/review-pr  look at #12' })
+    const text = (sent as { text: string }).text
+    expect(text).toContain('<skill_content name="review-pr">\n# Skill: review-pr\n\nBODY-REVIEW\n')
+    expect(text).toContain(`Base directory for this skill: ${path.join(dir, 'cfg/skills/review-pr')}`)
+    expect(text).not.toContain('OLD') // 엔진의 캐시된 본문이 아니다
+    expect(text.endsWith('</skill_content>\n\nlook at #12')).toBe(true)
+    expect((await triggers.submit(scope, '/proj-only')) as { text: string }).toMatchObject({ text: expect.stringMatching(/BODY-PROJ\n[\s\S]*<\/skill_content>$/) })
+    // 같은 이름이면 명령이 이긴다
+    expect(await triggers.submit(scope, '/hi there')).toMatchObject({ kind: 'send', text: 'Say there first=there second= none=' })
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  it('스킬 기능이 꺼져 있으면(ctx.skills 없음) 후보도 실행도 없다', async () => {
+    const { triggers, dir } = await withSkills()
+    await settle()
+    expect((await triggers.query(scope, '/', 1))?.candidates.map((entry) => entry.label)).toEqual(['/init', '/hi'])
+    expect(await triggers.submit(scope, '/review-pr x')).toEqual({ kind: 'error', message: '모르는 명령입니다: /review-pr' })
+    await fs.rm(dir, { recursive: true, force: true })
   })
 })
 

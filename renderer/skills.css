@@ -1,0 +1,126 @@
+/* 스킬 (이슈 #7) — 출처 배지, 설정 > 스킬 목록, 대화의 스킬 줄 지침 상자. 목록 행 모양은 설정 > 일반 행(이름 + 회색 설명, 0.5px 선),
+   지침 상자는 dsh ui-skill 의 "Instructions" 카드(높이 260 제한 스크롤) */
+
+.skill-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--module);
+  white-space: nowrap;
+}
+
+.skill-badge[data-source='project'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.skill-badge[data-source='claude'] {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.skills-page {
+  display: flex;
+  flex-direction: column;
+  padding-top: 4px;
+}
+
+.skills-page__intro {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-tertiary);
+}
+
+.skills-page__note {
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-tertiary);
+}
+
+.skill-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-item {
+  border-bottom: 0.5px solid var(--border);
+}
+
+.skill-item:last-child {
+  border-bottom: none;
+}
+
+.skill-item__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 12px 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.skill-item__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skill-item__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.skill-item__chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+}
+
+.skill-item__head[aria-expanded='true'] .skill-item__chevron {
+  transform: rotate(180deg);
+}
+
+.skill-item__description {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+}
+
+.skill-item__body,
+.turn-row__instructions {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.skill-item__body {
+  margin-bottom: 12px;
+}
+
+.turn-row__line .skill-badge {
+  margin-left: 4px;
+}

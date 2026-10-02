@@ -6,7 +6,8 @@ import { CompactionMark } from './Compaction.tsx'
 import { takeCompactions } from './compaction.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
-import { answerText, clockTime, formatDuration, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
+import { answerText, clockTime, formatDuration, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
+import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import './chat.css'
 
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
@@ -162,7 +163,9 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   }
 
   const think = item.kind === 'think'
-  const title = think ? t('chat.think') : toolTitle(item.name)
+  // 스킬 줄 (이슈 #7, dsh ui-skill): "스킬 · 이름" + 출처 배지, 펼치면 지침 본문 (260 높이 제한). 기록(도구 결과)만으로 그린다
+  const skill = item.kind === 'tool' ? item.skill : undefined
+  const title = think ? t('chat.think') : skill ? t('chat.skill') : toolTitle(item.name)
   const summary = think
     ? thinkSummary(item.text, item.done) || (item.done ? '' : t('chat.thinking'))
     : (item.summary ?? (item.status === 'preparing' ? t('chat.toolPreparing') : ''))
@@ -171,6 +174,10 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
     item.text.trim() && <Markdown text={item.text.trim()} />
   ) : item.diffs && !item.error ? (
     <DiffCard diffs={item.diffs} />
+  ) : skill && item.result && !item.error ? (
+    <div className="turn-row__instructions" aria-label={t('chat.skillInstructions')}>
+      <Markdown text={skillInstructions(item.result)} />
+    </div>
   ) : (
     (item.input || item.result || item.error) && (
       <>
@@ -197,6 +204,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
             <span className="turn-row__summary">{summary}</span>
           </>
         )}
+        {skill && <SkillBadge source={skill.source} />}
         {!think && item.diffs && item.status === 'done' && <DiffStat diffs={item.diffs} />}
       </button>
       {open && body && <div className="turn-row__body">{body}</div>}
@@ -342,6 +350,12 @@ function ToolIcon({ name }: { name: string }) {
       <Icon>
         <path d="M4 1.75H9.5L12.5 4.75V14.25H4Z" />
         <path d="M9.5 1.75V4.75H12.5" />
+      </Icon>
+    )
+  if (name === 'skill')
+    return (
+      <Icon>
+        <path d={SKILL_ICON_PATH} />
       </Icon>
     )
   if (['grep', 'glob', 'codesearch', 'websearch'].includes(name))

@@ -29,6 +29,8 @@ export interface Settings {
   openInApp?: string
   /** 기능별 켜기 (설정 > 기능, 이슈 #8) — false 로 적힌 기능만 꺼진다. 없으면 모두 켜짐 (ctx.features 가 묶음을 올리고 내린다) */
   features?: FeatureSwitches
+  /** "Claude Code 스킬 함께 쓰기" (설정 > 스킬, 이슈 #7) — 켜면 엔진이 ~/.claude/skills·프로젝트 .claude/skills 를 싣는다(ctx.engine 재시작). 없으면 꺼짐(사용자 결정) */
+  claudeSkills?: boolean
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9). 새 대화는 기본 모드(01k §6) */
@@ -59,6 +61,7 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   defaultMode: isMode,
   openInApp: (value): value is string => typeof value === 'string',
   features: isFeatureSwitches,
+  claudeSkills: (value): value is boolean => typeof value === 'boolean',
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

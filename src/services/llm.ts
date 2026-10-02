@@ -172,6 +172,15 @@ export interface EngineCommand {
   description?: string
 }
 
+/** 레거시 GET /skill 의 한 항목 (이슈 #7 실측 2026-10-02). location 은 SKILL.md 절대 경로, 내장은 `<built-in>`. content 는 frontmatter 를 뺀 본문 —
+ *  opencode 가 폴더별로 캐시해 재시작 전까지 옛것이다 */
+export interface EngineSkill {
+  name: string
+  description?: string
+  location: string
+  content?: string
+}
+
 interface TurnOutcome {
   ok: boolean
   text: string
@@ -525,6 +534,17 @@ export class LlmService extends Service {
     if (first.length > 0) return first
     await new Promise((resolve) => setTimeout(resolve, 300))
     return this.engineGet<EngineCommand[]>('/api/command', directory)
+  }
+
+  /** 그 폴더에서 모델에게 보이는 스킬 (이슈 #7). 레거시 GET /skill?directory= — 채팅이 레거시라 LLM 요청의 `<available_skills>` 와 같은 출처다.
+   *  신규 세대 /api/skill 은 프로젝트 설정 차단 플래그를 안 따라 레거시가 안 싣는 스킬까지 준다(실측) — 쓰지 않는다. 숨긴(deny) 내장 스킬도 목록엔 남는다 */
+  async listSkills(directory: string): Promise<EngineSkill[]> {
+    const workdir = await realDirectory(directory)
+    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
+    const conn = await this.ctx.engine.connection()
+    const res = await fetch(`${conn.url}/skill?${at(workdir)}`, { headers: conn.headers })
+    if (!res.ok) throw new Error(tr('error.engineRoute', { route: '/skill', status: res.status }))
+    return (await res.json()) as EngineSkill[]
   }
 
   /** 그 폴더에서 셸 하나를 띄워 붙는다 (opencode pty — opencodePty.ts) */

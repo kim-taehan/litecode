@@ -13,6 +13,7 @@ import { engineLimit } from '../../shared/outputLimit.ts'
 import { tr } from '../i18n.ts'
 import './providers.ts'
 import type {} from './features.ts' // ctx.features·'features/changed' 타입
+import type {} from './settings.ts' // ctx.settings·'settings/changed' 타입
 
 // 앱이 띄우는 opencode 서버 하나의 수명 (ctx.engine). ctx.llm 은 이 서비스에서 주소·인증을 받아 쓰고, 그 밖의 누구도
 // opencode 를 모른다. 프로젝트마다 띄우지 않는다 — 세션마다 location.directory 로 폴더를 가른다 (01_probe Q1).
@@ -147,6 +148,31 @@ function withWebDenied(permission: Permission): Permission {
   return { ...rest, ...WEB_TOOLS_DENY }
 }
 
+// 스킬 (이슈 #7, 레거시 실측 2026-10-02 opencode 1.18.18 — 가짜 LLM 이 받은 요청·레거시 GET /skill 로 봤다):
+// - 레거시는 앱 CONFIG_DIR/skills 를 읽고 시스템 프롬프트 끝 `<available_skills>`(이름·설명·위치)에 싣는다. 매 요청 다시 만든다 — 옛 대화에
+//   `<system-update>` 가 따로 붙지 않는다. 목록·본문은 폴더별로 캐시돼 재시작해야 바뀐다
+// - OPENCODE_DISABLE_PROJECT_CONFIG(engineEnv)가 프로젝트 `.opencode/skills` 도 끈다. `skills.paths` 에 상대 경로 `.opencode/skills` 를 주면
+//   다시 읽힌다(세션 폴더 기준 — git 루트까지 올라가지 않는다). 프로젝트 opencode.json·MCP·npm 설치는 그대로 막혀 있다(.opencode 에 설치 0)
+// - `~/.claude/skills`·`.claude/skills` 는 OPENCODE_DISABLE_CLAUDE_CODE·_EXTERNAL_SKILLS 로 꺼져 있고, `skills.paths` 에 주면 읽힌다
+//   ("Claude Code 스킬 함께 쓰기", 기본 꺼짐 — 사용자 결정). `~/.agents/skills` 는 안 읽는다
+// - 내장 customize-opencode(opencode 설정 안내 16KB)는 `permission.skill["customize-opencode"]="deny"` 로 프롬프트에서 빠진다. 전역만으로는
+//   litecode-full 의 "*":allow 가 되살린다 → 웹 도구 deny 처럼 에이전트마다 맨 뒤에도 붙인다. `skill: "deny"` 면 도구·목록이 통째로 빠진다(기능 끔)
+const PROJECT_SKILL_PATHS = ['.opencode/skills', '.opencode/skill']
+const CLAUDE_SKILL_PATHS = ['~/.claude/skills', '.claude/skills']
+const HIDDEN_SKILLS = { 'customize-opencode': 'deny' }
+
+/** 엔진에 실을 스킬 — enabled: 설정 > 기능의 스킬, claude: "Claude Code 스킬 함께 쓰기" */
+export interface EngineSkills {
+  enabled: boolean
+  claude: boolean
+}
+
+/** 그 규칙을 지우고 맨 뒤에 붙인다 (규칙은 뒤가 이긴다) */
+function withLast(permission: Record<string, unknown>, name: string, rule: unknown): Record<string, unknown> {
+  const { [name]: _dropped, ...rest } = permission
+  return { ...rest, [name]: rule }
+}
+
 const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 초 무응답인 때가 있다 (live-test 스킬 기록)
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
@@ -168,7 +194,7 @@ function hiddenEnvNames(env: NodeJS.ProcessEnv): string[] {
 export function engineConfig(
   providers: ProviderConfig[],
   proxy: Pick<KeyProxy, 'token' | 'baseURLFor'>,
-  extra: { mcp?: Record<string, EngineMcp>; childEnv?: NodeJS.ProcessEnv; webTools?: boolean } = {},
+  extra: { mcp?: Record<string, EngineMcp>; childEnv?: NodeJS.ProcessEnv; webTools?: boolean; skills?: EngineSkills } = {},
 ): Record<string, unknown> {
   const provider: Record<string, unknown> = {}
   for (const config of providers) {
@@ -193,13 +219,20 @@ export function engineConfig(
   const mcp =
     extra.mcp &&
     Object.fromEntries(Object.entries(extra.mcp).map(([name, def]) => [name, { ...def, environment: { ...hidden, ...def.environment } }]))
+  const agent = extra.webTools
+    ? ENGINE_AGENTS
+    : Object.fromEntries(Object.entries(ENGINE_AGENTS).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
+  // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
+  const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
+  const permission = { ...SUBAGENT_ASK_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
   return {
     $schema: 'https://opencode.ai/config.json',
     provider,
-    agent: extra.webTools
-      ? ENGINE_AGENTS
-      : Object.fromEntries(Object.entries(ENGINE_AGENTS).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }])),
-    permission: { ...SUBAGENT_ASK_DENY, ...(!extra.webTools && WEB_TOOLS_DENY) },
+    agent: skillRule
+      ? Object.fromEntries(Object.entries(agent).map(([name, def]) => [name, { ...def, permission: withLast(def.permission, 'skill', skillRule) }]))
+      : agent,
+    permission,
+    ...(extra.skills?.enabled && { skills: { paths: [...PROJECT_SKILL_PATHS, ...(extra.skills.claude ? CLAUDE_SKILL_PATHS : [])] } }),
     // 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 데이터 폴더에 만든다(큰 저장소에서 비용). litecode 는 revert 를 안 쓴다 (01w 1절)
     snapshot: false,
     ...engineDefaults(providers),
@@ -340,6 +373,8 @@ export class EngineService extends Service {
   private purging: Promise<void> = Promise.resolve()
   /** 떠 있는(띄우는 중인) 서버의 opencode.json 에 넣은 웹 도구 켜짐 (설정 > 기능 web, 기본 꺼짐) */
   private launchedWebTools = false
+  /** 떠 있는(띄우는 중인) 서버에 넣은 스킬 설정 (JSON — 바뀌었는지만 본다) */
+  private launchedSkills = ''
 
   constructor(
     ctx: Context,
@@ -352,10 +387,20 @@ export class EngineService extends Service {
     // 웹 도구 켜기/끄기 (이슈 #14) — 설정은 재시작해야 먹는다. 떠 있는 서버와 값이 다르면 다시 띄운다(진행 중 턴은 중단됨).
     // 안 떠 있으면 다음 기동이 읽는다(launch). features 는 inject 하지 않는다 — 기능 레지스트리 없이 띄운 엔진(서비스 실물 테스트)은 꺼짐으로 돈다
     ctx.on('features/changed', (enabled) => {
-      if (!this.current || enabled.includes('web') === this.launchedWebTools) return
-      void this.restart().catch((error: unknown) => console.error('[engine] 웹 도구 변경 후 재시작 실패', (error as Error).message))
+      if (!this.current || (enabled.includes('web') === this.launchedWebTools && JSON.stringify(this.skills()) === this.launchedSkills)) return
+      void this.restart().catch((error: unknown) => console.error('[engine] 웹 도구·스킬 변경 후 재시작 실패', (error as Error).message))
+    })
+    // 스킬 (이슈 #7) — 설정 > 기능의 스킬(위 features/changed)과 "Claude Code 스킬 함께 쓰기"(settings) 도 같은 길로 다시 띄운다
+    ctx.on('settings/changed', () => {
+      if (!this.current || JSON.stringify(this.skills()) === this.launchedSkills) return
+      void this.restart().catch((error: unknown) => console.error('[engine] 스킬 설정 변경 후 재시작 실패', (error as Error).message))
     })
     ctx.effect(() => () => this.stop())
+  }
+
+  /** 지금 설정의 스킬 — 기능 레지스트리·설정 없이 띄운 엔진(서비스 실물 테스트)은 켬·Claude 꺼짐 */
+  private skills(): EngineSkills {
+    return { enabled: this.ctx.get('features')?.isEnabled('skills') ?? true, claude: this.ctx.get('settings')?.get().claudeSkills ?? false }
   }
 
   /** 떠 있는 서버의 연결. 없거나 죽었으면 띄운다 (동시에 불러도 한 번만) */
@@ -433,7 +478,9 @@ export class EngineService extends Service {
 
     fs.mkdirSync(this.opts.configDir, { recursive: true })
     this.launchedWebTools = this.ctx.get('features')?.isEnabled('web') ?? false
-    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, webTools: this.launchedWebTools })
+    const skills = this.skills()
+    this.launchedSkills = JSON.stringify(skills)
+    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, webTools: this.launchedWebTools, skills })
     fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(config, null, 2))
     prepareInstallMarkers(this.opts.configDir, env)
 
