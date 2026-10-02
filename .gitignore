@@ -8,3 +8,4 @@ _workspace_*/
 build/vendor/
 release/
 .claude/worktrees/
+.claude/
