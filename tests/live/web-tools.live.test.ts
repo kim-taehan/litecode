@@ -28,6 +28,8 @@ let project: string
 
 const MODES: Mode[] = ['plan', 'build', 'ask', 'full']
 const WEB = ['webfetch', 'websearch']
+/** 켜졌을 때 실리는 웹 도구 — 레거시 경로엔 websearch 가 없다(신규 세대 전용, 01x). 꺼짐 확인은 둘 다 본다 */
+const WEB_ON = ['webfetch']
 
 async function launch(): Promise<void> {
   app = await electron.launch({
@@ -81,7 +83,8 @@ async function toolsIn(mode: Mode): Promise<string[]> {
   )
   expect(result, mode).toMatchObject({ ok: true, text: `echo: ${text}` })
   const { lastChat } = await requests()
-  expect(lastChat.messages.at(-1)!.text, mode).toBe(text) // 이 턴의 요청이다
+  // 이 턴의 요청이다 — 레거시는 계획 모드 턴의 user 글 뒤에 <system-reminder> 를 붙인다
+  expect(lastChat.messages.at(-1)!.text.startsWith(text), mode).toBe(true)
   return lastChat.tools
 }
 
@@ -133,10 +136,10 @@ describe('웹 도구 켜기/끄기 (이슈 #14)', () => {
     await expect.poll(() => page.evaluate(() => window.litecode.getFeatures()), { timeout: 5_000 }).toContain('web')
   })
 
-  it('켜짐 — 계획은 둘 다 없고(deny), 기본·매번 묻기(ask)·전체 권한은 webfetch·websearch 가 실린다', async () => {
+  it('켜짐 — 계획은 없고(deny), 기본·매번 묻기(ask)·전체 권한은 webfetch 가 실린다 (레거시엔 websearch 가 없다)', async () => {
     for (const mode of MODES) {
       const tools = await toolsIn(mode)
-      expect(tools.filter((tool) => WEB.includes(tool)), mode).toEqual(mode === 'plan' ? [] : WEB)
+      expect(tools.filter((tool) => WEB.includes(tool)), mode).toEqual(mode === 'plan' ? [] : WEB_ON)
     }
   })
 
@@ -145,7 +148,7 @@ describe('웹 도구 켜기/끄기 (이슈 #14)', () => {
     await app.close()
     await launch()
     await input().waitFor({ timeout: 10_000 })
-    expect(await toolsIn('build')).toEqual(expect.arrayContaining(WEB))
+    expect(await toolsIn('build')).toEqual(expect.arrayContaining(WEB_ON))
   })
 
   it('다시 끄면 기본값이라 settings.json 에서 키가 빠지고, 전체 권한에서도 다시 없다', async () => {
