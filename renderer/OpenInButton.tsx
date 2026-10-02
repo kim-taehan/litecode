@@ -7,6 +7,7 @@ import './openIn.css'
 // 왼쪽 = 기본 앱으로 열기(아이콘만), 오른쪽 ⌄ = 메뉴. 메뉴에서 고른 앱이 다음부터 기본이 된다(settings.openInApp — dsh 방식, 설정 화면 없음).
 // 여는 것은 그 대화의 프로젝트 폴더뿐이다. 앱 목록·허용 검사·실행은 메인(ctx.openIn) — 화면은 앱 id 와 폴더만 보낸다.
 // 앱이 없으면(mac 이 아니면) 버튼을 그리지 않는다.
+// file 을 주면(파일 미리보기 패널) 그 파일 하나를 편집기로 연다 — 메뉴는 파일을 받는 앱(files)만, 실행은 ctx.openIn.openFile.
 
 /** ↗ — 아이콘을 못 구한 앱 */
 function ArrowIcon() {
@@ -29,7 +30,7 @@ function AppIcon({ app }: { app: OpenInApp }) {
   return app.icon ? <img className="open-in__icon" src={app.icon} alt="" /> : <ArrowIcon />
 }
 
-export function OpenInButton({ directory }: { directory: string }) {
+export function OpenInButton({ directory, file }: { directory: string; file?: string }) {
   const t = useT()
   const { openInApp } = useSettings()
   const [apps, setApps] = useState<OpenInApp[]>()
@@ -39,8 +40,12 @@ export function OpenInButton({ directory }: { directory: string }) {
   const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    void window.litecode.openInApps().then(setApps, () => setApps([]))
-  }, [])
+    const forFile = file !== undefined
+    void window.litecode.openInApps().then(
+      (found) => setApps(forFile ? found.filter((app) => app.files) : found),
+      () => setApps([]),
+    )
+  }, [file !== undefined])
 
   // 메뉴 밖을 누르면 닫는다. 열리면 첫 항목에 포커스 (키보드로 바로 고르게)
   useEffect(() => {
@@ -66,7 +71,7 @@ export function OpenInButton({ directory }: { directory: string }) {
     setBusy(true)
     setError(undefined)
     try {
-      await window.litecode.openIn(app.id, directory)
+      await (file === undefined ? window.litecode.openIn(app.id, directory) : window.litecode.openFileIn(app.id, directory, file))
     } catch (failure) {
       // IPC 를 지난 오류는 "Error invoking remote method …: Error: <사유>" — 사유만
       setError(String(failure instanceof Error ? failure.message : failure).replace(/^.*?Error: /, ''))
@@ -83,6 +88,7 @@ export function OpenInButton({ directory }: { directory: string }) {
 
   function onMenuKey(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.key === 'Escape') {
+      event.preventDefault() // 메뉴만 닫는다 — 파일 미리보기 패널이 이 Esc 로 같이 닫히지 않게
       setMenu(false)
       root.current?.querySelector<HTMLButtonElement>('.open-in__more')?.focus()
       return

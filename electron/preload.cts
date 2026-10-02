@@ -36,6 +36,7 @@ const Channel = {
   STOP_TURN: 'chat:stop',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
+  PREVIEW_FILE: 'chat:preview-file',
   RUN_SHELL: 'shell:run',
   STOP_SHELL: 'shell:stop',
   SHELL_DATA: 'shell:data',
@@ -52,6 +53,7 @@ const Channel = {
   NOTIFICATION_OPEN: 'notifications:open',
   OPEN_IN_APPS: 'openIn:apps',
   OPEN_IN: 'openIn:open',
+  OPEN_FILE_IN: 'openIn:open-file',
   GET_FEATURES: 'features:get',
   FEATURES_CHANGED: 'features:changed',
 } as const
@@ -108,6 +110,7 @@ const bridge: LitecodeBridge = {
   stopTurn: (conversationId) => ipcRenderer.invoke(Channel.STOP_TURN, conversationId),
   resolveFiles: (directory, tokens) => ipcRenderer.invoke(Channel.RESOLVE_FILES, directory, tokens),
   revealFile: (directory, token) => ipcRenderer.invoke(Channel.REVEAL_FILE, directory, token),
+  previewFile: (directory, token) => ipcRenderer.invoke(Channel.PREVIEW_FILE, directory, token),
   runShell: (conversationId, runId, directory, command, position) =>
     ipcRenderer.invoke(Channel.RUN_SHELL, conversationId, runId, directory, command, position),
   stopShell: (runId) => ipcRenderer.invoke(Channel.STOP_SHELL, runId),
@@ -129,6 +132,7 @@ const bridge: LitecodeBridge = {
   onNotificationOpen: (listener) => listen(Channel.NOTIFICATION_OPEN, listener),
   openInApps: () => ipcRenderer.invoke(Channel.OPEN_IN_APPS),
   openIn: (appId, directory) => ipcRenderer.invoke(Channel.OPEN_IN, appId, directory),
+  openFileIn: (appId, directory, token) => ipcRenderer.invoke(Channel.OPEN_FILE_IN, appId, directory, token),
   getFeatures: () => ipcRenderer.invoke(Channel.GET_FEATURES),
   onFeaturesChanged: (listener) => listen(Channel.FEATURES_CHANGED, listener),
 }

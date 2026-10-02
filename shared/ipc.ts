@@ -12,6 +12,7 @@ import type { TurnItem } from '../src/services/turnProgress.ts'
 import type { Settings } from '../src/services/settings.ts'
 import type { NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 import type { OpenInApp } from '../src/services/openIn.ts'
+import type { FilePreview } from '../src/services/filePreview.ts'
 import type { FeatureId } from './features.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -27,6 +28,7 @@ export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts
 export type { Appearance, Settings } from '../src/services/settings.ts'
 export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 export type { OpenInApp } from '../src/services/openIn.ts'
+export type { FilePreview } from '../src/services/filePreview.ts'
 export type { FeatureId, FeatureSwitches } from './features.ts'
 
 export const Channel = {
@@ -65,6 +67,7 @@ export const Channel = {
   STOP_TURN: 'chat:stop',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
+  PREVIEW_FILE: 'chat:preview-file',
   RUN_SHELL: 'shell:run',
   STOP_SHELL: 'shell:stop',
   /** 메인 → 화면 (runId, chunk) */
@@ -85,6 +88,7 @@ export const Channel = {
   NOTIFICATION_OPEN: 'notifications:open',
   OPEN_IN_APPS: 'openIn:apps',
   OPEN_IN: 'openIn:open',
+  OPEN_FILE_IN: 'openIn:open-file',
   GET_FEATURES: 'features:get',
   /** 메인 → 화면 (FeatureId[]) — 켜진 기능이 바뀌었다 (묶음을 다 올리고 내린 뒤) */
   FEATURES_CHANGED: 'features:changed',
@@ -161,6 +165,9 @@ export interface LitecodeBridge {
   resolveFiles(directory: string, tokens: string[]): Promise<string[]>
   /** 프로젝트 안의 그 파일을 OS 파일 관리자에서 보여 준다 (열지·실행하지 않는다). 프로젝트 밖·없는 파일이면 false */
   revealFile(directory: string, token: string): Promise<boolean>
+  /** 파일 미리보기 패널 — 칩과 같은 (프로젝트, 답의 글자) 로 그 파일 내용(앞 1MB). 등록 안 된 폴더·밖·링크로 밖·없는 파일이면
+   *  unavailable, 이진이면 내용 없이 binary. 읽기만 한다 */
+  previewFile(directory: string, token: string): Promise<FilePreview>
   /** `!명령` — 그 대화의 프로젝트 폴더에서 한 번 돌리고, 끝나면 그 대화에 카드로 저장한 것을 준다. runId 는 화면이 정한다(출력 조각을
    *  onShellData 로 받으려고). position 은 대화 안 자리(앞 말풍선 수). 결과는 대화 맥락에 안 들어간다 */
   runShell(conversationId: string, runId: string, directory: string, command: string, position: number): Promise<ShellCard>
@@ -190,6 +197,8 @@ export interface LitecodeBridge {
   openInApps(): Promise<OpenInApp[]>
   /** 그 프로젝트 폴더를 그 앱으로 연다. 목록 밖 앱·등록 안 된 폴더·실행 실패면 지금 언어의 사유로 거절 */
   openIn(appId: string, directory: string): Promise<void>
+  /** 프로젝트 안 파일 하나를 편집기(files 표시 앱)로 연다 — 파일 미리보기 패널. 편집기 아닌 앱·밖 파일·등록 안 된 폴더면 거절 */
+  openFileIn(appId: string, directory: string, token: string): Promise<void>
   /** 켜진 기능 (ctx.features) — 꺼진 기능의 버튼·탭·메뉴·단축키는 그리지 않는다. 켜고 끄기는 setSettings({ features }) */
   getFeatures(): Promise<FeatureId[]>
   onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void
