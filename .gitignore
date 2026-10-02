@@ -9,3 +9,4 @@ build/vendor/
 release/
 .claude/worktrees/
 .claude/
+shots/
