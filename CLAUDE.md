@@ -233,3 +233,4 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-10-01 | 엔진 경계 = `ctx.llm` + `ctx.engine` (문서 정정), bootstrap 의 IPC·종료를 Cordis effect·fiber dispose 로 | agents/litecode-dev, electron/main.ts | 코디스 사용 검토 |
 | 2026-10-01 | 병렬 라운드 규칙 — 동시 2개·worktree·기능별 컴포넌트/실물 테스트 파일·실물 테스트 잠금·리더가 합침 | skills/litecode-build | 사용자 "병렬 개발은 안 되나" |
 | 2026-10-02 | 돌고 있는 라운드에 범위를 얹지 않는다(다음 라운드로), 개발 중엔 자기 실물 파일만·전체는 착지 직전 한 번 | skills/litecode-build | 사용자 "왜 이리 오래 걸리지" |
+| 2026-10-02 | GitHub 흐름 — 라운드마다 이슈 → 브랜치 → PR → main 머지(머지는 사용자 확인). 원격 kim-taehan/litecode | skills/litecode-build | 사용자 지시 |

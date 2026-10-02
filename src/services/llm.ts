@@ -2,6 +2,7 @@ import { Context, Service } from 'cordis'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { Agent } from 'undici'
 import { normalizeBaseURL } from './providers.ts'
 import { MODE_AGENT, type EngineConnection } from './engine.ts'
 import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
@@ -192,6 +193,11 @@ export function interruptedError(): string {
   return tr('error.interrupted')
 }
 
+export interface LlmConfig {
+  /** 세션 SSE 의 무바이트 한도(ms). 0 = 없음(기본). 시험이 끊김을 짧게 재현할 때만 준다 */
+  streamTimeoutMs?: number
+}
+
 export class LlmService extends Service {
   static readonly inject = ['providers', 'engine']
 
@@ -207,8 +213,16 @@ export class LlmService extends Service {
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
   private watchers = new Map<string, { answered(requestId: string): void }>()
 
-  constructor(ctx: Context) {
+  /** 세션 SSE 를 여는 dispatcher. 전역 fetch(undici) 기본 bodyTimeout·headersTimeout 은 300초인데 세션 SSE 는 스텝의 LLM 스트림·도구 실행·
+   *  승인 대기 동안 0바이트라 그보다 오래 조용하면 끊긴다 (01q, 재현함). 끊김 감지는 시간이 아니라 엔진 생존(conn.closed)으로 한다.
+   *  undici 는 Electron 33 메인의 Node 20.18.3 내장(6.21.1)과 같은 버전을 쓴다 */
+  private streamDispatcher: Agent
+
+  constructor(ctx: Context, config: LlmConfig = {}) {
     super(ctx, 'llm')
+    const timeout = config.streamTimeoutMs ?? 0
+    this.streamDispatcher = new Agent({ bodyTimeout: timeout, headersTimeout: timeout })
+    ctx.effect(() => () => void this.streamDispatcher.close().catch(() => {}))
   }
 
   // model 을 꼭 명시한다 — {} 로 보내면 opencode 가 opencode.json 의 model 을 무시하고 models.dev 카탈로그의
@@ -618,7 +632,8 @@ export class LlmService extends Service {
       const res = await fetch(`${conn.url}/api/session/${sessionId}/event`, {
         headers: conn.headers,
         signal: AbortSignal.any([controller.signal, conn.closed]), // 서버가 끝나면 읽기를 바로 멈춘다
-      })
+        dispatcher: this.streamDispatcher,
+      } as RequestInit) // dispatcher 는 Node(undici) fetch 확장이라 DOM RequestInit 타입에 없다
       if (!res.ok || !res.body) throw new Error(tr('error.subscribe', { status: res.status }))
 
       const reader = res.body.getReader()
@@ -633,7 +648,19 @@ export class LlmService extends Service {
             if (controller.signal.aborted) throw error // 우리가 멈췄다 (stop)
             return undefined // 연결이 잘렸다 (undici: "terminated")
           })
-          if (!read || read.done) return { ok: false, text: texts.join(''), error: await interruption(conn.closed), usage: meter.usage(), interrupted: true }
+          if (!read || read.done) {
+            const error = await interruption(conn.closed)
+            // 엔진이 살아 있으면 opencode 의 턴은 계속 돈다 — 그대로 두면 다음 프롬프트가 그 뒤에 줄 서고 이 턴의 답을 받는다(답이 한 칸 밀림, 01q 5/5).
+            // interrupt 는 204 후 즉시 idle (01q 10/10)
+            if (!conn.closed.aborted) {
+              await fetch(`${conn.url}/api/session/${sessionId}/interrupt`, {
+                method: 'POST',
+                headers: { ...conn.headers, 'content-type': 'application/json' },
+                body: '{}',
+              }).catch(() => {})
+            }
+            return { ok: false, text: texts.join(''), error, usage: meter.usage(), interrupted: true }
+          }
           const { value } = read
           buffer += decoder.decode(value, { stream: true })
 

@@ -14,7 +14,10 @@ import { translate } from '../../shared/i18n/index.ts'
 // 승인·질문 (01f 1-c·1-d, 01i 2-a~2-c): 요청은 세션 SSE 에 없고 전역 /api/event(permission.v2.* · question.v2.*, seq 없음) + 세션별 목록에 있다.
 // 거절은 그 도구의 tool.failed 하나로 끝나고 step.* 가 없다. 모드(에이전트) 목록은 지연 로드 — 첫 /api/agent 는 빈 목록
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent'
+
+/** 'silent' 턴이 끝 이벤트까지 세션 SSE 에 아무것도 안 보내는 시간 — LLM 스트림·도구 실행·승인 대기 동안 세션 SSE 는 0바이트다 (01q) */
+const SILENT_MS = 1_500
 
 const PROXY = 'http://proxy.invalid/v1'
 const directory = os.tmpdir()
@@ -89,6 +92,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
         frame(5, 'step.ended', { finish: 'stop' })
       })
     }
+    if (url === '/api/session/ses_1/interrupt') return void req.on('end', () => res.writeHead(204).end())
     if (url === '/api/session/ses_1/event') {
       events = res
       return void res.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -104,6 +108,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
         frame(2, 'prompted', {})
         if (ending === 'done') frame(3, 'step.ended', { finish: 'stop' })
         if (ending === 'failed') frame(3, 'step.failed', { error: { message: 'boom' } })
+        if (ending === 'silent') setTimeout(() => frame(3, 'step.ended', { finish: 'stop' }), SILENT_MS)
         if (ending === 'permission' || ending === 'question') {
           frame(3, 'tool.called', { callID: 'call_1', tool: ending === 'question' ? 'question' : 'bash' })
           if (ending === 'permission') pending.permission = [{ id: 'per_1', sessionID: 'ses_1', action: 'bash', resources: ['ls'], source: { callID: 'call_1' } }]
@@ -127,7 +132,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 }
 
-async function start(url: string): Promise<{ llm: LlmService; seen: string[] }> {
+async function start(url: string, config?: ConstructorParameters<typeof LlmService>[1]): Promise<{ llm: LlmService; seen: string[] }> {
   closer = new AbortController()
   prompts = []
   class FakeProviders extends Service {
@@ -156,7 +161,7 @@ async function start(url: string): Promise<{ llm: LlmService; seen: string[] }> 
   ctx.on('llm/attention-resolved', (info) => void seen.push(`resolved ${show(info)}`))
   ctx.plugin(FakeProviders)
   ctx.plugin(FakeEngine)
-  ctx.plugin(LlmService)
+  ctx.plugin(LlmService, config)
   return new Promise((resolve) => ctx.inject(['llm'], (ready) => resolve({ llm: ready.llm, seen })))
 }
 
@@ -300,5 +305,32 @@ describe('ctx.llm 모드 = opencode 에이전트 (라운드 A)', () => {
     expect(calls.filter((call) => call.startsWith('/api/session/ses_1/agent'))).toEqual([])
     await llm.chat('p', 'm', directory, 'hi', 'ses_1', undefined, undefined, undefined, 'ask').catch(() => {})
     expect(calls.filter((call) => call.startsWith('/api/session/ses_1/agent'))).toEqual(['/api/session/ses_1/agent {"agent":"litecode-ask"}'])
+  })
+})
+
+describe('ctx.llm 세션 SSE 무바이트 구간 (01q)', () => {
+  // undici 기본 bodyTimeout·headersTimeout 은 300초 — 그 이상 조용하면(긴 생각·도구·승인 대기) 앱 쪽에서 끊긴다.
+  // 300초를 기다릴 수 없어 타임아웃을 주입해 같은 길을 짧게 돈다
+
+  it('조용한 구간이 타임아웃보다 길면 끊긴다 — 주입한 타임아웃이 세션 SSE fetch 에 닿는다', async () => {
+    const { llm } = await start(await fakeOpencode('silent'), { streamTimeoutMs: 300 })
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, interrupted: true })
+  })
+
+  it('기본(타임아웃 없음)이면 조용한 구간을 지나 끝까지 받는다', async () => {
+    const { llm } = await start(await fakeOpencode('silent'))
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true })
+  })
+
+  it('엔진이 살아 있는데 끝 이벤트 없이 끊기면 opencode 턴도 멈춘다 (POST /interrupt) — 안 그러면 다음 턴이 이 턴의 답을 받는다', async () => {
+    const { llm } = await start(await fakeOpencode('silent'), { streamTimeoutMs: 300 })
+    await llm.chat('p', 'm', directory, 'hi')
+    expect(calls).toContain('/api/session/ses_1/interrupt {}')
+  })
+
+  it('엔진이 끝나 끊긴 턴은 interrupt 를 보내지 않는다 (보낼 곳이 없다)', async () => {
+    const { llm } = await start(await fakeOpencode('cut'))
+    await llm.chat('p', 'm', directory, 'hi')
+    expect(calls.filter((call) => call.includes('/interrupt'))).toEqual([])
   })
 })
