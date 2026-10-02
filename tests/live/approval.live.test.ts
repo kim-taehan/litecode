@@ -107,7 +107,7 @@ describe('승인·질문 카드와 모드 칩 (라운드 A)', () => {
   it('기본 모드: 폴더 밖 파일 읽기 → 승인 카드 → 한 번 허용 → 그 내용으로 턴이 끝난다', async () => {
     await send('first chat')
     expect(await chip().textContent()).toBe('기본')
-    await submit(`[call:read {"path":"${outside}"}]`)
+    await submit(`[call:read {"filePath":"${outside}"}]`)
     await card('permission').waitFor({ timeout: 30_000 })
     expect(await card('permission').locator('.attention-card__headline').textContent()).toBe('프로젝트 폴더 밖에 접근하려고 합니다')
     expect(await card('permission').locator('.attention-card__command').textContent()).toContain(path.dirname(outside))
@@ -119,7 +119,7 @@ describe('승인·질문 카드와 모드 칩 (라운드 A)', () => {
   })
 
   it('거절하면 실패가 아니라 "거절함" 으로 끝나고 다음 질문이 된다', async () => {
-    await submit(`[call:read {"path":"${outside}"}]`)
+    await submit(`[call:read {"filePath":"${outside}"}]`)
     await card('permission').waitFor({ timeout: 30_000 })
     await card('permission').getByRole('button', { name: '거절' }).click()
     await expect.poll(lastHead, { timeout: 30_000 }).toMatch(/^거절함/)
@@ -155,7 +155,7 @@ describe('승인·질문 카드와 모드 칩 (라운드 A)', () => {
     await pickMode('매번 묻기')
     expect(await chip().textContent()).toBe('매번 묻기')
     expect(await page.locator('.mode-divider').count()).toBe(0) // 아직 안 보냈다 — 바꾼 모드는 보낼 때 엔진에 간다
-    await submit('[call:write {"path":"made-by-edit.txt","content":"hello"}]')
+    await submit('[call:write {"filePath":"made-by-edit.txt","content":"hello"}]')
     await card('permission').waitFor({ timeout: 30_000 })
     expect(await card('permission').locator('.attention-card__headline').textContent()).toBe('파일을 고치려고 합니다')
     expect(await exists('made-by-edit.txt')).toBe(false)
@@ -185,7 +185,7 @@ describe('승인·질문 카드와 모드 칩 (라운드 A)', () => {
     expect(await chip().getAttribute('data-mode')).toBe('plan')
     expect(await input().getAttribute('placeholder')).toBe('계획을 세울 작업을 설명하세요…')
 
-    await send('plan chat [call:write {"path":".opencode/plans/p.md","content":"x"}]')
+    await send('plan chat [call:write {"filePath":".opencode/plans/p.md","content":"x"}]')
     const request = await lastChat()
     expect(request.tools).toContain('read')
     expect(request.tools.filter((tool) => EDIT_TOOLS.includes(tool))).toEqual([])
@@ -208,8 +208,11 @@ describe('승인·질문 카드와 모드 칩 (라운드 A)', () => {
     expect(await page.locator('.mode-divider').allTextContents()).toEqual(['기본 모드로 바꿈'])
     const request = await lastChat()
     expect(request.tools).toContain('bash')
-    expect(request.messages[0]!.text).toMatch(/^You are an AI coding agent\. Help/)
+    // 기본 모드 = opencode build 에이전트. 레거시의 build 는 opencode 기본 시스템 프롬프트("You are opencode, …")로 돈다 — 계획 프롬프트가 아니면 된다
+    expect(request.messages[0]!.text).not.toMatch(/plan mode/)
     expect(request.messages.some((message) => message.text.startsWith('plan chat'))).toBe(true) // 앞 맥락이 이어진다
+    // 레거시는 계획에서 나온 턴의 user 글 뒤에 모드가 바뀌었다는 알림을 붙여 LLM 에 보낸다 (01w — 기록엔 없고 요청에만)
+    expect(((await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { lastChatText: string }).lastChatText).toContain('Your operational mode has changed from plan to build')
     expect(await run.count()).toBe(0)
   })
 
@@ -238,7 +241,7 @@ describe('승인·질문 카드와 모드 칩 (라운드 A)', () => {
     await confirm.getByRole('button', { name: '전체 권한 켜기' }).click()
     expect(await chip().getAttribute('data-mode')).toBe('full')
     expect(await chip().textContent()).toBe('전체 권한')
-    await send(`full chat [call:read {"path":"${outside}"}]`)
+    await send(`full chat [call:read {"filePath":"${outside}"}]`)
     expect(await lastAnswer()).toContain(OUTSIDE_TEXT)
     expect(await card('permission').count()).toBe(0)
   })

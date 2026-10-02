@@ -102,9 +102,9 @@ describe('ctx.llm ↔ 실물 opencode', () => {
     expect(result.sessionId).toBeUndefined()
   }, MODEL_CATALOG_TIMEOUT_MS + 5_000)
 
-  // opencode 는 세션을 만들 때 모델이 정해지고 prompt 본문엔 model 이 없다 — 이어가는 대화에서 다른 모델을 넘기면
-  // ctx.llm 이 POST /api/session/{id}/model 로 바꾼 뒤 보낸다. 앞 턴 맥락은 그대로 실린다 (_workspace/01_probe.md)
-  it('이어가는 대화에서 다른 모델을 넘기면 그 세션의 모델을 바꿔 보내고, 앞 턴 맥락이 실린다', async () => {
+  // 레거시는 프롬프트마다 model 을 싣는다(빼면 마지막 user 의 모델을 따라간다 — 01w). 이어가는 대화에서 다른 모델을 넘기면 그 턴부터
+  // 그 모델로 돌고, 앞 턴 맥락은 그대로 실린다
+  it('이어가는 대화에서 다른 모델을 넘기면 그 모델로 보내고, 앞 턴 맥락이 실린다', async () => {
     const first = await services.llm.chat('fake', 'echo-b', work, '첫 턴 알파')
     expect(first).toMatchObject({ ok: true, text: 'echo: 첫 턴 알파' })
     expect((await lastChat()).model).toBe('echo-b')
@@ -120,8 +120,8 @@ describe('ctx.llm ↔ 실물 opencode', () => {
     ])
   })
 
-  // 함정(01_probe): opencode 는 없는 모델로 바꿔도 204 를 주고 다음 턴이 조용히 매달린다 — 바꾸기 전에 확인해야 한다
-  it('이어가는 대화를 없는 모델로 바꾸려 하면 바꾸지 않고 ok:false 이고, 그 세션은 이전 모델로 계속 쓸 수 있다', async () => {
+  // 없는 모델은 보내기 전에 카탈로그로 거른다 — 화면에 알맞은 사유("모델 없음")를 주고 LLM 요청이 0 이다
+  it('이어가는 대화를 없는 모델로 보내려 하면 보내지 않고 ok:false 이고, 그 세션은 이전 모델로 계속 쓸 수 있다', async () => {
     const first = await services.llm.chat('fake', 'echo-b', work, '바꾸기 전')
     expect(first.ok).toBe(true)
     const before = await fakeLlmRequests()
@@ -130,14 +130,12 @@ describe('ctx.llm ↔ 실물 opencode', () => {
     expect(refused).toMatchObject({ ok: false, sessionId: first.sessionId })
     expect(refused.error).toContain('fake/no-such-model')
     expect(await fakeLlmRequests()).toBe(before)
-    const session = (await (await opencodeGet(`/api/session/${first.sessionId}`)).json()) as { data: { model: { id: string } } }
-    expect(session.data.model.id).toBe('echo-b')
 
     expect(await services.llm.chat('fake', 'echo-b', work, '이어서', first.sessionId)).toMatchObject({ ok: true, text: 'echo: 이어서' })
     expect((await lastChat()).model).toBe('echo-b')
   }, MODEL_CATALOG_TIMEOUT_MS + 30_000)
 
-  it('LLM 이 실패하면 step.failed 를 잡아 ok:false 와 사유를 돌려준다', async () => {
+  it('LLM 이 실패하면 session.error·assistant error 를 잡아 ok:false 와 사유를 돌려준다', async () => {
     const result = await services.llm.chat('fake', 'echo', work, '[fail] 일부러')
 
     expect(result.ok).toBe(false)
@@ -145,7 +143,7 @@ describe('ctx.llm ↔ 실물 opencode', () => {
   })
 })
 
-// 대화는 프로젝트 폴더에서 돈다 — 한 opencode 서버에서 세션마다 location.directory 를 준다 (01_probe 결론).
+// 대화는 프로젝트 폴더에서 돈다 — 한 opencode 서버에서 세션마다 폴더를 준다 (01_probe 결론, 레거시는 ?directory= — 01w).
 describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
   async function folder(name: string): Promise<string> {
     const dir = path.join(root, name)
@@ -153,10 +151,10 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
     return dir
   }
 
-  async function opencodeSession(id: string): Promise<{ location: { directory: string } }> {
-    const res = await opencodeGet(`/api/session/${id}`)
+  async function opencodeSession(id: string, directory: string): Promise<{ directory: string }> {
+    const res = await opencodeGet(`/session/${id}?directory=${encodeURIComponent(directory)}`)
     expect(res.status).toBe(200)
-    return ((await res.json()) as { data: { location: { directory: string } } }).data
+    return (await res.json()) as { directory: string }
   }
 
   // 도구 cwd 까지 본다 — location 이 저장만 되고 실행에 안 쓰이는 경우도 잡는다. 동시에 돌려 섞임도 본다.
@@ -176,7 +174,7 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
   })
 
   // opencode 는 경로를 문자열 그대로 저장·비교한다(01_probe Q3) — 최근 목록 키와 같은 realpath 로 넘겨야 한다.
-  it('심볼릭 링크로 넘겨도 세션의 location.directory 는 realpath 다', async () => {
+  it('심볼릭 링크로 넘겨도 세션의 directory 는 realpath 다', async () => {
     const real = await folder('real')
     const link = path.join(root, 'link')
     await fs.symlink(real, link)
@@ -184,7 +182,7 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
     const result = await services.llm.chat('fake', 'echo', link, '링크')
 
     expect(result).toMatchObject({ ok: true, text: 'echo: 링크' })
-    expect((await opencodeSession(result.sessionId!)).location.directory).toBe(real)
+    expect((await opencodeSession(result.sessionId!, real)).directory).toBe(real)
   })
 
   // 없는 경로로 세션을 만들면 opencode 는 200 을 주지만 그 세션·경로는 서버 재시작 전까지 500 이 된다(01_probe Q3) —
@@ -197,22 +195,25 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toContain(missing)
     expect(result.sessionId).toBeUndefined()
-    const listed = await opencodeGet(`/api/session?directory=${encodeURIComponent(missing)}&limit=10`)
+    const listed = await opencodeGet(`/api/session?directory=${encodeURIComponent(missing)}&limit=10`) // 읽기 전용 신규 세대 목록 — 레거시 /session?directory= 는 그 경로 인스턴스를 띄운다
     expect(((await listed.json()) as { data: unknown[] }).data).toHaveLength(0)
   })
 
-  // 카탈로그는 디렉터리별이다(01_probe Q2). 쿼리 이름이 틀리면 opencode 는 200 에 서버 cwd 카탈로그를 준다 —
-  // 그 카탈로그에는 이 폴더에만 있는 모델이 없으므로 "모델 없음" 으로 실패해 헛초록이 안 난다.
-  // 폴더 설정은 우리 provider 에 모델만 더한다 — 주소는 그대로 키 프록시라 주소 대조를 통과한다 (폴더가 자기 provider 를 정의해
-  // 우리 id 로 쓰면 주소가 달라 거부된다 — 그건 engine.live.test.ts 의 덮어쓰기 시나리오)
-  it('그 폴더의 opencode.json 에만 있는 모델로 턴이 돈다 (카탈로그를 세션 폴더 기준으로 본다)', async () => {
+  // 프로젝트 설정 차단(blockProjectConfig) 아래 레거시는 폴더 opencode.json 을 안 읽는다 — 폴더가 정의한 모델은 쓰이지 않는다(LLM 요청 0).
+  // 신규 세대 카탈로그(/api/model?location[directory]=)는 그래도 폴더 설정을 보여 모델 확인은 통과한다 — 레거시가 거절해 실패로 끝난다.
+  // (카탈로그 쿼리 이름 `location[directory]` 는 engine.live 의 "주소를 바꾸면 거부" 시나리오가 지킨다 — 틀리면 덮인 주소를 못 봐 거부하지 못한다)
+  it('폴더 opencode.json 에만 있는 모델은 쓰이지 않는다 — 실패로 끝나고 LLM 요청이 없다 (프로젝트 설정 차단)', async () => {
     const dir = await folder('folder-provider')
     await fs.writeFile(
       path.join(dir, 'opencode.json'),
       JSON.stringify({ $schema: 'https://opencode.ai/config.json', provider: { fake: { models: { 'folder-echo': { name: 'Folder echo' } } } } }),
     )
+    const before = await fakeLlmRequests()
 
-    expect(await services.llm.chat('fake', 'folder-echo', dir, '폴더 모델')).toMatchObject({ ok: true, text: 'echo: 폴더 모델' })
+    const result = await services.llm.chat('fake', 'folder-echo', dir, '폴더 모델')
+    expect(result.ok).toBe(false)
+    expect(result.error).toBeTruthy()
+    expect(await fakeLlmRequests()).toBe(before)
   }, MODEL_CATALOG_TIMEOUT_MS + 10_000)
 })
 
@@ -294,14 +295,14 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
       ['user', '셋째'],
       ['assistant', 'echo: 셋째'],
     ])
-    expect(history.messages[3]!.error).toContain('500')
+    expect(history.messages[3]!.error).toContain('fake-llm: 요청된 실패')
   })
 
   // 세션 삭제는 레거시 DELETE 뿐 (01c Q3). 이미 없는 세션을 다시 지워도 실패로 보지 않는다
   it('세션을 지우면 opencode 에서 사라지고, 다시 지워도 오류가 아니다', async () => {
     const result = await services.llm.chat('fake', 'echo', work, '지울 것')
     await services.llm.deleteSession(result.sessionId!)
-    expect((await opencodeGet(`/api/session/${result.sessionId}`)).status).toBe(404)
+    expect((await opencodeGet(`/session/${result.sessionId}?directory=${encodeURIComponent(work)}`)).status).toBe(404)
     await services.llm.deleteSession(result.sessionId!)
   })
 
@@ -347,6 +348,99 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
     await services.engine.restart()
     expect(await occurrences(db, mark)).toBe(0)
     expect((await services.llm.chat('fake', 'echo', work, '정리 뒤')).text).toBe('echo: 정리 뒤')
+  })
+})
+
+// 레거시 경로 (이슈 #13 L1, 실측 _workspace/01w_legacy_migration.md) — 단위 테스트(turnEvents)가 흉내 낸 계약을 진짜 opencode 로 확인한다
+describe('ctx.llm 레거시 경로', () => {
+  async function folder(name: string): Promise<string> {
+    const dir = path.join(root, name)
+    await fs.mkdir(dir)
+    return dir
+  }
+  type Requests = { lastChatText: string; lastChat: LastChat; cut: string[] }
+  const requests = async (): Promise<Requests> => (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as Requests
+
+  // 같은 세션에 다른 클라이언트가 보내면 opencode 는 같은 루프에 줄 세우고 idle 은 둘 다 끝난 뒤 한 번이다 (01w 1/1) — 답은 parentID 로 가른다
+  it('도는 턴에 다른 클라이언트가 같은 세션으로 보내도 이 턴의 답은 이 턴 것만이다 (parentID)', async () => {
+    const dir = await folder('two-clients')
+    const first = await services.llm.chat('fake', 'echo', dir, '처음')
+    const mine = services.llm.chat('fake', 'echo', dir, '[late] 내 질문', first.sessionId)
+    await expect.poll(async () => (await requests()).lastChatText, { timeout: 10_000 }).toContain('[late] 내 질문')
+    const conn = await services.engine.connection()
+    const other = await fetch(`${conn.url}/session/${first.sessionId}/prompt_async?directory=${encodeURIComponent(dir)}`, {
+      method: 'POST',
+      headers: { ...conn.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: { providerID: 'fake', modelID: 'echo' }, agent: 'build', parts: [{ type: 'text', text: '남의 질문' }] }),
+    })
+    expect(other.status).toBe(204)
+    expect(await mine).toMatchObject({ ok: true, text: 'echo: [late] 내 질문' })
+    const history = await services.llm.history(dir, first.sessionId!)
+    expect(history.messages.map((message) => message.text)).toEqual(['처음', 'echo: 처음', '[late] 내 질문', 'echo: [late] 내 질문', '남의 질문', 'echo: 남의 질문'])
+  })
+
+  // 중지하면 idle 이 두 번 온다(01w 5/5) — 바로 보낸 다음 턴이 앞 턴의 늦은 idle 로 끝나면 빈 답이 된다
+  it('멈춘 턴은 "중단됨"(LLM 요청도 끊긴다)이고, 곧바로 보낸 다음 턴은 자기 답을 받는다. 다시 열면 멈춘 턴은 중단됨이다', async () => {
+    const dir = await folder('stop-next')
+    const stop = new AbortController()
+    let sessionId: string | undefined
+    const turn = services.llm.chat('fake', 'echo', dir, '[slow] 멈출 질문', undefined, async (id) => void (sessionId = id), undefined, undefined, undefined, undefined, stop.signal)
+    await expect.poll(async () => (await requests()).lastChatText, { timeout: 10_000 }).toContain('[slow] 멈출 질문')
+    stop.abort()
+    expect(await turn).toMatchObject({ ok: false, interrupted: true })
+    await expect.poll(async () => (await requests()).cut, { timeout: 10_000 }).toContain('[slow] 멈출 질문')
+
+    expect(await services.llm.chat('fake', 'echo', dir, '바로 다음', sessionId)).toMatchObject({ ok: true, text: 'echo: 바로 다음' })
+    const history = await services.llm.history(dir, sessionId!)
+    expect(history.messages[1]).toMatchObject({ role: 'assistant', interrupted: true })
+    expect(history.messages.slice(2).map((message) => message.text)).toEqual(['바로 다음', 'echo: 바로 다음'])
+  })
+
+  // 재시작 뒤 그 턴은 완료 시각 없는 assistant 로 남고 status 는 비어 있다 (01w) — 다시 열면 "중단됨", 다음 턴은 정상
+  it('엔진 재시작으로 끊긴 턴은 중단됨이고, 다시 열어도 중단됨이며, 다음 턴은 자기 답을 받는다', async () => {
+    const dir = await folder('restart-mid')
+    let sessionId: string | undefined
+    const turn = services.llm.chat('fake', 'echo', dir, '[slow] 재시작될 질문', undefined, async (id) => void (sessionId = id))
+    await expect.poll(async () => (await requests()).lastChatText, { timeout: 10_000 }).toContain('[slow] 재시작될 질문')
+    await services.engine.restart()
+    expect(await turn).toMatchObject({ ok: false, interrupted: true })
+    const history = await services.llm.history(dir, sessionId!)
+    expect(history.messages.at(-1)).toMatchObject({ role: 'assistant', interrupted: true })
+    expect(await services.llm.chat('fake', 'echo', dir, '재시작 뒤', sessionId)).toMatchObject({ ok: true, text: 'echo: 재시작 뒤' })
+  })
+
+  // `!` 카드의 "AI 에게 보내기" — noReply 로 넣은 글은 LLM 을 돌리지 않고 다음 턴 맥락에 실린다 (01w 2회)
+  it('addContext 로 넣은 글은 LLM 요청 없이 저장되고 다음 턴 맥락에 실린다', async () => {
+    const dir = await folder('add-context')
+    const first = await services.llm.chat('fake', 'echo', dir, '맥락 앞')
+    const before = await fakeLlmRequests()
+    const marker = `CTX-MARK-${Date.now()}`
+    expect(await services.llm.addContext('fake', 'echo', dir, `$ echo ${marker}\n${marker}`, services.llm.newMessageId(), first.sessionId)).toMatchObject({ ok: true })
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(await fakeLlmRequests()).toBe(before)
+    expect(await services.llm.chat('fake', 'echo', dir, '맥락 뒤', first.sessionId)).toMatchObject({ ok: true, text: 'echo: 맥락 뒤' })
+    expect((await requests()).lastChatText).toContain(marker)
+  })
+})
+
+// 프로젝트 설정을 막으면(blockProjectConfig — 제품·engineOptions 가 켠다) opencode 는 프로젝트 AGENTS.md 도 안 읽는다(01w 3-1) → 앱이 매 턴 system
+// 으로 넣는다. 막혀 있으니 여기 실린 지시문은 앱이 넣은 것이다 (플래그가 없으면 opencode 도 넣어 헛초록이 난다)
+describe('ctx.llm 프로젝트 지시문 주입 (프로젝트 설정 차단 아래)', () => {
+  it('AGENTS.md 를 "Instructions from: <경로>" 로 매 턴 LLM 요청에 싣고, 바꾸면 다음 턴부터 바뀐 내용이다', async () => {
+    const dir = path.join(root, 'instructions')
+    await fs.mkdir(dir)
+    const file = path.join(dir, 'AGENTS.md')
+    await fs.writeFile(file, '# 규칙\nRULE-ALPHA\n')
+    const lastText = async () => ((await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { lastChatText: string }).lastChatText
+    const first = await services.llm.chat('fake', 'echo', dir, '지시문 첫 턴')
+    expect(first).toMatchObject({ ok: true, text: 'echo: 지시문 첫 턴' })
+    expect(await lastText()).toContain(`Instructions from: ${file}\n# 규칙\nRULE-ALPHA`) // 마지막 요청 messages 의 글에 system 이 들어 있다
+
+    await fs.writeFile(file, '# 규칙\nRULE-BETA\n')
+    expect(await services.llm.chat('fake', 'echo', dir, '지시문 둘째 턴', first.sessionId)).toMatchObject({ ok: true })
+    const second = await lastText()
+    expect(second).toContain('RULE-BETA')
+    expect(second).not.toContain('RULE-ALPHA')
   })
 })
 

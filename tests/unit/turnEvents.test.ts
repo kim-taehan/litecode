@@ -1,36 +1,38 @@
+import fs from 'node:fs'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import os from 'node:os'
+import path from 'node:path'
 import { Context, Service } from 'cordis'
-import { afterEach, describe, expect, it } from 'vitest'
-import { interruptedError, LlmService, type Attention, type TurnInfo } from '../../src/services/llm.ts'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { ascendingId, interruptedError, LlmService, type Attention, type TurnInfo } from '../../src/services/llm.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
 
-// ctx.llm 의 턴 수명 Cordis 이벤트 ('llm/turn-started'·'llm/turn-ended') — 알림 플러그인이 받아 쓸 계약.
-// 받아들여진 턴마다 정확히 한 번씩, outcome 이 맞는지만 고정한다. opencode 는 이 시험에 필요한 엔드포인트만 흉내 낸 HTTP 서버다
-// (모양은 실측 그대로: prompt 응답의 admittedSeq, 세션 SSE 의 session.next.* 프레임)
+// ctx.llm 의 턴 수명 Cordis 이벤트 ('llm/turn-started'·'llm/turn-ended') — 알림 플러그인이 받아 쓸 계약 — 과 레거시 경로 계약(이슈 #13 L1).
+// opencode 는 이 시험에 필요한 엔드포인트만 흉내 낸 HTTP 서버다. 모양은 01w 실측 그대로: prompt_async 204, GET /event?directory= 의
+// {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
+// (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-// 승인·질문 (01f 1-c·1-d, 01i 2-a~2-c): 요청은 세션 SSE 에 없고 전역 /api/event(permission.v2.* · question.v2.*, seq 없음) + 세션별 목록에 있다.
-// 거절은 그 도구의 tool.failed 하나로 끝나고 step.* 가 없다. 모드(에이전트) 목록은 지연 로드 — 첫 /api/agent 는 빈 목록
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'noidle' | 'compactloop'
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent'
-
-/** 'silent' 턴이 끝 이벤트까지 세션 SSE 에 아무것도 안 보내는 시간 — LLM 스트림·도구 실행·승인 대기 동안 세션 SSE 는 0바이트다 (01q) */
+/** 'silent' 턴이 끝 이벤트까지 /event 에 아무것도 안 보내는 시간 */
 const SILENT_MS = 1_500
 
 const PROXY = 'http://proxy.invalid/v1'
-const directory = os.tmpdir()
+/** 작업 폴더 — AGENTS.md 시험용으로 이 파일이 만든다. 끝나면 이 경로만 지운다 */
+const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'litecode-turnevents-')))
+const A = 'msg_a1'
 let server: http.Server | undefined
 let closer: AbortController
-/** 받은 prompt 본문 */
-let prompts: unknown[] = []
+/** 받은 prompt_async 본문 */
+let prompts: Record<string, unknown>[] = []
 /** hold 턴을 끝낸다 (엔진이 끝난 것처럼) */
 let release: () => void = () => {}
-/** 받은 요청 (메서드 경로 본문) — 세션 생성·에이전트 전환·답 보내기를 본다 */
+/** 받은 POST (경로 본문 — 쿼리는 뺀다) */
 let calls: string[] = []
-/** 세션의 지금 에이전트 (GET /api/session/ses_1) — 없으면 build */
-let sessionAgent: string | undefined
+/** 받은 모든 요청의 URL (쿼리 포함) — 레거시 호출의 ?directory= 를 본다 */
+let urls: string[] = []
 const AGENTS = ['build', 'plan', 'litecode-ask', 'litecode-full'].map((id) => ({ id, mode: 'primary' }))
 
 afterEach(() => {
@@ -38,101 +40,121 @@ afterEach(() => {
   server?.close()
 })
 
-/** ending: 프롬프트 뒤 세션 SSE 를 어떻게 끝낼지 (cut: 끝 이벤트 없이 엔진이 끝남, reject: 프롬프트를 500 으로 거절) */
+afterAll(() => fs.rmSync(directory, { recursive: true, force: true }))
+
+/** ending: 프롬프트 뒤 /event 를 어떻게 끝낼지 (cut: 끝 이벤트 없이 엔진이 끝남, reject: 프롬프트를 500 으로 거절, noidle: 메시지 없이 session.error 만) */
 async function fakeOpencode(ending: Ending): Promise<string> {
   let events: http.ServerResponse | undefined
-  let global: http.ServerResponse | undefined
   let agentLists = 0
+  let busy = false
   calls = []
-  sessionAgent = undefined
+  urls = []
   const pending: { permission: unknown[]; question: unknown[] } = { permission: [], question: [] }
-  const frame = (seq: number, type: string, data: Record<string, unknown>) =>
-    events?.write(`data: ${JSON.stringify({ type: `session.next.${type}`, durable: { seq }, data: { sessionID: 'ses_1', ...data } })}\n\n`)
-  const announce = (type: string, data: Record<string, unknown>) => global?.write(`data: ${JSON.stringify({ type, data: { sessionID: 'ses_1', ...data } })}\n\n`)
+  const emit = (type: string, properties: Record<string, unknown>) => events?.write(`data: ${JSON.stringify({ type, properties: { sessionID: 'ses_1', ...properties } })}\n\n`)
+  const part = (p: Record<string, unknown>) => emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: A, ...p }, time: Date.now() })
+  const answer = (text: string) => {
+    part({ type: 'text', id: 'prt_t', text, time: { start: 1, end: 2 } })
+    part({ type: 'step-finish', id: 'prt_f', reason: 'stop', tokens: { input: 700, output: 50, reasoning: 0, cache: { read: 300, write: 0 } } })
+  }
+  const idle = () => {
+    busy = false
+    emit('session.status', { status: { type: 'idle' } })
+    emit('session.idle', {})
+  }
   server = http.createServer((req, res) => {
     const url = req.url ?? ''
+    urls.push(url)
+    const route = url.split('?')[0]!
     let raw = ''
-    req.on('data', (part) => (raw += part))
+    req.on('data', (chunk) => (raw += chunk))
     req.on('end', () => {
-      if (req.method === 'POST' && !url.endsWith('/prompt')) calls.push(`${url} ${raw}`.trim())
+      if (req.method === 'POST') calls.push(`${route} ${raw}`.trim())
     })
-    if (url.startsWith('/api/model')) return void res.end(JSON.stringify({ data: [{ id: 'm', providerID: 'p', api: { url: PROXY } }] }))
-    if (url.startsWith('/api/agent')) return void res.end(JSON.stringify({ data: agentLists++ === 0 ? [] : AGENTS }))
-    if (url === '/api/event') {
-      global = res
-      return void res.writeHead(200, { 'content-type': 'text/event-stream' })
+    if (route === '/api/model') return void res.end(JSON.stringify({ data: [{ id: 'm', providerID: 'p', api: { url: PROXY } }] }))
+    if (route === '/api/agent') return void res.end(JSON.stringify({ data: agentLists++ === 0 ? [] : AGENTS }))
+    if (route === '/event') {
+      events = res
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      return void res.write(`data: ${JSON.stringify({ type: 'server.connected', properties: {} })}\n\n`)
     }
-    if (req.method === 'POST' && url === '/api/session') {
-      return void req.on('end', () => {
-        sessionAgent = (JSON.parse(raw) as { agent?: string }).agent
-        res.end(JSON.stringify({ data: { id: 'ses_1' } }))
-      })
-    }
-    if (url === '/api/session/ses_1') return void res.end(JSON.stringify({ data: { model: { providerID: 'p', id: 'm' }, ...(sessionAgent && { agent: sessionAgent }) } }))
-    if (url === '/api/session/ses_1/agent') {
-      return void req.on('end', () => {
-        sessionAgent = (JSON.parse(raw) as { agent: string }).agent
-        res.writeHead(204).end()
-      })
-    }
-    if (url === '/api/session/ses_1/permission' || url === '/api/session/ses_1/question') {
-      return void res.end(JSON.stringify({ data: pending[url.endsWith('permission') ? 'permission' : 'question'] }))
-    }
-    // 답: once·답하기는 도구가 이어서 끝나고 턴이 끝난다. 거절은 tool.failed 하나로 끝 (01f 1-d, 01i 2-c)
-    const answered = /^\/api\/session\/ses_1\/(permission|question)\/(\w+)\/(reply|reject)$/.exec(url)
+    if (req.method === 'POST' && route === '/session') return void req.on('end', () => res.end(JSON.stringify({ id: 'ses_1', title: 'x' })))
+    if (route === '/session/status') return void res.end(JSON.stringify(busy ? { ses_1: { type: 'busy' } } : {}))
+    if (route === '/session/ses_1/message') return void res.end('[]')
+    if (route === '/permission' || route === '/question') return void res.end(JSON.stringify(pending[route === '/permission' ? 'permission' : 'question']))
+    // 답: once·답하기는 도구가 이어서 끝나고 턴이 끝난다. 거절은 도구 error 뒤 곧바로 idle (01w)
+    const answered = /^\/(permission|question)\/(\w+)\/(reply|reject)$/.exec(route)
     if (answered) {
       return void req.on('end', () => {
         const kind = answered[1] as 'permission' | 'question'
         pending[kind] = []
-        res.writeHead(204).end()
+        res.end('true')
         const rejected = answered[3] === 'reject' || (JSON.parse(raw || '{}') as { reply?: string }).reply === 'reject'
-        announce(`${kind}.v2.${rejected && kind === 'question' ? 'rejected' : 'replied'}`, { requestID: answered[2] })
-        if (rejected) return void frame(4, 'tool.failed', { callID: 'call_1', error: { message: 'Tool execution interrupted' } })
-        frame(4, 'tool.success', { callID: 'call_1' })
-        frame(5, 'step.ended', { finish: 'stop' })
+        emit(`${kind}.${rejected && kind === 'question' ? 'rejected' : 'replied'}`, { requestID: answered[2] })
+        if (rejected) {
+          part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'error', input: {}, error: 'The user rejected permission to use this specific tool call.' } })
+          return idle()
+        }
+        part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'completed', input: {}, output: 'ok' } })
+        answer('done')
+        idle()
       })
     }
-    // 승인·질문 대기 중 interrupt 는 tool.failed + step.ended(tool-calls) 로 끝난다 — 끝 판정으로는 "계속" 이다 (01f 1-d, 01i 2-d)
-    if (url === '/api/session/ses_1/interrupt') {
+    // 중지: 200 true → session.error(MessageAbortedError) → idle 두 번 (01w 8회)
+    if (route === '/session/ses_1/abort') {
       return void req.on('end', () => {
-        res.writeHead(204).end()
-        if (ending !== 'permission') return
-        frame(4, 'tool.failed', { callID: 'call_1', error: { message: 'Tool execution interrupted' } })
-        frame(5, 'step.ended', { finish: 'tool-calls' })
+        res.end('true')
+        emit('session.error', { error: { name: 'MessageAbortedError', data: { message: 'The operation was aborted.' } } })
+        idle()
+        idle()
       })
     }
-    if (url === '/api/session/ses_1/event') {
-      events = res
-      return void res.writeHead(200, { 'content-type': 'text/event-stream' })
-    }
-    if (url === '/api/session/ses_1/prompt') {
-      let raw = ''
-      req.on('data', (part) => (raw += part))
-      req.on('end', () => prompts.push(JSON.parse(raw)))
-      if (ending === 'reject') return void res.writeHead(500).end()
-      res.end(JSON.stringify({ data: { admittedSeq: 1 } }))
-      setTimeout(() => {
-        frame(1, 'prompt.admitted', {})
-        frame(2, 'prompted', {})
-        if (ending === 'done') frame(3, 'step.ended', { finish: 'stop' })
-        if (ending === 'failed') frame(3, 'step.failed', { error: { message: 'boom' } })
-        if (ending === 'silent') setTimeout(() => frame(3, 'step.ended', { finish: 'stop' }), SILENT_MS)
-        if (ending === 'permission' || ending === 'question') {
-          frame(3, 'tool.called', { callID: 'call_1', tool: ending === 'question' ? 'question' : 'bash' })
-          if (ending === 'permission') pending.permission = [{ id: 'per_1', sessionID: 'ses_1', action: 'bash', resources: ['ls'], source: { callID: 'call_1' } }]
-          else pending.question = [{ id: 'que_1', sessionID: 'ses_1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'SQLite' }] }], tool: { callID: 'call_1' } }]
-          announce(`${ending}.v2.asked`, { id: ending === 'permission' ? 'per_1' : 'que_1' })
-        }
-        if (ending === 'cut') {
-          closer.abort(new Error('engine exited')) // 엔진이 끝나면 closed 가 먼저 걸리고 소켓이 닫힌다
-          events?.destroy()
-        }
-        release = () => {
-          closer.abort(new Error('engine exited'))
-          events?.destroy()
-        }
-      }, 20)
-      return
+    if (route === '/session/ses_1/prompt_async') {
+      return void req.on('end', () => {
+        const body = JSON.parse(raw) as { messageID: string; noReply?: boolean }
+        prompts.push(body)
+        if (ending === 'reject') return void res.writeHead(500).end()
+        res.writeHead(204).end()
+        if (body.noReply) return
+        busy = ending !== 'noidle'
+        setTimeout(() => {
+          if (ending === 'noidle') return void emit('session.error', { error: { name: 'UnknownError', data: { message: 'Agent not found: "x"' } } })
+          // 앞 턴을 멈춘 뒤 늦게 온 것들 — 이 턴 user 메시지 전이라 끝·실패로 보면 안 된다
+          emit('session.error', { error: { name: 'MessageAbortedError', data: { message: 'The operation was aborted.' } } })
+          idle()
+          emit('message.updated', { info: { id: body.messageID, sessionID: 'ses_1', role: 'user', time: { created: Date.now() } } })
+          emit('session.status', { status: { type: 'busy' } })
+          emit('message.updated', { info: { id: A, sessionID: 'ses_1', role: 'assistant', parentID: body.messageID, time: { created: Date.now() } } })
+          // 같은 세션에 다른 클라이언트가 보낸 턴의 답 — 섞이면 안 된다
+          emit('message.updated', { info: { id: 'msg_other', sessionID: 'ses_1', role: 'assistant', parentID: 'msg_someone_else' } })
+          emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: 'msg_other', type: 'text', id: 'prt_o', text: 'NOT MINE', time: { start: 1, end: 2 } } })
+          if (ending === 'done') {
+            answer('echo: hi')
+            idle()
+          }
+          if (ending === 'failed') {
+            emit('message.updated', { info: { id: A, sessionID: 'ses_1', role: 'assistant', parentID: body.messageID, error: { name: 'APIError', data: { message: 'boom' } } } })
+            emit('session.error', { error: { name: 'APIError', data: { message: 'boom' } } })
+            idle()
+          }
+          if (ending === 'silent') setTimeout(() => (answer('late'), idle()), SILENT_MS)
+          if (ending === 'compactloop') for (let i = 0; i < 10; i++) emit('session.compacted', {}) // 한도가 작아 요약 → Continue → 다시 넘침 (idle 없음)
+          if (ending === 'permission' || ending === 'question') {
+            part({ type: 'tool', id: 'prt_b', tool: ending === 'question' ? 'question' : 'bash', callID: 'call_1', state: { status: 'running', input: {} } })
+            const tool = { messageID: A, callID: 'call_1' }
+            if (ending === 'permission') pending.permission = [{ id: 'per_old', sessionID: 'ses_1', permission: 'bash', patterns: ['old'], tool: { messageID: 'msg_stopped', callID: 'c0' } }, { id: 'per_1', sessionID: 'ses_1', permission: 'bash', patterns: ['ls'], metadata: {}, always: ['ls *'], tool }]
+            else pending.question = [{ id: 'que_1', sessionID: 'ses_1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'SQLite' }] }], tool }]
+            emit(`${ending}.asked`, { id: ending === 'permission' ? 'per_1' : 'que_1' })
+          }
+          if (ending === 'cut') {
+            closer.abort(new Error('engine exited')) // 엔진이 끝나면 closed 가 먼저 걸리고 소켓이 닫힌다
+            events?.destroy()
+          }
+          release = () => {
+            closer.abort(new Error('engine exited'))
+            events?.destroy()
+          }
+        }, 20)
+      })
     }
     res.writeHead(404).end()
   })
@@ -174,16 +196,27 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
 }
 
 describe("ctx.llm 턴 수명 이벤트", () => {
-  it('끝까지 간 턴: started 한 번 → ended done 한 번', async () => {
+  it('끝까지 간 턴: started 한 번 → ended done 한 번. 답은 이 턴 답 메시지(parentID)의 글만 — 다른 클라이언트 답·앞 턴의 늦은 idle·중지 오류는 섞이지 않는다', async () => {
     const { llm, seen } = await start(await fakeOpencode('done'))
-    expect((await llm.chat('p', 'm', directory, 'hi')).ok).toBe(true)
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true, text: 'echo: hi', usage: { steps: 1, tokens: { input: 700 } } })
     expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} done`])
   })
 
-  it('실패한 턴(step.failed): ended failed 와 사유', async () => {
+  it('실패한 턴(assistant error·session.error 뒤 idle): ended failed 와 사유', async () => {
     const { llm, seen } = await start(await fakeOpencode('failed'))
     expect((await llm.chat('p', 'm', directory, 'hi')).interrupted).toBeUndefined()
     expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} failed (boom)`])
+  })
+
+  it('session.error 만 오고 idle 이 없으면(없는 에이전트 — 01w) 상태를 물어 실패로 끝낸다', async () => {
+    const { llm } = await start(await fakeOpencode('noidle'))
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, error: 'Agent not found: "x"' })
+  })
+
+  it('한 턴에 자동 요약이 끝없이 돌면(한도가 작은 모델 — 01w) 몇 번 뒤 멈추고(abort) 한도 초과 안내로 끝낸다', async () => {
+    const { llm } = await start(await fakeOpencode('compactloop'))
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, error: tr('error.contextOverflow') })
+    await expect.poll(() => calls).toContain('/session/ses_1/abort')
   })
 
   it('엔진이 끝나 끊긴 턴: ended interrupted', async () => {
@@ -211,26 +244,68 @@ describe("ctx.llm 턴 수명 이벤트", () => {
   })
 })
 
+describe('레거시 경로 계약 (이슈 #13)', () => {
+  it('세션은 POST /session 에 모델·제목(제목 LLM 호출을 막는다)을 싣고, 프롬프트는 prompt_async 에 messageID·모델·모드 에이전트를 매번 싣는다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    await llm.chat('p', 'm', directory, '첫 줄\n둘째 줄', undefined, undefined, undefined, undefined, 'plan')
+    expect(JSON.parse(calls.find((call) => call.startsWith('/session '))!.slice('/session '.length))).toEqual({ model: { providerID: 'p', id: 'm' }, title: '첫 줄' })
+    expect(prompts[0]).toMatchObject({ model: { providerID: 'p', modelID: 'm' }, agent: 'plan', parts: [{ type: 'text', text: '첫 줄\n둘째 줄' }] })
+    expect(prompts[0]!['messageID']).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/)
+
+    await llm.chat('p', 'm', directory, 'again', 'ses_1') // 이어가는 턴 — 모드를 안 주면 기본(build) 에이전트를 싣는다
+    expect(prompts[1]).toMatchObject({ agent: 'build', model: { providerID: 'p', modelID: 'm' } })
+    expect(prompts[1]!['messageID']).not.toBe(prompts[0]!['messageID'])
+  })
+
+  it('모든 레거시 호출에 ?directory=<작업 폴더> 를 붙인다 (빠지면 다른 인스턴스로 간다 — 01w)', async () => {
+    const { llm } = await start(await fakeOpencode('permission'))
+    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => void (requests[0] && llm.reply('ses_1', requests[0].id, 'once')))
+    const legacy = urls.filter((url) => !url.startsWith('/api/'))
+    expect(legacy.length).toBeGreaterThan(4)
+    for (const url of legacy) expect(url, url).toContain(`directory=${encodeURIComponent(directory)}`)
+  })
+
+  it('프로젝트 AGENTS.md 를 매 턴 system 으로 싣는다 (opencode 와 같은 "Instructions from:" 모양). 없으면 system 을 안 싣는다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    await llm.chat('p', 'm', directory, 'no instructions')
+    expect(prompts[0]).not.toHaveProperty('system')
+    fs.writeFileSync(path.join(directory, 'AGENTS.md'), '# 규칙\n한국어로 답한다\n')
+    try {
+      await llm.chat('p', 'm', directory, 'with instructions', 'ses_1')
+      await llm.chat('p', 'm', directory, 'every turn', 'ses_1')
+      for (const prompt of prompts.slice(1)) expect(prompt['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\n# 규칙\n한국어로 답한다\n`)
+    } finally {
+      fs.rmSync(path.join(directory, 'AGENTS.md'))
+    }
+  })
+
+  it('새 메시지 id 는 opencode 형식으로 시간 순 정렬된다 — 같은 ms 안에서도 순번으로', () => {
+    const ids = [ascendingId('msg', 1_790_919_809_202), ascendingId('msg', 1_790_919_809_202), ascendingId('msg', 1_790_919_809_203)]
+    expect(ids[0]!.slice(0, 16)).toBe('msg_0fb2398b2001') // opencode 가 만든 msg_0fb2398b20010dJ8a8bQ1z0neE 와 같은 머리 (01w 기록)
+    expect([...ids].sort()).toEqual(ids)
+  })
+})
+
 describe('ctx.llm.addContext (`!` 카드의 "AI 에게 보내기")', () => {
-  it('턴이 쉬면 resume:false 로 넣는다 — 정한 메시지 id 그대로, 턴 이벤트는 없다', async () => {
+  it('턴이 쉬면 noReply 로 넣는다 — 정한 메시지 id 그대로, 턴 이벤트는 없다', async () => {
     const { llm, seen } = await start(await fakeOpencode('done'))
-    expect(await llm.addContext('p', 'm', directory, '$ ls', 'msg_litecode_x')).toEqual({ ok: true, sessionId: 'ses_1' })
-    expect(prompts).toEqual([{ id: 'msg_litecode_x', prompt: { text: '$ ls' }, resume: false }])
+    expect(await llm.addContext('p', 'm', directory, '$ ls', 'msg_0fb2398b2001aaaaaaaaaaaaaa')).toEqual({ ok: true, sessionId: 'ses_1' })
+    expect(prompts).toEqual([{ messageID: 'msg_0fb2398b2001aaaaaaaaaaaaaa', noReply: true, model: { providerID: 'p', modelID: 'm' }, parts: [{ type: 'text', text: '$ ls' }] }])
     expect(seen).toEqual([])
   })
 
-  it('그 세션의 턴이 도는 중이면 거절한다 (끼어들거나 새 턴이 돈다 — 01h)', async () => {
+  it('그 세션의 턴이 도는 중이면 거절한다 (돌고 있는 턴이 그 입력에 이어 답한다 — 01w)', async () => {
     const { llm } = await start(await fakeOpencode('hold'))
     const turn = llm.chat('p', 'm', directory, 'hi')
     await expect.poll(() => prompts.length).toBe(1)
-    expect(await llm.addContext('p', 'm', directory, '$ ls', 'msg_litecode_y', 'ses_1')).toMatchObject({ ok: false })
+    expect(await llm.addContext('p', 'm', directory, '$ ls', 'msg_y', 'ses_1')).toMatchObject({ ok: false })
     expect(prompts).toHaveLength(1)
     release()
     await turn
   })
 })
 
-describe('ctx.llm 승인·질문 (라운드 A)', () => {
+describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
   /** 카드가 받는 목록을 적고, 처음 보이는 요청에 answer 로 답한다 */
   function answering(llm: LlmService, answer: Parameters<LlmService['reply']>[2]) {
     const shown: Attention[][] = []
@@ -241,14 +316,14 @@ describe('ctx.llm 승인·질문 (라운드 A)', () => {
     return { shown, onAttention }
   }
 
-  it('권한 요청 → 카드 목록·attention 이벤트, 한 번 허용하면 목록이 비고 resolved, 턴은 끝까지 간다', async () => {
+  it('권한 요청 → 이 턴 것만 카드 목록(멈춘 턴의 남은 요청은 빼고)·attention 이벤트, 한 번 허용하면 목록이 비고 resolved, 턴은 끝까지 간다', async () => {
     const { llm, seen } = await start(await fakeOpencode('permission'))
     const { shown, onAttention } = answering(llm, 'once')
     const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)
-    expect(result).toMatchObject({ ok: true })
+    expect(result).toMatchObject({ ok: true, text: 'done' })
     expect(result.declined).toBeUndefined()
     expect(shown).toEqual([[{ kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'bash', resources: ['ls'] }], []])
-    expect(calls).toContain('/api/session/ses_1/permission/per_1/reply {"reply":"once"}')
+    expect(calls).toContain('/permission/per_1/reply {"reply":"once"}')
     expect(seen).toEqual([
       `started ses_1@${directory}`,
       `attention ses_1@${directory} permission: bash ls`,
@@ -257,7 +332,7 @@ describe('ctx.llm 승인·질문 (라운드 A)', () => {
     ])
   })
 
-  it('권한 거절 → tool.failed 하나로 끝나는 턴을 실패가 아닌 "거절함" 으로 끝낸다 (step.* 없음)', async () => {
+  it('권한 거절 → 도구 error 뒤 idle 로 끝나는 턴을 실패가 아닌 "거절함" 으로 끝낸다', async () => {
     const { llm, seen } = await start(await fakeOpencode('permission'))
     const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', answering(llm, 'reject').onAttention)
     expect(result).toMatchObject({ ok: true, declined: true })
@@ -269,7 +344,7 @@ describe('ctx.llm 승인·질문 (라운드 A)', () => {
     const { shown, onAttention } = answering(answered.llm, [['SQLite']])
     expect(await answered.llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)).toMatchObject({ ok: true })
     expect(shown[0]).toEqual([{ kind: 'question', id: 'que_1', sessionId: 'ses_1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'SQLite' }] }] }])
-    expect(calls).toContain('/api/session/ses_1/question/que_1/reply {"answers":[["SQLite"]]}')
+    expect(calls).toContain('/question/que_1/reply {"answers":[["SQLite"]]}')
     expect(answered.seen).toContain(`attention ses_1@${directory} question: Which DB?`)
 
     server?.closeAllConnections()
@@ -277,7 +352,7 @@ describe('ctx.llm 승인·질문 (라운드 A)', () => {
     const rejected = await start(await fakeOpencode('question'))
     const result = await rejected.llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', answering(rejected.llm, 'reject').onAttention)
     expect(result).toMatchObject({ ok: true, declined: true })
-    expect(calls).toContain('/api/session/ses_1/question/que_1/reject')
+    expect(calls).toContain('/question/que_1/reject {}')
   })
 
   it('빈 답·모르는 요청·권한에 질문 답은 보내지 않고 던진다 (opencode 는 빈 답도 받는다 — 01i 2-b)', async () => {
@@ -294,41 +369,31 @@ describe('ctx.llm 승인·질문 (라운드 A)', () => {
     })
     expect(await turn).toMatchObject({ ok: true, declined: true })
     expect(errors).toHaveLength(5)
-    expect(calls.filter((call) => call.includes('/question/'))).toEqual(['/api/session/ses_1/question/que_1/reject'])
+    expect(calls.filter((call) => call.includes('/question/'))).toEqual(['/question/que_1/reject {}'])
   })
 })
 
-describe('ctx.llm 모드 = opencode 에이전트 (라운드 A)', () => {
-  it('새 세션은 그 모드의 에이전트로 만든다 — 에이전트 목록이 비어 있으면(지연 로드) 나올 때까지 기다린다', async () => {
+describe('ctx.llm 모드 = opencode 에이전트', () => {
+  it('보내기 전에 그 모드의 에이전트가 목록에 있는지 본다 — 목록이 비어 있으면(지연 로드) 나올 때까지 기다린다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
-    expect((await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'plan')).ok).toBe(true)
-    expect(calls.find((call) => call.startsWith('/api/session '))).toContain('"agent":"plan"')
-  })
-
-  it('이어가는 세션은 모드가 다를 때만 에이전트를 바꾼다 (POST /api/session/{id}/agent)', async () => {
-    const { llm } = await start(await fakeOpencode('done'))
-    await llm.chat('p', 'm', directory, 'hi')
-    expect(sessionAgent).toBe('build')
-    await llm.chat('p', 'm', directory, 'hi', 'ses_1', undefined, undefined, undefined, 'build').catch(() => {})
-    expect(calls.filter((call) => call.startsWith('/api/session/ses_1/agent'))).toEqual([])
-    await llm.chat('p', 'm', directory, 'hi', 'ses_1', undefined, undefined, undefined, 'ask').catch(() => {})
-    expect(calls.filter((call) => call.startsWith('/api/session/ses_1/agent'))).toEqual(['/api/session/ses_1/agent {"agent":"litecode-ask"}'])
+    expect((await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask')).ok).toBe(true)
+    expect(prompts[0]).toMatchObject({ agent: 'litecode-ask' })
   })
 })
 
 describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
-  it('도는 턴을 멈추면 opencode 턴도 멈추고(POST /interrupt) "중단됨" 으로 끝난다 — turn-ended interrupted', async () => {
+  it('도는 턴을 멈추면 opencode 턴도 멈추고(POST /session/{id}/abort) "중단됨" 으로 끝난다 — turn-ended interrupted', async () => {
     const { llm, seen } = await start(await fakeOpencode('hold'))
     const stop = new AbortController()
     const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, undefined, undefined, stop.signal)
     await expect.poll(() => seen.length).toBe(1) // started — 프롬프트가 받아들여졌다
     stop.abort()
     expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped'), sessionId: 'ses_1' })
-    expect(calls).toContain('/api/session/ses_1/interrupt {}')
+    expect(calls).toContain('/session/ses_1/abort')
     expect(seen.at(-1)).toBe(`ended ses_1@${directory} interrupted (${tr('error.stopped')})`)
   })
 
-  it('보내기 전에 멈추면 프롬프트를 보내지 않는다 — interrupt·턴 이벤트도 없다', async () => {
+  it('보내기 전에 멈추면 프롬프트를 보내지 않는다 — abort·턴 이벤트도 없다', async () => {
     const { llm, seen } = await start(await fakeOpencode('done'))
     const stop = new AbortController()
     stop.abort()
@@ -338,11 +403,11 @@ describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
       error: tr('error.stopped'),
     })
     expect(prompts).toEqual([])
-    expect(calls.filter((call) => call.includes('/interrupt'))).toEqual([])
+    expect(calls.filter((call) => call.includes('/abort'))).toEqual([])
     expect(seen).toEqual([])
   })
 
-  it('승인 대기 중 멈추면 — interrupt 뒤 오는 step.ended(tool-calls) 를 기다리지 않고 "중단됨" 으로 끝난다', async () => {
+  it('승인 대기 중 멈추면 idle 을 기다리지 않고 "중단됨" 으로 끝난다 — 끝난 턴의 카드는 더 답할 수 없다', async () => {
     const { llm } = await start(await fakeOpencode('permission'))
     const stop = new AbortController()
     const shown: Attention[][] = []
@@ -352,34 +417,31 @@ describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
     }, stop.signal)
     expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped') })
     expect(shown[0]?.[0]).toMatchObject({ kind: 'permission' })
-    expect(calls).toContain('/api/session/ses_1/interrupt {}')
-    await expect(llm.reply('ses_1', 'per_1', 'once')).rejects.toThrow() // 끝난 턴의 카드는 더 답할 수 없다
+    expect(calls).toContain('/session/ses_1/abort')
+    await expect(llm.reply('ses_1', 'per_1', 'once')).rejects.toThrow()
   })
 })
 
-describe('ctx.llm 세션 SSE 무바이트 구간 (01q)', () => {
-  // undici 기본 bodyTimeout·headersTimeout 은 300초 — 그 이상 조용하면(긴 생각·도구·승인 대기) 앱 쪽에서 끊긴다.
-  // 300초를 기다릴 수 없어 타임아웃을 주입해 같은 길을 짧게 돈다
-
-  it('조용한 구간이 타임아웃보다 길면 끊긴다 — 주입한 타임아웃이 세션 SSE fetch 에 닿는다', async () => {
+describe('ctx.llm /event 무바이트 구간 (01q)', () => {
+  it('조용한 구간이 타임아웃보다 길면 끊긴다 — 주입한 타임아웃이 /event fetch 에 닿는다', async () => {
     const { llm } = await start(await fakeOpencode('silent'), { streamTimeoutMs: 300 })
     expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, interrupted: true })
   })
 
   it('기본(타임아웃 없음)이면 조용한 구간을 지나 끝까지 받는다', async () => {
     const { llm } = await start(await fakeOpencode('silent'))
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true })
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true, text: 'late' })
   })
 
-  it('엔진이 살아 있는데 끝 이벤트 없이 끊기면 opencode 턴도 멈춘다 (POST /interrupt) — 안 그러면 다음 턴이 이 턴의 답을 받는다', async () => {
+  it('엔진이 살아 있는데 끝 이벤트 없이 끊기면 opencode 턴도 멈춘다 (abort) — 재생이 없어 끝을 다시 받을 길이 없다', async () => {
     const { llm } = await start(await fakeOpencode('silent'), { streamTimeoutMs: 300 })
     await llm.chat('p', 'm', directory, 'hi')
-    expect(calls).toContain('/api/session/ses_1/interrupt {}')
+    expect(calls).toContain('/session/ses_1/abort')
   })
 
-  it('엔진이 끝나 끊긴 턴은 interrupt 를 보내지 않는다 (보낼 곳이 없다)', async () => {
+  it('엔진이 끝나 끊긴 턴은 abort 를 보내지 않는다 (보낼 곳이 없다)', async () => {
     const { llm } = await start(await fakeOpencode('cut'))
     await llm.chat('p', 'm', directory, 'hi')
-    expect(calls.filter((call) => call.includes('/interrupt'))).toEqual([])
+    expect(calls.filter((call) => call.includes('/abort'))).toEqual([])
   })
 })

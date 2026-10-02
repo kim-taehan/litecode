@@ -90,6 +90,9 @@ mounted.push(ctx.plugin(EngineService, {
   pidFile: path.join(userData, 'opencode-server.json'),
   // 설치본에는 opencode·rg 가 실려 있다 (electron-builder.yml extraResources). 개발 실행의 resourcesPath 는 electron 배포물 자리라 넘기지 않는다
   bundled: app.isPackaged ? bundledPaths(process.resourcesPath) : undefined,
+  // 프로젝트 opencode 설정(opencode.json·.opencode/ 의 MCP·플러그인·에이전트 덮어쓰기·npm 설치)을 막는다 — 사용자 결정 (00_next_legacy 2).
+  // 그 대가로 꺼지는 프로젝트 AGENTS.md/CLAUDE.md 는 ctx.llm 이 매 턴 system 으로 넣는다 (instructions.ts, 이슈 #13 L1)
+  blockProjectConfig: true,
 }))
 mounted.push(ctx.plugin(LlmService))
 mounted.push(ctx.plugin(ProjectsService, { file: path.join(userData, 'projects.json') }))

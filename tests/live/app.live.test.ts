@@ -1052,12 +1052,13 @@ describe('엔진 — 앱이 띄운 opencode', () => {
     expect(unknown['메시지']).toMatch(/^~\d+$/)
     expect(unknown['시스템·도구']).toMatch(/^~/)
 
-    // 설정 > 모델에 컨텍스트 길이를 적으면 마지막 스텝 크기 / 한도
-    await editGateway(() => field('컨텍스트 길이 1').fill(String(4 * perStep)))
+    // 설정 > 모델에 컨텍스트 길이를 적으면 마지막 스텝 크기 / 한도. 한도는 넉넉히 — 레거시는 한도 − 20000 을 넘으면 매 스텝 자동 요약하고, 한도가 그보다
+    // 작으면 요약이 끝없이 돈다 (01w, 이슈 #13 L2). 이 대화 뒤로 같은 provider 를 쓰는 테스트가 이어진다
+    await editGateway(() => field('컨텍스트 길이 1').fill(String(50 * perStep)))
     await page.keyboard.press('Escape')
-    await expect.poll(() => pills.nth(2).textContent(), { timeout: 5_000 }).toBe('25%')
+    await expect.poll(() => pills.nth(2).textContent(), { timeout: 5_000 }).toBe('2%')
     await pills.nth(2).hover()
-    expect(await page.getByRole('dialog', { name: '컨텍스트 사용' }).locator('.stats-dialog__title').textContent()).toContain(`~${(perStep / 1000).toFixed(1)}K / ${(4 * perStep / 1000).toFixed(1)}K`)
+    expect(await page.getByRole('dialog', { name: '컨텍스트 사용' }).locator('.stats-dialog__title').textContent()).toContain(`~${(perStep / 1000).toFixed(1)}K / ${(50 * perStep / 1000).toFixed(1)}K`)
     await page.locator('.main__header').hover()
 
     // 다른 대화는 따로 센다
