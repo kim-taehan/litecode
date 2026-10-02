@@ -37,15 +37,164 @@
   background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px);
 }
 
-/* 머리 — 대화 머리(.main__header 52px·같은 밑줄)와 선이 이어지게 같은 높이 */
+/* 탭 줄 — 대화 머리(.main__header 52px·같은 밑줄)와 선이 이어지게 같은 높이. 창 끌기 영역(styles.css)이고, 탭·버튼은 no-drag 규칙으로 빠진다
+   (dsh ui-dockkit strip: 28px 칩, 고른 칩은 채운 바탕, 끝에 패널 단추) */
 .file-preview__head {
   height: 52px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px 0 16px;
+  gap: 4px;
+  padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+
+.file-preview__tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.file-preview__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* 칩 — 28px, 80~170 폭, 이름은 끝이 흐려진다. × 는 흐름 밖(이름 끝 위)에 있어 보이든 말든 폭이 같다 */
+.file-preview__tab {
+  position: relative;
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 80px;
+  max-width: 170px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+.file-preview__tab--files {
+  min-width: 0;
+  flex: none;
+}
+
+.file-preview__tab:hover {
+  background: var(--fill-hover);
+}
+
+.file-preview__tab:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.file-preview__tab[aria-selected='true'] {
+  color: var(--text);
+  background: var(--fill-active);
+}
+
+.file-preview__tab-icon {
+  flex: none;
+}
+
+.file-preview__tab-icon--folder {
+  color: var(--warn);
+}
+
+.file-preview__tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.4;
+  mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
+}
+
+.file-preview__tab--files .file-preview__tab-title {
+  mask-image: none;
+}
+
+.file-preview__tab:hover .file-preview__tab-title,
+.file-preview__tab:focus-within .file-preview__tab-title,
+.file-preview__tab[aria-selected='true']:not(.file-preview__tab--files) .file-preview__tab-title {
+  mask-image: linear-gradient(to right, black calc(100% - 30px), transparent calc(100% - 14px));
+}
+
+.file-preview__tab-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.file-preview__tab:hover .file-preview__tab-close,
+.file-preview__tab:focus-within .file-preview__tab-close,
+.file-preview__tab[aria-selected='true'] .file-preview__tab-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.file-preview__tab-close:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.file-preview__add {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.file-preview__add:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+/* 탭 줄 끝 — 전체 화면·닫기. 빈 곳(탭과 이 사이)은 끌기 영역 */
+.file-preview__chrome {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 경로 줄 — 탭 줄 아래 38px (dsh files·documentpreview 머리) */
+.file-preview__bar {
+  height: 38px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 16px;
+  border-bottom: 0.5px solid var(--border-ring);
   font-size: 13px;
 }
 
@@ -54,13 +203,36 @@
   color: var(--text-secondary);
 }
 
+/* 경로 — 넘치면 앞이 잘린다(flex-end), 잘렸을 때만 왼쪽 16px 이 흐려진다 */
 .file-preview__path {
   flex: 1 1 auto;
   min-width: 0;
   margin-right: 12px;
+  display: flex;
+  justify-content: flex-end;
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
+}
+
+.file-preview__path-inner {
+  flex: none;
+  margin-right: auto;
+}
+
+.file-preview__path[data-clipped] {
+  mask-image: linear-gradient(to right, transparent, black 16px);
+}
+
+.file-preview__path[data-clipped] .file-preview__path-inner {
+  margin-right: 0;
+}
+
+.file-preview__path-dir {
+  color: var(--text-tertiary);
+}
+
+.file-preview__path-name {
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -69,6 +241,13 @@
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.file-preview__kind {
+  flex: none;
+  margin-right: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 /* 28px 칸에 15px 그림 (dsh .tool) */
@@ -187,4 +366,146 @@
   padding: 16px 20px 32px;
   font-size: var(--chat-font-size);
   line-height: 1.7;
+}
+
+/* HTML 렌더 — 본문을 가장자리까지 채운다(dsh HtmlBody) */
+.file-preview__body--frame {
+  overflow: hidden;
+}
+
+.file-preview__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #ffffff;
+}
+
+.file-view,
+.file-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-tree[hidden] {
+  display: none;
+}
+
+/* 파일 나무 — dsh FilesBody: 줄 5px 10px, 단계마다 18px 들여쓰기, 폴더 먼저 */
+.file-tree__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-right: 2px;
+  padding: 8px 0 8px 8px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.file-tree__level {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-tree__level .file-tree__level {
+  padding-left: 18px;
+}
+
+.file-tree__item {
+  margin: 0;
+  padding: 0;
+}
+
+.file-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-tree__row:hover {
+  background: var(--fill-hover);
+}
+
+.file-tree__row--other {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.file-tree__row--other:hover {
+  background: transparent;
+}
+
+.file-tree__icon {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.file-tree__name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.file-tree__note {
+  margin: 0;
+  padding: 3px 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+/* 전체 화면 — 패널이 창을 채운다(dsh fullscreen 표현). 대화 칸은 아래에 그대로 */
+.file-preview--full {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  border-left: none;
+}
+
+/* macOS 제목 표시줄 없는 창 — 창 버튼 자리(사이드바 로고 줄과 같은 88px)를 비운다. 전체 화면(OS)엔 창 버튼이 없다 */
+html[data-platform='darwin']:not([data-fullscreen]) .file-preview--full .file-preview__head {
+  padding-left: 88px;
+}
+
+/* 대화 머리 오른쪽 끝 — 패널을 다시 연다 */
+.right-panel-open {
+  flex: none;
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  transform: scaleX(-1);
+}
+
+.right-panel-open:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.main__header .open-in + .right-panel-open {
+  margin-left: 8px;
 }

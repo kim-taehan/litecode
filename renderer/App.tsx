@@ -22,7 +22,7 @@ import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { OpenInButton } from './OpenInButton.tsx'
-import { FilePreviewPanel } from './FilePreview.tsx'
+import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { useSendQueue } from './useSendQueue.ts'
 import { QueueDock } from './QueueDock.tsx'
 import { RunningCount, RunningFilter } from './Background.tsx'
@@ -973,6 +973,7 @@ export function App() {
             <div className="main__header">
               {titleOf(active)}
               {features.has('openIn') && <OpenInButton directory={active.project} />}
+              <RightPanelButton directory={active.project} />
             </div>
             {/* 설정 > 일반의 코딩 뷰나 설정 > 기능의 추론 과정을 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
             {trajectoryOn && (

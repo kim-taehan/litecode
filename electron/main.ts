@@ -17,7 +17,8 @@ import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
 import { TrajectoryService } from '../src/services/trajectory.ts'
 import { existingFiles, projectFile } from '../src/services/fileMentions.ts'
-import { previewFile, type FilePreview } from '../src/services/filePreview.ts'
+import { previewFile, readHtmlAssets, type FilePreview, type HtmlAsset } from '../src/services/filePreview.ts'
+import { listDirectory, type DirectoryListing } from '../src/services/fileTree.ts'
 import { SettingsService, type Settings } from '../src/services/settings.ts'
 import { NotificationsService } from '../src/services/notifications.ts'
 import { recordingHost, systemHost, type NotifyTestRecord, type WindowAccess } from './notificationHost.ts'
@@ -209,6 +210,15 @@ function bootstrap(ctx: Context): void {
   handle(ctx, Channel.PREVIEW_FILE, async (_event, directory: string, token: string): Promise<FilePreview> => {
     const registered = (await ctx.projects.list()).some((project) => project.path === directory)
     return registered ? previewFile(directory, token) : { status: 'unavailable' }
+  })
+  // 오른쪽 패널(이슈 #29) — HTML 미리보기 리소스와 Files 탭 목록도 등록된 프로젝트 안만
+  handle(ctx, Channel.PREVIEW_ASSETS, async (_event, directory: string, token: string, references: string[]): Promise<HtmlAsset[]> => {
+    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    return registered ? readHtmlAssets(directory, token, references) : []
+  })
+  handle(ctx, Channel.LIST_DIRECTORY, async (_event, directory: string, relative: string): Promise<DirectoryListing> => {
+    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    return registered ? listDirectory(directory, relative) : { status: 'unavailable' }
   })
   handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
   handle(ctx, Channel.SET_SETTINGS, async (_event, patch: Partial<Settings>) => ctx.settings.set(patch))
@@ -456,6 +466,11 @@ function createWindow(): BrowserWindow {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event, url) => {
     if (new URL(url).origin !== new URL(win.webContents.getURL()).origin) event.preventDefault()
+  })
+  // 화면 안 iframe(오른쪽 패널의 HTML 미리보기, 이슈 #29)은 처음 실린 srcdoc 밖으로 못 나간다 — 링크·location 변경·meta refresh 로
+  // 외부 주소를 여는 것도 네트워크 요청이라 CSP(connect-src 등)로는 못 막는다. 같은 문서 안 #조각 이동만 둔다
+  win.webContents.on('will-frame-navigate', (event) => {
+    if (!event.isMainFrame && !/^about:(srcdoc|blank)(#|$)/.test(event.url)) event.preventDefault()
   })
 
   win.webContents.on('preload-error', (_event, preloadPath, error) => {

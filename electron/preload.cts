@@ -37,6 +37,8 @@ const Channel = {
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   PREVIEW_FILE: 'chat:preview-file',
+  PREVIEW_ASSETS: 'chat:preview-assets',
+  LIST_DIRECTORY: 'chat:list-directory',
   RUN_SHELL: 'shell:run',
   STOP_SHELL: 'shell:stop',
   SHELL_DATA: 'shell:data',
@@ -118,6 +120,8 @@ const bridge: LitecodeBridge = {
   resolveFiles: (directory, tokens) => ipcRenderer.invoke(Channel.RESOLVE_FILES, directory, tokens),
   revealFile: (directory, token) => ipcRenderer.invoke(Channel.REVEAL_FILE, directory, token),
   previewFile: (directory, token) => ipcRenderer.invoke(Channel.PREVIEW_FILE, directory, token),
+  previewAssets: (directory, token, references) => ipcRenderer.invoke(Channel.PREVIEW_ASSETS, directory, token, references),
+  listDirectory: (directory, relative) => ipcRenderer.invoke(Channel.LIST_DIRECTORY, directory, relative),
   runShell: (conversationId, runId, directory, command, position) =>
     ipcRenderer.invoke(Channel.RUN_SHELL, conversationId, runId, directory, command, position),
   stopShell: (runId) => ipcRenderer.invoke(Channel.STOP_SHELL, runId),
