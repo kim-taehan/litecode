@@ -470,21 +470,26 @@ describe('앱 ↔ 실물 opencode', () => {
     await page.keyboard.press('Escape')
   })
 
-  it('대화 목록도 잘린 제목은 흘러가며 보이고 옆 카드에 전체 제목이 뜬다', async () => {
-    // 제목은 첫 메시지 앞 24자 — 공백 없는 한글 24자는 목록 폭(약 231px)을 넘는다
-    const title = '가나다라마바사아자차카타파하가나다라마바사아자차카타파하'
+  it('대화 목록도 잘린 제목은 흘러가며 끝까지 보이고 옆 카드에 전체 제목이 뜬다', async () => {
+    // 제목은 첫 메시지 첫 줄(80자까지) — 사용자: 조금 더 긴 제목은 앞 24자만 남아 끝까지 안 보였다 (#16)
+    const title = '가나다라마바사아자차카타파하가나다라마바사아자차카타파하 끝까지 보여야 하는 긴 대화 제목 마지막'
     await page.getByRole('button', { name: '+ 새 대화' }).click()
-    await send(title)
+    await send(`${title}\n둘째 줄은 제목에 안 들어간다`)
     const item = page.locator('.session-item', { hasText: title.slice(0, 10) })
-    const shown = title.slice(0, 24) // 대화 제목은 첫 메시지 앞 24자
+    const marquee = item.locator('.marquee')
+    expect(await marquee.textContent()).toBe(title)
 
     await item.hover()
-    await expect.poll(() => item.locator('.marquee').evaluate((el) => el.scrollLeft), { timeout: 5_000 }).toBeGreaterThan(0)
-    await expect.poll(() => page.locator('.hover-card').textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain(shown)
+    // 끝까지 흘러간다 — scrollLeft 가 잘린 만큼(scrollWidth − clientWidth)에 닿는다
+    await expect
+      .poll(() => marquee.evaluate((el) => el.scrollWidth - el.clientWidth - el.scrollLeft), { timeout: 15_000 })
+      .toBeLessThanOrEqual(1)
+    await expect.poll(() => page.locator('.hover-card').textContent({ timeout: 1_000 }), { timeout: 5_000 }).toContain(title)
     expect(await page.locator('.hover-card').textContent()).toContain('메시지 2개')
 
     await page.locator('.main__header').hover()
     await expect.poll(() => page.locator('.hover-card').count(), { timeout: 2_000 }).toBe(0)
+    expect(await marquee.evaluate((el) => el.scrollLeft)).toBe(0)
   })
 
   it('✎ 로 보이는 이름만 바꾼다 — Enter 저장·Esc 취소·재시작 후에도 남고, 폴더 이름은 그대로', async () => {
