@@ -375,10 +375,27 @@ const features: FeatureDefinition[] = [
 // 종료 때 바탕보다 먼저 내려간다(거꾸로 내리므로) — 터미널·셸·알림이 엔진보다 먼저 정리된다
 mounted.push(ctx.plugin(FeaturesService, features))
 
+/** Windows·Linux 창 버튼 덮개(titleBarOverlay) — 대화 머리(52px)와 같은 높이, 테마 바탕(--bg)·보조 글자(--text-secondary) 색 */
+function titleBarOverlay(): Electron.TitleBarOverlayOptions {
+  const dark = nativeTheme.shouldUseDarkColors
+  return { height: 52, color: dark ? '#151517' : '#ffffff', symbolColor: dark ? '#cfd3d6' : '#61666b' }
+}
+
+/** 화면에 전체 화면 여부를 알린다 — macOS 는 전체 화면에서 창 버튼이 사라지므로 화면이 그 자리 여백을 거둔다 (preload 가 html[data-fullscreen]) */
+function sendFullScreen(win: BrowserWindow): void {
+  if (!win.isDestroyed()) win.webContents.send(Channel.WINDOW_FULLSCREEN, win.isFullScreen())
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    // 제목 표시줄 없이 화면이 창 맨 위까지 (이슈 #25). macOS 는 창 버튼을 사이드바 맨 위 줄(52px) 안 왼쪽에 — dsh 데스크톱과 같은
+    // {16, 18}(버튼 세로 가운데 = 25, 사이드바 맨 위 줄·사이드바 숨김 때 본문 왼쪽 위 버튼과 같은 줄). Windows·Linux 는 창 버튼을
+    // 오른쪽 위 덮개로 그린다(실행 미검증). 창 끌기는 화면 CSS(-webkit-app-region)가 정한다
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 18 } }
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: titleBarOverlay() }),
     // 첫 그림 전 깜빡임 막기 — 테마 바탕(--bg)과 같은 색. themeSource 는 창보다 먼저 넣었다
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#151517' : '#ffffff',
     show: !hiddenForTests,
@@ -414,8 +431,18 @@ function createWindow(): BrowserWindow {
     // __dirname 은 dist-electron/electron — vite 는 <root>/dist/renderer 에 쓴다 (설치본에선 app.asar 안의 같은 자리)
     void win.loadFile(path.join(__dirname, '../../dist/renderer/index.html'))
   }
+  win.on('enter-full-screen', () => sendFullScreen(win))
+  win.on('leave-full-screen', () => sendFullScreen(win))
+  win.webContents.on('did-finish-load', () => sendFullScreen(win)) // 새로고침하면 화면 표시가 지워지므로 다시
+  // 덮개 색은 테마를 따라간다 (Windows·Linux)
+  const recolor = () => {
+    if (!win.isDestroyed()) win.setTitleBarOverlay(titleBarOverlay())
+  }
+  if (process.platform !== 'darwin') nativeTheme.on('updated', recolor)
+
   mainWindow = win
   win.on('closed', () => {
+    nativeTheme.off('updated', recolor)
     if (mainWindow === win) mainWindow = undefined
   })
   return win

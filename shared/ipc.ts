@@ -92,6 +92,8 @@ export const Channel = {
   GET_FEATURES: 'features:get',
   /** 메인 → 화면 (FeatureId[]) — 켜진 기능이 바뀌었다 (묶음을 다 올리고 내린 뒤) */
   FEATURES_CHANGED: 'features:changed',
+  /** 메인 → preload (boolean) — 창이 전체 화면인가. preload 가 html[data-fullscreen] 으로 옮긴다 (화면 코드는 CSS 만 본다) */
+  WINDOW_FULLSCREEN: 'window:fullscreen',
 } as const
 
 export interface LitecodeBridge {

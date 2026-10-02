@@ -1253,6 +1253,53 @@ button {
   color: var(--text);
 }
 
+/* ── 제목 표시줄 없는 창 (이슈 #25, dsh 데스크톱 macOS hiddenInset 방식) ──
+   창 끌기: 맨 위 줄들(사이드바 로고 줄·대화 머리·파일 미리보기 머리)이 자기 상자만큼 끌기 영역이다. Electron 은 끌기 영역을 쌓임이
+   아니라 문서 순서로 합치므로, 그 위에 놓이는 누를 것(버튼·입력·메뉴·대화상자·가림막)은 아래 규칙 하나로 빠진다 — 가림막·메뉴는
+   끌기 줄보다 문서 뒤에 있어야 한다. 사이드바 경계 손잡이는 로고 줄보다 앞이라 맨 위 줄 높이만큼은 끌기가 이긴다(폭 조절은 그 아래로) */
+.sidebar__logo,
+.main__header,
+.file-preview__head {
+  -webkit-app-region: drag;
+}
+
+:is(
+  button, a, input, select, textarea, summary, [contenteditable='true'], [tabindex],
+  [role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox'], [role='tooltip'],
+  [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='option'], [role='separator'],
+  .settings-overlay, .confirm-mask, .toasts
+) {
+  -webkit-app-region: no-drag;
+}
+
+/* macOS — 창 버튼(trafficLightPosition {16, 18}, 세 개 ≈ 16~70px)이 사이드바 로고 줄 왼쪽 안에 앉는다. 줄은 대화 머리와 같은 52px,
+   아래 2px 로 28px 버튼 가운데를 25(창 버튼 가운데)에 맞춘다. 로고는 dsh 접힌 자리와 같은 88px 부터 (dsh ui-sidebar .topStrip·
+   ui-layout .leadingSeat). 전체 화면엔 창 버튼이 없으므로(html[data-fullscreen], preload) 원래 자리로 */
+html[data-platform='darwin']:not([data-fullscreen]) .sidebar__logo {
+  height: 52px;
+  padding: 0 12px 2px 88px;
+}
+
+/* 사이드바를 숨기면 다시 열기 버튼이 창 버튼 오른쪽에(같은 줄), 대화 머리 글은 그 뒤에서 시작 (88 + 28 + 12) */
+html[data-platform='darwin']:not([data-fullscreen]) .sidebar-toggle--floating {
+  top: 11px;
+  left: 88px;
+}
+
+html[data-platform='darwin']:not([data-fullscreen]) .main--full .main__header {
+  padding-left: 128px;
+}
+
+/* Windows·Linux — 창 버튼 덮개(titleBarOverlay)가 오른쪽 위를 덮는다. 맨 오른쪽 머리가 원래 여백에 그만큼 더 비운다
+   (덮개 폭 = 창 폭 − 제목 영역 오른쪽 끝, 덮개가 없으면 env 가 없어 0). 실행 미검증 */
+html[data-platform]:not([data-platform='darwin']) .app:not(:has(> .file-preview)) .main__header {
+  padding-right: calc(24px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
+
+html[data-platform]:not([data-platform='darwin']) .file-preview__head {
+  padding-right: calc(8px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
+
 /* 마지막 활동 시각 — dsh 세션 행 오른쪽의 작은 회색 글자 (10 / 16 tertiary) */
 .session-item__time {
   flex-shrink: 0;

@@ -56,6 +56,7 @@ const Channel = {
   OPEN_FILE_IN: 'openIn:open-file',
   GET_FEATURES: 'features:get',
   FEATURES_CHANGED: 'features:changed',
+  WINDOW_FULLSCREEN: 'window:fullscreen',
 } as const
 
 /** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
@@ -138,3 +139,14 @@ const bridge: LitecodeBridge = {
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)
+
+// 창 모양 표시 (이슈 #25) — 화면 CSS 가 html[data-platform] 으로 창 버튼 자리를 비우고(macOS), html[data-fullscreen] 이면 그 여백을
+// 거둔다(전체 화면엔 창 버튼이 없다). 화면 코드는 이 값을 모른다. preload 가 도는 때엔 아직 <html> 이 없을 수 있다
+function markWindow(apply: (root: HTMLElement) => void): void {
+  if (document.documentElement) apply(document.documentElement)
+  else document.addEventListener('DOMContentLoaded', () => apply(document.documentElement), { once: true })
+}
+markWindow((root) => (root.dataset.platform = process.platform))
+ipcRenderer.on(Channel.WINDOW_FULLSCREEN, (_event, fullScreen: boolean) =>
+  markWindow((root) => root.toggleAttribute('data-fullscreen', fullScreen === true)),
+)
