@@ -132,7 +132,7 @@ describe('채팅 답 모양·진행 표시', () => {
     expect(await lastTurn().locator('.turn-row[data-kind="tool"]').getAttribute('data-status')).toBe('done')
   })
 
-  it('파일 칩: 답의 인라인 코드 중 프로젝트에 있는 파일만 파일 아이콘 + 파란 이름, 누르면 파일 관리자에서 그 파일', async () => {
+  it('파일 칩: 답의 인라인 코드 중 프로젝트에 있는 파일만 파일 아이콘 + 파란 이름, 누르면 미리보기 패널 → 그 머리에서 파일 관리자', async () => {
     const before = await replies().count()
     await type('칩 `src/hello.ts` 와 `src/nope.ts`')
     await waitReply(before)
@@ -141,8 +141,11 @@ describe('채팅 답 모양·진행 표시', () => {
     expect(await chips.textContent()).toBe('src/hello.ts')
     expect(await replies().last().locator('code').allTextContents()).toEqual(['src/nope.ts']) // 없는 파일은 그냥 코드
     expect(await chips.evaluate((element) => getComputedStyle(element).color)).toBe('rgb(65, 118, 230)') // --accent
-    await chips.click()
+    await chips.click() // 패널 자세한 동작은 file-preview.live.test.ts
+    await page.locator('.file-preview').getByRole('button', { name: 'Finder에서 보기' }).click()
     await expect.poll(() => app.evaluate(() => (globalThis as { revealed?: string[] }).revealed ?? [])).toEqual([path.join(project, 'src', 'hello.ts')])
+    await page.keyboard.press('Escape')
+    await page.locator('.file-preview').waitFor({ state: 'detached' })
   })
 
   it('내 말 아래 시각(HH:MM)과 복사 — 답은 말풍선이 아니다(바탕·테두리 없음)', async () => {

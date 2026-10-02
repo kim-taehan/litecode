@@ -17,6 +17,7 @@ import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
 import { TrajectoryService } from '../src/services/trajectory.ts'
 import { existingFiles, projectFile } from '../src/services/fileMentions.ts'
+import { previewFile, type FilePreview } from '../src/services/filePreview.ts'
 import { SettingsService, type Settings } from '../src/services/settings.ts'
 import { NotificationsService } from '../src/services/notifications.ts'
 import { recordingHost, systemHost, type NotifyTestRecord, type WindowAccess } from './notificationHost.ts'
@@ -197,6 +198,11 @@ function bootstrap(ctx: Context): void {
     if (file) shell.showItemInFolder(file)
     return !!file
   })
+  // 파일 미리보기 패널 — 읽기만. 칩 판정에 더해 폴더가 등록된 프로젝트인지 본다(화면이 오염돼도 아무 폴더나 읽게 두지 않는다)
+  handle(ctx, Channel.PREVIEW_FILE, async (_event, directory: string, token: string): Promise<FilePreview> => {
+    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    return registered ? previewFile(directory, token) : { status: 'unavailable' }
+  })
   handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
   handle(ctx, Channel.SET_SETTINGS, async (_event, patch: Partial<Settings>) => ctx.settings.set(patch))
   // dsh 처럼 설정 정본 파일을 연다 (없으면 만든다). openPath 는 OS 연결 프로그램 — 실패하면 사유 문자열을 준다
@@ -317,6 +323,7 @@ const openInHost = openInTest ? recordingOpenInHost(openInTest) : systemOpenInHo
 function openInBridge(ctx: Context): void {
   handle(ctx, Channel.OPEN_IN_APPS, async () => ctx.openIn.apps())
   handle(ctx, Channel.OPEN_IN, async (_event, appId: string, directory: string) => ctx.openIn.open(appId, directory))
+  handle(ctx, Channel.OPEN_FILE_IN, async (_event, appId: string, directory: string, token: string) => ctx.openIn.openFile(appId, directory, token))
 }
 openInBridge.inject = ['openIn']
 

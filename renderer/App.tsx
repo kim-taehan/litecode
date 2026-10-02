@@ -22,6 +22,7 @@ import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { OpenInButton } from './OpenInButton.tsx'
+import { FilePreviewPanel } from './FilePreview.tsx'
 import { useSendQueue } from './useSendQueue.ts'
 import { QueueDock } from './QueueDock.tsx'
 import { RunningCount, RunningFilter } from './Background.tsx'
@@ -1156,6 +1157,8 @@ export function App() {
           </>
         )}
       </main>
+      {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
+      <FilePreviewPanel directory={active?.project} />
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
     </div>

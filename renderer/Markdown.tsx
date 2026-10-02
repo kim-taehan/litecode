@@ -5,6 +5,7 @@ import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { cjkStrong } from './cjkStrong.ts'
+import { openFilePreview } from './filePreviewStore.ts'
 import { useT } from './settingsStore.ts'
 import { looksLikePath } from './turnView.ts'
 import './markdown.css'
@@ -166,8 +167,8 @@ function renderTable(table: Md.Table, key: number, defs: Definitions): ReactNode
   )
 }
 
-/** 인라인 코드 — 그 프로젝트의 실제 파일이면 파일 아이콘 + 파란 이름 칩. 누르면 OS 파일 관리자에서 그 파일을 가리킨다
- *  (dsh 는 오른쪽 사이드바 미리보기로 연다 — litecode 엔 그 칸이 없다) */
+/** 인라인 코드 — 그 프로젝트의 실제 파일이면 파일 아이콘 + 파란 이름 칩. 누르면 채팅 오른쪽 파일 미리보기 패널에 그 파일
+ *  (dsh 처럼 오른쪽 사이드바 미리보기 — FilePreview.tsx, 이슈 #17) */
 function InlineCode({ value }: { value: string }) {
   const mentions = useContext(FileMentions)
   const t = useT()
@@ -176,8 +177,8 @@ function InlineCode({ value }: { value: string }) {
     <button
       type="button"
       className="md-file"
-      title={t('markdown.revealFile', { file: value })}
-      onClick={() => void window.litecode.revealFile(mentions.directory, value)}
+      title={t('markdown.previewFile', { file: value })}
+      onClick={() => openFilePreview(mentions.directory, value)}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
         <path d="M4 1.75H9.5L12.5 4.75V14.25H4Z" />

@@ -1,0 +1,190 @@
+/* 파일 미리보기 패널 (이슈 #17) — dsh ui-sidebar-right(오른쪽 열·폭 범위)·ui-sidebar-documentpreview TextPreview(머리 줄·28px 도구·
+   고정폭 본문·가운데 빈 상태) 치수. 색은 styles.css 토큰만 */
+
+/* 대화 칸의 기준 폭을 0 으로 — 기본(auto)이면 긴 글·코드의 내용 폭이 기준이 되어, 패널이 열린 창에서 그 몫만큼 패널이 같이 줄어든다
+   (끌어 넓혀도 덜 넓어짐). 패널이 없을 땐 전과 같다(남는 폭을 다 받는다). 창이 좁아지면 패널이 줄고(300 까지) */
+.app > .main {
+  flex-basis: 0;
+}
+
+.file-preview {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 300px;
+  max-width: 70vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 0.5px solid var(--border-ring);
+  outline: none;
+}
+
+/* 왼쪽 끝을 끌어 폭 조절 — 사이드바 손잡이와 같은 모양 */
+.file-preview__resize {
+  position: absolute;
+  top: 0;
+  left: -4px;
+  bottom: 0;
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.file-preview__resize:hover,
+.file-preview__resize:active {
+  background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px);
+}
+
+/* 머리 — 대화 머리(.main__header 52px·같은 밑줄)와 선이 이어지게 같은 높이 */
+.file-preview__head {
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+
+.file-preview__icon {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.file-preview__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.file-preview__tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 28px 칸에 15px 그림 (dsh .tool) */
+.file-preview__tool {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+.file-preview__tool svg {
+  width: 15px;
+  height: 15px;
+}
+
+.file-preview__tool:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.file-preview__toggle {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.file-preview__toggle:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+/* 잘림 안내 — dsh .changed 띠 */
+.file-preview__notice {
+  flex: none;
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: var(--module);
+  border-bottom: 0.5px solid var(--border-light);
+}
+
+.file-preview__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 못 그리는 경우 — 가운데보다 조금 위 한 줄 */
+.file-preview__empty {
+  box-sizing: border-box;
+  margin: 0;
+  height: 88%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 줄 번호 + 글: 두 pre 가 같은 글꼴·줄 높이로 나란히. 줄 번호는 가로로 밀어도 왼쪽에 붙어 있다 */
+.file-preview__code {
+  display: flex;
+  min-width: 100%;
+  width: max-content;
+  padding: 8px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.file-preview__gutter,
+.file-preview__text {
+  margin: 0;
+  font: inherit;
+  white-space: pre;
+}
+
+.file-preview__gutter {
+  position: sticky;
+  left: 0;
+  flex: none;
+  min-width: 44px;
+  padding: 0 12px 0 10px;
+  text-align: right;
+  color: var(--text-caption);
+  background: var(--bg);
+  user-select: none;
+}
+
+.file-preview__text {
+  flex: 1 0 auto;
+  padding: 0 16px 0 4px;
+  color: var(--text);
+}
+
+.file-preview__md {
+  padding: 16px 20px 32px;
+  font-size: var(--chat-font-size);
+  line-height: 1.7;
+}
