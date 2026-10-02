@@ -13,8 +13,8 @@ export interface TriggerOptions {
   setDraft(text: string): void
   /** `/` 명령: text 를 보내고 말풍선엔 display */
   onSend(text: string, display: string): void
-  /** `!`: 그 폴더 터미널 칸을 편다 */
-  onShell(directory: string): void
+  /** `!`: 그 폴더에서 command 를 돌려 대화에 결과 카드로 */
+  onShell(directory: string, command: string): void
 }
 
 export interface Triggers {
@@ -92,7 +92,7 @@ export function useTriggers({ directory, draft, setDraft, onSend, onShell }: Tri
     else if (result.kind === 'send') onSend(result.text, result.display)
     else if (result.kind === 'shell') {
       setDraft('')
-      onShell(result.directory)
+      onShell(result.directory, result.command)
     } else setNotice(result.message)
   }
 

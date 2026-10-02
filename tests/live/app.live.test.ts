@@ -1323,6 +1323,8 @@ describe('대화 영속화', () => {
     await page.getByRole('button', { name: '+ 새 대화' }).click()
     await chooseModel('Echo')
     expect(await send('둘째 대화')).toBe('echo: 둘째 대화')
+    // 마지막 턴의 통계(usage)는 답이 보인 뒤 effect 로 저장된다 — 그 저장이 끝난 파일을 기준으로 삼는다 (바로 읽으면 앞 저장본과 경합)
+    await expect.poll(async () => !!((await storedBy('둘째 대화')) as { usage?: unknown } | undefined)?.usage, { timeout: 5_000 }).toBe(true)
     const before = await stored()
     const first = (await storedBy('첫 대화'))!
     expect(first.engineSessionId).toMatch(/^ses/)

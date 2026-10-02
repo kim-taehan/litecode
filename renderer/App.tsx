@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Conversation, HistoryMessage, Project, ProviderSummary } from '../shared/ipc.ts'
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { Conversation, HistoryMessage, Project, ProviderSummary, TurnItem } from '../shared/ipc.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
-import { Markdown } from './Markdown.tsx'
+import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
+import { Minimap, useFollowBottom } from './Minimap.tsx'
+import { upsertItem } from './turnView.ts'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { SettingsModal } from './Settings.tsx'
@@ -12,10 +14,21 @@ import { addTurn, chatStats, type ChatUsage } from './stats.ts'
 import { useTriggers } from './useTriggers.ts'
 import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
+import { ShellCard, type ShellCardView } from './ShellCard.tsx'
+import { chatStrings } from './chatStrings.ts'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
+  /** assistant 가 실패했으면 `⚠️ 사유` */
   text: string
+  /** user: 보낸 시각 */
+  at?: number
+  /** assistant: 그 턴의 진행 줄 (생각·도구·글) */
+  items?: TurnItem[]
+  /** assistant: 걸린 시간(ms) */
+  duration?: number
+  failed?: boolean
+  interrupted?: boolean
 }
 
 interface Session {
@@ -31,6 +44,11 @@ interface Session {
   messages: ChatMessage[]
   /** 답을 기다리는 중 — 대화마다 따로. 기다리는 동안 다른 대화·프로젝트는 보낼 수 있다 (03_qa) */
   pending?: boolean
+  /** 답을 기다리는 턴의 진행 줄 (메인이 실시간으로 민다) 과 보낸 시각 — 턴이 끝나면 답에 옮긴다 */
+  progress?: TurnItem[]
+  sentAt?: number
+  /** `!명령` 결과 카드 — 저장된 것은 메인(ctx.sessions)이 정본이고, 여기는 화면 사본 + 돌고 있는 카드 */
+  shells?: ShellCardView[]
   /** 마지막 활동 시각(ms) — 목록에 `38min`·`1d` 로 보이고, 보관 개수 제한의 기준이 된다 */
   updatedAt: number
   /** 입력창 아래 통계 줄의 값 — 턴마다 엔진이 주는 사용량·시간을 이 대화에 더한다. 없으면 "—" */
@@ -45,21 +63,21 @@ function newSession(project: string): Session {
 
 /** 아직 아무것도 안 보낸 새 대화 — 저장하지 않고, 지울 것도 없다 */
 function isBlank(session: Session): boolean {
-  return session.messages.length === 0 && !session.history
+  return session.messages.length === 0 && !session.history && !session.shells?.length
 }
 
-/** 저장할 목록 정보 (말풍선·대기 상태는 빼고) */
+/** 저장할 목록 정보 (말풍선·대기 상태·카드는 빼고 — 카드는 메인이 저장한다) */
 function toConversation({ id, project, engineSessionId, title, updatedAt, model, usage }: Session): Conversation {
   return { id, project, engineSessionId, title, updatedAt, model, usage }
 }
 
 function fromConversation(conversation: Conversation): Session {
-  return { ...conversation, usage: conversation.usage as ChatUsage | undefined, messages: [], history: 'unloaded' }
+  return { ...conversation, usage: conversation.usage as ChatUsage | undefined, messages: [], history: 'unloaded', shells: conversation.shells }
 }
 
 /** 실시간 턴과 같은 모양 — 실패·중단이면 사유를 ⚠️ 로 */
-function toChatMessage({ role, text, error }: HistoryMessage): ChatMessage {
-  return { role, text: error ? `⚠️ ${error}` : text }
+function toChatMessage({ role, text, error, at, items, duration, interrupted }: HistoryMessage): ChatMessage {
+  return { role, text: error ? `⚠️ ${error}` : text, at, items, duration, failed: !!error, interrupted }
 }
 
 /** 그 프로젝트에 대화가 하나도 없으면 새 대화를 하나 더한다 — 같은 값을 두 번 넣어도 한 번만 더해진다 */
@@ -330,13 +348,34 @@ export function App() {
     setSessions((sessionsNow) => sessionsNow.filter((session) => !ids.includes(session.id)))
   }
 
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
-  })
+  // 답을 기다리는 턴의 진행 줄 — 보낸 대화에 쌓는다 (대화 id 로 온다. 끝난 뒤 늦게 온 것은 버린다)
+  useEffect(
+    () =>
+      window.litecode.onTurnProgress((conversationId, item) =>
+        updateSession(conversationId, (session) => (session.pending ? { ...session, progress: upsertItem(session.progress, item) } : session)),
+      ),
+    [],
+  )
+  // 돌고 있는 `!명령` 카드의 출력 조각 — 카드 id 로 찾는다
+  useEffect(
+    () =>
+      window.litecode.onShellData((runId, chunk) =>
+        setSessions((sessionsNow) =>
+          sessionsNow.map((session) =>
+            session.shells?.some((shell) => shell.id === runId && shell.running)
+              ? { ...session, shells: session.shells.map((shell) => (shell.id === runId ? { ...shell, output: shell.output + chunk } : shell)) }
+              : session,
+          ),
+        ),
+      ),
+    [],
+  )
 
   const project = projects?.find((candidate) => candidate.path === current)
   const visible = sessions.filter((session) => session.project === project?.path)
   const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
+  // 맨 아래에 있으면 내용이 늘 때 따라 내려간다 — 위로 올려 읽는 중(미니맵 이동 포함)이면 그대로 둔다
+  const following = useFollowBottom(listRef, `${active?.id}:${view}`)
   /** 이 대화의 모델 — 설정에서 지워졌으면 chosen 이 없고 보내기가 막힌다 */
   const selected = active?.model ?? initialModel(providers, lastModel)
   const chosen = findModel(providers, selected)
@@ -344,18 +383,42 @@ export function App() {
   const [confirming, setConfirming] = useState<string>()
   /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
   const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
+  /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
+  const [shellFocus, setShellFocus] = useState(0)
   const trigger = useTriggers({
     directory: active?.project,
     draft,
     setDraft,
     onSend: (text, display) => void send({ text, display }),
-    onShell: (directory) => setShellOpen((open) => ({ ...open, [directory]: true })),
+    onShell: (_directory, command) => void runShell(command),
   })
   /** Enter·보내기 — 입력 트리거(`/`·`!`)가 다루지 않으면 평범하게 보낸다 */
   const submit = () =>
     void trigger.submit().then((handled) => {
       if (!handled) void send()
     })
+
+  // 터미널 칸 — ⌘↓ 로 펴고 키를 칸으로 내리고, ⌘↑ 로 접고 입력창으로 올라온다 (closed-code useShellDrawer. Windows·Linux 는 Ctrl).
+  // `!` 로는 안 열린다(`!명령` 은 대화 카드). ⌘⇧↑ 은 글 선택 확장이라 건드리지 않는다. 칸이 접혀 있으면 ⌘↑ 은 입력창의 것이다
+  const drawerProject = active?.project
+  const drawerOpen = !!drawerProject && !!shellOpen[drawerProject]
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      const command = navigator.platform.startsWith('Mac') ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+      if (!command || event.shiftKey || event.altKey || !drawerProject) return
+      if (event.key === 'ArrowDown') {
+        setShellOpen((open) => ({ ...open, [drawerProject]: true }))
+        setShellFocus((count) => count + 1)
+      } else if (event.key === 'ArrowUp' && drawerOpen) {
+        setShellOpen((open) => ({ ...open, [drawerProject]: false }))
+        trigger.inputRef.current?.focus()
+      } else return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    window.addEventListener('keydown', onKeyDown, true) // 칸(xterm)이 키를 먹기 전에
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [drawerProject, drawerOpen])
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
   useEffect(() => {
@@ -460,13 +523,17 @@ export function App() {
     // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
     const target = active
     setDraft('')
+    following.current = true
+    const sentAt = Date.now()
     const start = (session: Session): Session => ({
       ...session,
       pending: true,
+      progress: [],
+      sentAt,
       updatedAt: Date.now(),
       model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
       title: isBlank(session) ? shown.slice(0, 24) : session.title,
-      messages: [...session.messages, { role: 'user', text: shown }],
+      messages: [...session.messages, { role: 'user', text: shown, at: sentAt }],
     })
     updateSession(target.id, start)
     // 보내기 전에 목록에 저장해 둔다 — 엔진 세션이 생기면 메인 프로세스가 여기에 붙인다 (답을 기다리는 중 앱이 꺼져도 다시 열리게)
@@ -478,14 +545,86 @@ export function App() {
     updateSession(target.id, (session) => ({
       ...session,
       pending: false,
+      progress: undefined,
+      sentAt: undefined,
       updatedAt: Date.now(),
       engineSessionId: result.sessionId ?? session.engineSessionId,
       usage: result.usage ? addTurn(session.usage, result.usage) : session.usage,
       messages: [
         ...session.messages,
-        { role: 'assistant', text: result.ok ? (result.text ?? '') : `⚠️ ${result.error}` },
+        {
+          role: 'assistant',
+          text: result.ok ? (result.text ?? '') : `⚠️ ${result.error}`,
+          items: session.progress,
+          duration: Date.now() - sentAt,
+          failed: !result.ok,
+          interrupted: result.interrupted,
+        },
       ],
     }))
+  }
+
+  /** `!명령` — 그 대화에 카드를 붙이고 메인이 프로젝트 폴더에서 돌린다. 맥락에는 안 들어간다. 자리는 지금 말풍선 수
+   *  (답을 기다리는 중이면 그 답 뒤) — 다시 열 때 같은 자리에 끼운다 */
+  async function runShell(command: string): Promise<void> {
+    if (!active || !canWrite(active)) return
+    const target = active
+    const runId = crypto.randomUUID()
+    const card: ShellCardView = {
+      id: runId,
+      command,
+      output: '',
+      exitCode: null,
+      status: 'done',
+      truncated: false,
+      at: Date.now(),
+      position: target.messages.length + (target.pending ? 1 : 0),
+      running: true,
+    }
+    following.current = true
+    const start = (session: Session): Session => ({
+      ...session,
+      updatedAt: Date.now(),
+      title: isBlank(session) ? `!${command}`.slice(0, 24) : session.title,
+      shells: [...(session.shells ?? []), card],
+    })
+    updateSession(target.id, start)
+    // 카드를 붙일 대화가 메인에 먼저 있어야 한다 (빈 새 대화는 아직 저장 전이다)
+    const conversation = toConversation(start(target))
+    saved.current.set(target.id, JSON.stringify(conversation))
+    forgetPruned(await window.litecode.saveConversation(conversation))
+    const done = await window.litecode.runShell(target.id, runId, target.project, command, card.position)
+    updateSession(target.id, (session) => ({ ...session, shells: session.shells?.map((shell) => (shell.id === runId ? done : shell)) }))
+  }
+
+  /** 카드를 AI 에게 — 맥락에만 넣는다. 세션이 없었으면 생긴 세션·모델을 이 대화에 붙인다. 실패하면 사유를 준다 */
+  async function shareShell(target: Session, cardId: string): Promise<string | undefined> {
+    if (!selected) return chatStrings.shellShareNoModel
+    const result = await window.litecode.shareShell(target.id, cardId, selected.providerId, selected.modelId)
+    if (!result.ok) return result.error
+    updateSession(target.id, (session) => ({
+      ...session,
+      model: session.model ?? selected,
+      engineSessionId: result.sessionId ?? session.engineSessionId,
+      shells: session.shells?.map((shell) => (shell.id === cardId ? { ...shell, sharedMessageId: shell.sharedMessageId ?? 'shared' } : shell)),
+    }))
+    return undefined
+  }
+
+  /** 그 자리의 `!` 카드들 (실행한 순서) */
+  function shellCards(session: Session, at: (position: number) => boolean) {
+    if (session.history === 'unloaded' || session.history === 'loading') return [] // 자리를 셀 말풍선이 아직 없다
+    return (session.shells ?? [])
+      .filter((card) => at(card.position))
+      .map((card) => (
+        <ShellCard
+          key={card.id}
+          card={card}
+          shareBlocked={session.pending ? chatStrings.shellShareBusy : !chosen ? chatStrings.shellShareNoModel : undefined}
+          onStop={() => void window.litecode.stopShell(card.id)}
+          onShare={() => shareShell(session, card.id)}
+        />
+      ))
   }
 
   /** 내용을 다 불러온 대화에만 보낸다 — 폴더가 없는 대화는 지우기만 된다 */
@@ -698,7 +837,9 @@ export function App() {
             {view === 'trajectory' ? (
               <Trajectory key={active.id} directory={active.project} sessionId={active.engineSessionId} pending={!!active.pending} />
             ) : (
+            <div className="chat-pane">
             <div className="main__messages" ref={listRef}>
+              <div className="chat-column">
               {active.history === 'missing' ? (
                 <div className="empty" role="alert">
                   폴더가 없습니다: {active.project}
@@ -708,12 +849,32 @@ export function App() {
               ) : (
                 active.messages.length === 0 && <div className="empty">무엇을 도와드릴까요?</div>
               )}
+              {/* 내 말은 말풍선, 답은 본문 폭 전체의 글 + 턴 머리 (ChatTurn.tsx) */}
               {active.messages.map((message, index) => (
-                <div key={index} className={`bubble bubble--${message.role}`}>
-                  {/* 모델이 빈 줄로 답을 시작하기도 한다 — 앞뒤 공백은 보여 주지 않는다 (속 줄바꿈은 그대로). 답은 마크다운으로 */}
-                  {message.role === 'assistant' ? <Markdown text={message.text.trim()} /> : message.text.trim()}
-                </div>
+                <Fragment key={index}>
+                  {shellCards(active, (position) => position === index)}
+                  {message.role === 'user' ? (
+                    <UserMessage text={message.text} at={message.at} />
+                  ) : (
+                    <AssistantTurn
+                      items={message.items ?? []}
+                      text={message.text}
+                      failed={message.failed}
+                      interrupted={message.interrupted}
+                      duration={message.duration}
+                      directory={active.project}
+                    />
+                  )}
+                </Fragment>
               ))}
+              {shellCards(active, (position) => position === active.messages.length)}
+              {active.pending && (
+                <AssistantTurn key="running" running items={active.progress ?? []} text="" startedAt={active.sentAt} directory={active.project} />
+              )}
+              {shellCards(active, (position) => position > active.messages.length)}
+              </div>
+            </div>
+            <Minimap scroller={listRef} turns={active.messages.filter((message) => message.role === 'user').map((message) => message.text)} />
             </div>
             )}
 
@@ -773,7 +934,15 @@ export function App() {
               <StatsBar stats={chatStats(active.usage, chosen?.model.contextLength)} />
             </div>
             {shellOpen[active.project] && (
-              <ShellDrawer key={active.project} directory={active.project} onClose={() => setShellOpen((open) => ({ ...open, [active.project]: false }))} />
+              <ShellDrawer
+                key={active.project}
+                directory={active.project}
+                focusSignal={shellFocus}
+                onClose={() => {
+                  setShellOpen((open) => ({ ...open, [active.project]: false }))
+                  trigger.inputRef.current?.focus()
+                }}
+              />
             )}
           </>
         )}

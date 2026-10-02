@@ -2,8 +2,8 @@ import { Context, Service } from 'cordis'
 import type { TerminalHandle } from './opencodePty.ts'
 import './llm.ts'
 
-// 프로젝트마다 터미널 하나 (ctx.terminals) — 본문 아래 터미널 칸과 `!` 명령이 같은 셸을 쓴다 (사용자 결정 2026-10-01, closed-code
-// 셸 서랍). 셸은 엔진이 띄운다(ctx.llm.openTerminal). 여기는 폴더별 셸·지금까지의 출력·화면으로 내보낼 이벤트만 쥔다.
+// 프로젝트마다 터미널 하나 (ctx.terminals) — 본문 아래 터미널 칸(⌘↓)의 셸 (closed-code 셸 서랍). `!명령` 은 여기가 아니라 ctx.shell 로
+// 따로 돈다 (사용자 결정 2026-10-02). 셸은 엔진이 띄운다(ctx.llm.openTerminal). 여기는 폴더별 셸·지금까지의 출력·화면으로 내보낼 이벤트만 쥔다.
 // 출력은 메인이 쌓아 둔다 — 칸을 접었다 펴거나 대화를 옮겨도 화면이 이어 그릴 수 있게. 셸이 끝나면(exit·엔진 재시작) 비우고,
 // 다음에 쓰면 새로 띄운다.
 
@@ -20,8 +20,6 @@ declare module 'cordis' {
 
 /** 화면이 다시 그릴 때 받는 출력 상한 (글자) */
 const MAX_OUTPUT = 256 * 1024
-/** 쓰던 줄을 비운다 — Ctrl+E(줄 끝) + Ctrl+U(줄 지우기). bash 의 Ctrl+U 는 커서 앞만 지워서 끝으로 먼저 간다 (closed-code 실측) */
-const CLEAR_LINE = '\x05\x15'
 
 interface Terminal {
   handle: Promise<TerminalHandle>
@@ -52,11 +50,6 @@ export class TerminalsService extends Service {
   /** 키 입력 그대로 */
   async write(directory: string, data: string): Promise<void> {
     ;(await this.ensure(directory).handle).write(data)
-  }
-
-  /** 쓰던 줄을 비우고 command 를 친다 */
-  async run(directory: string, command: string): Promise<void> {
-    await this.write(directory, `${CLEAR_LINE}${command}\r`)
   }
 
   async resize(directory: string, rows: number, cols: number): Promise<void> {

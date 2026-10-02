@@ -2,6 +2,7 @@ import { Context, Service } from 'cordis'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { History } from './llm.ts'
+import { shellContext, type ShellResult } from './shell.ts'
 import './llm.ts'
 
 // 대화 목록 정보 (ctx.sessions) — 재시작해도 대화 목록이 남게 작은 JSON 파일 하나에 둔다 (앱에서는 userData/sessions.json).
@@ -35,6 +36,19 @@ export interface Conversation {
   usage?: unknown
   /** 엔진 메시지 id → 말풍선에 보일 글. `/` 명령처럼 보낸 본문(풀어 쓴 template)과 사용자가 친 글이 다른 입력만 (label) */
   labels?: Record<string, string>
+  /** `!명령` 결과 카드 — opencode 는 모르는 로컬 기록이다(AI 에게 보내기 전까지). 메인만 고친다(addShell·shareShell) */
+  shells?: ShellCard[]
+}
+
+/** 대화 안의 `!명령` 결과 카드 하나 */
+export interface ShellCard extends ShellResult {
+  id: string
+  /** 실행한 시각(ms) */
+  at: number
+  /** 대화 안 자리 — 이 카드 앞에 있던 말풍선(내 말·답) 수 */
+  position: number
+  /** "AI 에게 보내기" 로 맥락에 넣은 엔진 메시지 id — 다시 열 때 그 메시지는 말풍선으로 안 그린다(카드가 대신 "보냄") */
+  sharedMessageId?: string
 }
 
 interface Stored {
@@ -80,7 +94,12 @@ export class SessionsService extends Service {
     let removed: Conversation[] = []
     await this.update((stored) => {
       const existing = stored.conversations.find((entry) => entry.id === input.id)
-      const next = pick({ ...input, engineSessionId: input.engineSessionId ?? existing?.engineSessionId, labels: input.labels ?? existing?.labels })
+      const next = pick({
+        ...input,
+        engineSessionId: input.engineSessionId ?? existing?.engineSessionId,
+        labels: input.labels ?? existing?.labels,
+        shells: existing?.shells, // 카드는 메인만 고친다 — 화면이 보낸 목록 정보로 덮지 않는다
+      })
       const conversations = existing
         ? stored.conversations.map((entry) => (entry === existing ? next : entry))
         : [next, ...stored.conversations]
@@ -108,6 +127,43 @@ export class SessionsService extends Service {
     }))
   }
 
+  /** 끝난 `!명령` 카드를 그 대화에 붙인다. 아직 저장 안 된(빈 새) 대화면 아무것도 안 한다 */
+  async addShell(id: string, card: ShellCard): Promise<void> {
+    await this.update((stored) => ({
+      ...stored,
+      conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, shells: [...(entry.shells ?? []), card] } : entry)),
+    }))
+  }
+
+  /** 카드를 AI 에게 보낸다 — 명령·출력을 그 대화의 엔진 세션 맥락에만 넣는다(LLM 은 안 돈다, ctx.llm.addContext). 세션이 없으면
+   *  만든다(모델이 필요하다). 보내기 전에 메시지 id 를 적어 둔다 — 보낸 뒤 앱이 꺼져도 그 본문이 말풍선으로 새지 않게. 실패하면 되돌린다 */
+  async shareShell(id: string, cardId: string, providerId: string, modelId: string): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
+    const conversation = (await this.read()).conversations.find((entry) => entry.id === id)
+    const card = conversation?.shells?.find((entry) => entry.id === cardId)
+    if (!conversation || !card) return { ok: false, error: '없는 카드입니다' }
+    if (card.sharedMessageId) return { ok: true, sessionId: conversation.engineSessionId }
+    const messageId = this.ctx.llm.newMessageId()
+    const mark = (sharedMessageId: string | undefined) =>
+      this.update((stored) => ({
+        ...stored,
+        conversations: stored.conversations.map((entry) =>
+          entry.id === id ? { ...entry, shells: entry.shells?.map((shell) => (shell.id === cardId ? { ...shell, sharedMessageId } : shell)) } : entry,
+        ),
+      }))
+    await mark(messageId)
+    const result = await this.ctx.llm.addContext(
+      providerId,
+      modelId,
+      conversation.project,
+      shellContext(card, conversation.project),
+      messageId,
+      conversation.engineSessionId,
+      (created) => this.attach(id, created),
+    )
+    if (!result.ok) await mark(undefined)
+    return result
+  }
+
   /** 목록에서 빼고 엔진 세션도 지운다. 되돌리기 없음 */
   async remove(id: string): Promise<void> {
     await this.update((stored) => dropping(stored.conversations, stored.orphans, stored.conversations.filter((entry) => entry.id === id)))
@@ -119,7 +175,8 @@ export class SessionsService extends Service {
     const conversation = (await this.read()).conversations.find((entry) => entry.id === id)
     if (!conversation) return { messages: [], error: '없는 대화입니다' }
     if (!conversation.engineSessionId) return { messages: [] }
-    const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId)
+    const shared = new Set((conversation.shells ?? []).flatMap((card) => (card.sharedMessageId ? [card.sharedMessageId] : [])))
+    const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId, shared)
     const labels = conversation.labels ?? {}
     return { ...history, messages: history.messages.map((message) => (message.id && message.id in labels ? { ...message, text: labels[message.id]! } : message)) }
   }
@@ -178,8 +235,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, updatedAt, model, usage, labels }: Conversation): Conversation {
-  return { id, project, engineSessionId, title, updatedAt, model, usage, labels }
+function pick({ id, project, engineSessionId, title, updatedAt, model, usage, labels, shells }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, updatedAt, model, usage, labels, shells }
 }
 
 function isConversation(value: unknown): value is Conversation {

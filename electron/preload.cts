@@ -30,6 +30,13 @@ const Channel = {
   TERMINAL_EXIT: 'terminal:exit',
   OPEN_EXTERNAL: 'shell:open-external',
   LOAD_TRAJECTORY: 'trajectory:load',
+  TURN_PROGRESS: 'chat:progress',
+  RESOLVE_FILES: 'chat:resolve-files',
+  REVEAL_FILE: 'chat:reveal-file',
+  RUN_SHELL: 'shell:run',
+  STOP_SHELL: 'shell:stop',
+  SHELL_DATA: 'shell:data',
+  SHARE_SHELL: 'shell:share',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -67,6 +74,22 @@ const bridge: LitecodeBridge = {
   },
   openExternal: (url) => ipcRenderer.invoke(Channel.OPEN_EXTERNAL, url),
   loadTrajectory: (directory, sessionId) => ipcRenderer.invoke(Channel.LOAD_TRAJECTORY, directory, sessionId),
+  onTurnProgress: (listener) => {
+    const handler = (_event: unknown, conversationId: string, item: Parameters<typeof listener>[1]) => listener(conversationId, item)
+    ipcRenderer.on(Channel.TURN_PROGRESS, handler)
+    return () => void ipcRenderer.removeListener(Channel.TURN_PROGRESS, handler)
+  },
+  resolveFiles: (directory, tokens) => ipcRenderer.invoke(Channel.RESOLVE_FILES, directory, tokens),
+  revealFile: (directory, token) => ipcRenderer.invoke(Channel.REVEAL_FILE, directory, token),
+  runShell: (conversationId, runId, directory, command, position) =>
+    ipcRenderer.invoke(Channel.RUN_SHELL, conversationId, runId, directory, command, position),
+  stopShell: (runId) => ipcRenderer.invoke(Channel.STOP_SHELL, runId),
+  onShellData: (listener) => {
+    const handler = (_event: unknown, runId: string, chunk: string) => listener(runId, chunk)
+    ipcRenderer.on(Channel.SHELL_DATA, handler)
+    return () => void ipcRenderer.removeListener(Channel.SHELL_DATA, handler)
+  },
+  shareShell: (conversationId, cardId, providerId, modelId) => ipcRenderer.invoke(Channel.SHARE_SHELL, conversationId, cardId, providerId, modelId),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

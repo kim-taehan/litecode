@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { freePort, isolatedEnv } from './support/opencodeServer.ts'
 
 // 입력창 트리거 실물 테스트 — 진짜 Electron 창에서 `@`·`/`·`!` 를 친다. 렌더러 → preload → IPC → ctx.triggers → 플러그인 →
-// ctx.llm/ctx.terminals → opencode(fs·command·pty) → (가짜) LLM 을 관통한다. 자기 앱·userData·프로젝트를 따로 띄워 다른 실물 테스트
+// ctx.llm/ctx.shell/ctx.terminals → opencode(fs·command·pty) → (가짜) LLM 을 관통한다. 자기 앱·userData·프로젝트를 따로 띄워 다른 실물 테스트
 // 순서에 기대지 않는다. 가짜로 두는 것은 OS 폴더 대화상자와 LLM 뿐이다.
 // 명령 파일(.opencode/command/hi.md)은 앱을 띄우기 전에 둔다 — opencode 는 명령 목록을 폴더별로 캐시해 재시작 전엔 새 파일을 못 본다 (01d).
 
@@ -72,9 +72,10 @@ const input = () => page.getByPlaceholder('메시지를 입력하세요…')
 const menu = () => page.getByRole('listbox', { name: '입력 후보' })
 const options = () => menu().getByRole('option')
 const replies = () => page.locator('.bubble--assistant')
+const cards = () => page.locator('.shell-card')
 const value = () => input().inputValue()
 const fakeLlm = async () =>
-  (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { count: number; lastChat?: { messages: { role: string; text: string }[] } }
+  (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { count: number; lastChat?: { messages: { role: string; text: string }[] }; lastChatText: string }
 
 /** 입력을 비우고 사람처럼 친다 (fill 은 캐럿 이벤트를 안 낸다) */
 async function typeFresh(text: string): Promise<void> {
@@ -163,7 +164,7 @@ describe('입력 트리거 ↔ 실물 opencode', () => {
     expect((await fakeLlm()).count).toBe(before)
   })
 
-  it('! 로 시작하면 입력 카드가 경고색이 되고, Enter 로 프로젝트 폴더의 터미널 칸에서 돈다 — LLM 은 안 부른다', async () => {
+  it('! 로 시작하면 입력 카드가 경고색이 되고, Enter 로 프로젝트 폴더에서 돌아 대화에 결과 카드로 남는다 — LLM 은 안 부르고 터미널 칸도 안 열린다', async () => {
     const before = (await fakeLlm()).count
     await typeFresh('!echo LITE-$((6*7)); pwd')
     await expect.poll(() => page.locator('.composer__box--danger').count(), { timeout: 10_000 }).toBe(1)
@@ -172,33 +173,84 @@ describe('입력 트리거 ↔ 실물 opencode', () => {
     expect(await page.getByRole('status').textContent()).toContain('셸')
     await page.keyboard.press('Enter')
 
-    const screen = page.locator('.shell-drawer .xterm-rows')
-    await expect.poll(() => screen.textContent(), { timeout: 20_000 }).toContain('LITE-42')
-    expect(await screen.textContent()).toContain(project)
+    const card = cards().last()
+    await expect.poll(() => card.locator('.shell-card__badge').textContent(), { timeout: 20_000 }).toBe('종료 코드 0')
+    expect(await card.locator('.shell-card__command').textContent()).toBe('echo LITE-$((6*7)); pwd')
+    expect(await card.locator('.shell-card__output').textContent()).toContain('LITE-42')
+    expect(await card.locator('.shell-card__output').textContent()).toContain(project)
+    expect(await card.getByRole('button', { name: 'AI 에게 보내기' }).isEnabled()).toBe(true)
     expect(await value()).toBe('')
+    expect(await page.locator('.shell-drawer').count()).toBe(0)
     expect((await fakeLlm()).count).toBe(before)
   })
 
   it('셸 결과는 대화 맥락에 안 들어간다 — 다음 질문의 LLM 요청에 없다', async () => {
     await typeFresh('셸 다음 질문')
     expect(await enterAndWait()).toBe('echo: 셸 다음 질문')
-    const texts = (await fakeLlm()).lastChat!.messages.map((message) => message.text).join('\n')
-    expect(texts).not.toContain('LITE-42')
+    expect((await fakeLlm()).lastChatText).not.toContain('LITE-42')
   })
 
-  it('터미널 칸을 접었다 펴도 앞 출력이 남고, 칸에 직접 친 키도 셸로 간다', async () => {
-    await page.getByRole('button', { name: '터미널 접기' }).click()
-    expect(await page.locator('.shell-drawer').count()).toBe(0)
-    await typeFresh('!echo AGAIN-$((1+1))')
-    await page.keyboard.press('Enter')
-    const screen = page.locator('.shell-drawer .xterm-rows')
-    await expect.poll(() => screen.textContent(), { timeout: 20_000 }).toContain('AGAIN-2')
-    expect(await screen.textContent()).toContain('LITE-42')
+  it('"AI 에게 보내기" 를 누르면 LLM 은 안 돌고 "보냄" 이 되며, 다음 질문의 LLM 요청에 명령·출력이 실린다', async () => {
+    const before = (await fakeLlm()).count
+    const card = cards().filter({ hasText: 'LITE-42' })
+    await card.getByRole('button', { name: 'AI 에게 보내기' }).click()
+    await expect.poll(() => card.locator('.shell-card__share').textContent(), { timeout: 10_000 }).toBe('보냄')
+    expect(await card.locator('.shell-card__share').isDisabled()).toBe(true)
+    expect((await fakeLlm()).count).toBe(before)
 
-    await page.locator('.shell-drawer .xterm').click()
+    await typeFresh('보낸 뒤 질문')
+    expect(await enterAndWait()).toBe('echo: 보낸 뒤 질문')
+    const sent = (await fakeLlm()).lastChatText
+    expect(sent).toContain('$ echo LITE-$((6*7)); pwd')
+    expect(sent).toContain('LITE-42')
+    expect(sent).toContain('종료 코드 0')
+    expect(await page.locator('.bubble--user').allTextContents()).not.toContain(expect.stringContaining('LITE-42')) // 말풍선으로 새지 않는다
+  })
+
+  it('그 대화의 턴이 도는 동안 "AI 에게 보내기" 는 막혀 있고(이유 툴팁), 턴이 끝나면 풀린다', async () => {
+    await typeFresh('!echo BUSY-1')
+    await page.keyboard.press('Enter')
+    const card = cards().filter({ hasText: 'BUSY-1' })
+    await expect.poll(() => card.locator('.shell-card__badge').textContent(), { timeout: 20_000 }).toBe('종료 코드 0')
+    const share = card.getByRole('button', { name: 'AI 에게 보내기' })
+    expect(await share.isEnabled()).toBe(true)
+
+    await typeFresh('[drip] 턴 도는 중')
+    const replied = enterAndWait()
+    await expect.poll(() => share.isDisabled(), { timeout: 5_000 }).toBe(true)
+    expect(await share.locator('..').getAttribute('title')).toContain('답을 기다리는 중')
+    await replied
+    await expect.poll(() => share.isEnabled(), { timeout: 5_000 }).toBe(true)
+  })
+
+  it('돌고 있는 명령은 ■ 로 멈춘다', async () => {
+    await typeFresh('!sleep 30; echo NEVER')
+    await page.keyboard.press('Enter')
+    const card = cards().last()
+    await expect.poll(() => card.locator('.shell-card__badge').textContent(), { timeout: 10_000 }).toBe('실행 중')
+    await card.getByRole('button', { name: '중단' }).click()
+    await expect.poll(() => card.locator('.shell-card__badge').textContent(), { timeout: 10_000 }).toBe('중단됨')
+    expect(await card.locator('.shell-card__output').textContent()).not.toContain('NEVER')
+  })
+
+  it('터미널 칸: ⌘↓ 로 펴서 키가 칸으로 내려가고, ⌘↑ 로 접혀 입력창으로 올라온다. 다시 펴면 앞 출력이 남아 있다', async () => {
+    await input().focus()
+    await page.keyboard.press('Meta+ArrowDown')
+    const screen = page.locator('.shell-drawer .xterm-rows')
+    await expect.poll(() => page.locator('.shell-drawer').count(), { timeout: 5_000 }).toBe(1)
+    await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('.shell-drawer')), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => screen.textContent(), { timeout: 20_000 }).not.toBe('') // 프롬프트가 뜰 때까지
     await page.keyboard.type('echo KEYS-$((3+4))')
     await page.keyboard.press('Enter')
     await expect.poll(() => screen.textContent(), { timeout: 20_000 }).toContain('KEYS-7')
+
+    await page.keyboard.press('Meta+ArrowUp')
+    await expect.poll(() => page.locator('.shell-drawer').count(), { timeout: 5_000 }).toBe(0)
+    expect(await page.evaluate(() => (document.activeElement as HTMLTextAreaElement | null)?.placeholder)).toBe('메시지를 입력하세요…')
+
+    await page.keyboard.press('Meta+ArrowDown')
+    await expect.poll(() => screen.textContent(), { timeout: 20_000 }).toContain('KEYS-7')
+    await page.keyboard.press('Meta+ArrowUp')
   })
 
   it('앱을 껐다 켜서 /hi 대화를 다시 열어도 말풍선은 /hi world 다', async () => {
@@ -207,5 +259,19 @@ describe('입력 트리거 ↔ 실물 opencode', () => {
     await page.locator('.session-item__main', { hasText: '/hi world' }).click()
     await expect.poll(() => page.locator('.bubble--user').first().textContent({ timeout: 1_000 }), { timeout: 20_000 }).toBe('/hi world')
     expect(await replies().first().textContent()).toBe('echo: Say world first=world')
+  })
+
+  it('다시 켜도 `!` 카드가 제자리에 남는다 — 보낸 카드는 "보냄", 맥락에 넣은 본문은 말풍선으로 안 보인다', async () => {
+    const sent = cards().filter({ hasText: 'LITE-42' })
+    await expect.poll(() => sent.locator('.shell-card__share').textContent(), { timeout: 20_000 }).toBe('보냄')
+    expect(await cards().filter({ hasText: 'BUSY-1' }).locator('.shell-card__share').textContent()).toBe('AI 에게 보내기')
+    expect(await cards().filter({ hasText: 'sleep 30' }).locator('.shell-card__badge').textContent()).toBe('중단됨')
+    const users = await page.locator('.bubble--user').allTextContents()
+    expect(users).toEqual(['/hi world', '셸 다음 질문', '보낸 뒤 질문', '[drip] 턴 도는 중'])
+    // 자리: LITE-42 카드는 "셸 다음 질문" 바로 앞
+    const order = await page.locator('.shell-card, .bubble--user').evaluateAll((elements) =>
+      elements.map((element) => (element.classList.contains('shell-card') ? `card:${element.querySelector('.shell-card__command')?.textContent}` : element.textContent)),
+    )
+    expect(order.slice(0, 3)).toEqual(['/hi world', 'card:echo LITE-$((6*7)); pwd', '셸 다음 질문'])
   })
 })

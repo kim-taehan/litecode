@@ -6,6 +6,7 @@ import { normalizeBaseURL } from './providers.ts'
 import type { EngineConnection } from './engine.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
+import { contextText, messageItems, TurnTracker, type TurnItem } from './turnProgress.ts'
 import './engine.ts'
 
 // opencode 를 감싸는 서비스 — 위층(세션·UI)은 이 ctx.llm 키만 알고 opencode 를 직접 모른다.
@@ -31,6 +32,17 @@ declare module 'cordis' {
   interface Context {
     llm: LlmService
   }
+  interface Events {
+    /** 프롬프트가 엔진에 받아들여졌다 (턴 하나에 한 번). directory 는 chat 에 넘긴 프로젝트 폴더 그대로 */
+    'llm/turn-started'(info: TurnInfo): void
+    /** 받아들여진 턴이 끝났다 (started 마다 정확히 한 번). 받아들여지기 전에 거절된 턴(모델 없음 등)은 둘 다 안 나간다 */
+    'llm/turn-ended'(info: TurnInfo & { outcome: 'done' | 'failed' | 'interrupted'; error?: string }): void
+  }
+}
+
+export interface TurnInfo {
+  sessionId: string
+  directory: string
 }
 
 export interface ChatResult {
@@ -40,6 +52,8 @@ export interface ChatResult {
   error?: string
   /** 이 턴의 사용량·시간 (중립 모양 — turnUsage.ts). 끝난 스텝이 없으면 없다 */
   usage?: TurnUsage
+  /** 실패가 아니라 엔진 재시작·크래시·스트림 끊김으로 끝났다 (error 는 "중단됨 …") */
+  interrupted?: boolean
 }
 
 /** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */
@@ -49,6 +63,14 @@ export interface HistoryMessage {
   role: 'user' | 'assistant'
   text: string
   error?: string
+  /** user: 보낸 시각(ms) */
+  at?: number
+  /** assistant: 그 턴의 진행 줄 (생각·도구·글·지시문) — 실시간 턴의 chat onProgress 와 같은 모양 */
+  items?: TurnItem[]
+  /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
+  duration?: number
+  /** assistant: 끊겨서 끝났다 (error 는 INTERRUPTED) — 실패와 가른다 */
+  interrupted?: boolean
 }
 
 export interface History {
@@ -65,7 +87,7 @@ interface OpencodeMessage {
   type: string
   text?: string
   time?: { created?: number; completed?: number }
-  content?: { type: string; text?: string }[]
+  content?: Parameters<typeof messageItems>[1][number][]
   error?: { message?: string }
 }
 
@@ -114,6 +136,8 @@ export class LlmService extends Service {
   /** 답을 기다리는 턴 수 — DB 정리는 0 일 때만 돈다 (정리 잠금이 길면 그 사이 opencode 쓰기가 실패한다, 01_probe) */
   private turns = 0
   private purgeWanted = false
+  /** 턴이 도는 세션 — addContext 가 막는다 */
+  private busy = new Set<string>()
 
   constructor(ctx: Context) {
     super(ctx, 'llm')
@@ -187,7 +211,8 @@ export class LlmService extends Service {
   /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더를 따르고, 모델이 다르면
    *  보내기 전에 그 세션의 모델을 바꾼다 — 이어갈 때도 그 세션의 폴더를 넘긴다(모델·주소 확인에 쓴다).
    *  onSession 은 새 세션을 만든 직후, 프롬프트를 보내기 전에 불린다 — 답을 기다리는 중에 앱이 꺼져도 그 대화를 다시 열 수 있게.
-   *  messageId(newMessageId)를 주면 이 입력의 엔진 메시지 id 가 그것이 된다 — history 의 id 로 돌아온다 */
+   *  messageId(newMessageId)를 주면 이 입력의 엔진 메시지 id 가 그것이 된다 — history 의 id 로 돌아온다.
+   *  onProgress 는 턴 중 진행 줄(생각·도구·글)이 바뀔 때마다 불린다 — 화면의 실시간 진행 표시용. 턴 끝은 여전히 반환값이 정본이다 */
   async chat(
     providerId: string,
     modelId: string,
@@ -196,13 +221,90 @@ export class LlmService extends Service {
     sessionId?: string,
     onSession?: (sessionId: string) => Promise<void>,
     messageId?: string,
+    onProgress?: (item: TurnItem) => void,
   ): Promise<ChatResult> {
     this.turns++
+    /** busy: 이 턴이 쥔 세션(addContext 를 막는다), sessionId: 받아들여진 턴의 세션 — 그때만 turn-started/ended 를 낸다 */
+    const admitted: { busy?: string; sessionId?: string } = {}
     try {
-      return await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId)
+      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted)
+      const interrupted = !result.ok && (result.error === INTERRUPTED || !!result.error?.startsWith('중단됨'))
+      if (interrupted) result.interrupted = true
+      if (admitted.sessionId) {
+        this.ctx.emit('llm/turn-ended', {
+          sessionId: admitted.sessionId,
+          directory,
+          outcome: result.ok ? 'done' : interrupted ? 'interrupted' : 'failed',
+          ...(result.error !== undefined && { error: result.error }),
+        })
+      }
+      return result
     } finally {
+      if (admitted.busy) this.busy.delete(admitted.busy)
       this.turns--
       this.purgeIfIdle()
+    }
+  }
+
+  /** 세션을 쓸 준비 — 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 보고, 이어가는 세션은 모델을 맞추고, 없으면 만든다.
+   *  이어가는 세션도 directory(그 대화의 프로젝트)로 본다 */
+  private async prepare(
+    conn: EngineConnection,
+    providerId: string,
+    modelId: string,
+    directory: string,
+    sessionId: string | undefined,
+    onSession?: (sessionId: string) => Promise<void>,
+  ): Promise<{ id: string } | { error: string }> {
+    const workdir = await realDirectory(directory)
+    if (!workdir) return { error: `작업 디렉터리가 없다: ${directory}` }
+    const model = await this.waitForModel(conn, providerId, modelId, workdir)
+    if (!model) return { error: `opencode 에 모델 ${providerId}/${modelId} 없음` }
+    // 세션 폴더의 opencode.json 은 우리 provider 의 baseURL 까지 덮는다 — 그러면 프롬프트(와 프록시 토큰)가 그 주소로 간다.
+    // OPENCODE_DISABLE_PROJECT_CONFIG 로는 못 막는다 — 대신 그 폴더 카탈로그의 api.url 에 덮인 주소가 보인다 (01_probe Q4, 5/5).
+    // 우리가 적은 주소는 키 프록시 주소다 (engine.ts)
+    if (normalizeBaseURL(model.api?.url ?? '') !== normalizeBaseURL(conn.providerBaseURL(providerId))) {
+      return { error: `이 프로젝트의 opencode.json 이 provider 주소를 바꿉니다 (${model.api?.url}) — 대화 내용이 그 주소로 갈 수 있어 보내지 않았습니다` }
+    }
+    if (sessionId) {
+      await this.useModel(conn, sessionId, providerId, modelId)
+      return { id: sessionId }
+    }
+    const id = await this.createSession(conn, providerId, modelId, workdir)
+    await onSession?.(id)
+    return { id }
+  }
+
+  /** 대화 맥락에만 넣는다 — LLM 을 돌리지 않고 입력만 저장해 다음 턴에 실린다(`resume:false`, 01d). `!` 카드의 "AI 에게 보내기".
+   *  **그 세션의 턴이 도는 중이면 거절한다**: 그때 넣으면 진행 중 턴에 끼어들어 모델이 답하거나(steer) 턴 뒤 새 턴이 저절로 돈다
+   *  (queue) — 01h §4.2, 각 5/5. 세션이 없으면 만든다(onSession). messageId 는 newMessageId — 다시 열 때 이 입력을 가려낸다 */
+  async addContext(
+    providerId: string,
+    modelId: string,
+    directory: string,
+    text: string,
+    messageId: string,
+    sessionId?: string,
+    onSession?: (sessionId: string) => Promise<void>,
+  ): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
+    if (sessionId && this.busy.has(sessionId)) return { ok: false, sessionId, error: '답을 기다리는 중에는 맥락에 넣을 수 없습니다' }
+    if (!this.ctx.providers.get(providerId)) return { ok: false, sessionId, error: `provider ${providerId} 없음` }
+    let id = sessionId
+    try {
+      const conn = await this.ctx.engine.connection()
+      const ready = await this.prepare(conn, providerId, modelId, directory, sessionId, onSession)
+      if ('error' in ready) return { ok: false, sessionId, error: ready.error }
+      id = ready.id
+      if (this.busy.has(id)) return { ok: false, sessionId: id, error: '답을 기다리는 중에는 맥락에 넣을 수 없습니다' }
+      const res = await fetch(`${conn.url}/api/session/${id}/prompt`, {
+        method: 'POST',
+        headers: { ...conn.headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ id: messageId, prompt: { text }, resume: false }),
+      })
+      if (!res.ok) return { ok: false, sessionId: id, error: `맥락에 넣지 못했습니다 (${res.status})` }
+      return { ok: true, sessionId: id }
+    } catch (error) {
+      return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
     }
   }
 
@@ -211,9 +313,11 @@ export class LlmService extends Service {
     modelId: string,
     directory: string,
     prompt: string,
-    sessionId?: string,
-    onSession?: (sessionId: string) => Promise<void>,
-    messageId?: string,
+    sessionId: string | undefined,
+    onSession: ((sessionId: string) => Promise<void>) | undefined,
+    messageId: string | undefined,
+    onProgress: ((item: TurnItem) => void) | undefined,
+    admittedTurn: { busy?: string; sessionId?: string },
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: `provider ${providerId} 없음` }
@@ -222,42 +326,43 @@ export class LlmService extends Service {
     let id = sessionId
     try {
       conn = await this.ctx.engine.connection()
-      // 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 본다 — 이어가는 세션도 directory(그 대화의 프로젝트)로 본다
-      const workdir = await realDirectory(directory)
-      if (!workdir) return { ok: false, sessionId: id, error: `작업 디렉터리가 없다: ${directory}` }
-      const model = await this.waitForModel(conn, providerId, modelId, workdir)
-      if (!model) return { ok: false, sessionId: id, error: `opencode 에 모델 ${providerId}/${modelId} 없음` }
-      // 세션 폴더의 opencode.json 은 우리 provider 의 baseURL 까지 덮는다 — 그러면 프롬프트(와 프록시 토큰)가 그 주소로 간다.
-      // OPENCODE_DISABLE_PROJECT_CONFIG 로는 못 막는다 — 대신 그 폴더 카탈로그의 api.url 에 덮인 주소가 보인다 (01_probe Q4, 5/5).
-      // 우리가 적은 주소는 키 프록시 주소다 (engine.ts)
-      if (normalizeBaseURL(model.api?.url ?? '') !== normalizeBaseURL(conn.providerBaseURL(providerId))) {
-        return { ok: false, sessionId: id, error: `이 프로젝트의 opencode.json 이 provider 주소를 바꿉니다 (${model.api?.url}) — 대화 내용이 그 주소로 갈 수 있어 보내지 않았습니다` }
-      }
-      if (id) await this.useModel(conn, id, providerId, modelId)
-      else {
-        id = await this.createSession(conn, providerId, modelId, workdir)
-        await onSession?.(id)
-      }
+      const ready = await this.prepare(conn, providerId, modelId, directory, id, onSession)
+      if ('error' in ready) return { ok: false, sessionId: id, error: ready.error }
+      id = ready.id
+      this.busy.add(id) // addContext 가 이 세션을 막는다 (prompt 보내기 전부터 — 그 사이에 끼어들지 않게)
+      admittedTurn.busy = id
 
       let admitted!: (seq: number) => void
-      const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)))
-      const admit = await fetch(`${conn.url}/api/session/${id}/prompt`, {
-        method: 'POST',
-        headers: { ...conn.headers, 'content-type': 'application/json' },
-        body: JSON.stringify({ ...(messageId && { id: messageId }), prompt: { text: prompt } }),
-      }).catch((error: unknown) => {
-        events.stop()
-        throw error
-      })
-      if (!admit.ok) {
-        events.stop()
-        return { ok: false, sessionId: id, error: `프롬프트 전송 실패 (${admit.status})` }
+      const tracker = new TurnTracker()
+      const report = (item: TurnItem | undefined) => {
+        if (item) onProgress?.(item)
       }
-      admitted(((await admit.json()) as { data: { admittedSeq: number } }).data.admittedSeq)
+      const events = this.subscribe(conn, id, new Promise<number>((resolve) => (admitted = resolve)), tracker, report)
+      // 조각(생각·글이 쓰이는 중)은 전역 스트림에만 온다 — 장식이다: 끊기거나 실패해도 턴은 세션 SSE 로 끝난다 (01g)
+      const pieces = onProgress ? this.followPieces(conn, id, tracker, report) : undefined
+      try {
+        const admit = await fetch(`${conn.url}/api/session/${id}/prompt`, {
+          method: 'POST',
+          headers: { ...conn.headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ ...(messageId && { id: messageId }), prompt: { text: prompt } }),
+        }).catch((error: unknown) => {
+          events.stop()
+          throw error
+        })
+        if (!admit.ok) {
+          events.stop()
+          return { ok: false, sessionId: id, error: `프롬프트 전송 실패 (${admit.status})` }
+        }
+        admitted(((await admit.json()) as { data: { admittedSeq: number } }).data.admittedSeq)
+        admittedTurn.sessionId = id
+        this.ctx.emit('llm/turn-started', { sessionId: id, directory })
 
-      const result = await events.result
-      const usage = result.usage && { ...result.usage, messageTokens: await this.messageTokens(conn, id) }
-      return { ok: result.ok, sessionId: id, text: result.text, error: result.error, usage }
+        const result = await events.result
+        const usage = result.usage && { ...result.usage, messageTokens: await this.messageTokens(conn, id) }
+        return { ok: result.ok, sessionId: id, text: result.text, error: result.error, usage }
+      } finally {
+        pieces?.()
+      }
     } catch (error) {
       if (conn?.closed.aborted) return { ok: false, sessionId: id, error: INTERRUPTED }
       return { ok: false, sessionId: id, error: `opencode 연결 실패: ${(error as Error).message}` }
@@ -310,8 +415,9 @@ export class LlmService extends Service {
 
   /** 지난 대화의 말풍선. directory 는 그 세션의 작업 폴더 — 없으면 opencode 에 묻지 않는다: 폴더가 없어진 세션은 내용 요청이
    *  500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 계속 500 이다 (01c Q5). 재시작 뒤에도 내용은
-   *  그대로 온다(01c Q2) — 이벤트 재생 대신 조립된 메시지 목록을 쓴다 */
-  async history(directory: string, sessionId: string): Promise<History> {
+   *  그대로 온다(01c Q2) — 이벤트 재생 대신 조립된 메시지 목록을 쓴다.
+   *  hidden 은 말풍선으로 안 그릴 엔진 메시지 id — addContext 로 넣은 `!` 카드 본문 (카드는 앱이 따로 그린다) */
+  async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set()): Promise<History> {
     if (!(await realDirectory(directory))) return { messages: [], missingFolder: true }
     try {
       const conn = await this.ctx.engine.connection()
@@ -319,7 +425,7 @@ export class LlmService extends Service {
       const active = await fetch(`${conn.url}/api/session/active`, { headers: conn.headers })
       if (!active.ok) throw new Error(`진행 중 세션 조회 실패 (${active.status})`)
       const running = sessionId in ((await active.json()) as { data: Record<string, unknown> }).data
-      return { messages: historyMessages(raw, running) }
+      return { messages: historyMessages(raw.filter((message) => !message.id || !hidden.has(message.id)), running) }
     } catch (error) {
       return { messages: [], error: `대화를 불러오지 못했습니다: ${(error as Error).message}` }
     }
@@ -381,6 +487,8 @@ export class LlmService extends Service {
     conn: EngineConnection,
     sessionId: string,
     admittedSeq: Promise<number>,
+    tracker: TurnTracker,
+    report: (item: TurnItem | undefined) => void,
   ): { result: Promise<TurnOutcome>; stop: () => void } {
     const controller = new AbortController()
     const result = (async () => {
@@ -410,7 +518,7 @@ export class LlmService extends Service {
           while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
             const frame = buffer.slice(0, frameEnd)
             buffer = buffer.slice(frameEnd + 2)
-            const outcome = this.handleFrame(frame, texts, meter, await admittedSeq)
+            const outcome = this.handleFrame(frame, texts, meter, await admittedSeq, tracker, report)
             if (outcome) return outcome
           }
         }
@@ -423,18 +531,19 @@ export class LlmService extends Service {
     return { result, stop: () => controller.abort() }
   }
 
-  private handleFrame(frame: string, texts: string[], meter: TurnMeter, admittedSeq: number): TurnOutcome | undefined {
-    const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
-    if (!dataLine) return undefined
-
-    let event: OpencodeEventEnvelope
-    try {
-      event = JSON.parse(dataLine.slice('data: '.length)) as OpencodeEventEnvelope
-    } catch {
-      return undefined
-    }
+  private handleFrame(
+    frame: string,
+    texts: string[],
+    meter: TurnMeter,
+    admittedSeq: number,
+    tracker: TurnTracker,
+    report: (item: TurnItem | undefined) => void,
+  ): TurnOutcome | undefined {
+    const event = parseFrame(frame)
+    if (!event) return undefined
     if ((event.durable?.seq ?? Infinity) <= admittedSeq) return undefined // 이전 턴의 재생분
     meter.observe(event.type, event.data)
+    report(tracker.observe(event.type, event.data))
 
     if (event.type === 'session.next.text.ended') {
       const text = event.data['text']
@@ -451,6 +560,47 @@ export class LlmService extends Service {
     }
     return undefined
   }
+
+  /** 전역 `GET /api/event` 에서 이 세션의 조각(`*.delta`)만 골라 tracker 에 얹는다. 해제 함수를 준다.
+   *  전역 스트림은 서버 전체 이벤트라 data.sessionID 로 거른다. 조각이 아닌 이벤트는 세션 SSE 가 정본이라 버린다 — 둘 다 쓰면
+   *  같은 이벤트를 두 번 본다. 구독 응답을 기다리지 않는다(프롬프트를 늦추지 않게) — 그 사이 조각은 *.ended 가 덮는다 */
+  private followPieces(conn: EngineConnection, sessionId: string, tracker: TurnTracker, report: (item: TurnItem | undefined) => void): () => void {
+    const controller = new AbortController()
+    void (async () => {
+      const res = await fetch(`${conn.url}/api/event`, { headers: conn.headers, signal: AbortSignal.any([controller.signal, conn.closed]) })
+      if (!res.ok || !res.body) return
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      try {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) return
+          buffer += decoder.decode(value, { stream: true })
+          let frameEnd: number
+          while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
+            const event = parseFrame(buffer.slice(0, frameEnd))
+            buffer = buffer.slice(frameEnd + 2)
+            if (event?.type.endsWith('.delta') && event.data?.['sessionID'] === sessionId) report(tracker.observe(event.type, event.data))
+          }
+        }
+      } finally {
+        void reader.cancel().catch(() => {})
+      }
+    })().catch(() => {}) // 장식 — 끊겨도 턴은 끝난다
+    return () => controller.abort()
+  }
+}
+
+/** SSE 프레임 하나의 `data:` JSON. 없거나 깨졌으면 undefined (전역 스트림의 `: heartbeat` 주석 프레임 포함) */
+function parseFrame(frame: string): OpencodeEventEnvelope | undefined {
+  const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
+  if (!dataLine) return undefined
+  try {
+    return JSON.parse(dataLine.slice('data: '.length)) as OpencodeEventEnvelope
+  } catch {
+    return undefined
+  }
 }
 
 /** opencode 메시지(asc) → 말풍선. 도구 턴의 assistant 여럿은 한 답으로 합치고 텍스트만 쓴다 — 실시간 턴이 text.ended 만
@@ -458,24 +608,37 @@ export class LlmService extends Service {
  *  끝에 "중단됨" 을 단다 (재시작 뒤 opencode 는 그 턴을 다시 돌리지 않는다) */
 export function historyMessages(raw: OpencodeMessage[], running: boolean): HistoryMessage[] {
   const messages: HistoryMessage[] = []
+  let sentAt: number | undefined
+  /** 지시문 바뀜(system 메시지)은 다음 답의 진행 줄 맨 앞에 — 실시간 턴에서 context.updated 가 오는 자리 */
+  let context: TurnItem[] = []
   for (const message of raw) {
     if (message.type === 'user') {
-      messages.push({ id: message.id, role: 'user', text: message.text ?? '' })
+      sentAt = message.time?.created
+      messages.push({ id: message.id, role: 'user', text: message.text ?? '', ...(sentAt !== undefined && { at: sentAt }) })
       continue
     }
-    if (message.type !== 'assistant') continue // 모델 바꿈·시스템·압축 등은 말풍선이 아니다
+    if (message.type === 'system') {
+      context.push({ kind: 'context', id: `context:${message.id ?? context.length}`, text: contextText(message.text ?? '') })
+      continue
+    }
+    if (message.type !== 'assistant') continue // 모델 바꿈·압축 등은 말풍선이 아니다
     const previous = messages.at(-1)
-    const reply: HistoryMessage = previous?.role === 'assistant' ? previous : { role: 'assistant', text: '' }
+    const reply: HistoryMessage = previous?.role === 'assistant' ? previous : { role: 'assistant', text: '', items: [] }
     if (reply !== previous) messages.push(reply)
     reply.text += (message.content ?? []).filter((part) => part.type === 'text').map((part) => part.text ?? '').join('')
+    reply.items = [...(reply.items ?? []), ...context, ...messageItems(message.id ?? String(messages.length), message.content ?? [])]
+    context = []
+    const completed = message.time?.completed
+    if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
+    else delete reply.duration // 마지막 스텝이 안 끝났다
     if (message.error) reply.error = message.error.message ?? '알 수 없는 오류'
   }
 
   const last = raw.filter((message) => message.type === 'user' || message.type === 'assistant').at(-1)
   if (!running && last && (last.type === 'user' || !last.time?.completed)) {
     const reply = messages.at(-1)
-    if (reply?.role === 'assistant') reply.error = INTERRUPTED
-    else messages.push({ role: 'assistant', text: '', error: INTERRUPTED })
+    if (reply?.role === 'assistant') Object.assign(reply, { error: INTERRUPTED, interrupted: true })
+    else messages.push({ role: 'assistant', text: '', error: INTERRUPTED, interrupted: true })
   }
   return messages
 }

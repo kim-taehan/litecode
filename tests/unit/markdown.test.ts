@@ -38,13 +38,15 @@ describe('Markdown', () => {
     expect(out).toContain('<del>취소</del>')
   })
 
-  it('코드 블록은 머리(언어) + 복사 버튼 + 고정폭 본문이다', () => {
+  it('코드 블록은 머리(언어) + 아이콘 버튼 둘(줄바꿈·복사) + 고정폭 본문이다. 줄바꿈은 켠 채로 시작한다', () => {
     const out = html('```ts\nconst a = 1 < 2\n```')
     expect(out).toContain('<span class="md-code__lang">ts</span>')
-    expect(out).toContain('>복사</button>')
+    expect(out).toContain('aria-label="복사"')
+    expect(out).toMatch(/aria-pressed="true" aria-label="줄바꿈 끄기"/)
+    expect(out).toContain('data-wrap="true"')
     expect(out).toContain('<pre><code>const a = 1 &lt; 2</code></pre>')
-    // 언어가 없으면 머리에 text
-    expect(html('```\nplain\n```')).toContain('<span class="md-code__lang">text</span>')
+    // 언어가 없으면 머리에 "코드 블록"
+    expect(html('```\nplain\n```')).toContain('<span class="md-code__lang">코드 블록</span>')
   })
 
   it('원문 HTML 은 요소가 아니라 글자로 보인다', () => {

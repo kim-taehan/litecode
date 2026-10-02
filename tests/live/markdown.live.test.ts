@@ -121,8 +121,8 @@ describe('답 말풍선 마크다운', () => {
     const button = reply().getByRole('button', { name: '복사' })
     await button.click()
     expect(await page.evaluate(() => (window as unknown as { copied: string[] }).copied)).toEqual(['const answer = 42'])
-    await expect.poll(() => reply().locator('.md-code__copy').textContent(), { timeout: 1_000 }).toBe('복사됨')
-    await expect.poll(() => reply().locator('.md-code__copy').textContent(), { timeout: 5_000 }).toBe('복사')
+    await expect.poll(() => reply().locator('.md-code__copy').getAttribute('aria-label'), { timeout: 1_000 }).toBe('복사됨')
+    await expect.poll(() => reply().locator('.md-code__copy').getAttribute('aria-label'), { timeout: 5_000 }).toBe('복사')
   })
 
   it('링크를 누르면 앱 밖 브라우저로 열고 앱 창은 그 자리에 있다', async () => {

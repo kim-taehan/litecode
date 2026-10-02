@@ -64,11 +64,11 @@
 .md-image { color: var(--text-tertiary); font-style: italic; }
 .md-footnote { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
 
-/* 코드 블록 — 머리(언어·복사) + 회색 바탕 고정폭 본문 */
+/* 코드 블록 — 둥근 연회색 바탕 하나에 머리(언어·아이콘 버튼 둘)와 고정폭 본문. 테두리 없음 (dsh CodeBlock·CodeToolbar) */
 .md-code {
   margin: 12px 0;
   background: var(--fill-selector);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -77,38 +77,69 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px 12px;
-  background: var(--fill-active);
-  font-size: 11px;
-  line-height: 18px;
+  padding: 6px 8px 0 14px;
+  font-size: 12px;
+  line-height: 24px;
 }
 
 .md-code__lang {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text);
+  color: var(--text-tertiary);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.md-code__copy {
+.md-code__tools {
   flex-shrink: 0;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.md-code__tool {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
+  border-radius: 6px;
   background: none;
   padding: 0;
-  font: inherit;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   cursor: pointer;
 }
-.md-code__copy:hover { color: var(--text); }
+.md-code__tool:hover { color: var(--text); background: var(--fill-hover); }
+.md-code__wrap[aria-pressed='true'] { color: var(--text-secondary); }
+.md-code__copy[data-copied='true'] { color: var(--ok); }
 
 .md-code pre {
   margin: 0;
-  padding: 12px 14px;
+  padding: 6px 14px 12px;
   overflow-x: auto;
   white-space: pre;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   line-height: 1.55;
 }
+.md-code[data-wrap='true'] pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 파일 언급 칩 — 파일 아이콘 + 파란 이름 (dsh MarkdownText fileMention) */
+.md-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 0 2px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent);
+  vertical-align: baseline;
+  cursor: pointer;
+}
+.md-file svg { flex: none; align-self: center; }
+.md-file:hover { text-decoration: underline dotted; text-underline-offset: 3px; }

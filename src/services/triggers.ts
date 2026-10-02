@@ -47,8 +47,8 @@ export type TriggerResult =
   | { kind: 'drill'; text: string }
   /** text 를 평소 전송 경로로 보낸다. 말풍선·대화 기록에는 display 가 보인다 */
   | { kind: 'send'; text: string; display: string }
-  /** 그 폴더의 터미널 칸에서 돌렸다 — 화면은 칸을 편다. 대화에는 안 들어간다 */
-  | { kind: 'shell'; directory: string }
+  /** 그 폴더에서 command 를 한 번 돌려 결과 카드로 — 화면이 대화에 카드를 붙이고 메인(ctx.shell)이 돌린다. 맥락에는 안 들어간다 */
+  | { kind: 'shell'; directory: string; command: string }
   /** 막고 알린다 (모르는 명령 등) */
   | { kind: 'error'; message: string }
 

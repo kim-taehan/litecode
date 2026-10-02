@@ -1,0 +1,402 @@
+/* 대화 한 턴의 모양 — dsh ui-chat(ChatView·TurnProcessNodeView·ReasoningRow·MessageIconActions)의 간격·크기를 litecode 토큰으로.
+   색은 styles.css :root 토큰만 쓴다(다크 모드가 토큰으로 따라온다). 본문 글자 크기는 --chat-font-size (설정 > 일반) */
+
+.user-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.user-turn__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  color: var(--text-caption);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.user-turn__copy {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  color: var(--text-tertiary);
+}
+.user-turn__copy:hover { color: var(--text); background: var(--fill-hover); }
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 턴 머리 — 회색 글자 + 접기 화살표, 아래 얇은 구분선 (dsh 33px, 아래 8px) */
+.turn__head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 33px;
+  padding: 0 0 8px;
+  margin-bottom: 16px;
+  border: none;
+  border-bottom: 0.5px solid var(--border);
+  background: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  text-align: left;
+}
+button.turn__head:hover { color: var(--text); }
+.turn[data-state='failed'] .turn__head { color: var(--danger); }
+
+.turn__head-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(var(--chat-font-size, 14px) - 1px);
+  line-height: 24px;
+}
+
+.turn__chevron {
+  flex: none;
+  margin-left: 4px;
+  color: var(--text-caption);
+  transition: transform 100ms ease;
+}
+.turn__head[aria-expanded='true'] .turn__chevron { transform: rotate(180deg); }
+
+/* 작업 줄 — 줄 사이 6px, 답과는 12px (dsh) */
+.turn__work {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.turn[data-state='running'] .turn__work { margin-bottom: 0; }
+
+.turn-row {
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: calc(var(--chat-font-size, 14px) - 1px);
+}
+
+.turn-row__line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.turn-row__line:not(:disabled):hover { color: var(--text); }
+button.turn-row__line:disabled { cursor: default; }
+
+.turn-row__icon { flex: none; }
+
+.turn-row__title {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.turn-row__dot {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 2px;
+  border-radius: 1px;
+  background: var(--text-caption);
+}
+
+/* 요약은 한 줄 — 넘치면 오른쪽 끝을 흐리게 (dsh ReasoningRow summary[data-streaming]) */
+.turn-row__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, black calc(100% - 48px), transparent);
+}
+
+.turn-row[data-live] .turn-row__title,
+.turn-row[data-live] .turn-row__summary {
+  animation: turn-shimmer 1.6s ease-in-out infinite;
+}
+
+.turn-row[data-status='error'] .turn-row__title,
+.turn-row[data-status='error'] .turn-row__icon { color: var(--danger); }
+
+.turn-row__body {
+  padding: 4px 0 4px 20px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.turn-row__code {
+  margin: 4px 0;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--fill-selector);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.turn-row__code--error { color: var(--danger); }
+
+/* 진행 중에 끼어 나오는 답 글 — 본문 글자 그대로 */
+.turn-row--text {
+  color: var(--text);
+  font-size: var(--chat-font-size, 14px);
+  line-height: 1.6;
+}
+
+/* 진행 중 맨 아래 파란 줄 — 앞에 작업 줄이 있으면 구분선 (dsh .running·runningDivider) */
+.turn-running {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  color: var(--accent);
+  font-size: calc(var(--chat-font-size, 14px) - 2px);
+  line-height: 22px;
+}
+
+.turn-running__divider {
+  display: none;
+  width: 100%;
+  height: 0.5px;
+  margin: 8px 0 10px;
+  background: var(--border);
+}
+.turn__work + .turn-running .turn-running__divider { display: block; }
+
+.turn-running__content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.turn-running__text { font-variant-numeric: tabular-nums; }
+
+.turn-running__dots span {
+  animation: turn-dot 1.2s infinite;
+  opacity: 0.25;
+}
+.turn-running__dots span:nth-child(2) { animation-delay: 0.2s; }
+.turn-running__dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes turn-dot {
+  0%, 60%, 100% { opacity: 0.25; }
+  30% { opacity: 1; }
+}
+
+@keyframes turn-shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn__chevron { transition: none; }
+  .turn-row[data-live] .turn-row__title,
+  .turn-row[data-live] .turn-row__summary,
+  .turn-running__dots span { animation: none; opacity: 1; }
+}
+
+/* 대화 열 — dsh ConversationRoot 의 --dsh-chat-content-width: clamp(680px, 본문 폭 × 0.64, 920px). 입력 카드(styles.css .composer__box)는
+   이것 + 32px 이고 카드 안쪽 여백으로 글 끝이 이 열과 한 줄에 선다. 좁으면 좌우 16px 만 남긴다 */
+.chat-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(calc(100% - 32px), clamp(680px, 64%, 920px));
+  margin: 0 auto;
+}
+
+/* 오른쪽 가장자리 미니맵 — 턴마다 가로줄, 지금 보는 턴은 진하게, 눌러 이동 (dsh TurnNavigator). 대화 칸이 좁으면 숨긴다 */
+.chat-pane {
+  position: relative;
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
+
+.minimap {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 28px;
+  max-height: min(calc(100% - 64px), 420px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+}
+.minimap::-webkit-scrollbar { display: none; }
+
+.minimap__mark {
+  position: relative;
+  flex: none;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.minimap__mark::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 20px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  content: '';
+  transform: translateY(-50%) scaleX(0.6);
+  transform-origin: right center;
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+.minimap__mark:hover::before { transform: translateY(-50%) scaleX(0.9); background: var(--text-tertiary); }
+.minimap__mark[aria-current='true']::before { transform: translateY(-50%) scaleX(1); background: var(--text); }
+
+@container (max-width: 900px) {
+  .minimap { display: none; }
+}
+
+/* `!명령` 결과 카드 — 명령·끝난 사정·고정폭 출력. 맥락 밖이라 답과 다른 모양(둥근 연회색 판) */
+.shell-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--fill-selector);
+  font-size: calc(var(--chat-font-size, 14px) - 1px);
+}
+
+.shell-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.shell-card__prompt {
+  flex: none;
+  color: var(--danger);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.shell-card__command {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+}
+
+.shell-card__badge {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.shell-card[data-state='ok'] .shell-card__badge { color: var(--ok); }
+.shell-card[data-state='failed'] .shell-card__badge,
+.shell-card[data-state='error'] .shell-card__badge { color: var(--danger); }
+.shell-card[data-state='running'] .shell-card__badge { color: var(--accent); }
+
+.shell-card__stop {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+}
+.shell-card__stop:hover { color: var(--danger); background: var(--fill-hover); }
+
+.shell-card__output {
+  margin: 0;
+  max-height: 480px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.shell-card__output[data-collapsed] {
+  max-height: calc(12 * 1.5em);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+}
+
+.shell-card__more {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.shell-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shell-card__note {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.shell-card__share {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+}
+.shell-card__share:not(:disabled):hover { background: var(--fill-hover); }
+.shell-card__share:disabled { color: var(--text-tertiary); cursor: default; }
+
+.shell-card__error {
+  font-size: 12px;
+  color: var(--danger);
+}

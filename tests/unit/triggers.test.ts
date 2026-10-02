@@ -89,25 +89,12 @@ class FakeLlm extends Service {
   }
 }
 
-class FakeTerminals extends Service {
-  runs: string[] = []
-  constructor(ctx: Context) {
-    super(ctx, 'terminals')
-  }
-  async run(directory: string, command: string): Promise<void> {
-    this.runs.push(`${directory}: ${command}`)
-  }
-}
-
-async function start(): Promise<{ ctx: Context; triggers: TriggerRegistry; llm: FakeLlm; terminals: FakeTerminals }> {
+async function start(): Promise<{ ctx: Context; triggers: TriggerRegistry; llm: FakeLlm }> {
   const ctx = new Context()
   ctx.plugin(FakeLlm)
-  ctx.plugin(FakeTerminals)
   ctx.plugin(TriggerRegistry)
   return new Promise((resolve) =>
-    ctx.inject(['triggers', 'llm', 'terminals'], (ready) =>
-      resolve({ ctx, triggers: ready.triggers, llm: ready.llm as unknown as FakeLlm, terminals: ready.terminals as unknown as FakeTerminals }),
-    ),
+    ctx.inject(['triggers', 'llm'], (ready) => resolve({ ctx, triggers: ready.triggers, llm: ready.llm as unknown as FakeLlm })),
   )
 }
 
@@ -130,7 +117,7 @@ describe('ctx.triggers', () => {
     const fiber = ctx.plugin(BangTrigger)
     await settle()
     expect((await triggers.query(scope, '!ls', 3))?.tone).toBe('danger')
-    expect(await triggers.submit(scope, '!ls')).toEqual({ kind: 'shell', directory: '/work/a' })
+    expect(await triggers.submit(scope, '!ls')).toEqual({ kind: 'shell', directory: '/work/a', command: 'ls' })
 
     await fiber.dispose()
     expect(await triggers.query(scope, '!ls', 3)).toBeNull()
@@ -138,7 +125,7 @@ describe('ctx.triggers', () => {
 
     ctx.plugin(BangTrigger)
     await settle()
-    expect(await triggers.submit(scope, '!ls')).toEqual({ kind: 'shell', directory: '/work/a' })
+    expect(await triggers.submit(scope, '!ls')).toEqual({ kind: 'shell', directory: '/work/a', command: 'ls' })
   })
 
   it('후보 조회가 실패하면 빈 목록이다 (팝업이 깨지지 않는다)', async () => {
@@ -205,12 +192,11 @@ describe('/ 명령', () => {
 })
 
 describe('! 셸', () => {
-  it('그 폴더 터미널에서 돌리고 대화로는 안 보낸다. 빈 명령은 막는다', async () => {
-    const { ctx, triggers, terminals } = await start()
+  it('명령을 결과 카드로 내고(화면이 ctx.shell 로 돌린다) 대화로는 안 보낸다. 빈 명령은 막는다', async () => {
+    const { ctx, triggers } = await start()
     ctx.plugin(BangTrigger)
     await settle()
-    expect(await triggers.submit(scope, '  !pwd ')).toEqual({ kind: 'shell', directory: '/work/a' })
-    expect(terminals.runs).toEqual(['/work/a: pwd'])
+    expect(await triggers.submit(scope, '  !pwd ')).toEqual({ kind: 'shell', directory: '/work/a', command: 'pwd' })
     expect(await triggers.submit(scope, '!')).toMatchObject({ kind: 'error' })
   })
 })

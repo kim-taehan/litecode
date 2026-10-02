@@ -4,15 +4,17 @@
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
 import type { ChatResult, History } from '../src/services/llm.ts'
 import type { Project } from '../src/services/projects.ts'
-import type { Conversation } from '../src/services/sessions.ts'
+import type { Conversation, ShellCard } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 import type { Trajectory } from '../src/services/trajectory.ts'
+import type { TurnItem } from '../src/services/turnProgress.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
 export type { TurnUsage } from '../src/services/turnUsage.ts'
+export type { TurnItem } from '../src/services/turnProgress.ts'
 export type { Project } from '../src/services/projects.ts'
-export type { Conversation } from '../src/services/sessions.ts'
+export type { Conversation, ShellCard } from '../src/services/sessions.ts'
 export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
 
@@ -44,6 +46,15 @@ export const Channel = {
   TERMINAL_EXIT: 'terminal:exit',
   OPEN_EXTERNAL: 'shell:open-external',
   LOAD_TRAJECTORY: 'trajectory:load',
+  /** 메인 → 화면 (conversationId, item) — 답을 기다리는 턴의 진행 줄 */
+  TURN_PROGRESS: 'chat:progress',
+  RESOLVE_FILES: 'chat:resolve-files',
+  REVEAL_FILE: 'chat:reveal-file',
+  RUN_SHELL: 'shell:run',
+  STOP_SHELL: 'shell:stop',
+  /** 메인 → 화면 (runId, chunk) */
+  SHELL_DATA: 'shell:data',
+  SHARE_SHELL: 'shell:share',
 } as const
 
 export interface LitecodeBridge {
@@ -103,6 +114,20 @@ export interface LitecodeBridge {
   openExternal(url: string): Promise<boolean>
   /** 대화 하나의 스텝·도구 기록 (Trajectory 탭). directory 는 그 대화의 작업 폴더 — 없으면 엔진에 묻지 않고 missingFolder */
   loadTrajectory(directory: string, sessionId: string): Promise<Trajectory>
+  /** 답을 기다리는 턴의 진행 줄(생각·도구·글)이 바뀔 때마다 — 같은 id 는 바꿔 끼운다. 해제 함수를 준다 */
+  onTurnProgress(listener: (conversationId: string, item: TurnItem) => void): () => void
+  /** 답의 인라인 코드 중 그 프로젝트 안의 실제 파일인 것만 (받은 글자 그대로) — 파일 언급 칩 */
+  resolveFiles(directory: string, tokens: string[]): Promise<string[]>
+  /** 프로젝트 안의 그 파일을 OS 파일 관리자에서 보여 준다 (열지·실행하지 않는다). 프로젝트 밖·없는 파일이면 false */
+  revealFile(directory: string, token: string): Promise<boolean>
+  /** `!명령` — 그 대화의 프로젝트 폴더에서 한 번 돌리고, 끝나면 그 대화에 카드로 저장한 것을 준다. runId 는 화면이 정한다(출력 조각을
+   *  onShellData 로 받으려고). position 은 대화 안 자리(앞 말풍선 수). 결과는 대화 맥락에 안 들어간다 */
+  runShell(conversationId: string, runId: string, directory: string, command: string, position: number): Promise<ShellCard>
+  /** ■ — 돌고 있으면 멈춘다 */
+  stopShell(runId: string): Promise<boolean>
+  onShellData(listener: (runId: string, chunk: string) => void): () => void
+  /** 카드를 AI 에게 — 그 대화 엔진 세션의 맥락에만 넣는다(LLM 은 안 돈다). 세션이 없으면 그 모델로 만든다. 턴이 도는 중이면 거절 */
+  shareShell(conversationId: string, cardId: string, providerId: string, modelId: string): Promise<{ ok: boolean; sessionId?: string; error?: string }>
 }
 
 declare global {

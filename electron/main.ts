@@ -4,16 +4,19 @@ import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
 import { ProviderRegistry, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService } from '../src/services/llm.ts'
+import type { TurnItem } from '../src/services/turnProgress.ts'
 import { EngineService } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { SessionsService, type Conversation } from '../src/services/sessions.ts'
 import { TriggerRegistry, type TriggerScope } from '../src/services/triggers.ts'
 import { TerminalsService } from '../src/services/terminals.ts'
+import { ShellService } from '../src/services/shell.ts'
 import { AtTrigger } from '../src/triggers/at.ts'
 import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
 import { TrajectoryService } from '../src/services/trajectory.ts'
+import { existingFiles, projectFile } from '../src/services/fileMentions.ts'
 import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { canSealKeys } from './keyStorage.ts'
@@ -72,6 +75,7 @@ mounted.push(ctx.plugin(SessionsService, {
 // 입력창 트리거 — 등록소 하나에 플러그인 셋이 effect 로 등록한다. 하나를 내리면 그 문자는 평범한 글자가 된다
 mounted.push(ctx.plugin(TriggerRegistry))
 mounted.push(ctx.plugin(TerminalsService))
+mounted.push(ctx.plugin(ShellService))
 mounted.push(ctx.plugin(AtTrigger))
 mounted.push(ctx.plugin(SlashTrigger))
 mounted.push(ctx.plugin(BangTrigger))
@@ -102,7 +106,11 @@ function bootstrap(ctx: Context): void {
       // 보낸 본문과 보일 글이 다르면(`/` 명령) 엔진 메시지 id 를 정해 보일 글을 적어 둔다 — 다시 열어도 친 글이 보이게
       const messageId = display ? ctx.llm.newMessageId() : undefined
       if (messageId) await ctx.sessions.label(conversationId, messageId, display!)
-      return ctx.llm.chat(providerId, modelId, directory, prompt, sessionId, (created) => ctx.sessions.attach(conversationId, created), messageId)
+      // 진행 줄은 모든 창에 흘린다 (화면이 대화 id 로 거른다) — 터미널 출력과 같은 방식
+      const progress = (item: TurnItem) => {
+        for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TURN_PROGRESS, conversationId, item)
+      }
+      return ctx.llm.chat(providerId, modelId, directory, prompt, sessionId, (created) => ctx.sessions.attach(conversationId, created), messageId, progress)
     },
   )
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
@@ -147,8 +155,30 @@ function bootstrap(ctx: Context): void {
     return true
   })
   handle(ctx, Channel.LOAD_TRAJECTORY, async (_event, directory: string, sessionId: string) => ctx.trajectory.read(directory, sessionId))
+  // 파일 언급 칩 — 프로젝트 안의 파일만. 누르면 OS 파일 관리자에서 그 파일을 가리킨다(열거나 실행하지 않는다 — 답은 모델이 쓴 글이다)
+  handle(ctx, Channel.RESOLVE_FILES, async (_event, directory: string, tokens: string[]) => (Array.isArray(tokens) ? existingFiles(directory, tokens) : []))
+  handle(ctx, Channel.REVEAL_FILE, async (_event, directory: string, token: string) => {
+    const file = await projectFile(directory, token)
+    if (file) shell.showItemInFolder(file)
+    return !!file
+  })
+  // `!명령` 카드 — 메인이 프로젝트 폴더에서 돌리고(ctx.shell), 끝나면 그 대화에 저장한다(ctx.sessions). 출력 조각은 모든 창에
+  handle(ctx, Channel.RUN_SHELL, async (_event, conversationId: string, runId: string, directory: string, command: string, position: number) => {
+    const at = Date.now()
+    const result = await ctx.shell.run(runId, directory, command)
+    const card = { ...result, id: runId, at, position }
+    await ctx.sessions.addShell(conversationId, card)
+    return card
+  })
+  handle(ctx, Channel.STOP_SHELL, async (_event, runId: string) => ctx.shell.stop(runId))
+  ctx.on('shell/data', (runId, chunk) => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.SHELL_DATA, runId, chunk)
+  })
+  handle(ctx, Channel.SHARE_SHELL, async (_event, conversationId: string, cardId: string, providerId: string, modelId: string) =>
+    ctx.sessions.shareShell(conversationId, cardId, providerId, modelId),
+  )
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory']
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory', 'shell']
 mounted.push(ctx.plugin(bootstrap))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).
