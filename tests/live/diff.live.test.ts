@@ -8,9 +8,10 @@ import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { freePort, isolatedEnv } from './support/opencodeServer.ts'
 
-// 파일 변경(diff) 실물 테스트 (이슈 #4) — 가짜 LLM 이 edit·apply_patch·write 를 부르게 해서 진짜 opencode 가 파일을 바꾸고, 그 도구 결과
-// (tool.success.structured → chat:progress, 기록 /message → 다시 열기·추론 과정 탭)가 도구 줄 끝 `+A −D` 와 펼친 카드의 줄로 보이는지 본다.
-// 신규 세대 도구 인자는 `path` 다 (`filePath` 면 실패, 01p). 기본 모드(build)라 프로젝트 안 편집은 묻지 않는다.
+// 파일 변경(diff) 실물 테스트 (이슈 #4 → 레거시 경로 #20 L2) — 가짜 LLM 이 edit·apply_patch·write 를 부르게 해서 진짜 opencode 가 파일을 바꾸고,
+// 그 도구 결과(레거시 state.metadata → chat:progress, 기록 /session/{id}/message → 다시 열기·추론 과정 탭)가 도구 줄 끝 `+A −D` 와 펼친 카드의 줄로
+// 보이는지 본다. 레거시 도구 인자는 `filePath` 다. 레거시는 모델 id 에 `gpt-` 가 있을 때만 apply_patch 를 주고(그때는 edit·write 가 없다) —
+// 그래서 gateway provider 에 GPT 이름의 모델을 하나 더 두고 apply_patch 턴만 그 모델로 보낸다. 기본 모드(build)라 프로젝트 안 편집은 묻지 않는다.
 // 자기 앱·vite·임시 폴더를 띄우고 다른 실물 테스트에 기대지 않는다.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
@@ -45,6 +46,23 @@ beforeAll(async () => {
   await fs.writeFile(path.join(project, 'a.txt'), 'line1\nline2\nline3\nline4\nline5\n')
   await fs.writeFile(path.join(project, 'c.txt'), 'gone\n')
   await fs.writeFile(path.join(project, 'w.txt'), 'old content\n')
+  // 첫 실행 기본값 대신 — 같은 gateway 에 apply_patch 를 받는 GPT 이름 모델을 더한다 (providers.json 이 정본)
+  await fs.mkdir(userData, { recursive: true })
+  await fs.writeFile(
+    path.join(userData, 'providers.json'),
+    JSON.stringify([
+      {
+        id: 'gateway-local',
+        displayName: 'Internal LiteLLM Gateway',
+        baseURL: `${inject('fakeLlmUrl')}/v1`,
+        protocol: 'openai-chat-completions',
+        models: [
+          { id: 'qwen3.8-27b', displayName: 'Qwen3.8 27B' },
+          { id: 'gpt-5-fake', displayName: 'GPT-5 Fake' },
+        ],
+      },
+    ]),
+  )
 
   const port = await freePort()
   vite = await createServer({ configFile: path.join(root, 'vite.config.ts'), server: { port, strictPort: true } })
@@ -73,6 +91,14 @@ const toolRow = (index: number) => turn(index).locator('.turn-row[data-kind="too
 const cardLines = (scope: ReturnType<Page['locator']>) =>
   scope.locator('.diff-line').evaluateAll((elements) => elements.map((element) => `${element.getAttribute('data-kind')}:${(element as HTMLElement).innerText}`))
 
+/** 입력창의 모델을 고른다 (메뉴 이름 = 모델 이름) */
+async function chooseModel(name: string): Promise<void> {
+  const menu = page.getByRole('menu', { name: '모델' })
+  await page.locator('.model-select__trigger').click()
+  await menu.getByRole('menuitemradio', { name, exact: true }).click()
+  await expect.poll(() => page.locator('.composer__model').textContent(), { timeout: 5_000 }).toBe(name)
+}
+
 async function send(text: string): Promise<void> {
   const before = await replies().count()
   await page.getByPlaceholder('메시지를 입력하세요…').fill(text)
@@ -93,7 +119,7 @@ const EDIT_LINES = ['file:a.txt', 'context:line1', 'context:line2', 'del:line3',
 
 describe('도구 줄 안 diff', () => {
   it('edit: 도구 줄 끝 +1 −1, 펼치면 경로·문맥·삭제·추가 줄 (파일도 실제로 바뀌었다)', async () => {
-    await send(`diff-edit [call:edit {"path":"${project}/a.txt","oldString":"line3","newString":"LINE3"}]`)
+    await send(`diff-edit [call:edit {"filePath":"${project}/a.txt","oldString":"line3","newString":"LINE3"}]`)
     expect(await fs.readFile(path.join(project, 'a.txt'), 'utf8')).toBe('line1\nline2\nLINE3\nline4\nline5\n')
     await turn(0).locator('.turn__head').click()
     expect(await toolRow(0).locator('.diff-stat').innerText()).toBe('+1 −1')
@@ -103,8 +129,10 @@ describe('도구 줄 안 diff', () => {
     expect(await card.locator('.diff-line[data-kind="del"]').evaluate((element) => getComputedStyle(element, '::before').content)).toBe('"- "')
   })
 
-  it('apply_patch: 파일 셋(수정·추가·삭제) — 경로 머리 셋, 새 파일·삭제됨 표시. 9줄 넘으면 접고 "N줄 더 보기"', async () => {
+  it('apply_patch(GPT 모델): 파일 셋(수정·추가·삭제) — 경로 머리 셋, 새 파일·삭제됨 표시. 9줄 넘으면 접고 "N줄 더 보기"', async () => {
+    await chooseModel('GPT-5 Fake')
     await send(`diff-patch [call:apply_patch ${JSON.stringify({ patchText: PATCH })}]`)
+    await chooseModel('Qwen3.8 27B')
     expect(await fs.readFile(path.join(project, 'b.txt'), 'utf8')).toBe('hello\nworld\n')
     await expect(fs.access(path.join(project, 'c.txt'))).rejects.toThrow()
     await turn(1).locator('.turn__head').click()
@@ -124,12 +152,12 @@ describe('도구 줄 안 diff', () => {
   })
 
   it('write: 새 파일은 전부 추가(+2 −0), 덮어쓰기는 이전 내용을 모른다(+1 −?)', async () => {
-    await send(`diff-write [call:write ${JSON.stringify({ path: `${project}/n.txt`, content: 'x\ny\n' })}]`)
+    await send(`diff-write [call:write ${JSON.stringify({ filePath: `${project}/n.txt`, content: 'x\ny\n' })}]`)
     await turn(2).locator('.turn__head').click()
     expect(await toolRow(2).locator('.diff-stat').innerText()).toBe('+2 −0')
     expect(await cardLines(await openTool(2))).toEqual(['file:n.txt새 파일', 'add:x', 'add:y'])
 
-    await send(`diff-over [call:write ${JSON.stringify({ path: `${project}/w.txt`, content: 'new content\n' })}]`)
+    await send(`diff-over [call:write ${JSON.stringify({ filePath: `${project}/w.txt`, content: 'new content\n' })}]`)
     expect(await fs.readFile(path.join(project, 'w.txt'), 'utf8')).toBe('new content\n')
     await turn(3).locator('.turn__head').click()
     expect(await toolRow(3).locator('.diff-stat').innerText()).toBe('+1 −?')

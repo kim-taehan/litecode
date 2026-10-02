@@ -5,7 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import { ascendingId, interruptedError, LlmService, type Attention, type TurnInfo } from '../../src/services/llm.ts'
+import { ascendingId, interruptedError, LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type TurnInfo } from '../../src/services/llm.ts'
+import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
 
@@ -14,7 +15,7 @@ import { translate } from '../../shared/i18n/index.ts'
 // {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
 // (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'noidle' | 'compactloop'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry'
 
 /** 'silent' 턴이 끝 이벤트까지 /event 에 아무것도 안 보내는 시간 */
 const SILENT_MS = 1_500
@@ -137,6 +138,43 @@ async function fakeOpencode(ending: Ending): Promise<string> {
             idle()
           }
           if (ending === 'silent') setTimeout(() => (answer('late'), idle()), SILENT_MS)
+          if (ending === 'heartbeat') {
+            // 레거시 /event 는 10초마다 heartbeat — 조용한 턴에도 바이트가 온다 (여기선 100ms 마다)
+            const beat = setInterval(() => events?.write(`data: ${JSON.stringify({ type: 'server.heartbeat', properties: {} })}\n\n`), 100)
+            setTimeout(() => (clearInterval(beat), answer('late'), idle()), SILENT_MS)
+          }
+          // 게이트웨이 한도 초과(이슈 #20 L2 실측 순서): session.error(ContextOverflowError) → 요약 user(compaction 파트) → 요약 답(summary) →
+          // 이음 user(합성 Continue) → 그 답 → idle. huge 는 요약도 넘쳐 요약 답이 error 로 끝나고 idle
+          if (ending === 'overflow' || ending === 'huge') {
+            emit('session.error', { error: { name: 'ContextOverflowError', data: { message: "This model's maximum context length is 8000 tokens." } } })
+            emit('message.updated', { info: { id: A, sessionID: 'ses_1', role: 'assistant', parentID: body.messageID, time: { created: 1, completed: 2 } } })
+            emit('message.updated', { info: { id: 'msg_c', sessionID: 'ses_1', role: 'user', time: { created: 3 } } })
+            emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: 'msg_c', id: 'prt_c', type: 'compaction', auto: true, overflow: true } })
+            emit('message.updated', { info: { id: 'msg_sum', sessionID: 'ses_1', role: 'assistant', parentID: 'msg_c', summary: true, agent: 'compaction', time: { created: 4 } } })
+            emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: 'msg_sum', id: 'prt_s', type: 'text', text: '## Objective', time: { start: 4, end: 5 } } })
+            if (ending === 'huge') {
+              emit('session.error', { error: { name: 'ContextOverflowError', data: { message: "This model's maximum context length is 8000 tokens." } } })
+              const error = { name: 'ContextOverflowError', data: { message: 'Session too large to compact - context exceeds model limit even after stripping media' } }
+              emit('message.updated', { info: { id: 'msg_sum', sessionID: 'ses_1', role: 'assistant', parentID: 'msg_c', summary: true, time: { created: 4, completed: 5 }, error } })
+              return idle()
+            }
+            emit('message.updated', { info: { id: 'msg_sum', sessionID: 'ses_1', role: 'assistant', parentID: 'msg_c', summary: true, agent: 'compaction', time: { created: 4, completed: 5 } } })
+            emit('message.updated', { info: { id: 'msg_k', sessionID: 'ses_1', role: 'user', time: { created: 6 } } })
+            emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: 'msg_k', id: 'prt_k', type: 'text', text: 'Continue if you have next steps', synthetic: true } })
+            emit('session.compacted', {})
+            emit('message.updated', { info: { id: 'msg_after', sessionID: 'ses_1', role: 'assistant', parentID: 'msg_k', time: { created: 7 } } })
+            emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: 'msg_after', type: 'text', id: 'prt_after', text: 'echo: continued', time: { start: 7, end: 8 } } })
+            idle()
+          }
+          // 게이트웨이 500: session.status retry(몇 번째·사유) → 다시 보낼 때 busy → 답
+          if (ending === 'retry') {
+            emit('session.status', { status: { type: 'retry', attempt: 1, message: 'Internal Server Error', next: Date.now() + 2000 } })
+            setTimeout(() => {
+              emit('session.status', { status: { type: 'busy' } })
+              answer('echo: hi')
+              idle()
+            }, 100)
+          }
           if (ending === 'compactloop') for (let i = 0; i < 10; i++) emit('session.compacted', {}) // 한도가 작아 요약 → Continue → 다시 넘침 (idle 없음)
           if (ending === 'permission' || ending === 'question') {
             part({ type: 'tool', id: 'prt_b', tool: ending === 'question' ? 'question' : 'bash', callID: 'call_1', state: { status: 'running', input: {} } })
@@ -241,6 +279,38 @@ describe("ctx.llm 턴 수명 이벤트", () => {
     expect((await llm.chat('p', 'm', directory, 'hi')).ok).toBe(false)
     expect((await llm.chat('p', 'm', `${directory}/litecode-no-such-dir`, 'hi')).ok).toBe(false)
     expect(seen).toEqual([])
+  })
+})
+
+describe('ctx.llm 자동 요약·재시도 (이슈 #20 L2)', () => {
+  it('게이트웨이 한도 초과 → opencode 가 요약해 이어 간 턴은 성공이다 — 요약 줄(running → done), 답은 이음(Continue)의 답, 요약 글은 답이 아니다', async () => {
+    const { llm, seen } = await start(await fakeOpencode('overflow'))
+    const items: TurnItem[] = []
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, (item) => items.push(item))
+    expect(result).toMatchObject({ ok: true, text: 'echo: continued' })
+    expect(items.filter((item) => item.kind === 'compaction')).toEqual([
+      { kind: 'compaction', id: 'msg_c:compaction', status: 'running' },
+      { kind: 'compaction', id: 'msg_c:compaction', status: 'done' },
+    ])
+    expect(items.some((item) => item.kind === 'text' && item.text.includes('Objective'))).toBe(false)
+    expect(seen.at(-1)).toBe(`ended ses_1@${directory} done`)
+  })
+
+  it('요약도 한도를 넘으면(요약 답 ContextOverflowError) "새 대화로" 안내로 실패 — 요약 줄은 failed', async () => {
+    const { llm } = await start(await fakeOpencode('huge'))
+    const items: TurnItem[] = []
+    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, (item) => items.push(item))).toMatchObject({ ok: false, error: tr('error.contextOverflow') })
+    expect(items.filter((item) => item.kind === 'compaction').at(-1)).toMatchObject({ status: 'failed' })
+  })
+
+  it('재시도(session.status retry) → 진행 줄 "재시도" waiting(몇 번째·사유), 다시 보내면 done. 턴은 그대로 끝난다', async () => {
+    const { llm } = await start(await fakeOpencode('retry'))
+    const items: TurnItem[] = []
+    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, (item) => items.push(item))).toMatchObject({ ok: true, text: 'echo: hi' })
+    expect(items.filter((item) => item.kind === 'retry')).toEqual([
+      { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'waiting' },
+      { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'done' },
+    ])
   })
 })
 
@@ -428,7 +498,12 @@ describe('ctx.llm /event 무바이트 구간 (01q)', () => {
     expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, interrupted: true })
   })
 
-  it('기본(타임아웃 없음)이면 조용한 구간을 지나 끝까지 받는다', async () => {
+  it('heartbeat 가 오면 조용한 턴이 타임아웃보다 길어도 끊기지 않는다 — 무바이트 한도는 죽은 연결만 잡는다', async () => {
+    const { llm } = await start(await fakeOpencode('heartbeat'), { streamTimeoutMs: 300 })
+    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true, text: 'late' })
+  })
+
+  it(`기본 한도(${STREAM_IDLE_TIMEOUT_MS}ms — heartbeat 세 번)면 그보다 짧은 조용한 구간을 지나 끝까지 받는다`, async () => {
     const { llm } = await start(await fakeOpencode('silent'))
     expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true, text: 'late' })
   })

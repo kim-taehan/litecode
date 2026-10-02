@@ -76,6 +76,7 @@ export const en = {
   // Automatic summary (compaction) — 01o
   'chat.compacting': 'Summarizing earlier conversation',
   'chat.compacted': 'Earlier conversation summarized',
+  'chat.retrying': 'Retrying (attempt {attempt})',
   'markdown.codeBlock': 'Code block',
   'markdown.wrapOff': 'Turn off wrapping',
   'markdown.wrapOn': 'Turn on wrapping',
@@ -280,7 +281,7 @@ export const en = {
   'models.contextLength': 'Context length {n}',
   'models.contextLengthPlaceholder': 'Context length',
   'models.contextLengthTitle': 'Context length (tokens, optional)',
-  'models.contextLengthHint': 'Context length is the most tokens the model accepts. Leave it empty to turn automatic summary off.',
+  'models.contextLengthHint': 'Context length is the most tokens the model accepts. Leave it empty to summarize only when the model rejects a request as too long.',
   'models.contextLengthLow': '{model}: automatic summary does not work well below {min} context tokens.',
   'models.removeModel': 'Remove model {n}',
   'models.removeModelTitle': 'Remove model',

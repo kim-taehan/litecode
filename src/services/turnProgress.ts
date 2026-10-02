@@ -10,9 +10,14 @@
 // - 도구: 같은 part id 를 덮어쓴다 — pending{input:{}} → running{input, time.start} → (bash) running{metadata.output: 누적 출력} 여러 번 →
 //   completed{output, metadata, time} | error{error(문자열)}
 // - 줄 순서는 처음 나타난 순서다 (Map 삽입 순서)
-// - 파일을 바꾼 도구의 diffs(레거시 metadata.filediff)는 L2 — 지금은 싣지 않는다
+// - 파일을 바꾼 도구의 diffs 는 state.metadata 에서 (toolDiffs.ts — 경로는 세션 폴더 기준 상대로)
+// 자동 요약 (이슈 #20 L2 실측, 가짜 LLM — 한도를 넘은 스텝 뒤·게이트웨이의 한도 초과 오류 뒤 둘 다 같은 모양):
+//   user(파트 `compaction{auto, overflow}`) → assistant(parentID = 그 user, agent "compaction", **summary:true**, 요약 글이 진행 이벤트로 흐른다)
+//   → user(합성 "Continue…" 글, metadata.compaction_continue — 게이트웨이 오류였으면 그 앞 user 의 복사본일 수 있다) → session.compacted
+//   → 그 user 에 대한 답 → idle. 요약이 실패하면 summary 답이 error(ContextOverflowError) 로 끝나고 이어지는 user 없이 idle
+//   → TurnScope 는 이 턴 안에서 opencode 가 만든 요약 user 와 그 뒤 user 하나를 이 턴 것으로 받는다 (그 답이 이 턴 답이다)
 
-import type { FileDiff } from './toolDiffs.ts'
+import { toolDiffs, type FileDiff } from './toolDiffs.ts'
 
 /** 진행 줄 하나. 같은 id 의 새 값이 오면 통째로 바꾼다 (누적 전체를 싣는다 — 조각을 놓쳐도 화면이 틀어지지 않는다) */
 export type TurnItem =
@@ -25,6 +30,9 @@ export type TurnItem =
   /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
    *  이어졌다)는 그리지 않는다 (01o) */
   | { kind: 'compaction'; id: string; status: 'running' | 'done' | 'failed' }
+  /** LLM 요청이 재시도할 수 있는 오류(500 등)로 실패해 엔진이 다시 보내려고 기다린다 — waiting 동안 "재시도 중 (n번째)", 다시 보내면 done
+   *  (그리지 않는다). 레거시는 5번까지 재시도한다(합계 ~71초, 01w) */
+  | { kind: 'retry'; id: string; attempt: number; message: string; status: 'waiting' | 'done' }
 
 type Props = Record<string, unknown>
 
@@ -44,12 +52,16 @@ export interface EnginePart {
     input?: unknown
     output?: string
     error?: string
-    metadata?: { output?: unknown; exit?: unknown }
+    /** bash: output(실시간 누적)·exit. edit: filediff. write: filepath·exists. apply_patch: files (toolDiffs.ts) */
+    metadata?: { output?: unknown; exit?: unknown; [key: string]: unknown }
     time?: { start?: number; end?: number }
   }
   /** step-finish */
   tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
   reason?: string
+  /** compaction 파트 (자동 요약을 시작한 user 메시지) */
+  auto?: boolean
+  overflow?: boolean
 }
 
 /** 레거시 메시지 정보 중 우리가 읽는 필드 */
@@ -63,30 +75,68 @@ export interface EngineMessageInfo {
   summary?: unknown
   time?: { created?: number; completed?: number }
   error?: { name?: string; data?: { message?: string } }
+  /** user: 그 프롬프트에 실은 system (앱이 넣는 프로젝트 지시문 — instructions.ts) */
+  system?: string
+  /** assistant: 그 스텝의 토큰 (step-finish 와 같은 값) */
+  tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
 }
 
-/** 이 턴(내가 보낸 user 메시지)에 속한 이벤트를 가린다. 답 메시지는 message.updated 의 parentID 로 배운다 — 답의 파트보다 먼저 온다 (01w 실측) */
+/** 이 턴(내가 보낸 user 메시지)에 속한 이벤트를 가린다. 답 메시지는 message.updated 의 parentID 로 배운다 — 답의 파트보다 먼저 온다 (01w 실측).
+ *  자동 요약: 이 턴 안에서 opencode 가 만든 요약 user(compaction 파트)와 그 뒤 user 하나(Continue·복사본)도 이 턴의 user 로 받는다 —
+ *  그 user 들의 답도 이 턴 답이다. 요약 답(summary:true)은 'summary' 로 따로 준다 (글을 답으로 그리면 안 된다) */
 export class TurnScope {
+  /** 내 user 메시지와 이 턴 것으로 받은 user 메시지 */
+  private readonly users = new Set<string>()
   private readonly assistants = new Set<string>()
+  private readonly summaries = new Set<string>()
+  /** 이 턴 중 본, 아직 이 턴 것인지 모르는 user 메시지 (요약 user 는 message.updated 뒤에 compaction 파트가 와야 안다) */
+  private readonly strangers = new Set<string>()
+  /** 내 user 메시지를 봤다 — 그 전의 user 는 앞 턴 것이다 */
+  private started = false
+  /** 요약 user 를 받았다 — 다음 user 메시지가 그 이음(Continue·복사본)이다. 요약이 실패하면 이음이 없다 */
+  private awaitingContinuation = false
 
   constructor(
     readonly sessionId: string,
     readonly userMessageId: string,
-  ) {}
+  ) {
+    this.users.add(userMessageId)
+  }
 
-  /** 이 턴의 user 메시지 이벤트면 'user', 답 메시지 이벤트면 'assistant', 아니면 undefined */
-  of(type: string, props: Props): 'user' | 'assistant' | undefined {
+  /** 이 턴의 user 메시지 이벤트면 'user', 답이면 'assistant', 요약 답이면 'summary', 아니면 undefined */
+  of(type: string, props: Props): 'user' | 'assistant' | 'summary' | undefined {
     if (type === 'message.updated') {
       const info = props['info'] as EngineMessageInfo | undefined
       if (!info || info.sessionID !== this.sessionId) return undefined
-      if (info.id === this.userMessageId) return 'user'
-      if (info.role === 'assistant' && info.parentID === this.userMessageId) this.assistants.add(info.id)
+      if (info.role === 'user') {
+        if (info.id === this.userMessageId) this.started = true
+        if (this.users.has(info.id)) return 'user'
+        if (this.started && this.awaitingContinuation) {
+          this.awaitingContinuation = false
+          this.users.add(info.id)
+          return 'user'
+        }
+        if (this.started) this.strangers.add(info.id)
+        return undefined
+      }
+      if (info.parentID !== undefined && this.users.has(info.parentID) && !this.summaries.has(info.id) && !this.assistants.has(info.id)) {
+        ;(info.summary === true ? this.summaries : this.assistants).add(info.id)
+      }
+      if (this.summaries.has(info.id)) {
+        if (info.error) this.awaitingContinuation = false // 요약 실패 — 이음 없이 끝난다
+        return 'summary'
+      }
       return this.assistants.has(info.id) ? 'assistant' : undefined
     }
-    const messageId =
-      type === 'message.part.updated' ? (props['part'] as EnginePart | undefined)?.messageID : type === 'message.part.delta' ? props['messageID'] : undefined
+    const part = type === 'message.part.updated' ? (props['part'] as EnginePart | undefined) : undefined
+    const messageId = part ? part.messageID : type === 'message.part.delta' ? props['messageID'] : undefined
     if (typeof messageId !== 'string' || props['sessionID'] !== this.sessionId) return undefined
-    if (messageId === this.userMessageId) return 'user'
+    if (part?.type === 'compaction' && this.strangers.delete(messageId)) {
+      this.users.add(messageId)
+      this.awaitingContinuation = true
+    }
+    if (this.users.has(messageId)) return 'user'
+    if (this.summaries.has(messageId)) return 'summary'
     return this.assistants.has(messageId) ? 'assistant' : undefined
   }
 
@@ -101,11 +151,16 @@ export class TurnTracker {
   private readonly items = new Map<string, TurnItem>()
   /** partID → 줄 id (delta 는 partID 만 싣는다) */
   private readonly ids = new Map<string, string>()
+  /** 재시도 줄 순번 — 한 번 다시 보내고 나서 또 재시도하면 새 줄 */
+  private retries = 0
+
+  /** root: 세션 폴더(realpath) — 바꾼 파일 경로를 그 기준 상대로 보인다 */
+  constructor(private readonly root = '') {}
 
   observe(type: string, props: Props): TurnItem | undefined {
     if (type === 'message.part.updated') {
       const part = props['part'] as EnginePart
-      const item = partItem(part, false)
+      const item = partItem(part, false, this.root)
       if (!item) return undefined
       this.ids.set(part.id ?? '', item.id)
       const previous = this.items.get(item.id)
@@ -127,14 +182,40 @@ export class TurnTracker {
     return undefined
   }
 
+  /** 자동 요약 줄 — 요약 user 메시지 하나에 하나 (그 user 의 compaction 파트가 오면 running, 요약 답이 끝나면 done, 오류면 failed) */
+  compaction(userMessageId: string, status: Extract<TurnItem, { kind: 'compaction' }>['status']): TurnItem | undefined {
+    const id = `${userMessageId}:compaction`
+    const previous = this.items.get(id)
+    if (previous?.kind === 'compaction' && (previous.status === status || previous.status !== 'running')) return undefined
+    const item: TurnItem = { kind: 'compaction', id, status }
+    this.items.set(id, item)
+    return item
+  }
+
+  /** 엔진 상태(session.status) — retry 면 재시도 줄을 세우거나 고치고, 다시 busy 면 그 줄을 끝낸다 */
+  status(status: { type?: string; attempt?: number; message?: string } | undefined): TurnItem | undefined {
+    const id = `retry:${this.retries}`
+    const previous = this.items.get(id)
+    if (status?.type === 'retry') {
+      const item: TurnItem = { kind: 'retry', id, attempt: status.attempt ?? 1, message: status.message ?? '', status: 'waiting' }
+      this.items.set(id, item)
+      return item
+    }
+    if (previous?.kind !== 'retry' || previous.status !== 'waiting') return undefined
+    const item: TurnItem = { ...previous, status: 'done' }
+    this.items.set(id, item)
+    this.retries++
+    return item
+  }
+
   /** 이 턴 답의 글 — 글 줄을 나타난 순서대로 잇는다 (도구 결과·생각은 빼고) */
   text(): string {
     return [...this.items.values()].map((item) => (item.kind === 'text' ? item.text : '')).join('')
   }
 }
 
-/** 파트 하나 → 진행 줄 (줄이 아닌 파트면 undefined). done 이면 끝난 기록이다 (다시 열기) */
-function partItem(part: EnginePart, done: boolean): TurnItem | undefined {
+/** 파트 하나 → 진행 줄 (줄이 아닌 파트면 undefined). done 이면 끝난 기록이다 (다시 열기). root 는 세션 폴더 (diff 경로 기준) */
+function partItem(part: EnginePart, done: boolean, root: string): TurnItem | undefined {
   const id = `${part.messageID ?? ''}:${part.id ?? ''}`
   if (part.type === 'reasoning' || part.type === 'text') {
     if (part.synthetic) return undefined
@@ -149,7 +230,11 @@ function partItem(part: EnginePart, done: boolean): TurnItem | undefined {
     item.input = JSON.stringify(input)
     item.summary = toolSummary(input)
   }
-  if (status === 'done') item.result = state.output ?? ''
+  if (status === 'done') {
+    item.result = state.output ?? ''
+    const diffs = toolDiffs(item.name, input, state.metadata, root)
+    if (diffs) item.diffs = diffs
+  }
   else if (status === 'running' && typeof state.metadata?.output === 'string' && state.metadata.output !== '') item.result = state.metadata.output // bash 실시간 출력
   if (status === 'error') item.error = state.error || '알 수 없는 오류'
   return item
@@ -166,7 +251,7 @@ export function toolSummary(input: unknown): string | undefined {
   return undefined
 }
 
-/** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다 */
-export function messageItems(parts: readonly EnginePart[]): TurnItem[] {
-  return parts.flatMap((part) => partItem(part, true) ?? [])
+/** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다. root 는 세션 폴더 (diff 경로 기준) */
+export function messageItems(parts: readonly EnginePart[], root = ''): TurnItem[] {
+  return parts.flatMap((part) => partItem(part, true, root) ?? [])
 }

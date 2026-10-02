@@ -53,13 +53,54 @@ describe('historyMessages (레거시 기록)', () => {
     expect(historyMessages([user('[slow]'), aborted, user('다음'), assistant('echo: 다음')], false)[1]).toMatchObject({ interrupted: true, error: tr('error.stopped') })
   })
 
-  it('합성 글뿐인 user(자동 요약 뒤 Continue)와 요약 답(summary:true)은 말풍선이 아니다', () => {
-    const synthetic: EngineMessage = { info: { id: 'msg_s', role: 'user', time: { created: 5 } }, parts: [{ type: 'text', synthetic: true, text: 'Continue if you have next steps' }] }
-    const compaction: EngineMessage = { info: { id: 'msg_c', role: 'user', time: { created: 4 } }, parts: [{ type: 'compaction' }] }
-    const summary = assistant('## Objective', { summary: true })
-    const messages = historyMessages([user('a'), assistant('echo: a'), compaction, summary, synthetic, assistant('계속')], false)
-    expect(messages.map(({ role }) => role)).toEqual(['user', 'assistant']) // 요약 뒤 이어진 답의 자리·표시는 L2
-    expect(messages[1]!.text).not.toContain('## Objective')
+  // 자동 요약 (이슈 #20 L2 실측): 요약 user(compaction 파트) → 요약 답(summary:true, parentID = 요약 user) → 이음 user(합성 Continue, 또는 한도 초과
+  // 뒤 앞 user 의 복사본) → 그 답. 요약 user 는 그 턴 답의 요약 줄이고, 이음의 답은 같은 턴 답에 붙는다
+  const compaction = (id = 'msg_c'): EngineMessage => ({ info: { id, role: 'user', time: { created: 4 } }, parts: [{ type: 'compaction', auto: true }] })
+  const continued: EngineMessage = { info: { id: 'msg_s', role: 'user', time: { created: 5 } }, parts: [{ type: 'text', synthetic: true, text: 'Continue if you have next steps' }] }
+
+  it('요약 user·요약 답·합성 Continue 는 말풍선이 아니다 — 요약 줄(done)이 그 턴 답에 붙고, Continue 의 답도 같은 턴 답이다', () => {
+    const summary = assistant('## Objective', { summary: true, parentID: 'msg_c', agent: 'compaction', time: { created: 4, completed: 6 } })
+    const messages = historyMessages([user('a'), assistant('echo: a'), compaction(), summary, continued, assistant('계속', { time: { created: 7, completed: 9 } }), user('b'), assistant('echo: b')], false)
+    expect(messages.map(({ role, text }) => [role, text])).toEqual([
+      ['user', 'a'],
+      ['assistant', 'echo: a계속'],
+      ['user', 'b'],
+      ['assistant', 'echo: b'],
+    ])
+    expect(messages[1]!.items!.map((item) => (item.kind === 'compaction' ? `compaction:${item.status}` : item.kind))).toEqual(['text', 'compaction:done', 'text'])
+    expect(messages[1]!.duration).toBe(8)
+  })
+
+  it('한도 초과 뒤 요약이 앞 user 를 복사해 다시 넣으면(이음) 그 복사본은 말풍선이 아니다', () => {
+    const summary = assistant('## Objective', { summary: true, parentID: 'msg_c' })
+    const copy = user('a') // 같은 글, 새 id
+    const messages = historyMessages([user('first'), assistant('1'), user('a'), assistant(''), compaction(), summary, copy, assistant('echo: a')], false)
+    expect(messages.map(({ role, text }) => [role, text])).toEqual([
+      ['user', 'first'],
+      ['assistant', '1'],
+      ['user', 'a'],
+      ['assistant', 'echo: a'],
+    ])
+  })
+
+  it('요약도 한도를 넘어 실패하면(요약 답 ContextOverflowError) 그 턴은 "새 대화로" 안내 — 요약 줄은 failed, 다음 user 는 새 턴', () => {
+    const summary = assistant('', { summary: true, parentID: 'msg_c', error: { name: 'ContextOverflowError', data: { message: 'Session too large to compact - context exceeds model limit even after stripping media' } } })
+    const messages = historyMessages([user('[huge]'), assistant(''), compaction(), summary, user('again'), assistant('x')], false)
+    expect(messages.map(({ role }) => role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(messages[1]).toMatchObject({ error: tr('error.contextOverflow') })
+    expect(messages[1]!.items).toEqual([{ kind: 'compaction', id: 'msg_c:compaction', status: 'failed' }])
+  })
+
+  it('요약 중에 끊겼으면(요약 답 완료 시각 없음, 세션이 쉼) "중단됨"', () => {
+    const summary: EngineMessage = { info: { id: 'msg_sum', role: 'assistant', parentID: 'msg_c', summary: true, time: { created: 4 } }, parts: [] }
+    expect(historyMessages([user('a'), assistant('1'), compaction(), summary], false)[1]).toMatchObject({ interrupted: true })
+  })
+
+  it('바꾼 파일은 세션 폴더 기준 상대 경로로 (root)', () => {
+    const patch = 'Index: /w/a.txt\n===\n--- /w/a.txt\n+++ /w/a.txt\n@@ -1 +1 @@\n-a\n+A\n'
+    const edit = { type: 'tool', id: 'prt_e', tool: 'edit', callID: 'c', state: { status: 'completed', input: { filePath: '/w/a.txt' }, output: 'ok', metadata: { filediff: { file: '/w/a.txt', patch } } } }
+    const [, reply] = historyMessages([user('edit'), assistant('', {}, [edit]), assistant('done')], false, '/w')
+    expect(reply!.items![0]).toMatchObject({ kind: 'tool', diffs: [{ path: 'a.txt', added: 1, removed: 1 }] })
   })
 
   it('답 없는 user 로 끝났으면 "중단됨" 답을 붙인다', () => {

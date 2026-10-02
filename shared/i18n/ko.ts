@@ -81,6 +81,7 @@ export const ko = {
   // 자동 요약(압축) — 01o
   'chat.compacting': '앞 대화 요약 중',
   'chat.compacted': '앞 대화를 요약했습니다',
+  'chat.retrying': '재시도 중 ({attempt}번째)',
   'markdown.codeBlock': '코드 블록',
   'markdown.wrapOff': '줄바꿈 끄기',
   'markdown.wrapOn': '줄바꿈 켜기',
@@ -293,7 +294,7 @@ export const ko = {
   'models.contextLength': '컨텍스트 길이 {n}',
   'models.contextLengthPlaceholder': '컨텍스트 길이',
   'models.contextLengthTitle': '컨텍스트 길이 (토큰, 선택)',
-  'models.contextLengthHint': '컨텍스트 길이는 모델이 받을 수 있는 최대 토큰입니다. 비우면 자동 요약이 꺼집니다.',
+  'models.contextLengthHint': '컨텍스트 길이는 모델이 받을 수 있는 최대 토큰입니다. 비우면 미리 요약하지 않고, 모델이 한도 초과로 거절할 때만 요약합니다.',
   'models.contextLengthLow': '{model}: 컨텍스트 길이가 {min} 미만이면 자동 요약이 제대로 동작하지 않습니다.',
   'models.removeModel': '모델 삭제 {n}',
   'models.removeModelTitle': '모델 삭제',

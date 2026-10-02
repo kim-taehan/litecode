@@ -8,9 +8,11 @@ import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { freePort, isolatedEnv } from './support/opencodeServer.ts'
 
-// 긴 대화 자동 요약(이슈 #5, 근거 _workspace/01o_compaction.md). 진짜 Electron·IPC·ctx.engine 이 띄운 opencode 1.18.18·가짜 LLM.
-// 가짜 LLM 은 압축 요청(도구 없음 + <conversation>)에 COMPACT_MS 뒤 요약을 답하고, `[pad:N]` 으로 답을 키우고, `[overflow]` 가 낀 대화엔
-// 400 context_length_exceeded 를 준다. 순서: 한도 초과(한도 비움) → 설정 안내·경고 → 한도 32000 으로 요약 → 다시 열기
+// 긴 대화 자동 요약(이슈 #5 → 레거시 경로 #20 L2, 근거 _workspace/01o_compaction.md·01w). 진짜 Electron·IPC·ctx.engine 이 띄운 opencode 1.18.18·가짜 LLM.
+// 레거시 opencode 는 ① 보고된 토큰이 문턱(한도 − 32000)을 넘은 스텝 뒤 ② 게이트웨이가 한도 초과로 거절했을 때 앞 대화를 요약하고, 합성
+// "Continue…" 로 스스로 이어 답한다 — 그 답이 이 턴 답이다. 가짜 LLM 은 요약 요청(도구 없음 + <conversation>)에 COMPACT_MS 뒤 요약을 답하고,
+// `[tokens:N]` 으로 보고 토큰을 정하고, `[overflow]` 가 낀 대화엔 400 context_length_exceeded(요약 요청은 빼고), `[huge]` 면 요약 요청까지 400 을 준다.
+// 순서: 한도 초과 → 요약으로 이어 감(한도 비움) → 요약도 못 하면 "새 대화로" → 설정 안내·경고 → 한도 60000 으로 요약 → 다시 열기
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const LONG = 180_000
@@ -98,24 +100,39 @@ async function openGatewayEditor(): Promise<void> {
 }
 
 describe('긴 대화 자동 요약', () => {
-  it('한도를 넘은 실패는 "새 대화로" 안내 — 같은 대화에 다시 보내도 같은 안내', async () => {
+  it('게이트웨이가 한도 초과로 거절하면 앞 대화를 요약해 이어 답한다 — 턴 안에 "앞 대화 요약 중" → 구분선, 턴은 완료 (한도를 비워도)', async () => {
     await page.getByRole('button', { name: '+ 새 대화' }).click()
-    const notice = '대화가 모델 한도를 넘었습니다 — 새 대화로 시작해 주세요'
-    expect((await send('[overflow] 첫 질문')).reply).toBe(`⚠️ ${notice}`)
-    expect(await page.locator('.turn').last().getAttribute('data-state')).toBe('failed')
-    expect((await send('다시 보냄')).reply).toBe(`⚠️ ${notice}`)
+    const before = (await requests()).compactions
+    const { reply, sawCompacting } = await send('[overflow] 첫 질문')
+    expect(sawCompacting).toBe(true)
+    expect(reply.startsWith('echo: ')).toBe(true) // opencode 가 스스로 보낸 "Continue…"(이음)에 대한 답 — 요약 글이 아니다
+    expect(reply).not.toContain('fake summary')
+    expect(await page.locator('.turn').last().getAttribute('data-state')).toBe('done')
+    expect(await dividers().count()).toBe(1)
+    expect((await requests()).compactions).toBe(before + 1)
+    expect((await send('다시 보냄')).reply).toBe('echo: 다시 보냄') // 요약으로 줄었다 — 다음 턴은 평소대로
+    expect(await page.locator('.user-turn').count()).toBe(2) // 이음 user(합성 Continue)는 내 말이 아니다
   }, LONG)
 
-  it('설정 > 모델: 컨텍스트 길이는 기본값 없이 비어 있고 "비우면 자동 요약이 꺼집니다" 안내, 24000 미만이면 경고', async () => {
+  it('요약으로도 못 줄이면 "새 대화로" 안내 — 같은 대화에 다시 보내도 같은 안내', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    const notice = '대화가 모델 한도를 넘었습니다 — 새 대화로 시작해 주세요'
+    expect((await send('[huge] 첫 질문')).reply).toBe(`⚠️ ${notice}`)
+    expect(await page.locator('.turn').last().getAttribute('data-state')).toBe('failed')
+    expect((await send('다시 보냄')).reply).toBe(`⚠️ ${notice}`)
+    expect(await dividers().count()).toBe(0) // 실패한 요약은 구분선을 남기지 않는다
+  }, LONG)
+
+  it('설정 > 모델: 컨텍스트 길이는 기본값 없이 비어 있고 "비우면 미리 요약하지 않는다" 안내, 48000 미만이면 경고', async () => {
     await openGatewayEditor()
     expect(await field('컨텍스트 길이 1').inputValue()).toBe('')
-    expect(await dialog().locator('.context-length-hint').first().textContent()).toContain('비우면 자동 요약이 꺼집니다')
+    expect(await dialog().locator('.context-length-hint').first().textContent()).toContain('비우면 미리 요약하지 않고, 모델이 한도 초과로 거절할 때만 요약합니다')
     const warning = () => dialog().locator('.context-length-hint--warn')
     expect(await warning().count()).toBe(0)
 
-    await field('컨텍스트 길이 1').fill('8000')
-    expect(await warning().textContent()).toBe('qwen3.8-27b: 컨텍스트 길이가 24000 미만이면 자동 요약이 제대로 동작하지 않습니다.')
     await field('컨텍스트 길이 1').fill('32000')
+    expect(await warning().textContent()).toBe('qwen3.8-27b: 컨텍스트 길이가 48000 미만이면 자동 요약이 제대로 동작하지 않습니다.')
+    await field('컨텍스트 길이 1').fill('60000')
     expect(await warning().count()).toBe(0)
 
     await dialog().getByRole('button', { name: '적용' }).click()
@@ -123,21 +140,20 @@ describe('긴 대화 자동 요약', () => {
     await page.keyboard.press('Escape')
   }, LONG)
 
-  it('긴 대화: 턴 안에 "앞 대화 요약 중" → 끝나면 "앞 대화를 요약했습니다" 구분선, 다음 요청은 요약본으로. 통계 % 에 문턱 눈금', async () => {
+  it('긴 대화: 문턱을 넘은 턴 안에 "앞 대화 요약 중" → 끝나면 "앞 대화를 요약했습니다" 구분선, 다음 요청은 요약본으로. 통계 % 에 문턱 눈금', async () => {
     await page.getByRole('button', { name: '+ 새 대화' }).click()
     const before = (await requests()).compactions
-    let compactedAt = -1
-    for (let n = 1; n <= 8 && compactedAt === -1; n++) {
-      const { reply, sawCompacting } = await send(`[pad:12000] t${n}`)
-      expect(reply.startsWith('echo:')).toBe(true)
-      if ((await dividers().count()) > 0) {
-        expect(sawCompacting).toBe(true)
-        compactedAt = n
-      }
-    }
-    expect(compactedAt, '8턴 안에 요약이 돌아야 한다').toBeGreaterThan(1)
-    expect((await requests()).compactions).toBeGreaterThan(before)
-    expect((await requests()).lastChat?.messages.find((message) => message.role === 'user')?.text.startsWith('<conversation-checkpoint>')).toBe(true)
+    expect((await send('long-talk t1')).sawCompacting).toBe(false)
+    expect(await dividers().count()).toBe(0)
+    // 보고 토큰 30000 ≥ 문턱 60000 − 32000 — 그 스텝 뒤에 요약이 돈다
+    const { reply, sawCompacting } = await send('[tokens:30000] t2')
+    expect(sawCompacting).toBe(true)
+    expect(reply.startsWith('echo: [tokens:30000] t2')).toBe(true) // 이 턴의 답 + 요약 뒤 이음 답
+    expect((await requests()).compactions).toBe(before + 1)
+    // 요약 뒤 요청: 앞 대화 대신 요약 (레거시는 요약 user 를 "What did we do so far?" 로, 요약 답을 assistant 로 싣는다)
+    const lastUser = (await requests()).lastChat?.messages.filter((message) => message.role === 'user')
+    expect(lastUser?.[0]?.text).toBe('What did we do so far?')
+    expect(lastUser?.some((message) => message.text.includes('long-talk t1'))).toBe(false)
     expect(await dividers().count()).toBe(1)
     expect(await dividers().textContent()).toBe('앞 대화를 요약했습니다')
     expect(await page.locator('.compaction-running').count()).toBe(0)
@@ -147,24 +163,25 @@ describe('긴 대화 자동 요약', () => {
     // 다음 턴은 평소대로 끝난다
     expect((await send('after')).reply.startsWith('echo:')).toBe(true)
 
-    // 통계 줄 컨텍스트 팝업 — 한도 32000 의 문턱 (32000 − 20000) / 32000 = 38%
+    // 통계 줄 컨텍스트 팝업 — 한도 60000 의 문턱 (60000 − 32000) / 60000 = 47%
     const pill = page.locator('.composer-stats .stats-pill').nth(2)
     await pill.hover()
     const popup = page.getByRole('dialog', { name: '컨텍스트 사용' })
     await popup.waitFor({ timeout: 2_000 })
-    expect(await popup.locator('.stats-bar__tick').evaluate((el) => (el as HTMLElement).style.left)).toBe('38%')
+    expect(await popup.locator('.stats-bar__tick').evaluate((el) => (el as HTMLElement).style.left)).toBe('47%')
     const row = await popup.evaluate((el) => [...el.querySelectorAll('dt')].find((dt) => dt.textContent === '자동 요약 기준')?.nextElementSibling?.textContent)
-    expect(row).toBe('~12K · 38%')
+    expect(row).toBe('~28K · 47%')
     await page.locator('.main__header').hover()
   }, LONG)
 
   it('앱을 다시 켜고 그 대화를 열어도 구분선이 같은 턴에 있다', async () => {
-    const live = await dividerTurns() // 요약본 뒤 큰 답으로 'after' 턴에서 한 번 더 돌 수 있다 — 개수가 아니라 자리를 비교한다
-    expect(live.length).toBeGreaterThan(0)
+    const live = await dividerTurns()
+    expect(live).toEqual([1]) // 둘째 턴
+
     const turns = await page.locator('.turn').count()
     await app.close()
     await launch()
-    await page.locator('.session-item', { hasText: '[pad:12000] t1' }).click()
+    await page.locator('.session-item', { hasText: 'long-talk t1' }).click()
     await expect.poll(() => page.locator('.turn').count(), { timeout: 15_000 }).toBe(turns)
     expect(await dividerTurns()).toEqual(live)
     expect(await dividers().first().textContent()).toBe('앞 대화를 요약했습니다')

@@ -27,7 +27,12 @@ import type { AddressInfo } from 'node:net'
 //   `/requests` 의 compactions 가 받은 압축 요청 수 (compaction.live.test.ts)
 // - 마지막 user 메시지에 `[pad:N]` 이 있으면 답 끝에 x 를 N 개 붙인다 — 기록을 키워 압축을 일으킨다
 // - 대화의 user 메시지 중 하나라도 `[overflow]` 가 있으면 400 context_length_exceeded — 한도를 넘은 대화는 이후 턴도 계속 실패하는
-//   실제 게이트웨이처럼 (01o 결론 1)
+//   실제 게이트웨이처럼 (01o 결론 1). 레거시 opencode 는 이 오류에 자동 요약으로 맥락을 줄여 이어 간다 — 요약 요청엔 이 규칙을 안 쓴다
+// - 대화(요약 요청의 본문 포함)에 `[huge]` 가 있으면 요약 요청까지 같은 400 — 요약으로도 못 줄이는 대화 (compaction.live.test.ts)
+// - 마지막 user 메시지에 `[tokens:N]` 이 있으면 그 답의 usage prompt_tokens 를 N 으로 보고한다 — 레거시 opencode 는 **보고된** 토큰이
+//   한도 − 출력 한도를 넘으면 그 스텝 뒤에 자동 요약을 돌린다(01w) — 요약이 도는 턴을 정해 만든다 (compaction.live.test.ts)
+// - 마지막 user 메시지에 `[flaky]` 가 있으면 그 글의 첫 요청에만 HTTP 500(`retry-after-ms: FLAKY_RETRY_MS`)을 준다 — 레거시 opencode 는 500 을
+//   재시도하고(session.status retry) 두 번째 요청은 평소대로 답한다 — 진행 줄의 "재시도 중" 을 본다 (llm.live·chat-layout)
 // - `GET /requests` 는 지금까지 받은 chat/completions 요청 수를 JSON 으로 준다 — 테스트 프로세스는
 //   globalSetup 과 달라 requestCount() 를 직접 못 부르므로 HTTP 로 연다. 마지막 `/v1/models` 요청의 Authorization
 //   헤더(modelsAuth)와 마지막 chat/completions 요청의 Authorization(chatAuth)도 함께 준다 — 설정 화면이 저장한 키가
@@ -61,6 +66,15 @@ export const COMPACT_SUMMARY = '## Objective\nfake summary of the earlier conver
 /** 답마다 돌려주는 usage (OpenAI 모양) */
 export const FAKE_USAGE = { prompt_tokens: 1_000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 300 } }
 const USAGE_CHUNK = `data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 0, model: 'echo', choices: [], usage: FAKE_USAGE })}\n\n`
+/** `[flaky]` 의 500 에 싣는 재시도 대기 — opencode 는 retry-after-ms 를 그대로 따른다 (기본은 2초부터 두 배씩) */
+export const FLAKY_RETRY_MS = 1_500
+/** 이 답의 usage 청크 — `[tokens:N]` 이면 prompt_tokens 를 N 으로 */
+function usageChunk(text: string): string {
+  const tokens = /\[tokens:(\d+)\]/.exec(text)?.[1]
+  if (!tokens) return USAGE_CHUNK
+  const usage = { ...FAKE_USAGE, prompt_tokens: Number(tokens) }
+  return `data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 0, model: 'echo', choices: [], usage })}\n\n`
+}
 
 /** `[md]` 의 답 — 화면 요소로 나와야 하는 것과, 실행·로드되면 안 되는 것(script·onerror·원격 이미지)을 함께 싣는다 */
 export const MARKDOWN_REPLY = [
@@ -137,6 +151,8 @@ export async function startFakeLlm(): Promise<FakeLlm> {
   /** 답하기 전에 끊긴 `[slow]`·`[late]` 요청의 마지막 user 글 (받은 순서) */
   const cut: string[] = []
   let compactions = 0
+  /** `[flaky]` 로 이미 한 번 500 을 준 글 */
+  const flaked = new Set<string>()
   const server = http.createServer((req, res) => {
     let raw = ''
     req.on('data', (part) => (raw += part))
@@ -167,6 +183,11 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       }
       lastChatText = messages.map(contentText).join('\n')
       const text = lastUserText(messages)
+      const overflow = (): void => {
+        res.writeHead(400, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: "This model's maximum context length is 8000 tokens. However, your messages resulted in 9000 tokens.", code: 'context_length_exceeded' } }))
+      }
+      if (lastChatText.includes('[huge]')) return overflow()
       if (!body.tools?.length && text.includes('<conversation>')) {
         compactions++
         res.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -180,8 +201,12 @@ export async function startFakeLlm(): Promise<FakeLlm> {
         return
       }
       if (messages[messages.length - 1]?.role !== 'tool' && messages.some((message) => message.role === 'user' && contentText(message).includes('[overflow]'))) {
-        res.writeHead(400, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: "This model's maximum context length is 8000 tokens. However, your messages resulted in 9000 tokens.", code: 'context_length_exceeded' } }))
+        return overflow()
+      }
+      if (text.includes('[flaky]') && messages[messages.length - 1]?.role !== 'tool' && !flaked.has(text)) {
+        flaked.add(text)
+        res.writeHead(500, { 'content-type': 'application/json', 'retry-after-ms': String(FLAKY_RETRY_MS) })
+        res.end(JSON.stringify({ error: { message: 'fake-llm: 잠깐 실패 (다시 시도하면 된다)' } }))
         return
       }
       if (text.includes('[fail]')) {
@@ -215,7 +240,7 @@ export async function startFakeLlm(): Promise<FakeLlm> {
         thinkFirst(() => {
           res.write(chunk({ role: 'assistant', tool_calls: [call] }))
           res.write(chunk({}, 'tool_calls'))
-          res.write(USAGE_CHUNK)
+          res.write(usageChunk(text))
           res.end('data: [DONE]\n\n')
         })
         return
@@ -230,7 +255,7 @@ export async function startFakeLlm(): Promise<FakeLlm> {
         const rest = (): void => {
           res.write(chunk({ content: reply.slice(half) }))
           res.write(chunk({}, 'stop'))
-          res.write(USAGE_CHUNK)
+          res.write(usageChunk(text))
           res.end('data: [DONE]\n\n')
         }
         if (text.includes('[drip]')) setTimeout(rest, DRIP_MS)

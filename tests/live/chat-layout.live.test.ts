@@ -255,4 +255,21 @@ describe('채팅 답 모양·진행 표시', () => {
     await expect.poll(() => head.textContent().catch(() => ''), { timeout: 15_000 }).toMatch(/^중단됨/)
     expect(await page.locator('.turn').last().getAttribute('data-state')).toBe('interrupted')
   })
+
+  // 게이트웨이 500 은 레거시 opencode 가 재시도한다(5번, 합계 ~71초 — 01w). 그동안 화면이 멈춘 듯 보이지 않게 진행 줄로 알린다 (이슈 #20).
+  // 가짜 LLM `[flaky]` 는 첫 요청만 500(retry-after-ms 1.5초) — opencode 가 session.status retry 를 낸 뒤 다시 보내 답한다
+  it('[flaky]: 재시도하는 동안 "재시도 중 (1번째) · 사유" 줄이 보이고, 다시 보내 답이 오면 그 줄은 사라진다', async () => {
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    await type('[flaky] 재시도 테스트')
+    const retry = running().locator('.turn-row[data-kind="retry"]')
+    await expect.poll(() => retry.count(), { timeout: 15_000 }).toBe(1)
+    expect(await retry.locator('.turn-row__title').textContent()).toBe('재시도 중 (1번째)')
+    expect(await retry.locator('.turn-row__summary').textContent()).toBe('fake-llm: 잠깐 실패 (다시 시도하면 된다)')
+
+    await waitReply(0)
+    expect(await replies().last().textContent()).toBe('echo: [flaky] 재시도 테스트')
+    expect(await lastTurn().getAttribute('data-state')).toBe('done')
+    await lastTurn().locator('.turn__head').click().catch(() => {}) // 접을 작업이 없으면 머리는 버튼이 아니다
+    expect(await page.locator('.turn-row[data-kind="retry"]').count()).toBe(0)
+  })
 })

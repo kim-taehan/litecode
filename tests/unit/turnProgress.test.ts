@@ -31,6 +31,36 @@ describe('TurnScope — 이 턴의 메시지 가리기 (parentID)', () => {
   })
 })
 
+describe('TurnScope — 자동 요약 (이슈 #20 L2 실측 순서)', () => {
+  const C = 'msg_compaction'
+  const K = 'msg_continue'
+  it('이 턴 안의 요약 user(compaction 파트)와 그 뒤 user 하나(Continue)를 이 턴 것으로 받는다 — 요약 답은 summary, Continue 의 답은 이 턴 답', () => {
+    const scope = new TurnScope(S, U)
+    scope.of(...info({ id: U, role: 'user' }))
+    scope.of(...info({ id: A, role: 'assistant', parentID: U }))
+    expect(scope.of(...info({ id: C, role: 'user' }))).toBeUndefined() // 아직 모른다 — 파트가 와야 요약 user 인지 안다
+    expect(scope.of(...updated({ type: 'compaction', id: 'prt_c', messageID: C, auto: true, overflow: false }))).toBe('user')
+    expect(scope.of(...info({ id: 'msg_sum', role: 'assistant', parentID: C, summary: true, agent: 'compaction' }))).toBe('summary')
+    expect(scope.of(...updated({ type: 'text', id: 'prt_s', messageID: 'msg_sum', text: '## Objective' }))).toBe('summary')
+    expect(scope.of(...delta('prt_s', 'x', 'msg_sum'))).toBe('summary')
+    expect(scope.of(...info({ id: K, role: 'user' }))).toBe('user') // 이음 — 합성 Continue 든 앞 user 의 복사본이든
+    expect(scope.of(...info({ id: 'msg_after', role: 'assistant', parentID: K }))).toBe('assistant')
+    expect(scope.owns('msg_after')).toBe(true)
+    expect(scope.owns('msg_sum')).toBe(false)
+    expect(scope.of(...info({ id: 'msg_next', role: 'user' }))).toBeUndefined() // 그다음 user 는 다른 턴
+  })
+
+  it('요약이 실패하면(요약 답 error) 이음이 없다 — 그 뒤 user 는 이 턴 것이 아니다. 내 user 전의 요약 user 도 아니다', () => {
+    const scope = new TurnScope(S, U)
+    expect(scope.of(...updated({ type: 'compaction', id: 'p0', messageID: 'msg_before' }))).toBeUndefined()
+    scope.of(...info({ id: U, role: 'user' }))
+    scope.of(...info({ id: C, role: 'user' }))
+    scope.of(...updated({ type: 'compaction', id: 'prt_c', messageID: C }))
+    expect(scope.of(...info({ id: 'msg_sum', role: 'assistant', parentID: C, summary: true, error: { name: 'ContextOverflowError' } }))).toBe('summary')
+    expect(scope.of(...info({ id: 'msg_other', role: 'user' }))).toBeUndefined()
+  })
+})
+
 describe('TurnTracker', () => {
   it('생각: 빈 글로 시작, 조각(field 가 "text" 여도 partID 로 생각)은 누적, time.end 의 완성본으로 덮고 그 뒤 조각은 버린다', () => {
     const tracker = new TurnTracker()
@@ -82,6 +112,36 @@ describe('TurnTracker', () => {
     expect(tracker.observe(...updated({ type: 'step-start', id: 'prt_s' }))).toBeUndefined()
     expect(tracker.observe(...updated({ type: 'step-finish', id: 'prt_f', reason: 'stop', tokens: {} }))).toBeUndefined()
     expect(tracker.observe('session.idle', { sessionID: S })).toBeUndefined()
+  })
+})
+
+describe('TurnTracker — 요약·재시도·diff (이슈 #20 L2)', () => {
+  it('요약 줄: running → done(또는 failed). 끝난 줄은 다시 안 바뀐다', () => {
+    const tracker = new TurnTracker()
+    expect(tracker.compaction('msg_c', 'running')).toEqual({ kind: 'compaction', id: 'msg_c:compaction', status: 'running' })
+    expect(tracker.compaction('msg_c', 'running')).toBeUndefined()
+    expect(tracker.compaction('msg_c', 'done')).toEqual({ kind: 'compaction', id: 'msg_c:compaction', status: 'done' })
+    expect(tracker.compaction('msg_c', 'failed')).toBeUndefined()
+    expect(tracker.compaction('msg_d', 'failed')).toMatchObject({ status: 'failed' })
+  })
+
+  it('재시도 줄: session.status retry 면 waiting(몇 번째·사유), 다시 busy 면 done. 그 뒤 또 재시도하면 새 줄', () => {
+    const tracker = new TurnTracker()
+    expect(tracker.status({ type: 'busy' })).toBeUndefined()
+    expect(tracker.status({ type: 'retry', attempt: 1, message: 'Internal Server Error' })).toEqual({ kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'waiting' })
+    expect(tracker.status({ type: 'retry', attempt: 2, message: 'Internal Server Error' })).toMatchObject({ id: 'retry:0', attempt: 2, status: 'waiting' })
+    expect(tracker.status({ type: 'busy' })).toMatchObject({ id: 'retry:0', status: 'done' })
+    expect(tracker.status({ type: 'busy' })).toBeUndefined()
+    expect(tracker.status({ type: 'retry', attempt: 1, message: 'x' })).toMatchObject({ id: 'retry:1', status: 'waiting' })
+  })
+
+  it('끝난 edit 도구는 metadata.filediff 로 diffs 를 싣는다 — 경로는 세션 폴더 기준 상대', () => {
+    const tracker = new TurnTracker('/p')
+    const patch = 'Index: /p/a.txt\n===\n--- /p/a.txt\n+++ /p/a.txt\n@@ -1 +1 @@\n-a\n+A\n'
+    const item = tracker.observe(
+      ...updated({ type: 'tool', id: 'prt_e', tool: 'edit', callID: 'c', state: { status: 'completed', input: { filePath: '/p/a.txt' }, output: 'Edit applied successfully.', metadata: { filediff: { file: '/p/a.txt', patch } } } }),
+    )
+    expect(item).toMatchObject({ status: 'done', diffs: [{ path: 'a.txt', status: 'modified', added: 1, removed: 1, patch }] })
   })
 })
 
