@@ -30,12 +30,43 @@ describe('engineConfig — 앱이 생성하는 opencode.json', () => {
       agent: engineConfig([], proxy).agent,
       permission: { webfetch: 'deny', websearch: 'deny' },
       snapshot: false,
+      model: 'a/m1',
+      enabled_providers: ['a', 'b'],
+      share: 'disabled',
+      autoupdate: false,
+      lsp: false,
+      formatter: false,
     })
   })
 
   // 01w 1절 스냅샷 행: 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 ~/.local/share/opencode 에 만든다 — litecode 는 revert 를 안 쓴다
   it('스냅샷을 끈다', () => {
     expect(engineConfig([], { token: 't', baseURLFor: () => '' }).snapshot).toBe(false)
+  })
+})
+
+// 01x (이슈 #19): opencode 가 묻지 않고 밖으로 나가는 기능을 앱 설정 폴더 값으로 고정한다. 레거시는 사용자 전역 opencode.json 도 읽지만
+// CONFIG_DIR 값이 이긴다(01x 2-5) — share·lsp·formatter·enabled_providers 를 사용자 설정과 무관하게 정한다
+describe('engineConfig — 엔진 기본값 (#19)', () => {
+  const proxy = { token: 't', baseURLFor: () => '' }
+
+  it('공유·자동 업데이트·LSP·포매터를 끈다', () => {
+    expect(engineConfig([], proxy)).toMatchObject({ share: 'disabled', autoupdate: false, lsp: false, formatter: false })
+  })
+
+  // 모델 없는 세션은 내장 opencode Zen(opencode.ai)으로 간다 — model 설정이 막는다(01x 2-4, 5/5). enabled_providers 는 Zen 을 레거시 목록에서
+  // 빼고, 사용자 전역의 enabled_providers 가 앱 provider 를 끄는 것을 덮는다(01x 4)
+  it('기본 모델은 모델이 있는 첫 provider 의 첫 모델이고, 켤 provider 는 앱 provider 전부다', () => {
+    const empty = { ...provider('empty'), models: [] }
+    const config = engineConfig([empty, { ...provider('b'), models: [{ id: 'org/m-2', displayName: 'M2' }, { id: 'm3', displayName: 'M3' }] }], proxy)
+    expect(config.model).toBe('b/org/m-2')
+    expect(config.enabled_providers).toEqual(['empty', 'b'])
+  })
+
+  it('모델이 있는 provider 가 없으면 model 을 넣지 않는다 (없는 모델을 가리키지 않게)', () => {
+    expect(engineConfig([], proxy)).not.toHaveProperty('model')
+    expect(engineConfig([{ ...provider('a'), models: [] }], proxy)).not.toHaveProperty('model')
+    expect(engineConfig([], proxy).enabled_providers).toEqual([])
   })
 })
 
@@ -158,7 +189,48 @@ describe('engineEnv — opencode 자식 프로세스 env', () => {
       OPENCODE_DB: '/d.db',
       OPENCODE_SERVER_PASSWORD: 'pw',
       OPENCODE_DISABLE_MODELS_FETCH: '1',
+      OPENCODE_DISABLE_SHARE: '1',
+      OPENCODE_DISABLE_AUTOUPDATE: '1',
+      OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
+      OPENCODE_DISABLE_CLAUDE_CODE: '1',
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
     })
+  })
+
+  // 01x 7·표 14·20 (이슈 #19): 물려받은 env 가 엔진을 바꾼다 — OPENCODE_EXPERIMENTAL 하나로 레거시에 exa 검색·lsp 도구가 생기고,
+  // OTEL_* 는 trace 를 내보내고, 개발 셸의 OPENCODE_DISABLE_* 때문에 개발·테스트와 Finder 실행본이 달랐다. 앱이 정한 것만 남긴다
+  it('앱이 정하지 않은 OPENCODE_*·EXA_API_KEY·PARALLEL_API_KEY·OTEL_* 는 물려주지 않는다', () => {
+    const env = engineEnv(
+      {
+        PATH: '/bin',
+        HOME: '/h',
+        HTTPS_PROXY: 'http://proxy',
+        OPENCODE_EXPERIMENTAL: '1',
+        OPENCODE_AUTO_SHARE: '1',
+        OPENCODE_CONFIG_CONTENT: '{}',
+        OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+        OPENCODE_DISABLE_SHARE: '0',
+        opencode_permission: 'x',
+        EXA_API_KEY: 'exa',
+        PARALLEL_API_KEY: 'par',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel',
+        OTEL_RESOURCE_ATTRIBUTES: 'a=b',
+        LITECODE_TEST_LANGUAGE: 'ko',
+      },
+      { configDir: '/c', db: '/d.db', password: 'pw' },
+    )
+    expect(Object.keys(env).filter((name) => !/^OPENCODE_(CONFIG_DIR|DB|SERVER_PASSWORD|DISABLE_)/.test(name)).sort()).toEqual(
+      ['HOME', 'HTTPS_PROXY', 'LITECODE_TEST_LANGUAGE', 'PATH'],
+    )
+    expect(env['OPENCODE_DISABLE_SHARE']).toBe('1')
+    expect(env).not.toHaveProperty('OPENCODE_DISABLE_PROJECT_CONFIG') // blockProjectConfig 를 안 켰다
+  })
+
+  // 01x 표 21 + #19 실측(2026-10-02): 레거시는 ~/.claude/CLAUDE.md·~/.claude/skills·~/.agents/skills(+ 프로젝트 CLAUDE.md·.claude/skills)를
+  // 묻지 않고 싣는다. 신규 세대는 원래 다섯 다 안 싣는다. 사용자 결정 — "Claude Code 스킬 함께 쓰기" 는 기본 꺼짐(켜는 스위치는 #7)
+  it('Claude Code 지시문·스킬 자동 싣기를 끈다', () => {
+    const env = engineEnv({}, { configDir: '/c', db: '/d.db', password: 'pw' })
+    expect(env).toMatchObject({ OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_EXTERNAL_SKILLS: '1' })
   })
 
   // 01w 3-1 / 사용자 결정 00_next_legacy 2. AGENTS.md 도 같이 꺼지므로(신규 경로 포함) L1 의 AGENTS.md 주입과 같이 켠다 — 기본 꺼짐
