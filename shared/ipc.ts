@@ -12,6 +12,7 @@ import type { TurnItem } from '../src/services/turnProgress.ts'
 import type { Settings } from '../src/services/settings.ts'
 import type { NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 import type { OpenInApp } from '../src/services/openIn.ts'
+import type { FeatureId } from './features.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -26,6 +27,7 @@ export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts
 export type { Appearance, Settings } from '../src/services/settings.ts'
 export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 export type { OpenInApp } from '../src/services/openIn.ts'
+export type { FeatureId, FeatureSwitches } from './features.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -83,6 +85,9 @@ export const Channel = {
   NOTIFICATION_OPEN: 'notifications:open',
   OPEN_IN_APPS: 'openIn:apps',
   OPEN_IN: 'openIn:open',
+  GET_FEATURES: 'features:get',
+  /** 메인 → 화면 (FeatureId[]) — 켜진 기능이 바뀌었다 (묶음을 다 올리고 내린 뒤) */
+  FEATURES_CHANGED: 'features:changed',
 } as const
 
 export interface LitecodeBridge {
@@ -185,6 +190,9 @@ export interface LitecodeBridge {
   openInApps(): Promise<OpenInApp[]>
   /** 그 프로젝트 폴더를 그 앱으로 연다. 목록 밖 앱·등록 안 된 폴더·실행 실패면 지금 언어의 사유로 거절 */
   openIn(appId: string, directory: string): Promise<void>
+  /** 켜진 기능 (ctx.features) — 꺼진 기능의 버튼·탭·메뉴·단축키는 그리지 않는다. 켜고 끄기는 setSettings({ features }) */
+  getFeatures(): Promise<FeatureId[]>
+  onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void
 }
 
 declare global {

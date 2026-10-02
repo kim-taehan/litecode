@@ -111,9 +111,9 @@ describe('설정 > 일반', () => {
     expect(await page.getByRole('tab').allTextContents()).toEqual(['Chat', 'Trajectory'])
   })
 
-  it('일반 페이지는 dsh 틀 — 왼쪽 메뉴(일반·모델)·머리줄의 설정 파일 열기와 닫기, 800px 판·28px 모서리', async () => {
+  it('일반 페이지는 dsh 틀 — 왼쪽 메뉴(일반·모델·기능)·머리줄의 설정 파일 열기와 닫기, 800px 판·28px 모서리', async () => {
     await openGeneral({ settings: 'Settings', general: 'General' })
-    expect(await dialog().locator('.settings-nav__item').allTextContents()).toEqual(['General', 'Models'])
+    expect(await dialog().locator('.settings-nav__item').allTextContents()).toEqual(['General', 'Models', 'Features'])
     expect(await dialog().getByRole('button', { name: 'General', exact: true }).getAttribute('aria-current')).toBe('page')
     expect(await dialog().locator('.settings-row__title').allTextContents()).toEqual(['Default mode for new chats', 'Language', 'Appearance', 'Font size', 'Show coding view', 'Notifications'])
     const panel = page.locator('.settings-panel')
@@ -127,7 +127,7 @@ describe('설정 > 일반', () => {
     await dialog().getByRole('button', { name: 'English' }).click()
     await dialog().getByRole('menuitemradio', { name: '한국어' }).click()
 
-    await expect.poll(() => dialog().locator('.settings-nav__item').allTextContents(), { timeout: 5_000 }).toEqual(['일반', '모델'])
+    await expect.poll(() => dialog().locator('.settings-nav__item').allTextContents(), { timeout: 5_000 }).toEqual(['일반', '모델', '기능'])
     expect(await page.getByRole('dialog', { name: '설정' }).count()).toBe(1)
     expect(await dialog().locator('.settings-row__title').allTextContents()).toEqual(['새 대화 기본 모드', '언어', '테마', '글자 크기', '코딩 뷰 보기', '알림'])
     expect(await dialog().getByRole('button', { name: '설정 파일 열기' }).isVisible()).toBe(true)

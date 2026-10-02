@@ -17,6 +17,7 @@ import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
 import { ShellCard, type ShellCardView } from './ShellCard.tsx'
 import { useSettings, useT } from './settingsStore.ts'
+import { useFeatures } from './featuresStore.ts'
 import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
@@ -282,6 +283,11 @@ function HoverCard({ card }: { card?: HoverCardContent & { top: number; left: nu
 export function App() {
   const t = useT()
   const settings = useSettings()
+  /** 켜진 기능 (설정 > 기능) — 꺼진 기능의 버튼·탭·단축키는 그리지 않는다 */
+  const features = useFeatures()
+  /** Trajectory 탭 — 설정 > 일반의 코딩 뷰와 설정 > 기능의 추론 과정이 둘 다 켜져야 보인다 */
+  const trajectoryOn = settings.codingView && features.has('trajectory')
+  const terminalOn = features.has('terminal')
   /** 새 대화는 제목 없이 두고 보일 때 번역한다 — 언어를 바꾸면 같이 바뀐다 (첫 메시지가 제목이 된다) */
   const titleOf = (session: Session) => session.title || t('sidebar.untitled')
   const cannotOpen = (dir: string) => t('project.cannotOpen', { dir })
@@ -433,7 +439,7 @@ export function App() {
   /** 이 대화의 모드 — 고른 적 없으면 새 대화 기본 모드 */
   const mode = active?.mode ?? settings.defaultMode
   /** 알림 — 메인이 쥔 대화별 상태(점)와 앞일 때의 토스트. 지금 보는 대화를 메인에 알린다 */
-  const notices = useNotices(active?.id)
+  const notices = useNotices(active?.id, features.has('notifications'))
   /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다 (정본은 알림 상태) */
   const running = runningIn(notices.state, project?.path)
   const [runningOnly, setRunningOnly] = useState(false)
@@ -492,7 +498,7 @@ export function App() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       const command = navigator.platform.startsWith('Mac') ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
-      if (!command || event.shiftKey || event.altKey || !drawerProject) return
+      if (!command || event.shiftKey || event.altKey || !drawerProject || !terminalOn) return
       if (event.key === 'ArrowDown') {
         setShellOpen((open) => ({ ...open, [drawerProject]: true }))
         setShellFocus((count) => count + 1)
@@ -505,7 +511,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown, true) // 칸(xterm)이 키를 먹기 전에
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [drawerProject, drawerOpen])
+  }, [drawerProject, drawerOpen, terminalOn])
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
   useEffect(() => {
@@ -711,6 +717,7 @@ export function App() {
   /** 그 자리의 `!` 카드들 (실행한 순서) */
   function shellCards(session: Session, at: (position: number) => boolean) {
     if (session.history === 'unloaded' || session.history === 'loading') return [] // 자리를 셀 말풍선이 아직 없다
+    if (!features.has('shell')) return [] // 설정 > 기능에서 `!명령` 을 껐다 — 카드는 sessions.json 에 남고 다시 켜면 보인다
     return (session.shells ?? [])
       .filter((card) => at(card.position))
       .map((card) => (
@@ -956,10 +963,10 @@ export function App() {
           <>
             <div className="main__header">
               {titleOf(active)}
-              <OpenInButton directory={active.project} />
+              {features.has('openIn') && <OpenInButton directory={active.project} />}
             </div>
-            {/* 설정 > 일반의 코딩 뷰를 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
-            {settings.codingView && (
+            {/* 설정 > 일반의 코딩 뷰나 설정 > 기능의 추론 과정을 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
+            {trajectoryOn && (
               <div className="main__tabs" role="tablist" aria-label={t('main.views')}>
                 {(['chat', 'trajectory'] as const).map((tab) => (
                   <button key={tab} type="button" role="tab" className="main__tab" aria-selected={view === tab} onClick={() => setView(tab)}>
@@ -969,7 +976,7 @@ export function App() {
               </div>
             )}
 
-            {settings.codingView && view === 'trajectory' ? (
+            {trajectoryOn && view === 'trajectory' ? (
               <Trajectory key={active.id} directory={active.project} sessionId={active.engineSessionId} pending={!!active.pending} />
             ) : (
             <div className="chat-pane">
@@ -1127,7 +1134,7 @@ export function App() {
               {/* 컨텍스트 % 의 한도는 지금 고른 모델의 설정값 (설정 > 모델의 "컨텍스트 길이") */}
               <StatsBar stats={chatStats(active.usage, chosen?.model.contextLength)} />
             </div>
-            {shellOpen[active.project] && (
+            {terminalOn && shellOpen[active.project] && (
               <ShellDrawer
                 key={active.project}
                 directory={active.project}
