@@ -42,7 +42,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   처음부터 다시 짜는 건 opencode/dsh 가 가장 공들인 부분이라 일이 제일 크다 — 지금 벗어나려는
   "너무 커진 일"을 새 이름으로 반복하는 셈이다.
 - **다만 opencode 는 `ctx.llm` 서비스 뒤에 숨긴다.** 위층(화면·세션)은 이 키만 알고 opencode
-  를 직접 모른다. 나중에 엔진을 바꿔도 이 서비스 경계만 교체하면 된다 — closed-code 의
+  를 직접 모른다. 나중에 엔진을 바꿔도 이 서비스 경계(`ctx.llm` + opencode 프로세스를 쥔 `ctx.engine`)만 교체하면 된다 — closed-code 의
   "부패방지 계층"과 같은 목적을, 이번엔 Cordis 서비스 경계로 더 깔끔하게 표현한다.
 - **플러그인 뼈대는 [Cordis](https://github.com/cordiverse/cordis)** (deepseek-harness 가
   쓰는 것과 같은 프레임워크, dsh 전용이 아니라 독립 OSS 다). 서비스는 `ctx.<key>` 로 등록되고
@@ -153,6 +153,17 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   usage 매핑: input = prompt_tokens − cached_tokens, cache.read = cached, output = completion − reasoning, cache.write 는 늘 0.
   비용은 가격을 줘도 0. custom 모델의 컨텍스트 한도는 0(모름) — opencode.json 모델에 `limit:{context}` 를 주면 반영된다.
   컨텍스트 구성(시스템·도구·메시지 크기)은 opencode 가 안 준다 — 추정만 가능
+- **지운 대화가 DB 에 남는다** (실측 2026-10-01): 레거시 DELETE 뒤 본문은 WAL 에, 체크포인트 뒤엔 freelist 페이지에 남는다(macOS
+  secure_delete=FAST). **checkpoint(TRUNCATE) → VACUUM → checkpoint** 까지 해야 0. opencode 가 떠 있는 동안 외부에서 해도 안전했다
+  (동시 턴 중 10회, busy 0·손상 0). Electron 33 엔 node:sqlite 가 없어 **동봉 opencode 를 `BUN_BE_BUN=1` 로 띄워 bun:sqlite 를 쓴다**
+  (문서화 안 된 동작 — 1.18.18 고정 전제). 잠금을 5초(opencode busy_timeout) 넘게 쥐면 그 사이 prompt 가 500 으로 실패한다
+- **입력 트리거(@ · / · !)** (실측 2026-10-01, `_workspace/01d_triggers.md`): **`prompt.files` 는 쓰지 않는다** — openai-compatible 경로에선
+  이미지 data: URI 만 되고 `.md`·`.txt`·`.ts` 를 붙이면 step.failed, **그 뒤 그 세션의 모든 턴이 같은 오류로 실패**(revert 로도 복구 안 됨).
+  후보 목록은 신규 세대(`/api/fs/find`·`/api/fs/list`·`/api/command`)에 있지만 `/`·`!` 실행은 레거시뿐이고 기록이 갈라진다 → 앱이 풀어서
+  `prompt.text` 로 보낸다. `prompt` 에 **`resume:false`** 를 주면 LLM 을 안 돌리고 입력만 저장(다음 턴 맥락에 실림). prompt 본문 `id`
+  (`msg_…`)는 앱이 정할 수 있다(중복 409). 새 폴더의 첫 `/api/command` 는 빈 배열 — 0.1~0.3초 뒤 다시. 명령 파일 변경은 재시작해야 반영
+- **`/message` 로 스텝 다시 그리기** (실측 2026-10-01, `_workspace/01e_trajectory.md`): assistant 메시지 하나 = 스텝 하나, `time.created` 는 step.started(= 응답이 오기 시작한 때) — 모델 대기는 직전 시각부터 잰다. 도구 파트 `{type:"tool", name, state:{status, input, content, structured, error?}, time:{created, ran, completed}}`, 실패는 `status:"error"` + `error.message` 뿐(코드 없음). 지시문(AGENTS.md)이 대화 중 바뀌면 `type:"system"` 메시지가 남고 그 턴 user 메시지 뒤에 `<system-update>…Instructions from: <경로>…` 로 LLM 에 실린다. 도구 목록 변경 이력은 없다
+- **opencode pty** (실측 2026-10-01, 1.18.18): `POST /api/pty?location[directory]=<dir>` `{cwd, title}` → `{id, command:"/bin/zsh", args:["-l"], cwd, status, pid}` (args 는 주지 않는다 — 서버가 `-l` 을 붙인다). 웹소켓 `GET /api/pty/{id}/connect?location[directory]=<dir>&cursor=0` 에 **Basic Authorization 헤더 그대로**(없으면 401). 키 바이트를 그대로 보내고, 출력은 텍스트 프레임, 바이너리 프레임(`0x00{"cursor":N}`)은 제어라 버린다. `cursor=0` 이면 지금까지 출력을 재생. **다른 폴더로 붙으면 열리지도 닫히지도 않고 멈춘다**(기한 필요). 크기는 `PUT /api/pty/{id}` `{size:{rows,cols}}`. opencode 가 끝나면 셸도 끝난다. 네이티브 모듈 불필요 — 메인은 `ws`(Electron 33 의 Node 20 엔 전역 WebSocket 이 없다), 화면은 `@xterm/xterm`. 셸은 opencode env 를 물려받는다(서버 비밀번호 포함)
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.
@@ -165,10 +176,18 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | `src/services/engine.ts` | **`ctx.engine` — 앱이 opencode 서버 하나를 직접 띄운다** (2a, 2026-09-30). `OPENCODE_CONFIG_DIR`(키 없는 opencode.json 생성)·`OPENCODE_DB`·실행마다 랜덤 비밀번호·`OPENCODE_DISABLE_MODELS_FETCH=1`. **진짜 키는 opencode 에 없다** — `keyProxy.ts`(127.0.0.1, 실행마다 랜덤 토큰)가 붙여 저장된 baseURL 로 스트리밍 전달. 키에 헤더 불가 문자가 있으면 저장 거부. provider 저장·삭제 → 재시작. 앱 종료 시 끄고, 이전 실행이 남긴 것은 PID 기록(명령줄+시작 시각 일치)으로 거둔다. 사용자 :4096 에 붙는 길(`OPENCODE_URL`)은 없어졌다 |
 | `src/services/llm.ts` | Basic 인증으로 opencode 호출. 세션 생성(모델 명시·카탈로그 대기·폴더 확인) → SSE → `admittedSeq` 이하 재생분 버리기. 재시작·크래시로 끊긴 턴은 "중단됨". **매 턴 `api.url` 대조** — 프로젝트 opencode.json 이 provider 주소를 바꾸면 거부 (키 유출 방지). 남은 공백: SSE 타임아웃 없음, 전송 실패 시 unhandled rejection |
 | `electron/` + `renderer/` | Electron 앱. 사이드바(프로젝트 전환·새 대화·세션 목록) + 채팅창. IPC 로 위 서비스에 연결됨 |
-| 패키징 (2b) | electron-builder. `scripts/fetch-opencode.mjs` 가 opencode 1.18.18(npm 레지스트리, sha512)·ripgrep 15.1.0(sha256)을 `build/vendor/` 에 받고(레포 제외), `extraResources` 로 `Resources/opencode`·`Resources/rg` 에 싣는다. 앱은 `OPENCODE_BIN` > 동봉 > PATH 순으로 찾고, 동봉 rg 폴더를 opencode PATH 맨 앞에 둔다(폐쇄망 grep 300초 멈춤 방지). mac ad-hoc 서명만 — **공증 없음, 다른 Mac 에서 내려받은 zip 의 격리(quarantine) 동작은 미검증**. vite `base: './'` (설치본 file:// 에서 assets 경로) |
+| 패키징 (2b) | electron-builder. `scripts/fetch-opencode.mjs` 가 opencode 1.18.18(npm 레지스트리, sha512)·ripgrep 15.1.0(sha256)을 `build/vendor/` 에 받고(레포 제외), `extraResources` 로 `Resources/opencode`·`Resources/rg` 에 싣는다. 앱은 `OPENCODE_BIN` > 동봉 > PATH 순으로 찾고, 동봉 rg 폴더를 opencode PATH 맨 앞에 둔다(폐쇄망 grep 300초 멈춤 방지). mac 서명은 키체인의 개발용 자체 서명 인증서 `litecode-dev` 가 있으면 그것(없으면 ad-hoc) — 같은 인증서라 다시 빌드해도 macOS 개인정보 허락(문서 폴더 등)이 유지된다. **공증 없음, 다른 Mac 에서 내려받은 zip 의 격리(quarantine) 동작은 미검증**. vite `base: './'` (설치본 file:// 에서 assets 경로) |
 | 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. 설정한 provider 로 실제 대화된다(ctx.engine 이 opencode 에 넘김, 2a). 바이너리 동봉·패키징은 2b |
 | 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). 실물 테스트가 착지 기준이다 |
-| 세션 영속화 | 없음. 새로고침하면 대화 목록이 다 날아감 (React state 뿐) |
+| 세션 영속화 | `ctx.sessions` (2026-10-01). 내용 정본은 opencode DB, 앱은 목록 정보만(userData `sessions.json` — 제목·마지막 활동·모델·통계). 프로젝트당 50개(넘치면 오래된 것 자동 삭제)·하나씩 수동 삭제(두 번 눌러 확인). 삭제 뒤·opencode 기동 전에 DB 정리(`BUN_BE_BUN` + checkpoint→VACUUM). 폴더 없는 프로젝트 대화는 "폴더가 없습니다"(삭제만, opencode 요청 0). 끊긴 턴은 "중단됨". `/message` 는 100개씩 끝까지(한도 200) |
+| 답 마크다운 | `renderer/Markdown.tsx` (2026-10-01). mdast + GFM → React 요소(`dangerouslySetInnerHTML` 없음, 원문 HTML 은 글자로), 한글 굵게 보정(`cjkStrong.ts`), 코드 블록 언어 머리 + 복사, 링크는 메인이 http(s) 만 OS 브라우저로(`shell:open-external`), 이미지는 alt 만(원격 요청 0), 창 이동·새 창 차단. 문법 색 없음 |
+| Trajectory 탭 | `ctx.trajectory`(`src/services/trajectory.ts`, 2026-10-01)가 `ctx.llm.readMessages` 의 `/message` 를 중립 레코드(user·assistant 스텝·tool·context)로 바꾼다. 화면 `renderer/Trajectory.tsx`: Chat/Trajectory 탭, 3레인 시간축(Input·Model·Tools, Duration = 같은 너비/실제 시간 — 쉰 구간 압축), Turns·Calls 접기, 단어 AND 검색. CONTEXT 줄은 지시문 변경만. 턴이 끝나면 다시 읽는다(실시간 아님) |
+| 채팅 답 모양·진행 표시 | dsh 방식 (2026-10-02). 답은 말풍선 없이 열 전체(`.chat-column` = clamp(680, 64%, 920), 입력 카드 = 열 + 32), 턴 머리 "완료/실패/중단됨 · N초"(펼치면 생각·도구·지시문 줄), 진행 중엔 줄이 실시간으로 쌓이고 진행 줄 초가 오른다(`chat:progress` — 턴 끝 판정은 세션 SSE, 조각은 턴마다 전역 `/api/event`), 파일 칩·코드 블록 줄바꿈/복사 아이콘·미니맵·내 말 시각/복사. `ctx.llm` 이 Cordis 이벤트 `llm/turn-started`·`llm/turn-ended`(outcome done/failed/interrupted, 받아들여진 턴만 정확히 한 번) |
+| `!명령` | 대화 카드 (2026-10-02, closed-code 방식). 메인 `ctx.shell` 이 `$SHELL -lc` 로 프로젝트 폴더에서 실행(100KB·60초·■ 중단), 맥락 밖. 카드의 "AI 에게 보내기" = `ctx.llm.addContext`(resume:false, **턴 중엔 막음** — 턴 중 resume:false 는 끼어든다, 01h). 카드는 `sessions.json` 에 남는다. 터미널 칸은 ⌘↓/⌘↑ 로만 |
+| 설정 > 일반 | `ctx.settings`(userData `settings.json`, 2026-10-02) — 언어(ko/en, 기본 en — 사전 `shared/i18n/{ko,en}.ts`, 화면 `useT()`, 메인 `tr()`), 테마 Light/Dark/System(`nativeTheme.themeSource` → CSS `prefers-color-scheme`, 첫 창 backgroundColor), 대화 글자 크기 12~17(`--chat-font-size`), 코딩 뷰(Trajectory 탭 숨김), 알림 스위치, 설정 파일 열기. 모달 틀은 dsh 치수. 실물 테스트는 `LITECODE_TEST_LANGUAGE=ko` 로 한국어 고정, 테마 테스트는 `page.emulateMedia({ colorScheme: null })`(Playwright 는 light 를 흉내 낸다) |
+| 알림 | `ctx.notifications`(2026-10-02) — `llm/turn-*`·`llm/attention*` 을 받아 창이 없거나 포커스가 없으면 PC 알림(대화마다 최신 하나, 제목 + "프로젝트 · 상태"), 앞이면 토스트·대화 행/프로젝트 점, 보고 있는 대화면 없음. 중단은 앱 안만. 클릭 → reveal + pendingOpen → 화면이 `openProject` 로 연다. dock 배지. `requestSingleInstanceLock` 은 서비스보다 먼저(engine 이 이전 실행 opencode 를 거두므로), macOS `activate` 는 창 생성. 테스트는 기록 host(`__litecodeNotifyTest`) |
+| 승인·질문 카드 + 모드 | 라운드 A (2026-10-02). 입력창 왼쪽 모드 칩 계획/기본/매번 묻기/전체 권한(`shared/modes.ts`, opencode 에이전트 plan 덮어쓰기·build·litecode-ask·litecode-full — 계획은 edit·bash·webfetch deny 로 도구가 실제로 빠지고 `.opencode/plans` 도 막힘), Shift+Tab 은 계획→기본→매번 묻기(전체 권한은 메뉴 + 확인), 턴 중 잠금, 계획 턴 끝 "이 계획대로 실행", 전환 구분선, 새 대화 기본 모드(설정 > 일반). 권한·질문 대기는 전역 `/api/event` + 정본 GET 조회 → 턴 안 카드(허용 한 번/거절, 보기 + 자유 입력), 거절의 tool.failed 종료를 턴 끝으로. `llm/attention`·`llm/attention-resolved` 이벤트 → 알림 "답 필요" |
+| 입력 트리거 | `ctx.triggers` 등록소 + `src/triggers/{at,slash,bang}.ts` 플러그인(effect 등록, 2026-10-01). `@` 는 경로 텍스트만, `/` 는 앱이 template 을 풀어 보내고 prompt `id`(`msg_litecode_…`)로 `ctx.sessions.labels` 에 친 글을 적어 다시 열어도 `/hi world` 로 보인다, 모르는 `/xxx` 는 막는다, `!` 는 `ctx.terminals`(프로젝트별 opencode pty, 화면 xterm)에서 돌고 대화 맥락에 안 들어간다 |
 | 프로젝트 전환 | 시안대로 구현 (2026-09-30). 사이드바 전환 버튼 + 팝오버(검색·즐겨찾기·최근·폴더 열기), 목록에서 빼기(폴더는 안 지움), 이름 바꾸기(보이는 이름만), 잘린 경로·대화 제목은 마우스를 올리면 흘러가며 보이고 옆 카드에 전체 내용(dsh 방식), 앱을 켜면 마지막 프로젝트. 목록은 `ctx.projects`(userData `projects.json`). 대화는 프로젝트별로 메모리에만 — **대화 영속화는 아직 없다** |
 
 ## 실행
@@ -211,3 +230,7 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-09-30 | 한 라운드에는 사용자 요청만 — QA 참고는 따로 모아 보고 | skills/litecode-build | 사용자 "너무 오래 걸린다" |
 | 2026-09-30 | QA 는 `차단` 재현 스크립트를 `_workspace/qa-repro/` 에 남긴다 | agents/boundary-qa | 프로브를 지워 구현자가 재현 못 함 |
 | 2026-09-30 | 테스트 창을 화면에 띄우지 않는다 (`LITECODE_TEST_HIDDEN=1`) — 에이전트·스크립트도 따른다 | skills/live-test | 사용자 "테스트 중 다른 일을 못 하겠다" |
+| 2026-10-01 | 엔진 경계 = `ctx.llm` + `ctx.engine` (문서 정정), bootstrap 의 IPC·종료를 Cordis effect·fiber dispose 로 | agents/litecode-dev, electron/main.ts | 코디스 사용 검토 |
+| 2026-10-01 | 병렬 라운드 규칙 — 동시 2개·worktree·기능별 컴포넌트/실물 테스트 파일·실물 테스트 잠금·리더가 합침 | skills/litecode-build | 사용자 "병렬 개발은 안 되나" |
+| 2026-10-02 | 돌고 있는 라운드에 범위를 얹지 않는다(다음 라운드로), 개발 중엔 자기 실물 파일만·전체는 착지 직전 한 번 | skills/litecode-build | 사용자 "왜 이리 오래 걸리지" |
+| 2026-10-02 | GitHub 흐름 — 라운드마다 이슈 → 브랜치 → PR → main 머지(머지는 사용자 확인). 원격 kim-taehan/litecode | skills/litecode-build | 사용자 지시 |

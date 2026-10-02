@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -7,6 +7,8 @@ import path from 'node:path'
 import { findOpencodeBinary, notFoundMessage } from './opencodeBinary.ts'
 import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
 import type { ProviderConfig } from './providers.ts'
+import type { Mode } from '../../shared/modes.ts'
+import { tr } from '../i18n.ts'
 import './providers.ts'
 
 // 앱이 띄우는 opencode 서버 하나의 수명 (ctx.engine). ctx.llm 은 이 서비스에서 주소·인증을 받아 쓰고, 그 밖의 누구도
@@ -70,6 +72,47 @@ interface ServerRecord {
   url: string
 }
 
+const PURGE_TIMEOUT_MS = 30_000
+// 지운 대화 본문을 DB 파일에서 걷어낸다 (2026-10-01 실측, _workspace/01_probe.md). DELETE 뒤에도 본문은 WAL 에, 체크포인트 뒤에는
+// main 의 빈 페이지에 남는다(secure_delete 기본값) — TRUNCATE 체크포인트 → VACUUM → 다시 TRUNCATE 해야 세 파일 모두 0 이 된다.
+// sqlite 는 opencode 실행 파일을 BUN_BE_BUN=1 로 띄워 bun 의 bun:sqlite 로 연다 — Electron 33(Node 20)엔 node:sqlite 가 없고 의존성을
+// 늘리지 않으려고. **문서화 안 된 bun 동작에 기댄다** (opencode 1.18.18 = bun 1.3.14 에서 확인). 버전이 바뀌어 안 먹으면 정리는 로그만
+// 남기고 넘어가고, 실물 테스트(DB 파일에 표식 0건)가 깨진다. opencode 가 떠 있어도 됐다 — 다만 잠금을 opencode busy_timeout(5초) 넘게
+// 쥐면 그동안의 opencode 쓰기가 실패하므로, 답을 기다리는 턴이 없을 때만 부른다(ctx.llm). busy_timeout 은 우리가 기다리는 쪽이다
+const PURGE_SCRIPT = [
+  'const { Database } = require("bun:sqlite")',
+  'const db = new Database(process.env.LITECODE_PURGE_DB)',
+  'db.run("PRAGMA busy_timeout=2000")',
+  'const before = db.query("PRAGMA wal_checkpoint(TRUNCATE)").get()',
+  'db.run("VACUUM")',
+  'const after = db.query("PRAGMA wal_checkpoint(TRUNCATE)").get()',
+  'db.close()',
+  'console.log(JSON.stringify({ busy: before.busy || after.busy }))',
+].join(';')
+// 모드 = opencode primary 에이전트 하나 (01k). 세션마다 POST /api/session 의 agent 로 고르고, 바꿀 땐 POST /api/session/{id}/agent.
+// 정의는 이 파일이 생성하는 opencode.json 에만 있다 — 위층은 모드 이름(shared/modes.ts)만 안다.
+// - plan: opencode 기본 plan 을 덮어쓴다. 기본 plan 은 편집만 막고(bash 허용, .opencode/plans/*.md 쓰기 허용) "계획만 세워라" 프롬프트도
+//   신규 세대엔 없다(01k). 규칙은 뒤가 이긴다 — edit·bash·webfetch deny 를 덧붙이면 그 도구들이 LLM 요청에서 빠지고 plans 예외도 막힌다
+//   (2026-10-02 실측 3/3: tools = glob·grep·question·read·skill·todowrite·websearch, plans md 안 생김)
+// - build: opencode 기본 그대로 (폴더 밖·.env 읽기는 묻는다)
+// - litecode-ask / litecode-full: 사용자 정의 에이전트. build 의 system 첫 줄을 못 받으므로 prompt 로 준다(01f). 기본 규칙에 question deny 가
+//   있어 ask 는 다시 허용한다. full 은 "*":"allow" — 폴더 밖·.env 도 안 묻는다(01f)
+// ⚠️ 없는 에이전트 이름도 opencode 는 200/204 로 받고 모든 도구 허용으로 돈다 — ctx.llm 이 /api/agent 로 먼저 확인한다
+export const MODE_AGENT: Record<Mode, string> = { plan: 'plan', build: 'build', ask: 'litecode-ask', full: 'litecode-full' }
+/** opencode 1.18.18 build 에이전트의 system (GET /api/agent) 그대로 */
+const BUILD_PROMPT =
+  'You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.'
+const PLAN_PROMPT = [
+  'You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools.',
+  'Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode.',
+  'Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.',
+].join(' ')
+export const ENGINE_AGENTS = {
+  plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny' } },
+  [MODE_AGENT.ask]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', question: 'allow' } },
+  [MODE_AGENT.full]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { '*': 'allow' } },
+}
+
 const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 초 무응답인 때가 있다 (live-test 스킬 기록)
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
@@ -92,7 +135,7 @@ export function engineConfig(providers: ProviderConfig[], proxy: Pick<KeyProxy, 
       ),
     }
   }
-  return { $schema: 'https://opencode.ai/config.json', provider }
+  return { $schema: 'https://opencode.ai/config.json', provider, agent: ENGINE_AGENTS }
 }
 
 /** opencode 자식 프로세스 env — 진짜 키는 없다 (키 프록시) */
@@ -124,6 +167,8 @@ export class EngineService extends Service {
   private disposed = false
   /** 엔진과 수명을 같이 한다 (토큰은 앱 실행마다 바뀐다) */
   private proxy?: Promise<KeyProxy>
+  /** DB 정리는 한 번에 하나만 */
+  private purging: Promise<void> = Promise.resolve()
 
   constructor(
     ctx: Context,
@@ -131,13 +176,14 @@ export class EngineService extends Service {
   ) {
     super(ctx, 'engine')
     reapStale(opts.pidFile)
-    ctx.on('providers/changed', () => void this.restart().catch(() => {}))
+    // 재시작이 실패해도 다음 대화가 다시 띄워 본다 — 다만 조용히 묻히지 않게 사유는 남긴다(키는 안 싣는다: 오류는 프로세스·포트 사유뿐)
+    ctx.on('providers/changed', () => void this.restart().catch((error: unknown) => console.error('[engine] 설정 변경 후 재시작 실패', (error as Error).message)))
     ctx.effect(() => () => this.stop())
   }
 
   /** 떠 있는 서버의 연결. 없거나 죽었으면 띄운다 (동시에 불러도 한 번만) */
   connection(): Promise<EngineConnection> {
-    if (this.disposed) return Promise.reject(new Error('앱이 종료 중입니다'))
+    if (this.disposed) return Promise.reject(new Error(tr('error.appQuitting')))
     if (!this.current) {
       const launching: Promise<RunningServer> = this.stopping.then(() => this.launch(() => this.forget(launching)))
       launching.catch(() => this.forget(launching))
@@ -158,6 +204,16 @@ export class EngineService extends Service {
     this.retire()
     await this.stopping
     await (await this.proxy?.catch(() => undefined))?.close()
+  }
+
+  /** 지운 대화 본문을 DB 파일에서 걷어낸다 (위 PURGE_SCRIPT). 실패·busy 면 로그만 남기고 다음 기회로 — 대화 기능을 막지 않는다.
+   *  띄우기 직전에도 스스로 부른다(크래시로 놓친 정리까지). 떠 있을 때는 답을 기다리는 턴이 없을 때만 부를 것 (ctx.llm.purgeDeleted) */
+  purgeDeleted(): Promise<void> {
+    const base = this.opts.env ?? process.env
+    const bin = findOpencodeBinary(base, undefined, this.opts.bundled?.opencode).path
+    if (!bin) return Promise.resolve()
+    this.purging = this.purging.then(() => purgeDb(bin, this.opts.db, base))
+    return this.purging
   }
 
   private retire(): void {
@@ -187,6 +243,7 @@ export class EngineService extends Service {
       return provider && { baseURL: provider.baseURL, apiKey: this.ctx.providers.apiKey(id) }
     })
     const proxy = await this.proxy
+    await this.purgeDeleted() // 다른 연결이 없을 때 — 지난 실행이 정리 전에 끝났어도 여기서 걷힌다
     fs.mkdirSync(this.opts.configDir, { recursive: true })
     fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(engineConfig(this.ctx.providers.all(), proxy), null, 2))
 
@@ -209,7 +266,7 @@ export class EngineService extends Service {
     const closer = new AbortController()
     const exited = new Promise<void>((resolve) =>
       child.once('exit', (code, signal) => {
-        closer.abort(new Error(`opencode 가 끝났습니다 (code=${code} signal=${signal})`))
+        closer.abort(new Error(tr('error.opencodeExited', { code: String(code), signal: String(signal) })))
         forgetRecord(this.opts.pidFile, child.pid)
         onExit()
         resolve()
@@ -217,7 +274,7 @@ export class EngineService extends Service {
     )
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve)
-      child.once('error', (error) => reject(new Error(`opencode 를 실행하지 못했습니다 (${bin}): ${error.message}`)))
+      child.once('error', (error) => reject(new Error(tr('error.opencodeSpawn', { bin, message: error.message }))))
     })
 
     const url = `http://127.0.0.1:${port}`
@@ -241,11 +298,25 @@ export class EngineService extends Service {
   }
 }
 
+async function purgeDb(bin: string, db: string, base: NodeJS.ProcessEnv): Promise<void> {
+  if (!fs.existsSync(db)) return // 열면 빈 DB 를 만든다
+  try {
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(bin, ['-e', PURGE_SCRIPT], { env: { ...base, BUN_BE_BUN: '1', LITECODE_PURGE_DB: db }, timeout: PURGE_TIMEOUT_MS }, (error, out) =>
+        error ? reject(error) : resolve(out),
+      ),
+    )
+    if ((JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as { busy?: number }).busy) console.warn('[engine] DB 정리: 잠겨 있어 일부 못 했다 — 다음 기회에')
+  } catch (error) {
+    console.error('[engine] DB 정리 실패 — 다음 기회에', (error as Error).message)
+  }
+}
+
 async function waitUntilReady(url: string, headers: Record<string, string>, closed: AbortSignal): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS
   let last = ''
   while (Date.now() < deadline) {
-    if (closed.aborted) throw new Error(`opencode 가 준비 전에 끝났습니다 — ${(closed.reason as Error).message}`)
+    if (closed.aborted) throw new Error(tr('error.opencodeExitedEarly', { message: (closed.reason as Error).message }))
     try {
       const res = await fetch(`${url}/doc`, { headers, signal: AbortSignal.timeout(2_000) })
       if (res.ok) return
@@ -255,7 +326,7 @@ async function waitUntilReady(url: string, headers: Record<string, string>, clos
     }
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
-  throw new Error(`opencode 가 ${READY_TIMEOUT_MS / 1000}초 안에 준비되지 않았습니다 (마지막 응답: ${last})`)
+  throw new Error(tr('error.opencodeNotReady', { seconds: READY_TIMEOUT_MS / 1000, last }))
 }
 
 async function freePort(): Promise<number> {

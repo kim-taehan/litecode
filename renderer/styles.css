@@ -26,6 +26,86 @@
   --danger: #e5484d;
   --danger-bg: #fdecec;
   --ok: #3fa66b;
+  --warn: #f59e0b;                     /* state-warn-primary (amber-500) — 승인·질문 카드, 전체 권한 칩 */
+  --warn-soft: #fef5e7;                /* state-warn-tertiary (amber-100) */
+  --warn-border: #f7ad31;              /* state-warn-secondary (amber-400) */
+  /* 설정 > 일반 라운드에서 하드코딩 색을 토큰으로 (01f 3절) */
+  --surface: #ffffff;                  /* bg-layer-1 — 카드·입력칸·말풍선 */
+  --surface-panel: #ffffff;            /* bg-layer-2 — 설정 판 */
+  --on-text: #ffffff;                  /* label-primary-foreground — var(--text) 바탕 위 글자 */
+  --tooltip-bg: #2c2c2e;               /* tooltip-bg */
+  --tooltip-text: #ffffff;
+  --tooltip-detail: #b8b8bd;
+  --mask: rgba(0, 0, 0, 0.24);         /* bg-mask-1 */
+  --module: #f5f6f7;                   /* bg-module-platform — 드롭다운·글자 크기 알약·고른 테마 카드 */
+  --nav-hover: #f1f3f5;                /* sidebar-nav-item-hover */
+  --nav-active: #ebeef2;               /* sidebar-nav-item-active */
+  --switch-thumb: #ffffff;
+  --selected-ring: #adb2b8;            /* neutral-bluish-400 — 두 테마 같음 */
+  /* 사이드바 (dsh ui-sidebar·ui-workspace, _workspace/01j_sidebar.md) */
+  --sidebar-fill: #f9fafb;             /* specific-sidebar-fill (bluish-50) */
+  --fill-elevated: #ffffff;            /* button-elevated-fill — 새 대화·프로젝트 전환 */
+  --fill-floating: #ffffff;            /* button-floating-fill — 맨 아래로 버튼 */
+  --fill-floating-hover: #f1f3f5;      /* button-floating-hover */
+  /* elevation-panel — 0.5px border-l3 선 + 옅은 그림자 (맨 아래로 버튼) */
+  --shadow-panel: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
+  --scrollbar: #e5e5e5;                /* scrollbar-bg-l2 */
+  --scrollbar-hover: #d4d4d4;          /* scrollbar-hover-l2 */
+  --hover-card-bg: #2c2c2e;            /* HoverCard 판 — 두 테마 같음 */
+  --hover-card-detail: #cfd3d6;        /* HoverCard 부가 글자 — 두 테마 같음 */
+  --shadow-lv3: 0 0 1px rgba(0, 0, 0, 0.2), 0 0 4px rgba(0, 0, 0, 0.02), 0 12px 32px rgba(0, 0, 0, 0.08);
+  /* 대화 본문 글자 크기 (설정 > 일반) — 렌더러가 설정값으로 덮는다. 제목은 기준 + delta, 표 등 한 단계 작은 글자는 secondary */
+  --chat-font-size: 14px;
+  --chat-font-delta: 0px;
+  --chat-font-size-secondary: 13px;
+  color-scheme: light dark;
+}
+
+/* 다크 — dsh design-platform.css 의 같은 alias 다크 값 (01f 대응표). 메인이 설정값을 nativeTheme.themeSource 에 넣으면
+   prefers-color-scheme 이 따라와 라이트·다크·시스템 셋이 이 쿼리 하나로 된다 (01f 실측, Electron 33) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151517;
+    --bg-sidebar: #1b1b1c;
+    --text: #f9fafb;
+    --text-strong-hover: #ebeef2;
+    --text-secondary: #cfd3d6;
+    --text-tertiary: #adb2b8;
+    --text-caption: #81858c;
+    --border: rgba(255, 255, 255, 0.12);
+    --border-light: rgba(255, 255, 255, 0.06);
+    --border-strong: rgba(255, 255, 255, 0.2);
+    --border-ring: rgba(255, 255, 255, 0.16);
+    --fill-hover: rgba(255, 255, 255, 0.08);
+    --fill-active: rgba(255, 255, 255, 0.14);
+    --accent: #7aaaff;
+    --accent-soft: #34415b;
+    --accent-hover: #4176e6;
+    --fill-selector: #353638;
+    --menu: rgba(48, 49, 54, 0.94);
+    --shadow-soft: 0 0 0 0.5px rgba(255, 255, 255, 0.2), 0 4px 16px 0 rgba(0, 0, 0, 0.03), 0 0 24px 0 rgba(0, 0, 0, 0.03);
+    --shadow-prominent: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
+    --danger: #f25a5a;
+    --danger-bg: rgba(242, 90, 90, 0.15);
+    --ok: #22c55e;
+    --warn-soft: #27241f;              /* amber-900 — warn·warn-border 는 두 테마 같다 */
+    --surface: #232324;
+    --surface-panel: #2c2c2e;
+    --on-text: #0f1115;
+    --tooltip-bg: #434549;
+    --mask: rgba(0, 0, 0, 0.5);
+    --module: #353638;
+    --nav-hover: #2c2c2e;
+    --nav-active: #434549;
+    --switch-thumb: #adb2b8;
+    --sidebar-fill: #1b1b1c;
+    --fill-elevated: #43454a;
+    --fill-floating: #2c2c2e;
+    --fill-floating-hover: #353638;
+    --shadow-panel: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
+    --scrollbar: #545557;
+    --scrollbar-hover: #65676b;
+  }
 }
 
 * {
@@ -55,25 +135,33 @@ button {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
+  background: var(--sidebar-fill);
+  border-right: 0.5px solid var(--border-ring); /* dsh 비-darwin 사이드바: 불투명 바탕 + 0.5px l3 */
+  font-size: 14px;
 }
 
+/* 좌우 기준선 — dsh 사이드바 안쪽 12px. 새 대화·전환 카드는 거기서 2px 더(margin 0 2), 행은 12 에서 시작 */
 .sidebar__project {
   position: relative;
-  padding: 0 16px 12px; /* 위는 로고 줄(아래 여백 4)이 맡는다 */
+  padding: 0 14px 12px; /* 위는 로고 줄(아래 여백 4)이 맡는다 */
 }
 
+/* 전환 카드는 dsh 에 대응물이 없어 새 대화 버튼과 같은 재질로 (01j 권고) */
 .project-switch {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--fill-elevated);
+  border: 0.5px solid var(--border-ring);
+  border-radius: 12px;
   text-align: left;
+  color: var(--text);
+}
+
+.project-switch:hover:not(:disabled) {
+  background: var(--fill-floating-hover);
 }
 
 .project-switch__badge {
@@ -97,16 +185,24 @@ button {
   flex-direction: column;
 }
 
-.project-switch__name,
+.project-switch__name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--text);
+}
+
+/* 팝오버 항목 이름 — dsh Menu 항목 13 / 20 */
 .project-item__name {
   font-size: 13px;
-  font-weight: 600;
+  line-height: 20px;
   color: var(--text);
 }
 
 .project-switch__path {
-  font-size: 11px;
-  color: var(--text-caption);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -114,37 +210,45 @@ button {
 
 .project-switch__caret {
   font-size: 11px;
-  color: var(--text-caption);
+  color: var(--text-tertiary);
 }
 
 .project-popover {
   position: absolute;
   top: calc(100% - 6px);
-  left: 16px;
+  left: 14px;
   z-index: 10;
   width: 300px;
-  padding: 8px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(15, 17, 21, 0.1);
+  padding: 4px;
+  background: var(--menu);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-radius: 16px;
+  box-shadow: var(--shadow-prominent);
 }
 
+/* dsh 목록 검색칸 — 30px, 0.5px l4, 반경 12, 포커스 링 없음 */
 .project-popover__search {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
   font-size: 13px;
+  line-height: 18px;
   font-family: inherit;
-  background: var(--bg);
+  color: var(--text);
+  background: transparent;
+}
+
+.project-popover__search:focus {
+  outline: none;
 }
 
 .project-popover__label {
-  padding: 10px 8px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-caption);
+  padding: 8px 8px 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
 }
 
 .project-popover__list {
@@ -169,7 +273,8 @@ button {
 .project-item {
   display: flex;
   align-items: center;
-  border-radius: 8px;
+  min-height: 34px;
+  border-radius: 12px;
 }
 
 .project-item__main {
@@ -178,11 +283,12 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px;
+  padding: 6px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   text-align: left;
+  color: var(--text);
 }
 
 .project-item__main:focus-visible {
@@ -194,18 +300,14 @@ button {
 .project-item:focus-within,
 .project-popover__open:hover:not(:disabled),
 .project-popover__open:focus-visible {
-  background: var(--bg);
+  background: var(--fill-hover);
   outline: none;
 }
 
-.project-item--active,
-.project-item--active:hover,
-.project-item--active:focus-within {
-  background: var(--bg-sidebar);
-}
-
-.project-item--active .project-item__main:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--border);
+/* 지금 프로젝트는 바탕 없이 오른쪽 끝 ✓ (dsh Menu 선택 항목) */
+.project-item__check {
+  flex: none;
+  color: var(--text-secondary);
 }
 
 .project-item__main:disabled,
@@ -256,28 +358,22 @@ button {
   outline: none;
 }
 
-.project-item__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  flex-shrink: 0;
-}
-
 .project-popover__divider {
-  height: 1px;
-  margin: 6px 0;
-  background: var(--border-light);
+  height: 0.5px;
+  margin: 4px 0;
+  background: var(--border);
 }
 
 .project-popover__open {
   width: 100%;
-  padding: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   text-align: left;
   font-size: 13px;
+  line-height: 20px;
   color: var(--text);
 }
 
@@ -309,84 +405,214 @@ button {
 }
 
 .sidebar__new {
-  padding: 0 16px 12px;
+  padding: 0 14px 12px;
 }
 
+/* dsh .newSession — 38px, 0.5px l3, 반경 12, elevated 바탕, 14/500/22 */
 .new-chat {
   width: 100%;
-  padding: 9px 12px;
-  background: var(--bg); /* dsh New Session: 흰 바탕 + 얇은 테두리 */
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  height: 38px;
+  padding: 8px 12px;
+  background: var(--fill-elevated);
+  border: 0.5px solid var(--border-ring);
+  border-radius: 12px;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
 }
 
+/* dsh .sectionHeader — 36px 줄, 14/400/20 tertiary, 행 글자와 같은 세로선(12 + 4) */
 .sidebar__label {
-  padding: 4px 20px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-caption);
+  height: 36px;
+  display: flex;
+  align-items: center;
+  margin: 2px 0 4px;
+  padding-left: 16px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-tertiary);
 }
 
+/* 행은 사이드바 12px 에서 시작, 오른쪽은 5px 스크롤바 자리(gutter)를 두고 12 에 맞춘다 */
 .sidebar__sessions {
   flex-grow: 1;
   overflow-y: auto;
-  padding: 0 8px;
+  padding: 0 7px 16px 12px;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+/* 5px 스크롤바 — 포인터가 사이드바 밖이면 감춘다 (dsh scrollbar.css) */
+.sidebar__sessions::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sidebar__sessions::-webkit-scrollbar-thumb {
+  border-radius: 5px;
+  background: transparent;
+}
+
+.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+}
+
+.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
+/* 목록 끝 24px 페이드 — 마지막 행이 발치 줄에 툭 잘리지 않게 */
+.sidebar__fade {
+  position: relative;
+  flex: none;
+  height: 24px;
+  margin-top: -24px;
+  background: linear-gradient(to bottom, transparent, var(--sidebar-fill));
+  pointer-events: none;
+}
+
+/* dsh .sessionRow — 32px, 반경 12, hover·선택 모두 interactive-bg-hover. 제목은 사용자 결정으로 13px(dsh 14)·400·줄 20 */
 .session-item {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  text-align: left;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: none;
-  background: none;
+  height: 32px;
+  border-radius: 12px;
   font-size: 13px;
+  line-height: 20px;
   color: var(--text);
+}
+
+.session-item:hover {
+  background: var(--fill-hover);
+}
+
+.session-item__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  text-align: left;
+  padding: 0 8px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+/* 상태 점 자리 — 점이 없어도 늘 있어 제목이 안 움직인다 (dsh 16×20 슬롯) */
+.session-item__slot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
+}
+
+/* 휴지통은 hover·포커스 때만 시각 자리에 — dsh ui-workspace 세션 행처럼 시각을 숨기고 버튼을 보인다 */
+.session-item__actions {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding-right: 8px;
+}
+
+.session-item:hover .session-item__actions,
+.session-item:focus-within .session-item__actions,
+.session-item--confirming .session-item__actions {
+  display: flex;
+}
+
+.session-item:hover .session-item__time,
+.session-item:focus-within .session-item__time,
+.session-item--confirming .session-item__time {
+  display: none;
+}
+
+/* dsh 행 버튼 — 16px 맨 아이콘, tertiary → primary, 바탕 없음 */
+.session-item__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-tertiary);
+}
+
+.session-item__action:hover,
+.session-item__action:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.session-item__confirm {
+  padding: 3px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--danger-bg);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--danger);
+  white-space: nowrap;
 }
 
 .session-item__title {
   display: block;
   flex: 1;
   min-width: 0;
+  margin: 0 6px 0 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .session-item--active {
-  background: var(--fill-active);
-  color: var(--text);
-  font-weight: 600;
+  background: var(--fill-hover); /* 선택은 바탕만 — 굵기·색 그대로 (dsh, 사용자 결정 2026-10-02) */
 }
 
 .sidebar__foot {
-  padding: 8px;
-  border-top: 1px solid var(--border);
+  padding: 0 12px 6px;
 }
 
-/* dsh ui-settings-general 트리거 행: 사이드바 폭 전체, hover 때만 배경 */
+/* dsh ui-sidebar 설정 줄(.trigger) — 42px 줄, 16px 톱니, 본문 글자색, 열림 표시 없음. dsh 발치에는 구분선이 없다 */
 .settings-trigger {
-  width: 100%;
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 4px);
+  height: 42px;
+  margin: 4px -2px;
+  padding: 0 10px 0 8px;
+  box-sizing: border-box;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   text-align: left;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 22px;
   color: var(--text);
 }
 
-.settings-trigger:hover,
+.settings-trigger svg {
+  flex: none;
+}
+
+.settings-trigger:hover {
+  background: var(--fill-hover);
+}
+
 .settings-trigger:focus-visible {
-  background: var(--fill-active);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .status-dot {
@@ -431,12 +657,8 @@ button {
 .main__messages {
   flex-grow: 1;
   overflow-y: auto;
-  padding: 28px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  max-width: 720px;
-  margin: 0 auto;
+  /* 스크롤 칸은 전체 폭(스크롤바가 창 끝에), 글은 안쪽 열(.chat-column, chat.css)만 — dsh 대화 열 폭 축 */
+  padding: 28px 0;
   width: 100%;
 }
 
@@ -450,7 +672,7 @@ button {
 .bubble {
   max-width: 78%;
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: var(--chat-font-size); /* 설정 > 일반의 글자 크기 */
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -462,11 +684,12 @@ button {
   border-radius: 14px 14px 4px 14px;
 }
 
+/* 답은 말풍선이 아니다 — 본문 폭 전체에 그냥 글 (dsh ui-chat). 턴 머리·작업 줄은 chat.css */
 .bubble--assistant {
-  align-self: flex-start;
-  background: #fff;
-  border: 1px solid var(--border-light);
-  border-radius: 4px 14px 14px 14px;
+  align-self: stretch;
+  max-width: none;
+  padding: 0;
+  line-height: 1.6;
 }
 
 /* 입력창 — dsh ui-conversation InputBar.module.css 의 값 그대로 (사용자 "완전 동일" 2026-10-01).
@@ -900,24 +1123,26 @@ button {
   position: fixed;
   z-index: 100;
   width: 244px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 16px;
-  border-radius: 12px;
-  background: #2c2c2e;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  border-radius: 16px;
+  background: var(--hover-card-bg);
+  box-shadow: var(--shadow-lv3);
   pointer-events: none;
 }
 
 .hover-card__name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--tooltip-text);
 }
 
 .hover-card__path {
-  margin-top: 6px;
   font-size: 12px;
-  line-height: 1.5;
-  color: #b8b8bd;
+  line-height: 16px;
+  color: var(--hover-card-detail);
   word-break: break-all;
 }
 
@@ -932,259 +1157,6 @@ button {
   font-family: inherit;
   font-size: 13px;
   color: var(--text);
-}
-
-/* 설정 모달 — dsh ui-settings-general SettingsRoot: 가림막 위 가운데 패널, 왼쪽 탭 목록 + 오른쪽 페이지 */
-.settings-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.settings-mask {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 17, 21, 0.32);
-}
-
-.settings-panel {
-  position: relative;
-  display: flex;
-  width: min(880px, calc(100vw - 64px));
-  height: min(640px, calc(100vh - 64px));
-  background: var(--bg);
-  border-radius: 14px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
-  overflow: hidden;
-}
-
-.settings-nav {
-  width: 200px;
-  flex-shrink: 0;
-  padding: 16px 8px;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.settings-nav__title {
-  padding: 4px 10px 12px;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.settings-nav__item {
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  text-align: left;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.settings-nav__item--active {
-  background: var(--fill-active);
-  color: var(--text);
-  font-weight: 600;
-}
-
-.settings-content {
-  position: relative;
-  flex-grow: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 24px 32px;
-}
-
-.settings-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  font-size: 18px;
-  color: var(--text-secondary);
-}
-
-.settings-close:hover {
-  background: var(--fill-hover);
-}
-
-.models-page__title {
-  margin: 0 0 4px;
-  font-size: 18px;
-}
-
-.models-page__hint {
-  margin: 0 0 16px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.provider-card {
-  margin-bottom: 10px;
-  padding: 12px 14px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.provider-card__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-}
-
-.provider-card__name {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.provider-card__tag {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-sidebar);
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.provider-card__actions {
-  margin-left: auto;
-  display: flex;
-  gap: 6px;
-}
-
-.settings-button {
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  font-size: 12px;
-  color: var(--text);
-}
-
-.settings-button:hover:not(:disabled) {
-  background: var(--bg-sidebar);
-}
-
-.settings-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.settings-button--primary {
-  background: var(--text);
-  border-color: var(--text);
-  color: #fff;
-}
-
-.settings-button--primary:hover:not(:disabled) {
-  background: var(--text-strong-hover);
-}
-
-.settings-button--danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.models-page__add {
-  width: 100%;
-  padding: 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 10px;
-  background: none;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.models-page__add:hover {
-  background: var(--bg-sidebar);
-}
-
-.provider-editor {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.settings-field {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  align-items: center;
-  gap: 12px;
-}
-
-.settings-field__label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.settings-input {
-  width: 100%;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  font-family: inherit;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.settings-input--readonly {
-  background: var(--bg-sidebar);
-  color: var(--text-caption);
-}
-
-.model-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 112px 28px;
-  gap: 6px;
-}
-
-.model-row .settings-input:first-child {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-}
-
-.settings-icon-button {
-  border: none;
-  border-radius: 6px;
-  background: none;
-  font-size: 16px;
-  color: var(--text-secondary);
-}
-
-.settings-icon-button:hover:not(:disabled) {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.provider-editor__model-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.provider-editor__footer {
-  display: flex;
-  justify-content: space-between;
-  padding-top: 6px;
-}
-
-.settings-error {
-  margin: 0;
-  font-size: 12px;
-  color: var(--danger);
 }
 
 /* 사이드바 오른쪽 경계를 끌어 폭 조절 (dsh ui-layout DragHandle) — 보이는 선은 테두리, 잡는 자리는 조금 넓게 */
@@ -1269,15 +1241,16 @@ button {
 }
 
 .sidebar-toggle:hover {
-  background: var(--border-light);
+  background: var(--fill-hover);
   color: var(--text);
 }
 
-/* 마지막 활동 시각 — dsh 세션 행 오른쪽의 작은 회색 글자 */
+/* 마지막 활동 시각 — dsh 세션 행 오른쪽의 작은 회색 글자 (10 / 16 tertiary) */
 .session-item__time {
   flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-caption);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-tertiary);
 }
 
 /* 모델을 바꾼 뒤 버튼 위에 잠깐 뜨는 작은 알림 */
@@ -1301,4 +1274,268 @@ button {
 
 @keyframes model-toast-in {
   from { opacity: 0; transform: translateY(4px); }
+}
+
+/* 안내 화면의 "폴더가 없는 프로젝트" 대화 — 지우기만 된다 */
+.missing-list {
+  width: min(420px, 100%);
+  margin: 0 0 16px;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.missing-list__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.missing-list__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.missing-list__note {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* Trajectory 탭 (renderer/Trajectory.tsx) — dsh ui-trajectory 참조: 얇은 툴바, 3레인 시간축, 턴별 목록 */
+.main__tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 16px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+/* 제목 줄 바로 밑에 탭 — 고른 탭은 파란 밑줄 */
+.main__header:has(+ .main__tabs) {
+  border-bottom: none;
+}
+
+.main__tab {
+  height: 32px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.main__tab:hover {
+  color: var(--text);
+}
+
+.main__tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.trajectory {
+  flex-grow: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.trajectory__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 18px;
+  background: var(--bg);
+  border-bottom: 0.5px solid var(--border);
+}
+
+.trajectory__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.trajectory__toggle:hover,
+.trajectory__toggle[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.trajectory__search {
+  margin-left: auto;
+  width: 180px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.trajectory__timeline {
+  padding: 10px 18px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.trajectory__lane {
+  display: flex;
+  align-items: center;
+  height: 16px;
+  gap: 8px;
+}
+
+.trajectory__lane-name {
+  width: 44px;
+  flex: none;
+  font-size: 11px;
+  color: var(--text-caption);
+}
+
+.trajectory__track {
+  position: relative;
+  flex-grow: 1;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--fill-selector);
+}
+
+/* Model 막대: 앞쪽 회색이 응답을 기다린 구간(--wait), 나머지가 생성 */
+.trajectory__bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 2px;
+  --wait: 0%;
+  background: linear-gradient(to right, var(--text-caption) var(--wait), var(--accent) var(--wait));
+}
+
+.trajectory__bar[data-kind='user'],
+.trajectory__bar[data-kind='context'] {
+  background: var(--text-secondary);
+}
+
+.trajectory__bar[data-kind='tool'] {
+  background: var(--ok);
+}
+
+.trajectory__bar.trajectory__bar--open {
+  background: transparent;
+  border-left: 2px solid var(--text-tertiary);
+}
+
+.trajectory__bar.trajectory__bar--error {
+  background: var(--danger);
+}
+
+.trajectory__ledger {
+  padding: 6px 0 24px;
+}
+
+.trajectory__turn-head {
+  display: block;
+  width: 100%;
+  padding: 6px 18px;
+  border: 0;
+  border-bottom: 0.5px solid var(--border-light);
+  background: var(--bg);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.trajectory__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 18px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.trajectory__row:hover {
+  background: var(--fill-hover);
+}
+
+.trajectory__row[data-kind='tool'] {
+  padding-left: 42px;
+}
+
+.trajectory__fold {
+  width: 14px;
+  flex: none;
+}
+
+.trajectory__fold button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.trajectory__tag {
+  width: 72px;
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.trajectory__text {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.trajectory__call,
+.trajectory__result {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+}
+
+.trajectory__result {
+  color: var(--text-secondary);
+}
+
+.trajectory__row--error .trajectory__text,
+.trajectory__row--error .trajectory__result,
+.trajectory__row--error .trajectory__tag {
+  color: var(--danger);
+}
+
+.trajectory__time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-caption);
+  font-variant-numeric: tabular-nums;
 }

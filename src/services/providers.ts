@@ -2,6 +2,7 @@ import { Context, Service } from 'cordis'
 import fs from 'node:fs'
 import path from 'node:path'
 import { providerIdFor } from '../../shared/providerId.ts'
+import { tr } from '../i18n.ts'
 
 // 모델 provider 설정 — dsh 의 Settings > Models 화면과 같은 모양을 따른다.
 // baseURL 을 직접 지정할 수 있어야 폐쇄망 내부 게이트웨이(LiteLLM 등)를 붙일 수 있다.
@@ -108,29 +109,29 @@ export class ProviderRegistry extends Service {
   save(input: ProviderInput): ProviderSummary[] {
     const displayName = input.displayName.trim()
     const baseURL = input.baseURL.trim()
-    if (!displayName) throw new Error('표시 이름을 입력하세요')
-    if (!isHttpUrl(baseURL)) throw new Error('Base URL 은 http(s) 주소여야 합니다')
+    if (!displayName) throw new Error(tr('error.displayNameRequired'))
+    if (!isHttpUrl(baseURL)) throw new Error(tr('error.baseUrlInvalid'))
     const models = input.models.map((model) => ({
       id: model.id.trim(),
       displayName: model.displayName.trim() || model.id.trim(),
       ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
     }))
     if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
-      throw new Error('컨텍스트 길이는 1 이상의 정수로 입력하세요')
+      throw new Error(tr('error.contextLength'))
     }
-    if (models.length === 0 || models.some((model) => !model.id)) throw new Error('모델을 하나 이상, id 와 함께 입력하세요')
-    if (new Set(models.map((model) => model.id)).size !== models.length) throw new Error('모델 id 가 겹칩니다')
+    if (models.length === 0 || models.some((model) => !model.id)) throw new Error(tr('error.modelsRequired'))
+    if (new Set(models.map((model) => model.id)).size !== models.length) throw new Error(tr('error.modelIdDuplicate'))
     const apiKey = input.apiKey?.trim()
     // 키는 키 프록시가 Authorization 헤더로 싣는다 — 헤더에 못 쓰는 문자(줄바꿈·제어 문자·U+200B 같은 보이지 않는 문자·비ASCII)는
     // 붙여넣기 실수이고, 저장되면 요청마다 실패한다 (03_qa 2차). 메시지에 키 값은 넣지 않는다
-    if (apiKey && !/^[\x20-\x7e]+$/.test(apiKey)) throw new Error('키에 쓸 수 없는 문자가 섞였습니다 (붙여넣기 확인)')
+    if (apiKey && !/^[\x20-\x7e]+$/.test(apiKey)) throw new Error(tr('error.keyChars'))
     const cipher = this.opts.cipher
-    if (apiKey && !cipher?.available()) throw new Error('이 환경에서는 API 키를 안전하게 저장할 수 없습니다 (OS 암호화 저장소 사용 불가)')
+    if (apiKey && !cipher?.available()) throw new Error(tr('error.keyStorage'))
 
     const existing = input.id ? this.entries.get(input.id) : undefined
     // 저장 키는 저장된 주소에만 묶인다 — 키 없이 주소만 바꿔 저장하면 이후 가져오기(·엔진 전달)로 저장 키가 새 주소로 간다 (03_qa)
     if (existing && !apiKey && existing.id in this.keys && normalizeBaseURL(existing.baseURL) !== normalizeBaseURL(baseURL)) {
-      throw new Error('주소가 바뀌었습니다 — 키를 다시 입력하세요')
+      throw new Error(tr('error.keyReenter'))
     }
     const id = existing?.id ?? providerIdFor(displayName, (candidate) => this.entries.has(candidate))
     this.entries.set(id, { id, displayName, baseURL, protocol: input.protocol, models, custom: existing ? existing.custom : true })
@@ -155,11 +156,11 @@ export class ProviderRegistry extends Service {
     const baseURL = normalizeBaseURL(draft.baseURL)
     let key = draft.apiKey?.trim()
     if (!key && draft.id && draft.id in this.keys) {
-      if (normalizeBaseURL(this.entries.get(draft.id)?.baseURL ?? '') !== baseURL) throw new Error('주소가 바뀌었습니다 — 키를 다시 입력하세요')
+      if (normalizeBaseURL(this.entries.get(draft.id)?.baseURL ?? '') !== baseURL) throw new Error(tr('error.keyReenter'))
       key = this.storedKey(draft.id)
     }
     const res = await fetch(`${baseURL}/models`, { headers: key ? { authorization: `Bearer ${key}` } : {} })
-    if (!res.ok) throw new Error(`모델 목록을 가져오지 못했습니다 (HTTP ${res.status})`)
+    if (!res.ok) throw new Error(tr('error.fetchModels', { status: res.status }))
     const body = (await res.json()) as { data?: { id?: unknown; name?: unknown }[] }
     return (body.data ?? [])
       .filter((model): model is { id: string; name?: unknown } => typeof model.id === 'string')

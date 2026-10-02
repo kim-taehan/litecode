@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { ProviderRegistry, type KeyCipher } from '../../src/services/providers.ts'
-import { INTERRUPTED, LlmService } from '../../src/services/llm.ts'
+import { interruptedError, LlmService } from '../../src/services/llm.ts'
 import { EngineService } from '../../src/services/engine.ts'
 import { alive, engineOptions, freePort, isolatedEnv, opencodeBin } from './support/opencodeServer.ts'
 import { DRIP_MS } from './support/fakeLlm.ts'
@@ -190,7 +190,7 @@ export const Dump = async () => ({})
     const started = Date.now()
     void services.engine.restart()
     const interrupted = await pending
-    expect(interrupted).toMatchObject({ ok: false, error: INTERRUPTED })
+    expect(interrupted).toMatchObject({ ok: false, error: interruptedError() })
     expect(Date.now() - started).toBeLessThan(10_000) // SLOW_MS(30초)를 기다리지 않았다
 
     const next = await services.llm.chat('keyed', 'echo', work, '다시', interrupted.sessionId)
@@ -207,7 +207,7 @@ export const Dump = async () => ({})
     const pid = await recordedPid()
 
     process.kill(pid, 'SIGKILL')
-    expect(await pending).toMatchObject({ ok: false, error: INTERRUPTED })
+    expect(await pending).toMatchObject({ ok: false, error: interruptedError() })
     expect(await services.llm.chat('keyed', 'echo', work, '살아남')).toMatchObject({ ok: true, text: 'echo: 살아남' })
     expect(await recordedPid()).not.toBe(pid)
   })

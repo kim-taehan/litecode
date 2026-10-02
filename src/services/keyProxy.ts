@@ -3,6 +3,7 @@ import http from 'node:http'
 import https from 'node:https'
 import type { AddressInfo } from 'node:net'
 import { normalizeBaseURL } from './providers.ts'
+import { tr } from '../i18n.ts'
 
 // 키 프록시 — 진짜 API 키를 opencode 프로세스에 두지 않으려고 메인 프로세스가 LLM 요청을 중계한다 (QA 1차 차단, 리더 결정 a).
 // opencode 는 자기 env 를 프로젝트 플러그인(.opencode/plugin, opencode.json plugin)과 bash 도구에 그대로 넘기고 --pure 로도
@@ -45,7 +46,7 @@ function sameToken(given: string | undefined, expected: string): boolean {
 }
 
 function fail(res: http.ServerResponse, status: number, message: string): void {
-  res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: `litecode 키 프록시: ${message}` } }))
+  res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: tr('error.proxy', { message }) } }))
 }
 
 /** targetOf 는 요청마다 부른다 — 저장된 설정이 정본이다 */
@@ -58,17 +59,17 @@ export async function startKeyProxy(targetOf: (providerId: string) => ProxyTarge
       forward(req, res)
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? 'ERR_PROXY'
-      if (!res.headersSent) fail(res, 502, `요청을 만들지 못했습니다 (${code})`)
+      if (!res.headersSent) fail(res, 502, tr('error.proxyRequest', { code }))
       else res.destroy()
     }
   })
   const forward = (req: http.IncomingMessage, res: http.ServerResponse): void => {
     // 토큰부터 본다 — 토큰 없는 요청에는 어떤 provider 가 있는지도 알려 주지 않는다
-    if (!sameToken(req.headers.authorization, token)) return fail(res, 401, '토큰이 맞지 않습니다')
+    if (!sameToken(req.headers.authorization, token)) return fail(res, 401, tr('error.proxyToken'))
     const incoming = new URL(req.url ?? '/', 'http://proxy')
     const [, first = '', ...rest] = incoming.pathname.split('/')
     const target = targetOf(decodeURIComponent(first))
-    if (!target) return fail(res, 404, `모르는 provider: ${first}`)
+    if (!target) return fail(res, 404, tr('error.proxyUnknown', { id: first }))
 
     const upstreamURL = new URL(`${normalizeBaseURL(target.baseURL)}${rest.length ? `/${rest.join('/')}` : ''}${incoming.search}`)
     const headers = forwardable(req.headers, ['host', 'authorization'])
@@ -78,7 +79,7 @@ export async function startKeyProxy(targetOf: (providerId: string) => ProxyTarge
       answer.pipe(res)
     })
     upstream.on('error', (error: NodeJS.ErrnoException) => {
-      if (!res.headersSent) fail(res, 502, `게이트웨이에 연결하지 못했습니다 (${error.code ?? error.message})`)
+      if (!res.headersSent) fail(res, 502, tr('error.proxyGateway', { code: error.code ?? error.message }))
       else res.destroy()
     })
     // opencode 가 끊으면(재시작·중단) 게이트웨이 요청도 끊는다

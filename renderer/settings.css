@@ -1,0 +1,583 @@
+/* 설정 모달 — dsh ui-settings-general(SettingsRoot·GeneralSection·DeveloperToolsRow·SettingsDocumentAction), locale LanguageRow,
+   ui-theme AppearanceRow·FontSizeRow, ui-primitives Menu·Switch·Button, ui-settings-models 의 치수 그대로 (01f 디자인 표).
+   색은 토큰만 — 다크는 styles.css 의 :root 미디어 쿼리가 맡는다 */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-mask {
+  position: absolute;
+  inset: 0;
+  background: var(--mask);
+}
+
+/* 판은 모든 페이지가 같은 크기 (800 × min(800, 100vh − 48)) */
+.settings-panel {
+  position: relative;
+  display: flex;
+  width: 800px;
+  max-width: calc(100vw - 48px);
+  height: min(800px, calc(100vh - 48px));
+  background: var(--surface-panel);
+  border-radius: 28px;
+  box-shadow: var(--shadow-prominent);
+  overflow: hidden;
+}
+
+/* 왼쪽 메뉴 — 자기 바탕·구분선 없이 판 위에 */
+.settings-nav {
+  width: 188px;
+  flex-shrink: 0;
+  padding: 22px 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+.settings-nav__title {
+  padding: 0 12px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--text);
+}
+
+.settings-nav__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 9px 16px 9px 12px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 400; /* 골라도 굵기는 그대로 */
+  line-height: 22px;
+  color: var(--text);
+}
+
+.settings-nav__item:hover {
+  background: var(--nav-hover);
+}
+
+.settings-nav__item--active,
+.settings-nav__item--active:hover {
+  background: var(--nav-active);
+}
+
+.settings-nav__icon {
+  flex-shrink: 0;
+}
+
+/* 오른쪽 — 머리줄([설정 파일 열기][×])은 고정, 내용만 스크롤 */
+.settings-content {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-header {
+  flex-shrink: 0;
+  min-height: 54px;
+  padding: 20px 14px 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-header__actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-header__error {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--danger);
+}
+
+/* Button outline sm */
+.settings-outline-button {
+  height: 28px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.settings-outline-button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.settings-outline-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.settings-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+}
+
+.settings-close:hover {
+  background: var(--fill-hover);
+}
+
+.settings-body {
+  flex-grow: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 24px 24px;
+}
+
+/* 일반 페이지 — 제목 없이 행부터. 행: 이름 + 회색 설명, 오른쪽 컨트롤, 아래 0.5px 선(마지막 행은 없음) */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 48px;
+}
+
+.settings-row__title {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.settings-row__description {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+}
+
+/* 드롭다운(언어) — 회색 채움 알약 + 오른쪽 끝에 맞춘 메뉴 */
+.settings-select {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.settings-select__trigger {
+  height: 36px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  border-radius: 12px;
+  background: var(--module);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.settings-select__trigger:hover {
+  background: var(--fill-hover);
+}
+
+.settings-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 144px;
+  max-width: 360px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: var(--menu);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-prominent);
+}
+
+.settings-menu__item {
+  min-height: 34px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.settings-menu__item:hover,
+.settings-menu__item:focus-visible {
+  background: var(--fill-hover);
+  outline: none;
+}
+
+/* 테마 카드 셋 — 아이콘 위·이름 아래, 고른 카드는 회색 채움 + 테두리 */
+.theme-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.theme-card {
+  flex: 1 1 180px;
+  padding: 20px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 20px;
+  background: transparent;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.theme-card:hover:not([aria-pressed='true']) {
+  background: var(--fill-hover);
+}
+
+.theme-card[aria-pressed='true'] {
+  background: var(--module);
+  border-color: var(--selected-ring);
+}
+
+/* 글자 크기 — 값 가운데 알약, ▲▼ 는 올리거나 포커스할 때만, 뒤에 px */
+.font-size {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.font-size__stepper {
+  position: relative;
+  min-width: 72px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--module);
+}
+
+.font-size__value {
+  font-size: 14px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.font-size__arrows {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.font-size__stepper:hover .font-size__arrows,
+.font-size__stepper:focus-within .font-size__arrows {
+  opacity: 1;
+}
+
+.font-size__arrow {
+  width: 17px;
+  height: 12px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  color: var(--text);
+}
+
+.font-size__arrow:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.font-size__arrow:disabled {
+  color: var(--text-caption);
+  cursor: default;
+}
+
+.font-size__unit {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-secondary);
+}
+
+/* 토글 36×20 — 끔은 옅은 선 색, 켬은 본문 글자색 바탕 */
+.settings-switch {
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  padding: 2px;
+  display: flex;
+  border: none;
+  border-radius: 999px;
+  background: var(--border-ring);
+}
+
+.settings-switch[aria-checked='true'] {
+  background: var(--text);
+}
+
+.settings-switch__thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--switch-thumb);
+  transition: transform 120ms;
+}
+
+.settings-switch[aria-checked='true'] .settings-switch__thumb {
+  transform: translateX(16px);
+  background: var(--on-text);
+}
+
+/* 모델 페이지 (dsh ui-settings-models ModelsSection) */
+.models-page__title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.models-page__hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+}
+
+.provider-card {
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  background: var(--surface-panel);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 20px;
+}
+
+.provider-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.provider-card__name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.provider-card__tag {
+  padding: 1px 6px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.provider-card__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.settings-button {
+  height: 36px;
+  padding: 0 14px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 12px;
+  background: transparent;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.settings-button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.settings-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-button--primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--on-text);
+}
+
+.settings-button--primary:hover:not(:disabled) {
+  background: var(--text-strong-hover);
+}
+
+.settings-button--danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.models-page__add {
+  width: 100%;
+  height: 36px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 12px;
+  background: transparent;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.models-page__add:hover {
+  background: var(--fill-hover);
+}
+
+.provider-editor {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-field {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-field__label {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.settings-input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text);
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-input--readonly {
+  background: var(--bg-sidebar);
+  color: var(--text-caption);
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 112px 28px;
+  gap: 6px;
+}
+
+.model-row .settings-input:first-child {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.settings-icon-button {
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+.settings-icon-button:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.provider-editor__model-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.provider-editor__footer {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 6px;
+}
+
+.settings-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}

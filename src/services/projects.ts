@@ -2,6 +2,7 @@ import { Context, Service } from 'cordis'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { tr } from '../i18n.ts'
 
 // 최근 프로젝트 목록 — 프로젝트 = 폴더. 재시작해도 남도록 작은 JSON 파일 하나에 둔다 (앱에서는 userData 아래).
 // 목록 맨 앞이 마지막으로 연 프로젝트다 — 앱을 켜면 그것을 연다.
@@ -16,6 +17,10 @@ import path from 'node:path'
 declare module 'cordis' {
   interface Context {
     projects: ProjectsService
+  }
+  interface Events {
+    /** 최근 목록에서 뺐다 (폴더는 그대로) — ctx.notifications 가 그 프로젝트의 알림을 거둔다 */
+    'projects/removed'(dir: string): void
   }
 }
 
@@ -61,7 +66,7 @@ export class ProjectsService extends Service {
   /** 폴더를 열어 최근 목록 맨 앞에 올린다. 폴더가 아니면(없는 경로·파일) 목록을 안 바꾸고 throw 한다. */
   async open(dir: string): Promise<Project> {
     const real = await fs.realpath(dir)
-    if (!(await fs.stat(real)).isDirectory()) throw new Error(`폴더가 아니다: ${dir}`)
+    if (!(await fs.stat(real)).isDirectory()) throw new Error(tr('error.notFolder', { dir }))
 
     const stored = await this.update((current) => ({ ...current, recent: [real, ...current.recent.filter((entry) => entry !== real)] }))
     return toProjects(stored).find((project) => project.path === real)!
@@ -80,13 +85,13 @@ export class ProjectsService extends Service {
 
   /** 목록·즐겨찾기에서만 뺀다 — 폴더는 디스크에 그대로. dir 은 목록의 path 그대로 */
   async remove(dir: string): Promise<Project[]> {
-    return toProjects(
-      await this.update(({ recent, favorites, names }) => ({
-        recent: recent.filter((entry) => entry !== dir),
-        favorites: favorites.filter((entry) => entry !== dir),
-        names: without(names, dir),
-      })),
-    )
+    const stored = await this.update(({ recent, favorites, names }) => ({
+      recent: recent.filter((entry) => entry !== dir),
+      favorites: favorites.filter((entry) => entry !== dir),
+      names: without(names, dir),
+    }))
+    this.ctx.emit('projects/removed', dir)
+    return toProjects(stored)
   }
 
   /** 보이는 이름만 바꾼다(폴더는 그대로). 빈 이름이면 폴더 이름으로 되돌린다. dir 은 목록의 path 그대로 */
