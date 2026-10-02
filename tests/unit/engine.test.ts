@@ -170,12 +170,30 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
 
 // 01_probe (2026-10-01): custom 모델의 한도는 opencode 가 모른다(limit.context 0). 모델에 limit 을 적으면 /api/model 에 그대로 보인다
 describe('engineConfig — 컨텍스트 길이', () => {
-  it('컨텍스트 길이를 준 모델만 limit {context, output: 0} 을 싣는다', () => {
+  // 이슈 #27 실측: limit.output 은 요청의 max_tokens 이자 요약 문턱의 출력 몫 — 0 이면 둘 다 32000 이라 작은 모델에서 요약이 끝없이 돈다
+  it('컨텍스트 길이·최대 출력 중 하나라도 준 모델만 limit 을 싣는다 — 최대 출력을 비우면 컨텍스트의 1/4(최대 32000)', () => {
     const proxy = { token: 't', baseURLFor: (id: string) => `http://127.0.0.1:9/${id}` }
-    const config = engineConfig([{ ...provider('a'), models: [{ id: 'm1', displayName: 'M1', contextLength: 32_768 }, { id: 'm2', displayName: 'M2' }] }], proxy)
+    const config = engineConfig(
+      [
+        {
+          ...provider('a'),
+          models: [
+            { id: 'm1', displayName: 'M1', contextLength: 32_768 },
+            { id: 'm2', displayName: 'M2' },
+            { id: 'm3', displayName: 'M3', contextLength: 24_000, maxOutput: 4_000 },
+            { id: 'm4', displayName: 'M4', maxOutput: 8_000 },
+            { id: 'm5', displayName: 'M5', contextLength: 256_000 },
+          ],
+        },
+      ],
+      proxy,
+    )
     expect((config.provider as Record<string, { models: unknown }>)['a']!.models).toEqual({
-      m1: { name: 'M1', limit: { context: 32_768, output: 0 } },
+      m1: { name: 'M1', limit: { context: 32_768, output: 8_192 } },
       m2: { name: 'M2' },
+      m3: { name: 'M3', limit: { context: 24_000, output: 4_000 } },
+      m4: { name: 'M4', limit: { context: 0, output: 8_000 } },
+      m5: { name: 'M5', limit: { context: 256_000, output: 32_000 } },
     })
   })
 })

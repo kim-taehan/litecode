@@ -118,7 +118,7 @@ export function StatsBar({ stats }: { stats?: ChatStats }) {
     : undefined
   const sum = parts?.reduce((total, [, size]) => total + size, 0) ?? 0
   // 자동 요약 문턱 눈금 (01o) — 한도를 모르면(요약 꺼짐) 눈금·줄이 없다
-  const compactAt = compactionThreshold(c?.limit)
+  const compactAt = compactionThreshold(c?.limit, c?.maxOutput)
 
   return (
     <div className="composer-stats">

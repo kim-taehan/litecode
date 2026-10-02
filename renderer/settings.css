@@ -544,7 +544,7 @@
 
 .model-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 112px 28px;
+  grid-template-columns: 1fr 1fr 112px 112px 28px;
   gap: 6px;
 }
 

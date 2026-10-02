@@ -111,6 +111,19 @@ describe('ProviderRegistry', () => {
     expect(() => providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', contextLength: 1.5 }] })).toThrow('컨텍스트 길이')
   })
 
+  // 최대 출력(선택, 이슈 #27) — opencode limit.output → 요청 max_tokens. 컨텍스트 길이보다 작아야 문턱(context − 출력)이 남는다
+  it('모델의 최대 출력은 양의 정수이고 컨텍스트 길이보다 작을 때만 남는다, 비우면 없다', async () => {
+    const providers = await registry(files)
+    providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', contextLength: 24_000, maxOutput: 4_000 }, { id: 'm2', displayName: 'N', maxOutput: 8_000 }] })
+    expect((await registry(files)).get('gw')!.models).toEqual([
+      { id: 'm1', displayName: 'M', contextLength: 24_000, maxOutput: 4_000 },
+      { id: 'm2', displayName: 'N', maxOutput: 8_000 },
+    ])
+    expect(() => providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', maxOutput: 0 }] })).toThrow('최대 출력')
+    expect(() => providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', maxOutput: 2.5 }] })).toThrow('최대 출력')
+    expect(() => providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', contextLength: 24_000, maxOutput: 24_000 }] })).toThrow('최대 출력')
+  })
+
   // 03_qa 1차 재확인 · 리더 결정: 주소를 바꿔 저장하려면 키를 다시 넣어야 한다 — 안 그러면 save → fetch 로 저장 키가 새 주소로 간다
   it('저장 키가 있는 provider 의 Base URL 을 키 없이 바꾸면 저장을 거부하고 파일·키는 그대로다', async () => {
     const providers = await registry(files)

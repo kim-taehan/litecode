@@ -185,8 +185,8 @@ interface CatalogModel {
 export const MODEL_CATALOG_TIMEOUT_MS = 10_000
 /** 에이전트 목록도 지연 로드된다(01f: 첫 응답 빈 목록, ~1.5초) — 모델 카탈로그와 같은 기한 */
 export const AGENT_LIST_TIMEOUT_MS = 10_000
-/** 한 턴에 자동 요약이 이만큼 넘게 돌면 멈춘다 — 레거시는 요약 뒤 스스로 "Continue" 턴을 돌리고, 모델 한도가 작으면(한도 − 32000 이 프롬프트보다
- *  작으면 — renderer/compaction.ts) 요약 → 다시 넘침이 끝없이 돈다 (01w 자동 요약 행, 가짜 LLM 30초에 10회 이상). 요약 줄·이음 답은 TurnScope */
+/** 한 턴에 자동 요약이 이만큼 넘게 돌면 멈춘다 — 레거시는 요약 뒤 스스로 "Continue" 턴을 돌리고, 모델 한도가 작으면(한도 − 출력 한도가 프롬프트보다
+ *  작으면 — renderer/compaction.ts) 요약 → 다시 넘침이 끝없이 돈다 (01w 자동 요약 행, 가짜 LLM 30초에 10회 이상). 출력 한도를 넣은 뒤(#27)로는 안전망. 요약 줄·이음 답은 TurnScope */
 export const MAX_COMPACTIONS_PER_TURN = 3
 /** 구독을 걸고 server.connected 를 기다리는 한도 — 헤더와 함께 바로 온다(01w) */
 const CONNECT_TIMEOUT_MS = 10_000

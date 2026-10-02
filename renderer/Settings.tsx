@@ -5,6 +5,7 @@ import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
 import { useT } from './settingsStore.ts'
 import { ContextLengthNotes } from './ContextLengthNotes.tsx'
+import { defaultOutputLimit } from '../shared/outputLimit.ts'
 import './settings.css'
 
 // 설정 모달 — 틀은 dsh ui-settings-general SettingsRoot(왼쪽 메뉴·오른쪽 머리줄[설정 파일 열기][×]·내용, 가림막 클릭·Esc 로 닫기),
@@ -371,6 +372,19 @@ function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
             value={model.contextLength ?? ''}
             disabled={busy}
             onChange={(event) => setModel(index, { contextLength: event.target.value === '' ? undefined : Number(event.target.value) })}
+          />
+          {/* 최대 출력 — 요청 max_tokens 이자 요약 문턱(컨텍스트 − 출력)의 몫. 비우면 엔진이 정하는 값을 흐리게 보인다 (이슈 #27) */}
+          <input
+            className="settings-input"
+            aria-label={t('models.maxOutput', { n: index + 1 })}
+            placeholder={model.contextLength ? t('models.maxOutputAuto', { n: defaultOutputLimit(model.contextLength) }) : t('models.maxOutputPlaceholder')}
+            title={t('models.maxOutputTitle')}
+            type="number"
+            min={1}
+            step={1}
+            value={model.maxOutput ?? ''}
+            disabled={busy}
+            onChange={(event) => setModel(index, { maxOutput: event.target.value === '' ? undefined : Number(event.target.value) })}
           />
           <button
             type="button"
