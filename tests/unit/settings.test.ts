@@ -113,3 +113,14 @@ describe('대화 글자 크기 변수', () => {
     expect([12, 13, 14, 15, 16, 17].map((size) => chatFontVars(size)['--chat-font-size-secondary'])).toEqual(['11px', '12px', '13px', '13px', '14px', '15px'])
   })
 })
+
+describe('다른 앱에서 열기 기본 앱 (settings.openInApp)', () => {
+  it('처음엔 없다(목록 첫 앱), 고르면 settings.json 에 남고 다시 읽힌다. 문자열이 아니면 거절', async () => {
+    const { settings } = await service({ file })
+    expect(settings.get().openInApp).toBeUndefined()
+    settings.set({ openInApp: 'iterm' })
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).openInApp).toBe('iterm')
+    expect((await service({ file })).settings.get().openInApp).toBe('iterm')
+    expect(() => settings.set({ openInApp: 3 as unknown as string })).toThrow()
+  })
+})

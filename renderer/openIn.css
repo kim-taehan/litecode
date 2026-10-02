@@ -1,0 +1,131 @@
+/* "다른 앱에서 열기" 분할 버튼 — dsh ui-open-in-app 치수 (_workspace/01m_open_in.md 1절 표). 색은 토큰만 */
+
+.open-in {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 400;
+}
+
+/* 높이 24, 0.5px border-l4, 반경 8 */
+.open-in__split {
+  display: flex;
+  height: 24px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.open-in__primary,
+.open-in__more {
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.open-in__primary {
+  gap: 4px;
+  padding: 3px 5px;
+}
+
+.open-in__more {
+  padding: 3px 4px 3px 3px;
+  border-left: 0.5px solid var(--border-strong);
+}
+
+.open-in__primary:hover,
+.open-in__more:hover,
+.open-in__primary:focus-visible,
+.open-in__more:focus-visible {
+  background: var(--fill-hover);
+  outline: none;
+}
+
+/* 여는 중 — 모양은 그대로, 커서만 */
+.open-in__primary:disabled {
+  cursor: default;
+}
+
+.open-in__primary .open-in__icon {
+  width: 13px;
+  height: 13px;
+}
+
+.open-in__icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.open-in__chevron {
+  width: 10px;
+  height: 10px;
+}
+
+/* 버튼 오른쪽 끝 정렬, 4px 아래. 팝오버 재질(01j) — min 144 / max 360, padding 4, 반경 16 */
+.open-in__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 144px;
+  max-width: 360px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--menu);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-radius: 16px;
+  box-shadow: var(--shadow-prominent);
+}
+
+/* dense 항목 — 30, padding 4 8, gap 6, 반경 12, 13/20. 선택 체크 없음 (기본 앱은 글자로) */
+.open-in__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.open-in__item:hover,
+.open-in__item:focus-visible,
+.open-in__item:focus {
+  background: var(--fill-hover);
+  outline: none;
+}
+
+.open-in__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.open-in__error {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 320px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
+  font-size: 12px;
+  line-height: 18px;
+}

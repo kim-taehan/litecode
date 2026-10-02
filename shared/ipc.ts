@@ -10,6 +10,7 @@ import type { Trajectory } from '../src/services/trajectory.ts'
 import type { TurnItem } from '../src/services/turnProgress.ts'
 import type { Settings } from '../src/services/settings.ts'
 import type { NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
+import type { OpenInApp } from '../src/services/openIn.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -21,6 +22,7 @@ export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from
 export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
 export type { Appearance, Settings } from '../src/services/settings.ts'
 export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
+export type { OpenInApp } from '../src/services/openIn.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -71,6 +73,8 @@ export const Channel = {
   NOTIFICATION_TOAST: 'notifications:toast',
   /** 메인 → 화면 — PC 알림을 눌렀다. 화면은 takePendingOpen 으로 열 곳을 당겨 간다 */
   NOTIFICATION_OPEN: 'notifications:open',
+  OPEN_IN_APPS: 'openIn:apps',
+  OPEN_IN: 'openIn:open',
 } as const
 
 export interface LitecodeBridge {
@@ -159,6 +163,10 @@ export interface LitecodeBridge {
   onNotificationsChanged(listener: (state: NoticeState) => void): () => void
   onNotificationToast(listener: (toast: Toast) => void): () => void
   onNotificationOpen(listener: () => void): () => void
+  /** "다른 앱에서 열기" — 이 기계에 깔린 허용 목록 앱 (메뉴 순서). mac 이 아니면 빈 목록 (ctx.openIn) */
+  openInApps(): Promise<OpenInApp[]>
+  /** 그 프로젝트 폴더를 그 앱으로 연다. 목록 밖 앱·등록 안 된 폴더·실행 실패면 지금 언어의 사유로 거절 */
+  openIn(appId: string, directory: string): Promise<void>
 }
 
 declare global {
