@@ -62,6 +62,8 @@ export function GeneralPage() {
   const [error, setError] = useState<string>()
   /** 새 대화 기본 모드로 전체 권한을 고르는 중 — 확인 대화상자 (dsh PermissionRow) */
   const [confirmingFull, setConfirmingFull] = useState(false)
+  const [version, setVersion] = useState<string>()
+  useEffect(() => void window.litecode.getAppVersion().then(setVersion, () => {}), [])
   const save = (patch: Partial<Settings>): void =>
     void updateSettings(patch).then(
       () => setError(undefined),
@@ -189,6 +191,9 @@ export function GeneralPage() {
           <span className="settings-switch__thumb" />
         </button>
       </div>
+
+      {/* 맨 아래 한 줄 — dsh CurrentVersionRow. 못 받으면 줄째 없다 */}
+      {version && <div className="settings-version">{t('settings.currentVersion', { version })}</div>}
     </div>
   )
 }

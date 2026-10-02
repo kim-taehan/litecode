@@ -221,7 +221,7 @@ describe('앱 ↔ 실물 opencode', () => {
     await page.getByRole('button', { name: '+ 새 대화' }).click()
     await page.getByPlaceholder('메시지를 입력하세요…').fill('[bash:sleep 6 && pwd]')
     await page.keyboard.press('Enter')
-    expect(await canSend()).toBe(false) // 이 대화는 기다리는 중
+    await page.locator('.turn[data-state="running"]').waitFor({ timeout: 5_000 }) // 이 대화는 기다리는 중 (보내기는 열려 있다 — 큐로 간다, send-queue.live)
 
     await switchTo('beta-app')
     expect(await canSend()).toBe(true)
@@ -780,7 +780,7 @@ describe('엔진 — 앱이 띄운 opencode', () => {
     await page.getByPlaceholder('메시지를 입력하세요…').fill('[slow] 기다리는 중')
     await page.keyboard.press('Enter')
     await expect.poll(async () => (await fakeLlm()).count, { timeout: 20_000 }).toBe(before + 1) // LLM 이 답을 쥐고 있다
-    expect(await canSend()).toBe(false)
+    expect(await page.locator('.turn[data-state="running"]').count()).toBe(1) // 기다리는 중 (보내기는 큐로 간다 — send-queue.live)
 
     await editGateway(() => field('모델 이름 1').fill('Qwen 다음'))
     await expect.poll(lastReply, { timeout: 15_000 }).toContain('중단됨')
