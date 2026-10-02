@@ -128,6 +128,7 @@ describe('trajectoryRecords', () => {
     const records = trajectoryRecords(
       [user('u', 'go', 10), assistant('a', 'u', 11, 19, [taskPart('t1', 'ses_x', 'job x'), taskPart('t2', 'ses_y', 'job y')])],
       '',
+      undefined,
       new Map([
         ['ses_x', child('ses_x', 'echo x')],
         ['ses_y', child('ses_y', 'echo y')],

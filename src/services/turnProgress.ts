@@ -32,7 +32,7 @@ export type TurnItem =
   | { kind: 'think'; id: string; text: string; done: boolean }
   | { kind: 'text'; id: string; text: string; done: boolean }
   /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글 */
-  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill }
+  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
   | { kind: 'context'; id: string; text: string }
   /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
@@ -68,6 +68,43 @@ export interface ToolSkill {
 }
 
 type Props = Record<string, unknown>
+
+/** MCP 도구 호출의 서버·도구 (이슈 #28) — 화면이 "MCP · 서버 · 도구" 로 그린다 */
+export interface McpToolRef {
+  server: string
+  tool: string
+}
+
+/** 엔진 도구 이름 → MCP 서버·도구 (MCP 가 아니면 undefined) */
+export type McpToolResolver = (name: string) => McpToolRef | undefined
+
+/** 밑줄이 든 내장 도구 — MCP 도구(`<서버>_<도구>`)로 읽으면 안 된다. list/read_mcp_* 는 MCP 리소스를 읽는 내장 도구다 (01u 실측 2) */
+const BUILTIN_UNDERSCORE_TOOLS = new Set([
+  'apply_patch',
+  'list_mcp_resources',
+  'read_mcp_resource',
+  'list_mcp_resource_templates',
+  'plan_enter',
+  'plan_exit',
+  // 권한 이름 (승인 카드의 action 도 같은 함수로 가른다)
+  'external_directory',
+  'doom_loop',
+])
+
+/** opencode 가 MCP 도구 이름을 만들 때 서버·도구 이름의 [A-Za-z0-9_-] 밖 글자를 `_` 로 바꾼다 (#28 실측: 서버 rem-1 + 도구 remote-dash.tool → rem-1_remote-dash_tool) */
+export function sanitizeMcpName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_-]/g, '_')
+}
+
+/** MCP 도구 이름 `<서버>_<도구>` 를 가른다. servers(그 폴더에 붙은 서버 이름)가 맞으면 그것을(가장 긴 것부터 — 서버 이름에도 `_` 가 있을 수 있다),
+ *  아니면(서버를 지웠거나 아직 모름) 첫 `_` 에서 가른다. 내장 도구는 MCP 가 아니다 */
+export function mcpToolOf(name: string, servers: readonly string[] = []): McpToolRef | undefined {
+  if (!name.includes('_') || BUILTIN_UNDERSCORE_TOOLS.has(name)) return undefined
+  const match = [...servers].sort((a, b) => b.length - a.length).find((server) => name.startsWith(`${sanitizeMcpName(server)}_`))
+  if (match) return { server: match, tool: name.slice(sanitizeMcpName(match).length + 1) }
+  const cut = name.indexOf('_')
+  return cut > 0 && cut < name.length - 1 ? { server: name.slice(0, cut), tool: name.slice(cut + 1) } : undefined
+}
 
 /** 레거시 메시지 파트 중 우리가 읽는 필드 (01w 실측) */
 export interface EnginePart {
@@ -190,12 +227,15 @@ export class TurnTracker {
   /** 이 턴의 하위 작업 자식 세션 → 그 진행 줄. taskId 는 그 자식을 띄운 task 줄 (task 파트의 metadata.sessionId 로 잇는다) */
   private readonly children = new Map<string, { taskId?: string; tracker: TurnTracker; assistants: Set<string>; tokens: number }>()
 
-  /** root: 세션 폴더(realpath) — 바꾼 파일 경로를 그 기준 상대로 보인다 */
-  constructor(private readonly root = '') {}
+  /** root: 세션 폴더(realpath) — 바꾼 파일 경로를 그 기준 상대로 보인다. mcp: 도구 이름 → MCP 서버·도구 */
+  constructor(
+    private readonly root = '',
+    private readonly mcp?: McpToolResolver,
+  ) {}
 
   /** 이 턴이 띄운 자식 세션을 안다 (session.created 의 parentID 또는 task 파트의 metadata.sessionId) — 그 뒤로 child 가 그 이벤트를 받는다 */
   adoptChild(sessionId: string): void {
-    if (!this.children.has(sessionId)) this.children.set(sessionId, { tracker: new TurnTracker(this.root), assistants: new Set(), tokens: 0 })
+    if (!this.children.has(sessionId)) this.children.set(sessionId, { tracker: new TurnTracker(this.root, this.mcp), assistants: new Set(), tokens: 0 })
   }
 
   isChild(sessionId: unknown): boolean {
@@ -244,7 +284,7 @@ export class TurnTracker {
   observe(type: string, props: Props): TurnItem | undefined {
     if (type === 'message.part.updated') {
       const part = props['part'] as EnginePart
-      let item = partItem(part, false, this.root)
+      let item = partItem(part, false, this.root, this.mcp)
       if (!item) return undefined
       if (item.kind === 'subtask') {
         // task 파트가 자식을 알려 준다 — 자식 줄을 이 줄에 잇고, 이미 쌓인 자식 줄을 싣는다 (파트 갱신이 자식 줄을 지우지 않게)
@@ -327,10 +367,10 @@ export function subtaskSessions(raw: readonly { parts: readonly EnginePart[] }[]
 }
 
 /** 자식 세션 기록 → 하위 작업 줄 안의 줄들과 토큰 합 (자식의 user·요약 답은 줄이 아니다) */
-function childRecord(raw: readonly { info: EngineMessageInfo; parts: readonly EnginePart[] }[], root: string): { items: TurnItem[]; tokens: number } {
+function childRecord(raw: readonly { info: EngineMessageInfo; parts: readonly EnginePart[] }[], root: string, mcp?: McpToolResolver): { items: TurnItem[]; tokens: number } {
   const steps = raw.filter(({ info }) => info.role === 'assistant' && info.summary !== true)
   return {
-    items: steps.flatMap(({ parts }) => parts.flatMap((part) => partItem(part, true, root) ?? [])),
+    items: steps.flatMap(({ parts }) => parts.flatMap((part) => partItem(part, true, root, mcp) ?? [])),
     tokens: steps.reduce((sum, { info }) => sum + tokenTotal(info.tokens), 0),
   }
 }
@@ -340,7 +380,7 @@ export type SubtaskHistory = ReadonlyMap<string, readonly { info: EngineMessageI
 
 /** 파트 하나 → 진행 줄 (줄이 아닌 파트면 undefined). done 이면 끝난 기록이다 (다시 열기). root 는 세션 폴더 (diff 경로 기준).
  *  children 은 끝난 기록의 자식 세션 메시지 — task 줄 안에 그 자식의 줄을 넣는다 */
-function partItem(part: EnginePart, done: boolean, root: string, children?: SubtaskHistory): TurnItem | undefined {
+function partItem(part: EnginePart, done: boolean, root: string, mcp: McpToolResolver = mcpToolOf, children?: SubtaskHistory): TurnItem | undefined {
   const id = `${part.messageID ?? ''}:${part.id ?? ''}`
   if (part.type === 'reasoning' || part.type === 'text') {
     if (part.synthetic) return undefined
@@ -366,13 +406,15 @@ function partItem(part: EnginePart, done: boolean, root: string, children?: Subt
     const sessionId = state.metadata?.['sessionId']
     const record = typeof sessionId === 'string' ? children?.get(sessionId) : undefined
     if (record) {
-      const { items, tokens } = childRecord(record, root)
+      const { items, tokens } = childRecord(record, root, mcp)
       item.items = items
       if (tokens > 0) item.tokens = tokens
     }
     return item
   }
   const item: Extract<TurnItem, { kind: 'tool' }> = { kind: 'tool', id, name: part.tool ?? '', status }
+  const ref = mcp(item.name)
+  if (ref) item.mcp = ref
   const input = state.input
   if (input !== undefined && input !== '' && !(typeof input === 'object' && input !== null && Object.keys(input).length === 0)) {
     item.input = JSON.stringify(input)
@@ -408,6 +450,6 @@ export function toolSummary(input: unknown): string | undefined {
 
 /** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다. root 는 세션 폴더 (diff 경로 기준).
  *  children 을 주면 task 줄 안에 그 자식 세션의 줄을 넣는다 (subtaskSessions 로 찾아 읽은 것) */
-export function messageItems(parts: readonly EnginePart[], root = '', children?: SubtaskHistory): TurnItem[] {
-  return parts.flatMap((part) => partItem(part, true, root, children) ?? [])
+export function messageItems(parts: readonly EnginePart[], root = '', mcp?: McpToolResolver, children?: SubtaskHistory): TurnItem[] {
+  return parts.flatMap((part) => partItem(part, true, root, mcp, children) ?? [])
 }

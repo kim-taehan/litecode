@@ -88,7 +88,7 @@ async function start(): Promise<{ ctx: Context; settings: SettingsService; featu
 
 /** 걸린 채널 (정렬) */
 const channels = () => [...ipc.handlers.keys()].sort()
-const ALL = ['at:x', 'bang:x', 'notifications:x', 'openIn:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
+const ALL = ['at:x', 'bang:x', 'mcp:x', 'notifications:x', 'openIn:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
 
 beforeEach(async () => {
   ipc = new FakeIpc()

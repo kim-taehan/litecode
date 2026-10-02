@@ -4,11 +4,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Agent } from 'undici'
 import { normalizeBaseURL } from './providers.ts'
-import { MODE_AGENT, type EngineConnection } from './engine.ts'
+import { MODE_AGENT, type EngineConnection, type EngineMcp } from './engine.ts'
 import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
-import { messageItems, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
+import { mcpToolOf, messageItems, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolRef, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
 import { projectInstructions } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
@@ -59,6 +59,8 @@ declare module 'cordis' {
     'llm/attention'(info: TurnInfo & { kind: Attention['kind']; title: string }): void
     /** 그 세션에 기다리는 것이 더는 없다 (답했다). 턴이 끝나면 따로 안 나간다 — turn-ended 가 덮는다 */
     'llm/attention-resolved'(info: TurnInfo): void
+    /** 그 폴더(realpath)에 프롬프트를 보내기 직전 — ctx.mcp 가 그 폴더 인스턴스에 MCP 서버를 붙인다(이슈 #28). 실패해도 턴은 간다 */
+    'llm/before-turn'(directory: string): Promise<void> | void
   }
 }
 
@@ -77,6 +79,14 @@ export interface PermissionAttention {
   action: string
   /** 명령·파일·폴더 패턴 (edit 요청엔 diff 가 없다 — 01f 1-c) */
   resources: string[]
+  /** MCP 도구 실행 요청이면 그 서버·도구 (action 이 `<서버>_<도구>`, 이슈 #28) */
+  mcp?: McpToolRef
+}
+
+/** opencode 의 MCP 서버 상태 (레거시 GET /mcp — connected·disabled·failed·needs_auth·needs_client_registration) */
+export interface McpStatus {
+  status: string
+  error?: string
 }
 
 export interface QuestionAttention {
@@ -242,6 +252,8 @@ export class LlmService extends Service {
   private declined = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
   private watchers = new Map<string, { answered(requestId: string): void }>()
+  /** 폴더(realpath) → 마지막으로 본 그 인스턴스의 MCP 서버 이름 — 도구 이름 `<서버>_<도구>` 를 가른다 (mcpTool) */
+  private mcpServers = new Map<string, string[]>()
 
   /** /event 를 여는 dispatcher. 전역 fetch(undici) 기본 bodyTimeout·headersTimeout 은 300초다 — 레거시 /event 는 heartbeat 가 10초마다 오므로
    *  무바이트 한도를 STREAM_IDLE_TIMEOUT_MS 로 줄여 죽은 연결을 30초 안에 알아챈다(이슈 #20). 시험은 더 짧게 줄 수 있다 (01q).
@@ -375,6 +387,8 @@ export class LlmService extends Service {
     }
     const agent = mode && MODE_AGENT[mode]
     if (agent && !(await this.waitForAgent(conn, agent, workdir))) return { error: tr('error.noAgent', { agent }) }
+    // MCP 서버 붙이기 (ctx.mcp, 이슈 #28) — 동적 추가는 그 폴더 인스턴스에만 있고 재시작하면 사라져서 매 턴 확인한다. 못 붙여도 턴은 보낸다
+    await this.ctx.parallel('llm/before-turn', workdir).catch((error: unknown) => console.error('[llm] MCP 준비 실패', (error as Error).message))
     if (sessionId) return { id: sessionId, workdir }
     const id = await this.createSession(conn, providerId, modelId, workdir, title)
     await onSession?.(id)
@@ -453,7 +467,7 @@ export class LlmService extends Service {
 
       let admitted!: (sent: boolean) => void
       const scope = new TurnScope(id, userMessageId)
-      const tracker = new TurnTracker(workdir)
+      const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
       const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention)
       const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop)
       try {
@@ -580,7 +594,8 @@ export class LlmService extends Service {
       // 레거시 전환 전에 쌓인 기록(신규 세대)이 먼저다 — 그 뒤에 레거시로 이어 쓴 기록 (migrate.ts, #21)
       const previous = (await readPreviousMessages(conn, sessionId)).filter((message) => !message.id || !hidden.has(message.id))
       const children = await this.subtaskMessages(conn, raw, workdir)
-      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(raw.filter((message) => !hidden.has(message.info.id)), running, workdir, children)] }
+      const visible = raw.filter((message) => !hidden.has(message.info.id))
+      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)] }
     } catch (error) {
       return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
     }
@@ -608,6 +623,62 @@ export class LlmService extends Service {
     const ids = [...new Set(subtaskSessions(raw))]
     const read = await Promise.all(ids.map((id) => this.engineMessages(conn, id, workdir).then((messages) => [id, messages] as const, () => undefined)))
     return new Map(read.filter((entry) => entry !== undefined))
+  }
+
+  // MCP (이슈 #28, 실측 2026-10-02 opencode 1.18.18 레거시 /mcp — 모든 호출에 평문 `?directory=`, location[directory] 는 조용히 서버 cwd 로 간다 01u):
+  // - GET /mcp → {"<이름>":{status, error?}} — 그 폴더 인스턴스의 서버 (앱 CONFIG_DIR·개인 설정·동적 추가). 처음 부르면 설정의 서버를 띄운다
+  // - POST /mcp {name, config} → 상태 맵 전체. **그 폴더 인스턴스에만** 붙고(다른 폴더엔 안 보인다) 파일에 안 쓴다. 같은 이름이면 바꿔 끼운다
+  //   (옛 프로세스를 끄고 새로 띄운다). 연결까지 기다린다 — 기본 기한 30초, config.timeout 이 기한이다. 다음 턴 LLM 요청 tools 에 바로 실린다
+  // - 넘긴 headers·environment 는 디스크(설정·로그·DB)·env·API(/config·/mcp·/provider) 어디에도 안 나온다 (grep 0) — 로컬 자식 env 에만 있다
+  // - POST /mcp/{name}/disconnect → true, 상태 disabled, 프로세스 종료, 도구 빠짐. connect 로 되살린다. 지우는 API 는 없다
+  // - 엔진을 다시 띄우면 동적 추가는 다 사라진다 — ctx.mcp 가 매 턴(llm/before-turn) 상태를 보고 다시 붙인다
+
+  /** 그 폴더 인스턴스의 MCP 서버 상태 */
+  async mcpStatus(directory: string): Promise<Record<string, McpStatus>> {
+    const { conn, workdir } = await this.legacyTarget(directory)
+    const res = await fetch(`${conn.url}/mcp?${at(workdir)}`, { headers: conn.headers, signal: AbortSignal.timeout(60_000) })
+    if (!res.ok) throw new Error(tr('error.engineRoute', { route: '/mcp', status: res.status }))
+    const status = (await res.json()) as Record<string, McpStatus>
+    this.mcpServers.set(workdir, Object.keys(status))
+    return status
+  }
+
+  /** 그 폴더 인스턴스에 서버를 붙이거나 바꿔 끼운다 (연결까지 기다린다). 비밀(헤더·env)은 opencode 메모리에만 */
+  async mcpAdd(directory: string, name: string, def: EngineMcp): Promise<Record<string, McpStatus>> {
+    const { conn, workdir } = await this.legacyTarget(directory)
+    const res = await fetch(`${conn.url}/mcp?${at(workdir)}`, {
+      method: 'POST',
+      headers: { ...conn.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ name, config: conn.mcpConfig(def) }),
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (!res.ok) throw new Error(tr('error.engineRoute', { route: '/mcp', status: res.status }))
+    const status = (await res.json()) as Record<string, McpStatus>
+    this.mcpServers.set(workdir, Object.keys(status))
+    return status
+  }
+
+  /** 그 폴더 인스턴스의 서버를 끊는다 (상태 disabled, 프로세스 종료) */
+  async mcpDisconnect(directory: string, name: string): Promise<void> {
+    const { conn, workdir } = await this.legacyTarget(directory)
+    const res = await fetch(`${conn.url}/mcp/${encodeURIComponent(name)}/disconnect?${at(workdir)}`, {
+      method: 'POST',
+      headers: conn.headers,
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!res.ok) throw new Error(tr('error.engineRoute', { route: '/mcp', status: res.status }))
+  }
+
+  /** 그 폴더의 도구 이름 → MCP 서버·도구 (마지막으로 본 서버 이름으로, 모르면 첫 `_` 에서 가른다) */
+  mcpTool(workdir: string): McpToolResolver {
+    return (name) => mcpToolOf(name, this.mcpServers.get(workdir))
+  }
+
+  /** 지금 엔진과 그 폴더(realpath) — 없는 폴더는 opencode 에 넘기지 않는다 (realDirectory) */
+  private async legacyTarget(directory: string): Promise<{ conn: EngineConnection; workdir: string }> {
+    const workdir = await realDirectory(directory)
+    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
+    return { conn: await this.ctx.engine.connection(), workdir }
   }
 
   /** 지운 대화의 본문을 DB 파일에서 걷어낸다 (ctx.engine.purgeDeleted). 답을 기다리는 턴이 있으면 다 끝난 뒤로 미룬다 */
@@ -871,8 +942,12 @@ export class LlmService extends Service {
         list<Request & { questions: AttentionQuestion[] }>('question'),
       ])
       if (stopped) return
+      const mcp = this.mcpTool(workdir)
       const next: Attention[] = [
-        ...permissions.map((entry): Attention => ({ kind: 'permission', id: entry.id, ...origin(entry), action: entry.permission, resources: entry.patterns ?? [] })),
+        ...permissions.map((entry): Attention => {
+          const ref = mcp(entry.permission)
+          return { kind: 'permission', id: entry.id, ...origin(entry), action: entry.permission, resources: entry.patterns ?? [], ...(ref && { mcp: ref }) }
+        }),
         ...questions.map((entry): Attention => ({ kind: 'question', id: entry.id, ...origin(entry), questions: entry.questions })),
       ]
       for (const entry of permissions) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID })
@@ -977,7 +1052,7 @@ function parseFrame(frame: string): EngineEvent | undefined {
  *  자동 요약(L2): 요약 user(compaction 파트)는 그 턴 답의 요약 줄(끝나면 done — 화면은 구분선)이고, 요약 답(summary:true)의 글은 답이 아니다.
  *  요약 뒤 user 하나(합성 Continue·한도 초과 뒤 앞 user 의 복사본)는 말풍선이 아니라 이음이다 — 그 답은 같은 턴 답에 붙는다 (TurnScope 와 같은 규칙).
  *  root 는 세션 폴더 — 바꾼 파일 경로를 그 기준 상대로 보인다. children 은 task 파트가 띄운 자식 세션의 기록 — 하위 작업 줄 안에 넣는다 (#31) */
-export function historyMessages(raw: readonly EngineMessage[], running: boolean, root = '', children?: SubtaskHistory): HistoryMessage[] {
+export function historyMessages(raw: readonly EngineMessage[], running: boolean, root = '', mcp?: McpToolResolver, children?: SubtaskHistory): HistoryMessage[] {
   const messages: HistoryMessage[] = []
   let sentAt: number | undefined
   let asked: HistoryMessage | undefined
@@ -1043,7 +1118,7 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
     }
     const reply = currentReply()
     reply.text += parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
-    reply.items = [...(reply.items ?? []), ...messageItems(parts, root, children)]
+    reply.items = [...(reply.items ?? []), ...messageItems(parts, root, mcp, children)]
     lastStep = message
     finishedAt(info.time?.completed, reply)
     if (info.error?.name === 'MessageAbortedError') Object.assign(reply, { error: tr('error.stopped'), interrupted: true })

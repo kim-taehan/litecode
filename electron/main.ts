@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
-import { ProviderRegistry, type ProviderInput } from '../src/services/providers.ts'
+import { ProviderRegistry, type KeyCipher, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService, type Attention, type AttentionAnswer } from '../src/services/llm.ts'
 import type { TurnItem } from '../src/services/turnProgress.ts'
 import { EngineService } from '../src/services/engine.ts'
@@ -30,6 +30,7 @@ import { OpenInService } from '../src/services/openIn.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
 import { SkillsService } from '../src/services/skills.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
+import { McpService, type McpServerInput } from '../src/services/mcp.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -56,21 +57,23 @@ const settingsFiber = ctx.plugin(SettingsService, {
   defaults: process.env.LITECODE_TEST_LANGUAGE === 'ko' ? { language: 'ko' } : undefined,
 })
 mounted.push(settingsFiber)
+/** provider 키·MCP 비밀을 봉하는 safeStorage (키 없는 Linux basic_text 는 못 쓴다 — keyStorage.ts) */
+const keyCipher: KeyCipher = {
+  available: () =>
+    canSealKeys(
+      process.platform,
+      safeStorage.isEncryptionAvailable(),
+      process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined,
+    ),
+  encrypt: (plain) => safeStorage.encryptString(plain),
+  decrypt: (sealed) => safeStorage.decryptString(sealed),
+}
 mounted.push(ctx.plugin(ProviderRegistry, {
   file: path.join(userData, 'providers.json'),
   keysFile: path.join(userData, 'provider-keys.json'),
   // safeStorage 는 app ready 뒤에만 쓸 수 있다 — 키 저장은 설정 화면에서만 일어나므로 그때는 늘 ready 다.
   // macOS 는 Keychain, 쓸 수 없는 환경(키링 없는 Linux 의 basic_text 포함 — keyStorage.ts)이면 서비스가 키 저장을 거부한다.
-  cipher: {
-    available: () =>
-      canSealKeys(
-        process.platform,
-        safeStorage.isEncryptionAvailable(),
-        process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined,
-      ),
-    encrypt: (plain) => safeStorage.encryptString(plain),
-    decrypt: (sealed) => safeStorage.decryptString(sealed),
-  },
+  cipher: keyCipher,
   // 첫 실행 기본값 — 이후로는 providers.json 이 정본이다.
   defaults: [
     {
@@ -337,6 +340,16 @@ function skillsBridge(ctx: Context): void {
 }
 skillsBridge.inject = ['skills']
 
+// MCP (이슈 #28) — 설정 > MCP 의 IPC. 기능을 끄면 ctx.mcp 와 같이 내려가 붙인 서버를 끊는다
+function mcpBridge(ctx: Context): void {
+  handle(ctx, Channel.LIST_MCP, async (_event, directory?: string) => ctx.mcp.list(directory))
+  handle(ctx, Channel.SAVE_MCP, async (_event, input: McpServerInput) => ctx.mcp.save(input))
+  handle(ctx, Channel.REMOVE_MCP, async (_event, name: string) => ctx.mcp.remove(name))
+  handle(ctx, Channel.SET_MCP_ENABLED, async (_event, name: string, enabled: boolean) => ctx.mcp.setEnabled(name, enabled))
+  handle(ctx, Channel.TEST_MCP, async (_event, input: McpServerInput, directory?: string) => ctx.mcp.test(input, directory))
+}
+mcpBridge.inject = ['mcp']
+
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게 */
 const features: FeatureDefinition[] = [
   { id: 'at', plugin: AtTrigger },
@@ -386,6 +399,19 @@ const features: FeatureDefinition[] = [
     },
   },
   // 웹 도구(web)는 묶음이 없다 — ctx.engine 이 features/changed 를 듣고 opencode.json 을 다시 써 재시작한다 (이슈 #14)
+  {
+    id: 'mcp',
+    plugin: (ctx) => {
+      // 비밀(env·헤더 값)은 provider 키와 같은 safeStorage — 렌더러엔 설정 여부만
+      ctx.plugin(McpService, {
+        file: path.join(userData, 'mcp.json'),
+        secretsFile: path.join(userData, 'mcp-secrets.json'),
+        cipher: keyCipher,
+        fallbackCwd: userData,
+      })
+      ctx.plugin(mcpBridge)
+    },
+  },
 ]
 // 종료 때 바탕보다 먼저 내려간다(거꾸로 내리므로) — 터미널·셸·알림이 엔진보다 먼저 정리된다
 mounted.push(ctx.plugin(FeaturesService, features))

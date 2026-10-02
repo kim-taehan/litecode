@@ -125,7 +125,7 @@ describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
 
   it('계획은 opencode plan 을 덮어써 편집·명령·웹을 막고 계획 프롬프트를 준다', () => {
     expect(MODE_AGENT.plan).toBe('plan')
-    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny' })
+    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', external_directory: 'ask', doom_loop: 'ask' })
     expect(agent['plan']!.prompt).toMatch(/plan mode/)
   })
 
@@ -173,7 +173,28 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
   it('켜면 전역 permission 에 웹 deny 가 없고 에이전트 정의는 ENGINE_AGENTS 그대로', () => {
     const on = engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true })
     expect(on.permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' } })
-    expect(on.agent).toEqual(ENGINE_AGENTS)
+    expect(Object.keys(on.agent as object).sort()).toEqual(Object.keys(ENGINE_AGENTS).sort())
+    for (const [name, def] of Object.entries(ENGINE_AGENTS)) expect((on.agent as Record<string, unknown>)[name], name).toMatchObject(def)
+  })
+})
+
+// 이슈 #28 실측 (2026-10-02, opencode 1.18.18 레거시): MCP 도구 이름 = 권한 이름 = `<서버>_<도구>`. 와일드카드 `*_*` deny 면 LLM 요청에서 빠지고,
+// ask 면 permission.asked{permission:"<서버>_<도구>"} 가 온다. 밑줄 있는 내장 권한은 기본값을 다시 적는다
+describe('engineConfig — MCP 도구 권한 (#28)', () => {
+  const agent = engineConfig([], { token: 't', baseURLFor: () => '' }).agent as Record<string, { permission: Record<string, unknown> }>
+
+  it('계획은 MCP 도구를 막고 external_directory·doom_loop 는 opencode 기본(ask)으로 되돌린다 — 그 뒤에 웹 deny', () => {
+    const keys = Object.keys(agent['plan']!.permission)
+    expect(agent['plan']!.permission).toMatchObject({ '*_*': 'deny', external_directory: 'ask', doom_loop: 'ask' })
+    expect(keys.indexOf('external_directory')).toBeGreaterThan(keys.indexOf('*_*'))
+    expect(keys.slice(-2)).toEqual(['webfetch', 'websearch'])
+  })
+
+  it('매번 묻기와 그 하위 작업은 MCP 도구를 묻는다, 기본(build)·전체 권한은 그대로 허용', () => {
+    expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
+    expect(agent[SUBAGENT_ASK]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, webfetch: 'deny', websearch: 'deny' })
+    expect(agent['build']).toBeUndefined()
   })
 })
 

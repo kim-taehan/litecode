@@ -3,6 +3,7 @@ import { failureText, realDirectory, type EngineMessage } from './llm.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
 import { toolDiffs, type FileDiff } from './toolDiffs.ts'
+import { mcpToolOf, type McpToolRef, type McpToolResolver } from './turnProgress.ts'
 
 // Trajectory 탭의 데이터 (ctx.trajectory) — 한 대화의 스텝·도구 호출을 시간 순 중립 레코드로 준다. 화면은 opencode 형식을 모른다.
 // 원천은 대화 다시 열기와 같은 레거시 GET /session/{id}/message?directory= (ctx.llm.readMessages) — 같은 응답을 Chat 은 말풍선으로(historyMessages),
@@ -40,7 +41,8 @@ export type TrajectoryRecord =
    *  subtask 가 있으면 그 하위 작업(자식 세션)의 스텝이다 — "에이전트 · 설명" */
   | { kind: 'assistant'; text: string; start: number; firstAt: number; end?: number; tokens?: TrajectoryTokens; error?: string; subtask?: string }
   /** 도구 호출 하나. input 은 인자 JSON 문자열, ranAt = 실행 시작(신규 세대 기록만 — 레거시엔 없다), exit = bash 의 종료 코드, diffs = 바꾼 파일 (toolDiffs.ts) */
-  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; ranAt?: number; end?: number; exit?: number; diffs?: FileDiff[]; subtask?: string }
+  /** mcp = MCP 도구 호출의 서버·도구 (이슈 #28 — 화면은 "MCP · 서버 · 도구") */
+  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; ranAt?: number; end?: number; exit?: number; diffs?: FileDiff[]; subtask?: string; mcp?: McpToolRef }
 
 export interface Trajectory {
   records: TrajectoryRecord[]
@@ -52,7 +54,12 @@ export interface Trajectory {
 
 /** 레거시 메시지(asc) → 시간 순 레코드. 스텝 뒤에 그 스텝이 부른 도구가 온다. root 는 세션 폴더 (바꾼 파일 경로 기준).
  *  children 은 task 파트가 띄운 자식 세션의 기록 — task 레코드 바로 뒤에 그 자식의 스텝·도구를 subtask 표시로 잇는다 */
-export function trajectoryRecords(raw: readonly EngineMessage[], root = '', children?: ReadonlyMap<string, readonly EngineMessage[]>): TrajectoryRecord[] {
+export function trajectoryRecords(
+  raw: readonly EngineMessage[],
+  root = '',
+  mcp: McpToolResolver = mcpToolOf,
+  children?: ReadonlyMap<string, readonly EngineMessage[]>,
+): TrajectoryRecord[] {
   const records: TrajectoryRecord[] = []
   let cursor = 0
   const reach = (time: number | undefined) => {
@@ -120,6 +127,8 @@ export function trajectoryRecords(raw: readonly EngineMessage[], root = '', chil
         result: state.output ?? '',
         start: state.time?.start ?? firstAt,
       }
+      const ref = mcp(call.name)
+      if (ref) call.mcp = ref
       if (state.status === 'error') call.error = state.error || tr('error.unknown')
       if (state.time?.end !== undefined) call.end = state.time.end
       if (typeof state.metadata?.exit === 'number') call.exit = state.metadata.exit
@@ -132,7 +141,7 @@ export function trajectoryRecords(raw: readonly EngineMessage[], root = '', chil
       if (childRaw) {
         const input = (state.input ?? {}) as { subagent_type?: unknown; description?: unknown }
         const subtask = [input.subagent_type, input.description].filter((value): value is string => typeof value === 'string' && value !== '').join(' · ')
-        for (const record of trajectoryRecords(childRaw, root)) {
+        for (const record of trajectoryRecords(childRaw, root, mcp)) {
           if (record.kind === 'assistant' || record.kind === 'tool') records.push({ ...record, subtask })
         }
       }
@@ -155,7 +164,7 @@ export class TrajectoryService extends Service {
     if (!workdir) return { records: [], missingFolder: true }
     try {
       const raw = await this.ctx.llm.readMessages(workdir, sessionId)
-      return { records: trajectoryRecords(raw, workdir, await this.ctx.llm.readSubtasks(workdir, raw)) }
+      return { records: trajectoryRecords(raw, workdir, this.ctx.llm.mcpTool(workdir), await this.ctx.llm.readSubtasks(workdir, raw)) }
     } catch (error) {
       return { records: [], error: tr('error.trajectoryLoad', { message: (error as Error).message }) }
     }

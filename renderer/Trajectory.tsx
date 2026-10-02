@@ -219,8 +219,8 @@ function Row({ record, calls, callsFolded, onToggleCalls }: { record: Trajectory
           {subtask !== undefined && <span className="trajectory__subtask">{t('trajectory.subtask', { name: subtask })}</span>}
           {record.kind === 'tool' ? (
             <>
-              <span className="trajectory__call">
-                {record.name} {record.input}
+              <span className="trajectory__call" data-mcp={record.mcp ? `${record.mcp.server}/${record.mcp.tool}` : undefined}>
+                {toolLabel(record)} {record.input}
               </span>
               <span className="trajectory__result">
                 → {error ? firstLine(error) : firstLine(record.result) || t('trajectory.emptyResult')}
@@ -249,8 +249,13 @@ function Row({ record, calls, callsFolded, onToggleCalls }: { record: Trajectory
   )
 }
 
+/** 도구 이름 — MCP 도구는 "MCP · 서버 · 도구" (이슈 #28) */
+function toolLabel(record: Extract<TrajectoryRecord, { kind: 'tool' }>): string {
+  return record.mcp ? `MCP · ${record.mcp.server} · ${record.mcp.tool}` : record.name
+}
+
 function barTitle(record: TrajectoryRecord, t: Translate): string {
-  if (record.kind === 'tool') return `${record.name} · ${record.end === undefined ? t('trajectory.unfinished') : formatDuration(record.end - record.start)}`
+  if (record.kind === 'tool') return `${toolLabel(record)} · ${record.end === undefined ? t('trajectory.unfinished') : formatDuration(record.end - record.start)}`
   if (record.kind === 'assistant') {
     if (record.end === undefined) return `ASSISTANT · ${t('trajectory.unfinished')}`
     return `ASSISTANT · ${t('trajectory.stepTiming', { wait: formatDuration(record.firstAt - record.start), generate: formatDuration(record.end - record.firstAt) })}`

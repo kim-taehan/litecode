@@ -5,6 +5,7 @@ import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
 import { SkillsPage } from './SkillsSettings.tsx'
 import { SKILL_ICON_PATH } from './SkillBadge.tsx'
+import { McpPage } from './McpSettings.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
 import { ContextLengthNotes } from './ContextLengthNotes.tsx'
@@ -24,13 +25,13 @@ export function reason(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
-type Page = 'general' | 'models' | 'features' | 'skills'
+type Page = 'general' | 'models' | 'features' | 'skills' | 'mcp'
 
 interface SettingsModalProps {
   providers: ProviderSummary[]
   onProvidersChange(providers: ProviderSummary[]): void
   onClose(): void
-  /** 지금 프로젝트 — 스킬 페이지가 그 프로젝트에서 쓸 수 있는 스킬을 보인다 */
+  /** 지금 프로젝트 — 스킬 페이지가 그 프로젝트에서 쓸 수 있는 스킬을, MCP 페이지가 그 폴더의 상태·프로젝트 서버를 본다 */
   directory?: string
 }
 
@@ -72,6 +73,15 @@ function SkillIcon() {
   )
 }
 
+/** 16px 플러그 — MCP 메뉴 */
+function PlugIcon() {
+  return (
+    <svg className="settings-nav__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5.5 1.75V4.5M10.5 1.75V4.5M3.75 4.5H12.25V7.5A4.25 4.25 0 0 1 3.75 7.5ZM8 11.75V14.25" />
+    </svg>
+  )
+}
+
 function CloseIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
@@ -83,6 +93,7 @@ function CloseIcon() {
 export function SettingsModal({ providers, onProvidersChange, onClose, directory }: SettingsModalProps) {
   const t = useT()
   const features = useFeatures()
+  const mcpOn = features.has('mcp') // 꺼지면 ctx.mcp 와 그 IPC 가 내려간다 — 메뉴도 없다
   const [page, setPage] = useState<Page>('general') // 첫 페이지는 일반 (dsh)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -98,6 +109,7 @@ export function SettingsModal({ providers, onProvidersChange, onClose, directory
     { id: 'features', label: t('settings.nav.features'), icon: <PuzzleIcon /> },
     // 스킬 기능을 끄면 페이지가 없다 (보던 중이면 일반으로)
     ...(features.has('skills') ? [{ id: 'skills' as const, label: t('settings.nav.skills'), icon: <SkillIcon /> }] : []),
+    ...(mcpOn ? [{ id: 'mcp' as const, label: t('settings.nav.mcp'), icon: <PlugIcon /> }] : []),
   ]
   const shown = pages.some((entry) => entry.id === page) ? page : 'general'
 
@@ -138,6 +150,8 @@ export function SettingsModal({ providers, onProvidersChange, onClose, directory
               <FeaturesPage />
             ) : shown === 'skills' ? (
               <SkillsPage directory={directory} />
+            ) : shown === 'mcp' ? (
+              <McpPage directory={directory} />
             ) : (
               <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />
             )}

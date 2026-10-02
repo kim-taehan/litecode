@@ -47,6 +47,8 @@ export interface EngineConnection {
   closed: AbortSignal
   /** opencode.json 에 그 provider 의 baseURL 로 적은 주소(키 프록시). 카탈로그의 api.url 이 이것과 다르면 폴더 설정이 덮은 것 */
   providerBaseURL(providerId: string): string
+  /** 앱이 붙이는 MCP 서버의 opencode 설정 — 로컬 서버의 자식 env 에서 이 서버의 비밀(서버 비밀번호 등)을 빈 값으로 덮는다 (engineMcpConfig) */
+  mcpConfig(def: EngineMcp): Record<string, unknown>
 }
 
 export interface EngineOptions {
@@ -177,17 +179,36 @@ const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 �
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
 
-/** 앱이 정의하는 MCP 서버 (opencode McpLocalConfig 모양) — 정의할 화면은 아직 없다(01w L4) */
-export interface EngineMcp {
-  type: 'local'
-  command: string[]
-  environment?: Record<string, string>
-}
+/** 앱이 붙이는 MCP 서버 (opencode McpLocalConfig·McpRemoteConfig 모양, 이슈 #28). timeout 은 연결·도구 목록 기한(ms) */
+export type EngineMcp =
+  | { type: 'local'; command: string[]; environment?: Record<string, string>; timeout?: number }
+  | { type: 'remote'; url: string; headers?: Record<string, string>; timeout?: number }
 
 /** MCP 자식에 빈 값으로 덮어 넘길 env 이름. opencode 는 MCP 자식에 자기 env 전체(서버 비밀번호·DB 경로 포함)를 넘긴다
- *  (01u 실측 5, 01w 3-2). 설정의 environment 에 빈 값을 넣으면 덮인다(1/1) — 지우는 길은 없다. 이름 규칙은 dsh 의 stdio env 걸러 내기 */
-function hiddenEnvNames(env: NodeJS.ProcessEnv): string[] {
+ *  (01u 실측 5, 01w 3-2). 설정의 environment 에 빈 값을 넣으면 덮인다(1/1, 동적 추가 POST /mcp 도 같다 — #28 실측) — 지우는 길은 없다.
+ *  이름 규칙은 dsh 의 stdio env 걸러 내기 */
+export function hiddenEnvNames(env: NodeJS.ProcessEnv): string[] {
   return Object.keys(env).filter((name) => /^(OPENCODE|LITECODE)_/.test(name) || /KEY|PASSWORD|SECRET|TOKEN/i.test(name))
+}
+
+/** opencode 에 넘길 MCP 서버 설정 하나 — 로컬이면 hidden 이름을 빈 값으로 덮고 정의의 environment 를 그 위에. 원격은 OAuth 를 끈다
+ *  (401 이면 well-known·동적 등록을 시도한다 — 폐쇄망에선 의미 없다, 01u 실측 3) */
+export function engineMcpConfig(def: EngineMcp, hidden: readonly string[]): Record<string, unknown> {
+  if (def.type === 'remote') return { ...def, oauth: false }
+  return { ...def, environment: { ...Object.fromEntries(hidden.map((name) => [name, ''])), ...def.environment } }
+}
+
+// MCP 도구 권한 (이슈 #28, 실측 2026-10-02 opencode 1.18.18 레거시). MCP 도구 이름은 `<서버>_<도구>` 이고(서버·도구 이름의 [A-Za-z0-9_-] 밖
+// 글자는 `_`) 권한 이름도 그 이름이다. 서버 이름을 미리 모르므로(프로젝트 서버는 그 폴더를 열 때 붙는다) 와일드카드 `*_*` 로 건다 — deny 면
+// 그 도구가 LLM 요청에서 빠지고, ask 면 permission.asked{permission:"<서버>_<도구>", patterns:["*"]} 가 온다 (각 1/1).
+// `*_*` 는 밑줄이 있는 내장 권한(external_directory·doom_loop·plan_enter·plan_exit)에도 걸린다 → 계획은 기본값을 다시 적는다(opencode 기본은
+// external_directory·doom_loop 모두 ask. 대가: 기본의 "임시 폴더 허용" 하나가 ask 가 된다 — tool-output 허용은 opencode 가 맨 뒤에 다시 붙인다).
+// 기본·전체 권한은 opencode 기본(허용)이다. 웹 도구 deny(#14)는 이 뒤에 붙고 겹치지 않는다
+const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
+  plan: { '*_*': 'deny', external_directory: 'ask', doom_loop: 'ask' },
+  [MODE_AGENT.ask]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' },
+  // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
+  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' },
 }
 
 /** 생성할 opencode.json — 모든 provider 가 키 프록시를 거친다. 진짜 키·저장된 baseURL 은 없다 */
@@ -215,13 +236,14 @@ export function engineConfig(
       ),
     }
   }
-  const hidden = Object.fromEntries(hiddenEnvNames(extra.childEnv ?? {}).map((name) => [name, '']))
-  const mcp =
-    extra.mcp &&
-    Object.fromEntries(Object.entries(extra.mcp).map(([name, def]) => [name, { ...def, environment: { ...hidden, ...def.environment } }]))
+  const hidden = hiddenEnvNames(extra.childEnv ?? {})
+  const mcp = extra.mcp && Object.fromEntries(Object.entries(extra.mcp).map(([name, def]) => [name, engineMcpConfig(def, hidden)]))
+  const agents = Object.fromEntries(
+    Object.entries(ENGINE_AGENTS).map(([name, def]) => [name, { ...def, permission: { ...def.permission, ...MCP_TOOL_RULES[name] } }]),
+  )
   const agent = extra.webTools
-    ? ENGINE_AGENTS
-    : Object.fromEntries(Object.entries(ENGINE_AGENTS).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
+    ? agents
+    : Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
   // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
   const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
   const permission = { ...SUBAGENT_ASK_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
@@ -527,7 +549,8 @@ export class EngineService extends Service {
       await stop()
       throw new Error(`${(error as Error).message}\n${output.trim()}`.trimEnd())
     }
-    return { url, headers, closed: closer.signal, providerBaseURL: (id) => proxy.baseURLFor(id), pid: child.pid!, stop }
+    const hidden = hiddenEnvNames(env)
+    return { url, headers, closed: closer.signal, providerBaseURL: (id) => proxy.baseURLFor(id), mcpConfig: (def) => engineMcpConfig(def, hidden), pid: child.pid!, stop }
   }
 }
 

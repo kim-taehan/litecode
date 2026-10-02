@@ -165,7 +165,9 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   const think = item.kind === 'think'
   // 스킬 줄 (이슈 #7, dsh ui-skill): "스킬 · 이름" + 출처 배지, 펼치면 지침 본문 (260 높이 제한). 기록(도구 결과)만으로 그린다
   const skill = item.kind === 'tool' ? item.skill : undefined
-  const title = think ? t('chat.think') : skill ? t('chat.skill') : toolTitle(item.name)
+  // MCP 도구(`<서버>_<도구>`)는 "MCP · 서버 · 도구" (이슈 #28)
+  const mcp = item.kind === 'tool' ? item.mcp : undefined
+  const title = think ? t('chat.think') : skill ? t('chat.skill') : mcp ? `${t('mcp.chat')} · ${mcp.server} · ${mcp.tool}` : toolTitle(item.name)
   const summary = think
     ? thinkSummary(item.text, item.done) || (item.done ? '' : t('chat.thinking'))
     : (item.summary ?? (item.status === 'preparing' ? t('chat.toolPreparing') : ''))
@@ -194,9 +196,10 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
       data-done={think ? item.done : undefined}
       data-status={think ? undefined : item.status}
       data-live={live || undefined}
+      data-mcp={!think && item.mcp ? `${item.mcp.server}/${item.mcp.tool}` : undefined}
     >
       <button type="button" className="turn-row__line" aria-expanded={body ? open : undefined} disabled={!body} onClick={() => setOpen((now) => !now)}>
-        {think ? <ThinkIcon /> : <ToolIcon name={item.name} />}
+        {think ? <ThinkIcon /> : <ToolIcon name={item.mcp ? 'mcp' : item.name} />}
         <span className="turn-row__title">{title}</span>
         {summary && (
           <>
@@ -356,6 +359,12 @@ function ToolIcon({ name }: { name: string }) {
     return (
       <Icon>
         <path d={SKILL_ICON_PATH} />
+      </Icon>
+    )
+  if (name === 'mcp')
+    return (
+      <Icon>
+        <path d="M5.5 1.75V4.5M10.5 1.75V4.5M3.75 4.5H12.25V7.5A4.25 4.25 0 0 1 3.75 7.5ZM8 11.75V14.25" />
       </Icon>
     )
   if (['grep', 'glob', 'codesearch', 'websearch'].includes(name))
