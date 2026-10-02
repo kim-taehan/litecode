@@ -8,13 +8,16 @@
 // - reasoningID·textID 는 스텝마다 `-0` 부터 다시 → assistantMessageID 와 묶어 id 로 쓴다
 // - 줄 순서는 처음 나타난 순서다: 도구 앞에 쓴 글은 text.started 가 tool.input.started 보다 먼저 와서 도구 위에 선다
 // - 한 스텝의 여러 도구는 동시에 돌고 끝난 순서로 tool.success 가 온다 → callID 로 맞춘다
+// - 파일을 바꾼 도구(edit·apply_patch·write)는 tool.success.structured 에 바꾼 내용이 온다 → diffs (toolDiffs.ts, 01p)
+
+import { toolDiffs, type FileDiff } from './toolDiffs.ts'
 
 /** 진행 줄 하나. 같은 id 의 새 값이 오면 통째로 바꾼다 (누적 전체를 싣는다 — 조각을 놓쳐도 화면이 틀어지지 않는다) */
 export type TurnItem =
   | { kind: 'think'; id: string; text: string; done: boolean }
   | { kind: 'text'; id: string; text: string; done: boolean }
   /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글 */
-  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string }
+  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[] }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
   | { kind: 'context'; id: string; text: string }
 
@@ -51,7 +54,9 @@ export class TurnTracker {
       case 'tool.success': {
         if (!this.items.has(`${message}:${String(data['callID'])}`)) return undefined // 앞 턴에서 끊긴 도구의 매듭 (01c) — 이 턴 줄이 아니다
         const content = (data['content'] as { text?: string }[] | undefined) ?? []
-        return this.tool(`${message}:${String(data['callID'])}`, { status: 'done', result: content.map((part) => part.text ?? '').join('') })
+        const previous = this.items.get(`${message}:${String(data['callID'])}`) as Extract<TurnItem, { kind: 'tool' }>
+        const diffs = toolDiffs(previous.name, previous.input ? JSON.parse(previous.input) : undefined, data['structured'])
+        return this.tool(`${message}:${String(data['callID'])}`, { status: 'done', result: content.map((part) => part.text ?? '').join(''), ...(diffs && { diffs }) })
       }
       case 'tool.failed': {
         if (!this.items.has(`${message}:${String(data['callID'])}`)) return undefined
@@ -112,7 +117,7 @@ interface MessagePart {
   id?: string
   text?: string
   name?: string
-  state?: { status?: string; input?: unknown; content?: { text?: string }[]; error?: { message?: string } }
+  state?: { status?: string; input?: unknown; content?: { text?: string }[]; structured?: unknown; error?: { message?: string } }
 }
 
 /** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다 (진행 중 파트는 내용이 "" — 그대로 둔다) */
@@ -132,6 +137,8 @@ export function messageItems(messageId: string, parts: readonly MessagePart[]): 
       }
       if (state.content) item.result = state.content.map((content) => content.text ?? '').join('')
       if (state.error) item.error = state.error.message ?? '알 수 없는 오류'
+      const diffs = toolDiffs(item.name, state.input, state.structured)
+      if (diffs) item.diffs = diffs
       items.push(item)
     }
   })

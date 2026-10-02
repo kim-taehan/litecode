@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Trajectory as TrajectoryData, TrajectoryRecord } from '../shared/ipc.ts'
 import { formatDuration, groupTurns, matchesSearch, timeline, type TimelineMode } from './trajectoryView.ts'
 import { useT, type Translate } from './settingsStore.ts'
+import { DiffCard, DiffStat } from './DiffCard.tsx'
 
 // Trajectory 탭 — 한 대화의 스텝·도구 호출을 턴별 목록과 시간축으로 본다. dsh ui-trajectory 참조(모양·동작만):
 // 툴바(Duration 토글·Turns/Calls 전체 접기·검색), 3레인 시간축(Input·Model·Tools), 턴별 목록(USER·ASSISTANT·TOOL·CONTEXT).
@@ -192,37 +193,51 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
 
 function Row({ record, calls, callsFolded, onToggleCalls }: { record: TrajectoryRecord; calls?: number; callsFolded: boolean; onToggleCalls: () => void }) {
   const t = useT()
+  const [diffOpen, setDiffOpen] = useState(false)
   const error = 'error' in record ? record.error : undefined
   const took = record.kind === 'assistant' || record.kind === 'tool' ? (record.end === undefined ? '…' : formatDuration(record.end - record.start)) : ''
+  const diffs = record.kind === 'tool' && !error ? record.diffs : undefined
   return (
-    <div className={`trajectory__row${error ? ' trajectory__row--error' : ''}`} data-kind={record.kind}>
-      <span className="trajectory__fold">
-        {calls !== undefined && (
-          <button type="button" aria-label={callsFolded ? t('trajectory.unfoldCall') : t('trajectory.foldCall')} aria-expanded={!callsFolded} onClick={onToggleCalls}>
-            {callsFolded ? '▸' : '▾'}
+    <>
+      <div className={`trajectory__row${error ? ' trajectory__row--error' : ''}`} data-kind={record.kind}>
+        <span className="trajectory__fold">
+          {calls !== undefined && (
+            <button type="button" aria-label={callsFolded ? t('trajectory.unfoldCall') : t('trajectory.foldCall')} aria-expanded={!callsFolded} onClick={onToggleCalls}>
+              {callsFolded ? '▸' : '▾'}
+            </button>
+          )}
+        </span>
+        <span className="trajectory__tag">{TAG[record.kind]}</span>
+        <span className="trajectory__text">
+          {record.kind === 'tool' ? (
+            <>
+              <span className="trajectory__call">
+                {record.name} {record.input}
+              </span>
+              <span className="trajectory__result">
+                → {error ? firstLine(error) : firstLine(record.result) || t('trajectory.emptyResult')}
+                {record.exit !== undefined && record.exit !== 0 && ` · exit ${record.exit}`}
+              </span>
+            </>
+          ) : record.kind === 'assistant' ? (
+            error ? firstLine(error) : firstLine(record.text) || '—'
+          ) : (
+            firstLine(record.text)
+          )}
+        </span>
+        {diffs && (
+          <button type="button" className="trajectory__diff-toggle" aria-expanded={diffOpen} title={diffOpen ? t('diff.hide') : t('diff.show')} onClick={() => setDiffOpen((now) => !now)}>
+            <DiffStat diffs={diffs} />
           </button>
         )}
-      </span>
-      <span className="trajectory__tag">{TAG[record.kind]}</span>
-      <span className="trajectory__text">
-        {record.kind === 'tool' ? (
-          <>
-            <span className="trajectory__call">
-              {record.name} {record.input}
-            </span>
-            <span className="trajectory__result">
-              → {error ? firstLine(error) : firstLine(record.result) || t('trajectory.emptyResult')}
-              {record.exit !== undefined && record.exit !== 0 && ` · exit ${record.exit}`}
-            </span>
-          </>
-        ) : record.kind === 'assistant' ? (
-          error ? firstLine(error) : firstLine(record.text) || '—'
-        ) : (
-          firstLine(record.text)
-        )}
-      </span>
-      <span className="trajectory__time">{took}</span>
-    </div>
+        <span className="trajectory__time">{took}</span>
+      </div>
+      {diffs && diffOpen && (
+        <div className="trajectory__diff">
+          <DiffCard diffs={diffs} />
+        </div>
+      )}
+    </>
   )
 }
 

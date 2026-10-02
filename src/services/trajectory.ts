@@ -2,6 +2,7 @@ import { Context, Service } from 'cordis'
 import { realDirectory } from './llm.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
+import { toolDiffs, type FileDiff } from './toolDiffs.ts'
 
 // Trajectory 탭의 데이터 (ctx.trajectory) — 한 대화의 스텝·도구 호출을 시간 순 중립 레코드로 준다. 화면은 opencode 형식을 모른다.
 // 원천은 대화 영속화와 같은 GET /api/session/{id}/message (ctx.llm.readMessages) — 같은 응답을 Chat 은 말풍선으로(historyMessages),
@@ -36,8 +37,8 @@ export type TrajectoryRecord =
   | { kind: 'context'; text: string; at: number }
   /** 모델 스텝 하나. start = 요청을 보낸 쪽 시각(커서), firstAt = 응답이 오기 시작한 시각 — start→firstAt 이 대기 */
   | { kind: 'assistant'; text: string; start: number; firstAt: number; end?: number; tokens?: TrajectoryTokens; error?: string }
-  /** 도구 호출 하나. input 은 인자 JSON 문자열, ranAt = 실행 시작, exit = bash 의 종료 코드 */
-  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; ranAt?: number; end?: number; exit?: number }
+  /** 도구 호출 하나. input 은 인자 JSON 문자열, ranAt = 실행 시작, exit = bash 의 종료 코드, diffs = 바꾼 파일 (toolDiffs.ts) */
+  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; ranAt?: number; end?: number; exit?: number; diffs?: FileDiff[] }
 
 export interface Trajectory {
   records: TrajectoryRecord[]
@@ -127,6 +128,8 @@ export function trajectoryRecords(raw: readonly unknown[]): TrajectoryRecord[] {
       if (part.time?.ran !== undefined) call.ranAt = part.time.ran
       if (part.time?.completed !== undefined) call.end = part.time.completed
       if (typeof state.structured?.exit === 'number') call.exit = state.structured.exit
+      const diffs = toolDiffs(call.name, state.input, state.structured)
+      if (diffs) call.diffs = diffs
       records.push(call)
       reach(call.end)
     }

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Attention, AttentionAnswer, TurnItem } from '../shared/ipc.ts'
 import { AttentionCard } from './Attention.tsx'
+import { DiffCard, DiffStat } from './DiffCard.tsx'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
@@ -144,6 +145,8 @@ function WorkRow({ item, directory }: { item: TurnItem; directory: string }) {
   const live = think ? !item.done : item.status === 'preparing' || item.status === 'running'
   const body: ReactNode = think ? (
     item.text.trim() && <Markdown text={item.text.trim()} />
+  ) : item.diffs && !item.error ? (
+    <DiffCard diffs={item.diffs} />
   ) : (
     (item.input || item.result || item.error) && (
       <>
@@ -170,6 +173,7 @@ function WorkRow({ item, directory }: { item: TurnItem; directory: string }) {
             <span className="turn-row__summary">{summary}</span>
           </>
         )}
+        {!think && item.diffs && item.status === 'done' && <DiffStat diffs={item.diffs} />}
       </button>
       {open && body && <div className="turn-row__body">{body}</div>}
     </div>

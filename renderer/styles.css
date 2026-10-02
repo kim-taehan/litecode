@@ -54,6 +54,11 @@
   --hover-card-bg: #2c2c2e;            /* HoverCard 판 — 두 테마 같음 */
   --hover-card-detail: #cfd3d6;        /* HoverCard 부가 글자 — 두 테마 같음 */
   --shadow-lv3: 0 0 1px rgba(0, 0, 0, 0.2), 0 0 4px rgba(0, 0, 0, 0.02), 0 12px 32px rgba(0, 0, 0, 0.08);
+  /* 파일 변경 카드 (dsh DiffBlock, _workspace/01p_diff.md 1-b) — 추가 green-500, 삭제 red-600, 바탕은 그 8% */
+  --diff-add: rgb(34, 197, 94);
+  --diff-add-bg: rgba(34, 197, 94, 0.08);
+  --diff-del: rgb(236, 19, 19);
+  --diff-del-bg: rgba(236, 19, 19, 0.08);
   /* 대화 본문 글자 크기 (설정 > 일반) — 렌더러가 설정값으로 덮는다. 제목은 기준 + delta, 표 등 한 단계 작은 글자는 secondary */
   --chat-font-size: 14px;
   --chat-font-delta: 0px;
@@ -105,6 +110,9 @@
     --shadow-panel: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
     --scrollbar: #545557;
     --scrollbar-hover: #65676b;
+    --diff-add-bg: rgba(34, 197, 94, 0.12);  /* 추가 글자는 두 테마 같다 */
+    --diff-del: rgb(242, 90, 90);            /* red-400 */
+    --diff-del-bg: rgba(242, 90, 90, 0.12);
   }
 }
 
