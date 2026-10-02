@@ -69,6 +69,7 @@ export const Channel = {
   GET_SETTINGS: 'settings:get',
   SET_SETTINGS: 'settings:set',
   OPEN_SETTINGS_FILE: 'settings:open-file',
+  GET_APP_VERSION: 'app:version',
   GET_NOTIFICATIONS: 'notifications:get',
   VIEW_CONVERSATION: 'notifications:view',
   TAKE_PENDING_OPEN: 'notifications:take-open',
@@ -165,6 +166,8 @@ export interface LitecodeBridge {
   setSettings(patch: Partial<Settings>): Promise<Settings>
   /** userData/settings.json 을 OS 연결 프로그램으로 연다 (없으면 만든다). 못 열면 지금 언어의 사유로 거절 */
   openSettingsFile(): Promise<void>
+  /** 앱 버전 (package.json version) — 설정 > 일반 맨 아래 "현재 버전" */
+  getAppVersion(): Promise<string>
   /** 대화별 알림 상태 (실행 중·답 필요·안 본 끝남) — 대화 행·프로젝트 점 (ctx.notifications) */
   getNotifications(): Promise<NoticeState>
   /** 화면이 지금 보여 주는 대화 — 앱이 앞이면 읽음, 그 대화의 사건은 알리지 않는다 */

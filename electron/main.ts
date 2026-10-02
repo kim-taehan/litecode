@@ -224,6 +224,7 @@ function bootstrap(ctx: Context): void {
     const file = ctx.settings.ensureFile()
     if (!file || (await shell.openPath(file))) throw new Error(tr('settings.openFileError'))
   })
+  handle(ctx, Channel.GET_APP_VERSION, async () => app.getVersion())
   // 테마는 nativeTheme 에만 넣는다 — 렌더러의 prefers-color-scheme 이 즉시 따라와 CSS 미디어 쿼리 하나로 셋이 다 된다 (01f 실측)
   ctx.on('settings/changed', (settings) => {
     nativeTheme.themeSource = settings.appearance

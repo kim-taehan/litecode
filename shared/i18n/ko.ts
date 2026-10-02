@@ -16,6 +16,10 @@ export const ko = {
   'sidebar.confirmDelete': '삭제 확인',
   'sidebar.deleteChat': '대화 삭제',
   'sidebar.settings': '설정',
+  'sidebar.running': '진행 중 {count}',
+  'sidebar.runningOnly': '진행 중인 대화만 보기',
+  'sidebar.runningAll': '모든 대화 보기',
+  'sidebar.runningElsewhere': '다른 프로젝트에서 진행 중 {count}',
   // 프로젝트 전환
   'project.cannotOpen': '폴더를 열 수 없습니다: {dir}',
   'project.cannotOpenPicked': '폴더를 열 수 없습니다',
@@ -140,6 +144,9 @@ export const ko = {
   'question.custom': '직접 입력',
   'question.send': '답 보내기',
   'question.reject': '거절',
+  'composer.queued': '대기 중 {count}개',
+  'composer.queueRestore': '입력창으로 되돌리기',
+  'composer.queueList': '답이 끝나면 보낼 메시지',
   'model.loading': '모델 불러오는 중…',
   'model.none': '모델 없음',
   'model.missing': '{ref} — 설정에 없습니다',
@@ -213,6 +220,7 @@ export const ko = {
   'settings.notifications.description': '앱이 뒤에 있을 때 작업이 끝나거나 답이 필요하면 PC 알림을 띄웁니다',
   'settings.defaultMode': '새 대화 기본 모드',
   'settings.defaultMode.description': '새 대화가 이 모드로 시작합니다',
+  'settings.currentVersion': '현재 버전: {version}',
   // 알림 (ctx.notifications — PC 알림 문구는 메인이, 토스트·점은 화면이 쓴다)
   'notify.body': '{project} · {status}',
   'notify.done': '끝났습니다',
