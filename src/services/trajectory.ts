@@ -15,6 +15,8 @@ import { toolDiffs, type FileDiff } from './toolDiffs.ts'
 // - 자동 요약 답(summary:true)·합성 user(요약 뒤 Continue)·요약 user(compaction 파트)는 레코드가 아니다
 // - 지시문: 레거시는 지시문 변화를 기록하지 않는다 — 앱이 매 턴 프로젝트 AGENTS.md 를 prompt system 으로 싣고(instructions.ts), 그 값이 user 메시지
 //   info.system 에 남는다(L2 실측). 앞 턴과 달라진 user 뒤에 CONTEXT 레코드를 둔다 (첫 턴은 없다 — 처음 읽은 것은 바뀐 것이 아니다)
+// - 하위 작업 (task, 이슈 #31): 부모 task 파트의 metadata.sessionId 가 자식 세션이다. 자식 기록(스텝·도구)을 그 task 레코드 바로 뒤에 subtask 표시를 달아
+//   잇는다 — 화면이 묶어 들여 보인다. 자식의 user(= task 의 prompt)는 레코드가 아니다 (턴을 새로 세우면 안 된다)
 
 declare module 'cordis' {
   interface Context {
@@ -34,10 +36,11 @@ export type TrajectoryRecord =
   | { kind: 'user'; text: string; at: number }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 */
   | { kind: 'context'; text: string; at: number }
-  /** 모델 스텝 하나. start = 요청을 보낸 쪽 시각(커서), firstAt = 응답이 오기 시작한 시각 — start→firstAt 이 대기 */
-  | { kind: 'assistant'; text: string; start: number; firstAt: number; end?: number; tokens?: TrajectoryTokens; error?: string }
+  /** 모델 스텝 하나. start = 요청을 보낸 쪽 시각(커서), firstAt = 응답이 오기 시작한 시각 — start→firstAt 이 대기.
+   *  subtask 가 있으면 그 하위 작업(자식 세션)의 스텝이다 — "에이전트 · 설명" */
+  | { kind: 'assistant'; text: string; start: number; firstAt: number; end?: number; tokens?: TrajectoryTokens; error?: string; subtask?: string }
   /** 도구 호출 하나. input 은 인자 JSON 문자열, ranAt = 실행 시작(신규 세대 기록만 — 레거시엔 없다), exit = bash 의 종료 코드, diffs = 바꾼 파일 (toolDiffs.ts) */
-  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; ranAt?: number; end?: number; exit?: number; diffs?: FileDiff[] }
+  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; ranAt?: number; end?: number; exit?: number; diffs?: FileDiff[]; subtask?: string }
 
 export interface Trajectory {
   records: TrajectoryRecord[]
@@ -47,8 +50,9 @@ export interface Trajectory {
   error?: string
 }
 
-/** 레거시 메시지(asc) → 시간 순 레코드. 스텝 뒤에 그 스텝이 부른 도구가 온다. root 는 세션 폴더 (바꾼 파일 경로 기준) */
-export function trajectoryRecords(raw: readonly EngineMessage[], root = ''): TrajectoryRecord[] {
+/** 레거시 메시지(asc) → 시간 순 레코드. 스텝 뒤에 그 스텝이 부른 도구가 온다. root 는 세션 폴더 (바꾼 파일 경로 기준).
+ *  children 은 task 파트가 띄운 자식 세션의 기록 — task 레코드 바로 뒤에 그 자식의 스텝·도구를 subtask 표시로 잇는다 */
+export function trajectoryRecords(raw: readonly EngineMessage[], root = '', children?: ReadonlyMap<string, readonly EngineMessage[]>): TrajectoryRecord[] {
   const records: TrajectoryRecord[] = []
   let cursor = 0
   const reach = (time: number | undefined) => {
@@ -123,6 +127,15 @@ export function trajectoryRecords(raw: readonly EngineMessage[], root = ''): Tra
       if (diffs) call.diffs = diffs
       records.push(call)
       reach(call.end)
+      const child = call.name === 'task' ? state.metadata?.['sessionId'] : undefined
+      const childRaw = typeof child === 'string' ? children?.get(child) : undefined
+      if (childRaw) {
+        const input = (state.input ?? {}) as { subagent_type?: unknown; description?: unknown }
+        const subtask = [input.subagent_type, input.description].filter((value): value is string => typeof value === 'string' && value !== '').join(' · ')
+        for (const record of trajectoryRecords(childRaw, root)) {
+          if (record.kind === 'assistant' || record.kind === 'tool') records.push({ ...record, subtask })
+        }
+      }
     }
   }
   return records
@@ -141,7 +154,8 @@ export class TrajectoryService extends Service {
     const workdir = await realDirectory(directory)
     if (!workdir) return { records: [], missingFolder: true }
     try {
-      return { records: trajectoryRecords(await this.ctx.llm.readMessages(workdir, sessionId), workdir) }
+      const raw = await this.ctx.llm.readMessages(workdir, sessionId)
+      return { records: trajectoryRecords(raw, workdir, await this.ctx.llm.readSubtasks(workdir, raw)) }
     } catch (error) {
       return { records: [], error: tr('error.trajectoryLoad', { message: (error as Error).message }) }
     }

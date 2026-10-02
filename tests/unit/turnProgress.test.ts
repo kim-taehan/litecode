@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { messageItems, toolSummary, TurnScope, TurnTracker } from '../../src/services/turnProgress.ts'
+import { messageItems, subtaskSessions, toolSummary, TurnScope, TurnTracker } from '../../src/services/turnProgress.ts'
 
 // 턴 중 opencode 레거시 이벤트 → 진행 줄. 이벤트 모양은 01w 실측 그대로 (GET /event 의 {type, properties}, opencode 1.18.18 `hello [think]`·`[bash:pwd]`)
 
@@ -172,6 +172,146 @@ describe('messageItems (지난 대화)', () => {
       { kind: 'text', id: 'm:p2', text: 'Let me check', done: true },
       { kind: 'tool', id: 'm:p3', name: 'bash', status: 'done', input: '{"command":"ls","description":"List"}', summary: 'List', result: 'a' },
       { kind: 'tool', id: 'm:p4', name: 'read', status: 'error', input: '{"filePath":"/x"}', summary: '/x', error: 'nope' },
+    ])
+  })
+})
+
+// 이슈 #31 실측 (2026-10-02, opencode 1.18.18, 가짜 LLM `[calls:…]` 로 task 2개): 부모 task 파트 running 에 metadata.sessionId(자식) → 자식 세션 이벤트가
+// 같은 /event 에 자식 sessionID 로 (user 에코 → assistant → 파트 → step-finish → 자식 session.idle) → 부모 task 파트 completed
+describe('TurnTracker — 하위 작업 (task, 이슈 #31)', () => {
+  const task = (id: string, child: string, state: Record<string, unknown>) =>
+    updated({
+      type: 'tool',
+      id,
+      tool: 'task',
+      callID: `call_${id}`,
+      state: { input: { subagent_type: 'general', description: `job ${id}`, prompt: '[bash:sleep 3] child' }, metadata: { parentSessionId: S, sessionId: child }, ...state },
+    })
+  const childInfo = (child: string, id: string, role: 'user' | 'assistant') => ['message.updated', { sessionID: child, info: { id, sessionID: child, role } }] as const
+  const childPart = (child: string, messageID: string, part: Record<string, unknown>) =>
+    ['message.part.updated', { sessionID: child, part: { sessionID: child, messageID, ...part } }] as const
+
+  it('task 파트는 하위 작업 줄 — 준비(빈 인자) → 진행(에이전트·설명·시작 시각) → 완료(끝 시각), 실패는 사유', () => {
+    const tracker = new TurnTracker()
+    expect(tracker.observe(...updated({ type: 'tool', id: 't1', tool: 'task', callID: 'c', state: { status: 'pending', input: {} } }))).toEqual({
+      kind: 'subtask',
+      id: `${A}:t1`,
+      agent: '',
+      description: '',
+      status: 'preparing',
+      items: [],
+    })
+    expect(tracker.observe(...task('t1', 'ses_c1', { status: 'running', time: { start: 100 } }))).toEqual({
+      kind: 'subtask',
+      id: `${A}:t1`,
+      agent: 'general',
+      description: 'job t1',
+      status: 'running',
+      startedAt: 100,
+      items: [],
+    })
+    expect(tracker.observe(...task('t1', 'ses_c1', { status: 'completed', output: '<task id="ses_c1" state="completed">…', time: { start: 100, end: 4100 } }))).toMatchObject({
+      status: 'done',
+      startedAt: 100,
+      endedAt: 4100,
+    })
+    expect(tracker.observe(...task('t2', 'ses_c2', { status: 'error', error: 'The user has specified a rule which prevents…', time: { start: 100, end: 200 } }))).toMatchObject({
+      status: 'error',
+      error: 'The user has specified a rule which prevents…',
+    })
+    // 부모를 멈추면 opencode 가 task 를 "Task cancelled" 로 끝낸다 — 실패가 아니라 중단
+    const stopped = tracker.observe(...task('t3', 'ses_c3', { status: 'error', error: 'Task cancelled', time: { start: 100, end: 200 } }))
+    expect(stopped).toMatchObject({ status: 'stopped' })
+    expect(stopped).not.toHaveProperty('error')
+  })
+
+  it('자식 세션 이벤트는 그 하위 작업 줄 안으로 — user 에코는 버리고 도구·글을 쌓고 스텝 토큰을 더한다. 두 하위 작업이 섞이지 않는다', () => {
+    const tracker = new TurnTracker()
+    tracker.observe(...task('t1', 'ses_c1', { status: 'running', time: { start: 100 } }))
+    tracker.observe(...task('t2', 'ses_c2', { status: 'running', time: { start: 101 } }))
+    expect(tracker.isChild('ses_c1')).toBe(true)
+    expect(tracker.isChild('ses_other')).toBe(false)
+    expect(tracker.child(...childInfo('ses_c1', 'mu1', 'user'))).toBeUndefined()
+    expect(tracker.child(...childPart('ses_c1', 'mu1', { type: 'text', id: 'pe', text: '[bash:sleep 3] child' }))).toBeUndefined() // 에코
+    tracker.child(...childInfo('ses_c1', 'ma1', 'assistant'))
+    tracker.child(...childInfo('ses_c2', 'ma2', 'assistant'))
+    expect(tracker.child(...childPart('ses_c1', 'ma1', { type: 'tool', id: 'pb', tool: 'bash', state: { status: 'running', input: { command: 'sleep 3', description: 'Wait' } } }))).toMatchObject({
+      kind: 'subtask',
+      id: `${A}:t1`,
+      items: [{ kind: 'tool', id: 'ma1:pb', name: 'bash', status: 'running', summary: 'Wait' }],
+    })
+    expect(tracker.child(...childPart('ses_c2', 'ma2', { type: 'text', id: 'pt', text: 'B done', time: { start: 1, end: 2 } }))).toMatchObject({
+      id: `${A}:t2`,
+      items: [{ kind: 'text', text: 'B done', done: true }],
+    })
+    expect(tracker.child(...childPart('ses_c1', 'ma1', { type: 'step-finish', id: 'pf', tokens: { input: 700, output: 50, reasoning: 0, cache: { read: 300, write: 0 } } }))).toMatchObject({
+      id: `${A}:t1`,
+      tokens: 1050,
+    })
+    expect(tracker.child('session.idle', { sessionID: 'ses_c1' })).toBeUndefined()
+    // 부모 task 파트가 끝나도 자식 줄·토큰은 남는다
+    expect(tracker.observe(...task('t1', 'ses_c1', { status: 'completed', output: 'x', time: { start: 100, end: 300 } }))).toMatchObject({
+      status: 'done',
+      tokens: 1050,
+      items: [{ name: 'bash' }],
+    })
+    expect(tracker.subtaskOf('ses_c2')).toMatchObject({ agent: 'general', description: 'job t2' })
+    expect(tracker.text()).toBe('') // 자식 글은 부모 답이 아니다
+  })
+
+  it('task 파트보다 먼저 온 자식 이벤트(session.created 로 안 자식)도 잇는 순간 실린다', () => {
+    const tracker = new TurnTracker()
+    tracker.adoptChild('ses_c1')
+    tracker.child(...childInfo('ses_c1', 'ma1', 'assistant'))
+    expect(tracker.child(...childPart('ses_c1', 'ma1', { type: 'text', id: 'pt', text: 'early', time: { start: 1, end: 2 } }))).toBeUndefined() // 아직 줄이 없다
+    expect(tracker.observe(...task('t1', 'ses_c1', { status: 'running', time: { start: 100 } }))).toMatchObject({ items: [{ kind: 'text', text: 'early' }] })
+  })
+})
+
+describe('하위 작업 기록 (다시 열기)', () => {
+  const parts = [
+    {
+      type: 'tool',
+      id: 'p1',
+      messageID: 'm',
+      tool: 'task',
+      state: { status: 'completed', input: { subagent_type: 'general', description: 'job 0' }, output: 'x', metadata: { sessionId: 'ses_c' }, time: { start: 10, end: 50 } },
+    },
+    { type: 'tool', id: 'p2', messageID: 'm', tool: 'task', state: { status: 'running', input: { subagent_type: 'explore', description: 'job 1' }, metadata: { sessionId: 'ses_gone' }, time: { start: 11 } } },
+  ]
+
+  it('subtaskSessions 는 task 파트의 자식 세션 id', () => {
+    expect(subtaskSessions([{ parts }])).toEqual(['ses_c', 'ses_gone'])
+  })
+
+  it('messageItems 에 자식 기록을 주면 task 줄 안에 자식의 줄(user 빼고)과 토큰 합. 못 읽은 자식은 빈 줄', () => {
+    const tokens = { input: 700, output: 50, cache: { read: 300 } }
+    const children = new Map([
+      [
+        'ses_c',
+        [
+          { info: { id: 'cu', role: 'user' as const }, parts: [{ type: 'text', id: 'q', messageID: 'cu', text: 'prompt' }] },
+          { info: { id: 'ca', role: 'assistant' as const, tokens }, parts: [{ type: 'tool', id: 'b', messageID: 'ca', tool: 'bash', state: { status: 'completed', input: { command: 'ls' }, output: 'a' } }] },
+          { info: { id: 'cb', role: 'assistant' as const, tokens }, parts: [{ type: 'text', id: 't', messageID: 'cb', text: 'tool: a' }] },
+        ],
+      ],
+    ])
+    expect(messageItems(parts, '', children)).toEqual([
+      {
+        kind: 'subtask',
+        id: 'm:p1',
+        agent: 'general',
+        description: 'job 0',
+        status: 'done',
+        startedAt: 10,
+        endedAt: 50,
+        tokens: 2100,
+        items: [
+          { kind: 'tool', id: 'ca:b', name: 'bash', status: 'done', input: '{"command":"ls"}', summary: 'ls', result: 'a' },
+          { kind: 'text', id: 'cb:t', text: 'tool: a', done: true },
+        ],
+      },
+      { kind: 'subtask', id: 'm:p2', agent: 'explore', description: 'job 1', status: 'running', startedAt: 11, items: [] },
     ])
   })
 })

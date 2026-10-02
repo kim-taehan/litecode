@@ -17,6 +17,8 @@ import type { AddressInfo } from 'node:net'
 //   결과를 붙여 다시 부르면 위 규칙으로 끝난다. `[bash:pwd]` 로 세션의 작업 디렉터리를 답에서 읽는다 (01_probe 규칙)
 // - 마지막 user 메시지에 `[call:<도구 이름> <json 인자>]` 가 있으면 그 도구 호출을 낸다 — bash 밖의 도구(grep 등)를 부른다.
 //   예: `[call:grep {"pattern":"needle"}]`. 끝나는 것은 bash 와 같다 (01b_offline 제안)
+// - 마지막 user 메시지에 `[calls:<json 배열>]` 이 있으면 한 응답에 도구 호출을 그 수만큼 낸다 — `[{"name":"task","arguments":{…}}, …]`.
+//   레거시 task 병렬(이슈 #31). 인자 안의 `[bash:…]` 등은 자식 세션이 user 로 받을 글이라 이 규칙을 먼저 본다 (subagents.live.test.ts)
 // - 마지막 user 메시지에 `[lead]` 가 있으면 답을 빈 줄 두 개로 시작한다 — 실제 모델(Qwen)이 그렇게 답한다 (2026-10-01 사용자 캡처)
 // - 마지막 user 메시지에 `[md]` 가 있으면 MARKDOWN_REPLY(제목·한글 굵게·목록·표·코드 블록·링크·원격 이미지·원문 HTML·빈 줄 과다)를
 //   답한다 — 답 말풍선 마크다운 렌더링을 본다 (markdown.live.test.ts)
@@ -136,6 +138,36 @@ function lastUserText(messages: ChatMessage[]): string {
   return stripped === text ? text : stripped.trimEnd()
 }
 
+/** `[calls:<JSON 배열>]` 의 호출 목록 — 배열 안에 `]` 가 있으므로 정규식이 아니라 괄호 짝으로 끝을 찾는다. 없거나 깨졌으면 undefined */
+function manyCalls(text: string): { name: string; arguments: unknown }[] | undefined {
+  const start = text.indexOf('[calls:')
+  if (start === -1) return undefined
+  const from = start + '[calls:'.length
+  let depth = 0
+  let inString = false
+  for (let i = from; i < text.length; i++) {
+    const c = text[i]
+    if (inString) {
+      if (c === '\\') i++
+      else if (c === '"') inString = false
+      continue
+    }
+    if (c === '"') inString = true
+    else if (c === '[' || c === '{') depth++
+    else if (c === ']' || c === '}') {
+      depth--
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(from, i + 1)) as { name: string; arguments: unknown }[]
+        } catch {
+          return undefined
+        }
+      }
+    }
+  }
+  return undefined
+}
+
 function chunk(delta: Record<string, unknown>, finish: string | null = null): string {
   const body = { id: 'fake', object: 'chat.completion.chunk', created: 0, model: 'echo', choices: [{ index: 0, delta, finish_reason: finish }] }
   return `data: ${JSON.stringify(body)}\n\n`
@@ -222,6 +254,17 @@ export async function startFakeLlm(): Promise<FakeLlm> {
         return
       }
       const last = messages[messages.length - 1]
+      // [calls:[{"name":"task","arguments":{…}}, …]] — 한 응답에 도구 호출 여럿 (task 병렬, 이슈 #31). 인자 안의 다른 규칙([bash:…] 등)보다 먼저 본다 —
+      // 그것들은 자식 세션이 user 로 받을 글이다
+      const many = last?.role !== 'tool' ? manyCalls(text) : undefined
+      if (many) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.write(chunk({ role: 'assistant', tool_calls: many.map((entry, index) => ({ index, id: `call_${++toolCalls}`, type: 'function', function: { name: entry.name, arguments: JSON.stringify(entry.arguments) } })) }))
+        res.write(chunk({}, 'tool_calls'))
+        res.write(usageChunk(text))
+        res.end('data: [DONE]\n\n')
+        return
+      }
       const command = /\[bash:([^\]]+)\]/.exec(text)?.[1]
       const named = /\[call:(\w+) (\{.*\})\]/.exec(text)
       const tool = named ? { name: named[1]!, arguments: named[2]! } : command && { name: 'bash', arguments: JSON.stringify({ command, description: 'fake' }) }

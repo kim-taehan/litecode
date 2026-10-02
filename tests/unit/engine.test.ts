@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isOurServer, MODE_AGENT, plantInstallMarkers } from '../../src/services/engine.ts'
+import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isOurServer, MODE_AGENT, plantInstallMarkers, SUBAGENT_ASK } from '../../src/services/engine.ts'
 import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
@@ -28,7 +28,7 @@ describe('engineConfig — 앱이 생성하는 opencode.json', () => {
         b: { npm: '@ai-sdk/openai-compatible', name: 'B', options: { baseURL: 'http://127.0.0.1:9/b', apiKey: 'proxy-token' }, models: { m1: { name: 'Model 1' } } },
       },
       agent: engineConfig([], proxy).agent,
-      permission: { webfetch: 'deny', websearch: 'deny' },
+      permission: { task: { [SUBAGENT_ASK]: 'deny' }, webfetch: 'deny', websearch: 'deny' },
       snapshot: false,
       model: 'a/m1',
       enabled_providers: ['a', 'b'],
@@ -115,7 +115,7 @@ describe('engineConfig — 앱이 정의한 MCP 의 자식 env', () => {
 
 // 모드 = opencode 에이전트 (01f·01k, 2026-10-02 실측: plan 에 edit·bash·webfetch deny 를 덧붙이면 도구가 빠지고 .opencode/plans 예외도 막힌다)
 describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
-  const agent = engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true }).agent as Record<string, { mode?: string; prompt?: string; permission: Record<string, string> }>
+  const agent = engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true }).agent as Record<string, { mode?: string; prompt?: string; description?: string; permission: Record<string, unknown> }>
 
   it('모든 모드에 에이전트가 있다 — build 는 opencode 기본, 나머지는 생성한 opencode.json 에 정의', () => {
     for (const mode of MODES) if (mode !== 'build') expect(agent[MODE_AGENT[mode]], mode).toBeDefined()
@@ -125,16 +125,25 @@ describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
 
   it('계획은 opencode plan 을 덮어써 편집·명령·웹을 막고 계획 프롬프트를 준다', () => {
     expect(MODE_AGENT.plan).toBe('plan')
-    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny' })
+    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny' })
     expect(agent['plan']!.prompt).toMatch(/plan mode/)
   })
 
   it('매번 묻기는 편집·명령·웹을 묻고 질문 도구를 다시 허용한다, 전체 권한은 모두 허용 — 둘 다 primary 에 build 첫 줄 프롬프트', () => {
     expect(agent[MODE_AGENT.ask]).toMatchObject({ mode: 'primary', permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow' } })
     expect(agent[MODE_AGENT.full]).toMatchObject({ mode: 'primary', permission: { '*': 'allow' } })
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' } })
     expect(agent[MODE_AGENT.ask]!.prompt).toMatch(/^You are an AI coding agent\./)
     expect(agent[MODE_AGENT.full]!.prompt).toBe(agent[MODE_AGENT.ask]!.prompt)
+  })
+
+  // 이슈 #31 실측: 하위 작업(task 자식 세션)은 부모 모드 권한을 물려받지 않는다 — 매번 묻기에서 general 이 묻지 않고 bash 를 돌렸고, 레거시 explore 엔 bash 가 있다
+  it('하위 작업: 매번 묻기는 묻는 하위 에이전트만, 계획은 task 를 막고, 그 하위 에이전트는 다른 모드(전역·전체 권한)에서 막는다', () => {
+    expect(agent[MODE_AGENT.ask]!.permission['task']).toEqual({ '*': 'deny', [SUBAGENT_ASK]: 'allow' })
+    expect(agent[SUBAGENT_ASK]).toMatchObject({ mode: 'subagent', permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', todowrite: 'deny' } })
+    expect(agent[SUBAGENT_ASK]!.description).toMatch(/^General-purpose agent/)
+    expect(agent[SUBAGENT_ASK]!.prompt).toBeUndefined() // general 처럼 opencode 기본 시스템 프롬프트
+    expect(engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true }).permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' } })
   })
 })
 
@@ -145,8 +154,8 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
   const config = engineConfig([], { token: 't', baseURLFor: () => '' })
   const agent = config.agent as Record<string, { permission: Record<string, string> }>
 
-  it('전역 permission 에 webfetch·websearch deny (build·하위 에이전트용)', () => {
-    expect(config.permission).toEqual({ webfetch: 'deny', websearch: 'deny' })
+  it('전역 permission 에 webfetch·websearch deny (build·하위 에이전트용) — 묻는 하위 에이전트 막기와 함께', () => {
+    expect(config.permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' }, webfetch: 'deny', websearch: 'deny' })
   })
 
   it('정의한 에이전트마다 규칙 맨 뒤에 webfetch·websearch deny — "*":allow·ask 를 덮는다', () => {
@@ -157,13 +166,13 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
         ['websearch', 'deny'],
       ])
     }
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', webfetch: 'deny', websearch: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, webfetch: 'deny', websearch: 'deny' })
     expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ edit: 'ask', bash: 'ask', question: 'allow' })
   })
 
-  it('켜면 전역 permission 이 없고 에이전트 정의는 ENGINE_AGENTS 그대로', () => {
+  it('켜면 전역 permission 에 웹 deny 가 없고 에이전트 정의는 ENGINE_AGENTS 그대로', () => {
     const on = engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true })
-    expect(on).not.toHaveProperty('permission')
+    expect(on.permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' } })
     expect(on.agent).toEqual(ENGINE_AGENTS)
   })
 })

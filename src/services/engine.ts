@@ -112,11 +112,27 @@ const PLAN_PROMPT = [
   'Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode.',
   'Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.',
 ].join(' ')
+// 하위 작업(레거시 task, 이슈 #31 실측 2026-10-02): 자식 세션은 **부모 모드의 권한을 물려받지 않는다** — 자식 세션 권한은 task deny 하나뿐이고 하위 에이전트
+// (general·explore) 자기 규칙으로 돈다. 그래서 매번 묻기에서 general 이 bash 를 묻지 않고 실행했고(1/1), explore 도 레거시에선 bash 가 있어(도구 목록 실측)
+// 계획 모드에서 파일을 만들었다(1/1). → 매번 묻기는 묻는 하위 에이전트(SUBAGENT_ASK — general 과 같은 설명, 편집·명령·웹을 묻는다)만 쓰게 하고,
+// 계획은 task 를 막는다(도구가 빠진다). 그 하위 에이전트는 다른 모드에서 막는다 — 전역 규칙(build) + 전체 권한의 "*":allow 뒤. 규칙은 뒤가 이기고,
+// 막힌 하위 에이전트는 task 설명의 목록에서도 빠진다 (hidden 으로는 안 빠졌다)
+export const SUBAGENT_ASK = 'general-ask'
+const GENERAL_DESCRIPTION =
+  'General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.'
+const SUBAGENT_ASK_DENY = { task: { [SUBAGENT_ASK]: 'deny' } }
+type Permission = Record<string, string | Record<string, string>>
 // 웹 도구(webfetch·websearch)는 켰을 때 이 규칙을 따른다 — 계획 deny, 매번 묻기 ask, 기본·전체 허용 (이슈 #14)
-export const ENGINE_AGENTS: Record<string, { mode?: string; prompt: string; permission: Record<string, string> }> = {
-  plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny' } },
-  [MODE_AGENT.ask]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow' } },
-  [MODE_AGENT.full]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { '*': 'allow' } },
+export const ENGINE_AGENTS: Record<string, { mode?: string; prompt?: string; description?: string; permission: Permission }> = {
+  plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny' } },
+  [MODE_AGENT.ask]: {
+    mode: 'primary',
+    prompt: BUILD_PROMPT,
+    permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow', task: { '*': 'deny', [SUBAGENT_ASK]: 'allow' } },
+  },
+  [MODE_AGENT.full]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { '*': 'allow', ...SUBAGENT_ASK_DENY } },
+  // general 과 같다(todowrite deny, 시스템 프롬프트 없음) + 매번 묻기와 같은 묻기
+  [SUBAGENT_ASK]: { mode: 'subagent', description: GENERAL_DESCRIPTION, permission: { todowrite: 'deny', edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask' } },
 }
 
 // 웹 도구 끄기 (이슈 #14, 실측 2026-10-02 opencode 1.18.18 — 가짜 LLM 이 받은 요청의 tools 로 봤다). deny 면 도구가 LLM 요청에서 빠진다.
@@ -126,7 +142,7 @@ export const ENGINE_AGENTS: Record<string, { mode?: string; prompt: string; perm
 const WEB_TOOLS_DENY = { webfetch: 'deny', websearch: 'deny' }
 
 /** 웹 도구 규칙을 빼고 맨 뒤에 deny 를 붙인다 — 객체 펼치기는 있던 키의 자리를 지키므로 지운 뒤 붙인다 */
-function withWebDenied(permission: Record<string, string>): Record<string, string> {
+function withWebDenied(permission: Permission): Permission {
   const rest = Object.fromEntries(Object.entries(permission).filter(([name]) => !(name in WEB_TOOLS_DENY)))
   return { ...rest, ...WEB_TOOLS_DENY }
 }
@@ -183,7 +199,7 @@ export function engineConfig(
     agent: extra.webTools
       ? ENGINE_AGENTS
       : Object.fromEntries(Object.entries(ENGINE_AGENTS).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }])),
-    ...(!extra.webTools && { permission: WEB_TOOLS_DENY }),
+    permission: { ...SUBAGENT_ASK_DENY, ...(!extra.webTools && WEB_TOOLS_DENY) },
     // 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 데이터 폴더에 만든다(큰 저장소에서 비용). litecode 는 revert 를 안 쓴다 (01w 1절)
     snapshot: false,
     ...engineDefaults(providers),

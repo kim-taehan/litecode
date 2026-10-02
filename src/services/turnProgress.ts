@@ -16,6 +16,13 @@
 //   → user(합성 "Continue…" 글, metadata.compaction_continue — 게이트웨이 오류였으면 그 앞 user 의 복사본일 수 있다) → session.compacted
 //   → 그 user 에 대한 답 → idle. 요약이 실패하면 summary 답이 error(ContextOverflowError) 로 끝나고 이어지는 user 없이 idle
 //   → TurnScope 는 이 턴 안에서 opencode 가 만든 요약 user 와 그 뒤 user 하나를 이 턴 것으로 받는다 (그 답이 이 턴 답이다)
+// 하위 작업 (task 도구, 이슈 #31 실측 2026-10-02 opencode 1.18.18 — 가짜 LLM `[calls:…]` 로 한 응답에 task 2~3개):
+// - 한 메시지의 task 들은 **동시에** 돈다(각 자식 bash sleep 3 이 같은 0.1초 안에 시작·끝, 3/3). 자식마다 세션 하나 — `session.created{info.parentID = 부모}`,
+//   제목 "<description> (@<agent> subagent)". 부모 task 파트는 pending{input:{}} → running{input:{subagent_type, description, prompt},
+//   metadata:{parentSessionId, sessionId(자식), model}, time.start} → completed{output "<task id=…><task_result>…"} | error("Task cancelled" 등)
+// - 자식 이벤트는 같은 /event?directory= 에 자식 sessionID 로 온다 — 모양은 부모와 같다(user 에코 → assistant → 파트, 자식 session.idle 도 온다)
+//   → TurnTracker.child 가 자식마다 따로 진행 줄을 쌓아 그 task 의 subtask 줄 안에 넣는다. 부모 턴 끝은 부모 sessionID 의 idle 만 본다(llm.ts)
+// - 자식 토큰은 부모 턴 합계에 넣지 않는다 (dsh ui-subagent 처럼 자식 줄에 따로 — 부모 컨텍스트 % 가 자식 대화로 부풀지 않게)
 
 import { toolDiffs, type FileDiff } from './toolDiffs.ts'
 
@@ -33,12 +40,32 @@ export type TurnItem =
   /** LLM 요청이 재시도할 수 있는 오류(500 등)로 실패해 엔진이 다시 보내려고 기다린다 — waiting 동안 "재시도 중 (n번째)", 다시 보내면 done
    *  (그리지 않는다). 레거시는 5번까지 재시도한다(합계 ~71초, 01w) */
   | { kind: 'retry'; id: string; attempt: number; message: string; status: 'waiting' | 'done' }
+  /** 하위 작업 (task 도구 — 엔진이 자식 세션에서 따로 돌린다). items 는 그 자식의 진행 줄(생각·도구·글), tokens 는 자식 스텝 토큰 합(입력+출력+생각+캐시).
+   *  startedAt·endedAt 은 엔진 시각(ms) — 진행 중이면 화면이 startedAt 부터 초를 센다 */
+  | Subtask
+
+export interface Subtask {
+  kind: 'subtask'
+  id: string
+  /** 하위 에이전트 이름 (general·explore·general-ask …) — 준비 중엔 빈 글 */
+  agent: string
+  /** AI 가 붙인 짧은 설명 */
+  description: string
+  /** stopped: 부모 턴을 멈춰 엔진이 취소했다 (실패가 아니다) */
+  status: 'preparing' | 'running' | 'done' | 'error' | 'stopped'
+  startedAt?: number
+  endedAt?: number
+  error?: string
+  tokens?: number
+  items: TurnItem[]
+}
 
 type Props = Record<string, unknown>
 
 /** 레거시 메시지 파트 중 우리가 읽는 필드 (01w 실측) */
 export interface EnginePart {
   id?: string
+  sessionID?: string
   messageID?: string
   type: string
   text?: string
@@ -153,15 +180,75 @@ export class TurnTracker {
   private readonly ids = new Map<string, string>()
   /** 재시도 줄 순번 — 한 번 다시 보내고 나서 또 재시도하면 새 줄 */
   private retries = 0
+  /** 이 턴의 하위 작업 자식 세션 → 그 진행 줄. taskId 는 그 자식을 띄운 task 줄 (task 파트의 metadata.sessionId 로 잇는다) */
+  private readonly children = new Map<string, { taskId?: string; tracker: TurnTracker; assistants: Set<string>; tokens: number }>()
 
   /** root: 세션 폴더(realpath) — 바꾼 파일 경로를 그 기준 상대로 보인다 */
   constructor(private readonly root = '') {}
 
+  /** 이 턴이 띄운 자식 세션을 안다 (session.created 의 parentID 또는 task 파트의 metadata.sessionId) — 그 뒤로 child 가 그 이벤트를 받는다 */
+  adoptChild(sessionId: string): void {
+    if (!this.children.has(sessionId)) this.children.set(sessionId, { tracker: new TurnTracker(this.root), assistants: new Set(), tokens: 0 })
+  }
+
+  isChild(sessionId: unknown): boolean {
+    return typeof sessionId === 'string' && this.children.has(sessionId)
+  }
+
+  /** 그 자식 세션을 띄운 하위 작업 줄 (승인·질문 카드가 어느 하위 작업인지 보일 때) */
+  subtaskOf(sessionId: string): Subtask | undefined {
+    const taskId = this.children.get(sessionId)?.taskId
+    const item = taskId === undefined ? undefined : this.items.get(taskId)
+    return item?.kind === 'subtask' ? item : undefined
+  }
+
+  /** 자식 세션의 이벤트 하나 → 바뀐 하위 작업 줄 (없으면 undefined). 자식의 user 에코는 버리고 assistant 파트만 쌓는다 (부모와 같은 규칙) */
+  child(type: string, props: Props): TurnItem | undefined {
+    const info = props['info'] as EngineMessageInfo | undefined
+    const part = props['part'] as EnginePart | undefined
+    const child = this.children.get(String(props['sessionID'] ?? info?.sessionID ?? part?.sessionID))
+    if (!child) return undefined
+    if (type === 'message.updated') {
+      if (info?.role === 'assistant') child.assistants.add(info.id)
+      return undefined
+    }
+    const messageId = part ? part.messageID : props['messageID']
+    if (typeof messageId !== 'string' || !child.assistants.has(messageId)) return undefined
+    if (part?.type === 'step-finish') {
+      child.tokens += tokenTotal(part.tokens)
+      return this.refreshSubtask(child)
+    }
+    return child.tracker.observe(type, props) ? this.refreshSubtask(child) : undefined
+  }
+
+  private refreshSubtask(child: { taskId?: string; tracker: TurnTracker; tokens: number }): TurnItem | undefined {
+    const task = child.taskId === undefined ? undefined : this.items.get(child.taskId)
+    if (task?.kind !== 'subtask') return undefined
+    const item: Subtask = { ...task, items: child.tracker.list(), ...(child.tokens > 0 && { tokens: child.tokens }) }
+    this.items.set(item.id, item)
+    return item
+  }
+
+  /** 지금까지의 줄 (처음 나타난 순서) */
+  list(): TurnItem[] {
+    return [...this.items.values()]
+  }
+
   observe(type: string, props: Props): TurnItem | undefined {
     if (type === 'message.part.updated') {
       const part = props['part'] as EnginePart
-      const item = partItem(part, false, this.root)
+      let item = partItem(part, false, this.root)
       if (!item) return undefined
+      if (item.kind === 'subtask') {
+        // task 파트가 자식을 알려 준다 — 자식 줄을 이 줄에 잇고, 이미 쌓인 자식 줄을 싣는다 (파트 갱신이 자식 줄을 지우지 않게)
+        const sessionId = part.state?.metadata?.['sessionId']
+        if (typeof sessionId === 'string') {
+          this.adoptChild(sessionId)
+          this.children.get(sessionId)!.taskId = item.id
+        }
+        const child = [...this.children.values()].find((entry) => entry.taskId === item!.id)
+        if (child) item = { ...item, items: child.tracker.list(), ...(child.tokens > 0 && { tokens: child.tokens }) }
+      }
       this.ids.set(part.id ?? '', item.id)
       const previous = this.items.get(item.id)
       if (previous && (previous.kind === 'think' || previous.kind === 'text') && previous.done) return undefined
@@ -214,8 +301,39 @@ export class TurnTracker {
   }
 }
 
-/** 파트 하나 → 진행 줄 (줄이 아닌 파트면 undefined). done 이면 끝난 기록이다 (다시 열기). root 는 세션 폴더 (diff 경로 기준) */
-function partItem(part: EnginePart, done: boolean, root: string): TurnItem | undefined {
+/** opencode 1.18.18 이 부모 중지로 취소한 task 의 오류 글 */
+const TASK_CANCELLED = 'Task cancelled'
+
+/** 스텝 토큰 합 — 하위 작업 줄에 보이는 값 (dsh ui-subagent: 네 갈래를 더한다) */
+function tokenTotal(tokens: EnginePart['tokens']): number {
+  return (tokens?.input ?? 0) + (tokens?.output ?? 0) + (tokens?.reasoning ?? 0) + (tokens?.cache?.read ?? 0) + (tokens?.cache?.write ?? 0)
+}
+
+/** 기록의 task 파트가 띄운 자식 세션 id 들 (metadata.sessionId) — 다시 열기·추론 과정 탭이 자식 기록을 이어 읽는다 */
+export function subtaskSessions(raw: readonly { parts: readonly EnginePart[] }[]): string[] {
+  return raw.flatMap(({ parts }) =>
+    parts.flatMap((part) => {
+      const sessionId = part.type === 'tool' && part.tool === 'task' ? part.state?.metadata?.['sessionId'] : undefined
+      return typeof sessionId === 'string' ? [sessionId] : []
+    }),
+  )
+}
+
+/** 자식 세션 기록 → 하위 작업 줄 안의 줄들과 토큰 합 (자식의 user·요약 답은 줄이 아니다) */
+function childRecord(raw: readonly { info: EngineMessageInfo; parts: readonly EnginePart[] }[], root: string): { items: TurnItem[]; tokens: number } {
+  const steps = raw.filter(({ info }) => info.role === 'assistant' && info.summary !== true)
+  return {
+    items: steps.flatMap(({ parts }) => parts.flatMap((part) => partItem(part, true, root) ?? [])),
+    tokens: steps.reduce((sum, { info }) => sum + tokenTotal(info.tokens), 0),
+  }
+}
+
+/** 기록에서 자식 세션 id → 그 메시지 (asc) */
+export type SubtaskHistory = ReadonlyMap<string, readonly { info: EngineMessageInfo; parts: readonly EnginePart[] }[]>
+
+/** 파트 하나 → 진행 줄 (줄이 아닌 파트면 undefined). done 이면 끝난 기록이다 (다시 열기). root 는 세션 폴더 (diff 경로 기준).
+ *  children 은 끝난 기록의 자식 세션 메시지 — task 줄 안에 그 자식의 줄을 넣는다 */
+function partItem(part: EnginePart, done: boolean, root: string, children?: SubtaskHistory): TurnItem | undefined {
   const id = `${part.messageID ?? ''}:${part.id ?? ''}`
   if (part.type === 'reasoning' || part.type === 'text') {
     if (part.synthetic) return undefined
@@ -224,6 +342,29 @@ function partItem(part: EnginePart, done: boolean, root: string): TurnItem | und
   if (part.type !== 'tool') return undefined
   const state = part.state ?? {}
   const status = state.status === 'error' ? 'error' : state.status === 'completed' ? 'done' : state.status === 'pending' ? 'preparing' : 'running'
+  if (part.tool === 'task') {
+    const input = (state.input ?? {}) as { subagent_type?: unknown; description?: unknown }
+    const item: Subtask = {
+      kind: 'subtask',
+      id,
+      agent: typeof input.subagent_type === 'string' ? input.subagent_type : '',
+      description: typeof input.description === 'string' ? input.description : '',
+      // 부모를 멈추면 opencode 가 진행 중 task 를 "Task cancelled" 오류로 끝낸다 (#31 실측 — 자식도 MessageAbortedError) — 실패가 아니라 중단이다
+      status: status === 'error' && state.error === TASK_CANCELLED ? 'stopped' : status,
+      items: [],
+    }
+    if (state.time?.start !== undefined) item.startedAt = state.time.start
+    if (state.time?.end !== undefined) item.endedAt = state.time.end
+    if (item.status === 'error') item.error = state.error || '알 수 없는 오류'
+    const sessionId = state.metadata?.['sessionId']
+    const record = typeof sessionId === 'string' ? children?.get(sessionId) : undefined
+    if (record) {
+      const { items, tokens } = childRecord(record, root)
+      item.items = items
+      if (tokens > 0) item.tokens = tokens
+    }
+    return item
+  }
   const item: Extract<TurnItem, { kind: 'tool' }> = { kind: 'tool', id, name: part.tool ?? '', status }
   const input = state.input
   if (input !== undefined && input !== '' && !(typeof input === 'object' && input !== null && Object.keys(input).length === 0)) {
@@ -251,7 +392,8 @@ export function toolSummary(input: unknown): string | undefined {
   return undefined
 }
 
-/** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다. root 는 세션 폴더 (diff 경로 기준) */
-export function messageItems(parts: readonly EnginePart[], root = ''): TurnItem[] {
-  return parts.flatMap((part) => partItem(part, true, root) ?? [])
+/** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다. root 는 세션 폴더 (diff 경로 기준).
+ *  children 을 주면 task 줄 안에 그 자식 세션의 줄을 넣는다 (subtaskSessions 로 찾아 읽은 것) */
+export function messageItems(parts: readonly EnginePart[], root = '', children?: SubtaskHistory): TurnItem[] {
+  return parts.flatMap((part) => partItem(part, true, root, children) ?? [])
 }

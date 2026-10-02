@@ -1538,6 +1538,19 @@ html[data-platform]:not([data-platform='darwin']) .file-preview__head {
   padding-left: 42px;
 }
 
+/* 하위 작업(자식 세션)의 스텝·도구 — 한 단 더 들여 왼쪽 선으로 묶는다 (이슈 #31) */
+.trajectory__row--subtask {
+  margin-left: 42px;
+  border-left: 1px solid var(--border);
+}
+.trajectory__row--subtask[data-kind='tool'] {
+  padding-left: 30px;
+}
+.trajectory__subtask {
+  margin-right: 6px;
+  color: var(--text-caption);
+}
+
 .trajectory__fold {
   width: 14px;
   flex: none;
