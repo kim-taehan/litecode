@@ -66,9 +66,10 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 정본은 언제나 뜬 서버의 `/doc` (OpenAPI). 아래는 실제로 확인한 것만 적는다.
 
 - opencode 는 **레거시 세대**(`message.part.*`, `/session/*`)와 **신규 세대**
-  (`session.next.*`, `/api/session/*`) 이벤트를 **둘 다** 가진다. **litecode 는 신규
-  세대만 쓴다** — 레거시를 쓰는 유일한 이유는 "신규 경로가 LLM 요청에 MCP 도구를 안 싣는다"는
-  opencode 쪽 결함인데, opencode 를 감싸는 이 프로젝트 차원에서는 해당 안 된다.
+  (`session.next.*`, `/api/session/*`) 이벤트를 **둘 다** 가진다. **litecode 는 채팅을 레거시 경로로 한다**
+  (2026-10-02 결정·착지 #13·#20·#21, 실측 `_workspace/01w_legacy_migration.md`). 이유는 MCP·task 서브에이전트 — 신규 세대엔
+  없다(1.18.34·dev 도 같음, upstream `v2` 브랜치에서 작업 중, 이슈 #45333). 아래 신규 세대 실측은 **이력과 L3(옛 기록 읽기)용**으로 남긴다.
+  되돌리기는 git 태그 `pre-legacy`. 레거시 실측은 이 절 끝 "레거시 경로" 묶음에 있다.
 - 흐름:
   1. `POST /api/session` — `{}` 로 보내면 opencode 자신의 기본 provider/model(예:
      `gateway-local/qwen3.8-27b`, `opencode.json` 설정)로 세션이 생긴다.
@@ -138,8 +139,9 @@ Electron 렌더러 (React)          Electron 메인 프로세스
     `OPENCODE_DISABLE_PROJECT_CONFIG` 로 못 막음). `/api/model?location[directory]=` 의 `api.url` 로 덮였는지 보고 거부한다
   - 세션 저장소는 `OPENCODE_DB=<절대 경로>` 로 사용자 opencode 와 가른다. `XDG_CONFIG_HOME` 은 bash·git 이 물려받으므로 바꾸지 않는다
   - **폐쇄망** (실측 2026-09-30, `_workspace/01b_offline.md`): 대화는 네트워크 없이 된다 — `@ai-sdk/openai-compatible` 은 바이너리에
-    내장, CONFIG_DIR npm 설치(`@opencode-ai/plugin`)는 레거시 `GET /config` 를 부를 때만 일어나고 실패해도 턴은 된다(그래서 레거시
-    엔드포인트를 부르지 않는다). models.dev 없이도 우리 provider 는 1초 안에 카탈로그에 뜬다 → `OPENCODE_DISABLE_MODELS_FETCH=1`.
+    내장. CONFIG_DIR npm 설치(`@opencode-ai/plugin`)는 **레거시 호출 때마다** 시도되고(01w §8 — 처음 적은 "`GET /config` 때만" 은 틀렸다)
+    실패해도 턴은 된다. 설정 폴더에 표식 3개(빈 `node_modules/`·`package.json`·`package-lock.json`)를 두면 시도 0 → 앱이 앱 설정 폴더·
+    `~/.config/opencode`·(있으면) `~/.opencode` 에 둔다(#12, 있는 파일은 안 덮음). models.dev 없이도 우리 provider 는 1초 안에 카탈로그에 뜬다 → `OPENCODE_DISABLE_MODELS_FETCH=1`.
     **grep·glob 도구는 첫 사용 때 github 에서 ripgrep 을 받으려 하고, 패킷을 버리는 망에선 ~300초 멈춘다** → ripgrep 을 동봉해
     opencode 자식 PATH 앞에 둔다(2b). 개발 머신에서 오프라인을 재현하려면 HOME 도 비워야 한다(`~/.npm` 캐시가 설치를 채워 준다)
   - 동봉: closed-code `scripts/fetch-opencode.mjs`(npm 레지스트리 플랫폼별 패키지, sha512) · `electron-builder.yml` extraResources ·
@@ -170,6 +172,32 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   둘뿐이라 턴 끝 판정과 무관하고, 실패(요약 요청 오류)면 `ended` 없이 원래 요청이 나간다. 압축 뒤 앞 대화는 user 메시지 하나(`<conversation-checkpoint>`)로 바뀌고,
   `/message` 엔 `type:"compaction"` 이 끼며 원래 메시지는 남는다. `limit` 엔 **`output` 이 필수**다(빠지면 설정 파일 전체가 무시돼 provider 가 사라진다).
   화면(이슈 #5): 진행 줄 `compaction`(요약 중 → 구분선, ended 없이 step.* 면 지움), 한도 초과 오류는 "새 대화로" 안내(`contextOverflow.ts`), 설정의 컨텍스트 길이는 기본값 없음·24000 미만 경고, 통계 % 에 문턱 눈금
+- **레거시 경로** (실측 2026-10-02, 1.18.18 — 근거 `_workspace/01w_legacy_migration.md`, `01x_auto_features.md`):
+  - **흐름** (#13): 세션 `POST /session?directory=` `{model, title}`(제목을 주면 제목 LLM 호출이 없다) → 그 폴더 `GET /event?directory=` 를 먼저
+    구독(`server.connected`) → `POST /session/{id}/prompt_async?directory=` `{messageID, model:{providerID,modelID}, agent, system, parts}` → 204.
+    **모든 레거시 호출에 `?directory=`.** 끝 = **이 턴 user 메시지를 본 뒤의** `session.idle`(중지는 idle 이 두 번 와서 그 전 idle·`MessageAbortedError` 는 앞 턴 것).
+    답 = `parentID` 가 내 messageID 인 assistant. messageID 는 opencode 형식(시간 오름차순)이어야 순서가 맞고, **같은 id 를 두 번 보내면 409 없이 앞 메시지에 합쳐진다.**
+    모델은 sticky(마지막 user 의 모델), 에이전트는 아니다(빼면 build) → 매번 둘 다 싣는다. 재구독해도 과거 이벤트 재생은 없다. 모르는 agent 는 끝 신호가 없다
+  - **차이**: 도구 인자 이름이 다르다(read·write 는 `filePath`). 계획 모드 턴의 user 글 뒤에 `<system-reminder>` 가 붙는다. build 의 시스템 프롬프트는 opencode 기본.
+    `websearch` 는 레거시에 없다. 500 은 5번 재시도(~71초, `session.status {type:"retry", attempt, message, next}` → 진행 줄). `/event` heartbeat 10초 — 무바이트 30초면 끊긴 것.
+    `noReply` 를 돌고 있는 턴에 넣으면 그 턴이 이어서 답한다(턴 중 막기 유지). prompt 의 `system` 은 user 메시지 `info.system` 에 남는다
+  - **설정** (#12·#19): 레거시는 앱 CONFIG_DIR 외에 `~/.config/opencode`·`~/.opencode`·프로젝트 opencode.json·`.opencode/` 를 읽고 그 MCP 를 띄운다 →
+    `OPENCODE_DISABLE_PROJECT_CONFIG=1`(프로젝트 막기, AGENTS.md(없으면 CLAUDE.md)는 `ctx.llm` 이 매 턴 `system` 으로 — `instructions.ts`). 개인 설정은 읽되(사용자 결정)
+    앱 CONFIG_DIR 값이 이긴다 — `model`·`enabled_providers`(개인 설정이 앱 provider 를 꺼 **모든 턴이 Model not found** 였다)·`share:"disabled"`·`autoupdate`·`lsp`·`formatter` false.
+    `instructions` 배열은 합쳐져 못 지운다(원격 URL 은 막힌 망에서 요청마다 5초). Claude Code 자료(`~/.claude/CLAUDE.md`·스킬·프로젝트 `.claude/skills`)는 `OPENCODE_DISABLE_CLAUDE_CODE`·
+    `_EXTERNAL_SKILLS` 로 끔(켜는 스위치는 #7). 물려받은 `OPENCODE_*`·`OTEL_*`·`EXA/PARALLEL_API_KEY` 는 지운다(`OPENCODE_EXPERIMENTAL` 하나로 도구가 바뀐다).
+    모델 없는 세션은 내장 무료 `opencode` provider(opencode.ai/zen)로 갔다 — `model` 로 막음. 지킴이 `egress-guard.live`(바깥 요청 0)
+  - **웹 도구** (#14): 끄려면 전역 `permission` deny **와** 에이전트마다 맨 뒤 deny — 하나만이면 litecode-ask(`webfetch:ask`)·litecode-full(`"*":"allow"`)에서 되살아난다.
+    레거시 `task` 하위 에이전트는 상위 모드 deny 를 안 물려받는다(전역 deny 로 막힘)
+  - **자동 요약** (#20): 문턱 = context − (limit.output 이 0 이면 32000) — 우리 설정이면 context − 32000(`compaction.reserved` 안 쓰임), context ≤ 32000 이면 끝없이 돈다
+    (`ctx.llm` 이 한 턴 3번에서 끊음, 설정 경고 48000 미만 — 추정). 보고 토큰이 문턱을 넘은 스텝 뒤, 그리고 게이트웨이 한도 초과(`ContextOverflowError`) 뒤에(한도를 비워도) 돈다.
+    순서: 요약 user(compaction 파트) → 요약 답(summary:true) → 이음 user(합성 "Continue…" 또는 앞 user 복사본) → `session.compacted` → 그 답 → idle. 요약도 넘치면 이음 없이 idle.
+    `ctx.llm` 은 턴 안의 요약·이음 user 를 그 턴 것으로 보고 이음의 답을 그 턴 답으로 쓴다
+  - **diff** (#20): `apply_patch` 는 모델 id 에 `gpt-` 가 있을 때만 있고 그때는 edit·write 가 없다. edit `metadata.filediff{file(절대), patch}`, write `metadata{filepath, exists}`,
+    apply_patch `metadata.files[]{filePath, type, patch}`. git 이 아닌 폴더의 worktree 는 `/` — 경로는 세션 폴더 기준으로 앱이 계산
+  - **옛 대화 이어 쓰기** (#21): 신규 세대 기록과 레거시 기록은 같은 세션 id 여도 서로 안 보인다. 다시 열 때 신규 기록(`/api/session/{id}/message`, 읽기 전용)을 앞에 붙이고,
+    레거시 기록이 없고 신규 기록이 있는 세션의 첫 레거시 입력 직전에 옛 user·답 글을 `prompt_async {noReply, parts:[{synthetic:true, text:"<previous-conversation>…"}]}` 로 한 번
+    (id 는 이번 입력 바로 앞, 뒤에서 12,000자). "한 번" 은 DB 의 레거시 기록 유무로 판단(`limit=1`). 추론 과정 탭엔 옛 기록이 없다. `src/services/migrate.ts`
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.
@@ -180,7 +208,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 |---|---|
 | `src/services/providers.ts` | provider 설정(이름·baseURL·프로토콜·모델 카탈로그) 관리 — dsh Settings > Models 화면과 같은 모양 |
 | `src/services/engine.ts` | **`ctx.engine` — 앱이 opencode 서버 하나를 직접 띄운다** (2a, 2026-09-30). `OPENCODE_CONFIG_DIR`(키 없는 opencode.json 생성)·`OPENCODE_DB`·실행마다 랜덤 비밀번호·`OPENCODE_DISABLE_MODELS_FETCH=1`. **진짜 키는 opencode 에 없다** — `keyProxy.ts`(127.0.0.1, 실행마다 랜덤 토큰)가 붙여 저장된 baseURL 로 스트리밍 전달. 키에 헤더 불가 문자가 있으면 저장 거부. provider 저장·삭제 → 재시작. 앱 종료 시 끄고, 이전 실행이 남긴 것은 PID 기록(명령줄+시작 시각 일치)으로 거둔다. 사용자 :4096 에 붙는 길(`OPENCODE_URL`)은 없어졌다 |
-| `src/services/llm.ts` | Basic 인증으로 opencode 호출. 세션 생성(모델 명시·카탈로그 대기·폴더 확인) → SSE → `admittedSeq` 이하 재생분 버리기. 재시작·크래시로 끊긴 턴은 "중단됨". **매 턴 `api.url` 대조** — 프로젝트 opencode.json 이 provider 주소를 바꾸면 거부 (키 유출 방지). 남은 공백: SSE 타임아웃 없음, 전송 실패 시 unhandled rejection |
+| `src/services/llm.ts` | **레거시 경로** (2026-10-02, #13·#20·#21). Basic 인증, 폴더별 `/event` 구독 → `prompt_async`(messageID·model·agent·AGENTS.md system) → 이 턴 user 뒤의 `session.idle` 로 끝. 진행 줄(`turnProgress.ts` — 글·생각·도구·요약·재시도), 통계(`turnUsage.ts` — step-finish), diff(`toolDiffs.ts`), 옛 신규 세대 대화 이어 쓰기(`migrate.ts`). 자동 요약 한 턴 3번 상한, heartbeat 무바이트 30초 → "중단됨". 재시작·크래시로 끊긴 턴은 "중단됨". **매 턴 `api.url` 대조** — provider 주소가 바뀌었으면 거부 (키 유출 방지) |
 | `electron/` + `renderer/` | Electron 앱. 사이드바(프로젝트 전환·새 대화·세션 목록) + 채팅창. IPC 로 위 서비스에 연결됨 |
 | 패키징 (2b) | electron-builder. `scripts/fetch-opencode.mjs` 가 opencode 1.18.18(npm 레지스트리, sha512)·ripgrep 15.1.0(sha256)을 `build/vendor/` 에 받고(레포 제외), `extraResources` 로 `Resources/opencode`·`Resources/rg` 에 싣는다. 앱은 `OPENCODE_BIN` > 동봉 > PATH 순으로 찾고, 동봉 rg 폴더를 opencode PATH 맨 앞에 둔다(폐쇄망 grep 300초 멈춤 방지). mac 서명은 키체인의 개발용 자체 서명 인증서 `litecode-dev` 가 있으면 그것(없으면 ad-hoc) — 같은 인증서라 다시 빌드해도 macOS 개인정보 허락(문서 폴더 등)이 유지된다. **공증 없음, 다른 Mac 에서 내려받은 zip 의 격리(quarantine) 동작은 미검증**. vite `base: './'` (설치본 file:// 에서 assets 경로) |
 | 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. 설정한 provider 로 실제 대화된다(ctx.engine 이 opencode 에 넘김, 2a). 바이너리 동봉·패키징은 2b |
@@ -240,3 +268,5 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-10-01 | 병렬 라운드 규칙 — 동시 2개·worktree·기능별 컴포넌트/실물 테스트 파일·실물 테스트 잠금·리더가 합침 | skills/litecode-build | 사용자 "병렬 개발은 안 되나" |
 | 2026-10-02 | 돌고 있는 라운드에 범위를 얹지 않는다(다음 라운드로), 개발 중엔 자기 실물 파일만·전체는 착지 직전 한 번 | skills/litecode-build | 사용자 "왜 이리 오래 걸리지" |
 | 2026-10-02 | GitHub 흐름 — 라운드마다 이슈 → 브랜치 → PR → main 머지(머지는 사용자 확인). 원격 kim-taehan/litecode | skills/litecode-build | 사용자 지시 |
+| 2026-10-02 | main 머지는 리더가 직접 검증(typecheck·단위·실물 전체 초록)한 뒤 묻지 않고 한다 | skills/litecode-build | 사용자 "머지까지 알아서 해" |
+| 2026-10-02 | 채팅을 opencode 레거시 경로로 — "신규 세대만 쓴다" 원칙 폐기, 프로토콜 절에 레거시 묶음 | CLAUDE.md | 사용자 결정 (MCP·task) |
