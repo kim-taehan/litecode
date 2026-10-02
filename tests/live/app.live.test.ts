@@ -556,16 +556,16 @@ describe('설정 > 모델', () => {
     await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
   })
 
-  // dsh ui-sidebar 메뉴 줄(.panelRow)과 같은 모양 — 사용자: "설정이 너무 작다" (2026-10-01 캡처)
-  it('설정 버튼은 dsh 사이드바 메뉴 줄 모양이다 — 36px 줄·12px 모서리·14px 글자·20px 톱니, 위 구분선 없음', async () => {
+  // dsh ui-sidebar 설정 줄(.trigger)과 같은 모양 — 사용자: "설정이 너무 작다" (2026-10-01 캡처), 사이드바 dsh 값 라운드(2026-10-02)에서 42px·16px 톱니로
+  it('설정 버튼은 dsh 사이드바 설정 줄 모양이다 — 42px 줄·12px 모서리·14px 글자·16px 톱니, 위 구분선 없음', async () => {
     const button = settingsButton()
-    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(36)
+    expect((await button.boundingBox())!.height).toBe(42)
     expect(await button.evaluate((el) => {
       const style = getComputedStyle(el)
-      return [style.borderRadius, style.fontSize, style.padding, style.minHeight]
-    })).toEqual(['12px', '14px', '7px 8px', '36px'])
+      return [style.borderRadius, style.fontSize, style.padding]
+    })).toEqual(['12px', '14px', '0px 10px 0px 8px'])
     const icon = (await button.locator('svg').boundingBox())!
-    expect([icon.width, icon.height]).toEqual([20, 20])
+    expect([icon.width, icon.height]).toEqual([16, 16])
     expect(await button.textContent()).toBe('설정')
     expect(await page.locator('.sidebar__foot').evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('0px')
   })

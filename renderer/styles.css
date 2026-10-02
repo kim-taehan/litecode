@@ -39,6 +39,15 @@
   --nav-active: #ebeef2;               /* sidebar-nav-item-active */
   --switch-thumb: #ffffff;
   --selected-ring: #adb2b8;            /* neutral-bluish-400 — 두 테마 같음 */
+  /* 사이드바 (dsh ui-sidebar·ui-workspace, _workspace/01j_sidebar.md) */
+  --sidebar-fill: #f9fafb;             /* specific-sidebar-fill (bluish-50) */
+  --fill-elevated: #ffffff;            /* button-elevated-fill — 새 대화·프로젝트 전환 */
+  --fill-floating-hover: #f1f3f5;      /* button-floating-hover */
+  --scrollbar: #e5e5e5;                /* scrollbar-bg-l2 */
+  --scrollbar-hover: #d4d4d4;          /* scrollbar-hover-l2 */
+  --hover-card-bg: #2c2c2e;            /* HoverCard 판 — 두 테마 같음 */
+  --hover-card-detail: #cfd3d6;        /* HoverCard 부가 글자 — 두 테마 같음 */
+  --shadow-lv3: 0 0 1px rgba(0, 0, 0, 0.2), 0 0 4px rgba(0, 0, 0, 0.02), 0 12px 32px rgba(0, 0, 0, 0.08);
   /* 대화 본문 글자 크기 (설정 > 일반) — 렌더러가 설정값으로 덮는다. 제목은 기준 + delta, 표 등 한 단계 작은 글자는 secondary */
   --chat-font-size: 14px;
   --chat-font-delta: 0px;
@@ -82,6 +91,11 @@
     --nav-hover: #2c2c2e;
     --nav-active: #434549;
     --switch-thumb: #adb2b8;
+    --sidebar-fill: #1b1b1c;
+    --fill-elevated: #43454a;
+    --fill-floating-hover: #353638;
+    --scrollbar: #545557;
+    --scrollbar-hover: #65676b;
   }
 }
 
@@ -112,25 +126,33 @@ button {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
+  background: var(--sidebar-fill);
+  border-right: 0.5px solid var(--border-ring); /* dsh 비-darwin 사이드바: 불투명 바탕 + 0.5px l3 */
+  font-size: 14px;
 }
 
+/* 좌우 기준선 — dsh 사이드바 안쪽 12px. 새 대화·전환 카드는 거기서 2px 더(margin 0 2), 행은 12 에서 시작 */
 .sidebar__project {
   position: relative;
-  padding: 0 16px 12px; /* 위는 로고 줄(아래 여백 4)이 맡는다 */
+  padding: 0 14px 12px; /* 위는 로고 줄(아래 여백 4)이 맡는다 */
 }
 
+/* 전환 카드는 dsh 에 대응물이 없어 새 대화 버튼과 같은 재질로 (01j 권고) */
 .project-switch {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--fill-elevated);
+  border: 0.5px solid var(--border-ring);
+  border-radius: 12px;
   text-align: left;
+  color: var(--text);
+}
+
+.project-switch:hover:not(:disabled) {
+  background: var(--fill-floating-hover);
 }
 
 .project-switch__badge {
@@ -154,16 +176,24 @@ button {
   flex-direction: column;
 }
 
-.project-switch__name,
+.project-switch__name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--text);
+}
+
+/* 팝오버 항목 이름 — dsh Menu 항목 13 / 20 */
 .project-item__name {
   font-size: 13px;
-  font-weight: 600;
+  line-height: 20px;
   color: var(--text);
 }
 
 .project-switch__path {
-  font-size: 11px;
-  color: var(--text-caption);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -171,37 +201,45 @@ button {
 
 .project-switch__caret {
   font-size: 11px;
-  color: var(--text-caption);
+  color: var(--text-tertiary);
 }
 
 .project-popover {
   position: absolute;
   top: calc(100% - 6px);
-  left: 16px;
+  left: 14px;
   z-index: 10;
   width: 300px;
-  padding: 8px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  padding: 4px;
+  background: var(--menu);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-radius: 16px;
   box-shadow: var(--shadow-prominent);
 }
 
+/* dsh 목록 검색칸 — 30px, 0.5px l4, 반경 12, 포커스 링 없음 */
 .project-popover__search {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
   font-size: 13px;
+  line-height: 18px;
   font-family: inherit;
-  background: var(--bg);
+  color: var(--text);
+  background: transparent;
+}
+
+.project-popover__search:focus {
+  outline: none;
 }
 
 .project-popover__label {
-  padding: 10px 8px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-caption);
+  padding: 8px 8px 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
 }
 
 .project-popover__list {
@@ -226,7 +264,8 @@ button {
 .project-item {
   display: flex;
   align-items: center;
-  border-radius: 8px;
+  min-height: 34px;
+  border-radius: 12px;
 }
 
 .project-item__main {
@@ -235,11 +274,12 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px;
+  padding: 6px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   text-align: left;
+  color: var(--text);
 }
 
 .project-item__main:focus-visible {
@@ -251,18 +291,14 @@ button {
 .project-item:focus-within,
 .project-popover__open:hover:not(:disabled),
 .project-popover__open:focus-visible {
-  background: var(--bg);
+  background: var(--fill-hover);
   outline: none;
 }
 
-.project-item--active,
-.project-item--active:hover,
-.project-item--active:focus-within {
-  background: var(--bg-sidebar);
-}
-
-.project-item--active .project-item__main:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--border);
+/* 지금 프로젝트는 바탕 없이 오른쪽 끝 ✓ (dsh Menu 선택 항목) */
+.project-item__check {
+  flex: none;
+  color: var(--text-secondary);
 }
 
 .project-item__main:disabled,
@@ -313,28 +349,22 @@ button {
   outline: none;
 }
 
-.project-item__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  flex-shrink: 0;
-}
-
 .project-popover__divider {
-  height: 1px;
-  margin: 6px 0;
-  background: var(--border-light);
+  height: 0.5px;
+  margin: 4px 0;
+  background: var(--border);
 }
 
 .project-popover__open {
   width: 100%;
-  padding: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   text-align: left;
   font-size: 13px;
+  line-height: 20px;
   color: var(--text);
 }
 
@@ -366,64 +396,121 @@ button {
 }
 
 .sidebar__new {
-  padding: 0 16px 12px;
+  padding: 0 14px 12px;
 }
 
+/* dsh .newSession — 38px, 0.5px l3, 반경 12, elevated 바탕, 14/500/22 */
 .new-chat {
   width: 100%;
-  padding: 9px 12px;
-  background: var(--bg); /* dsh New Session: 흰 바탕 + 얇은 테두리 */
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  height: 38px;
+  padding: 8px 12px;
+  background: var(--fill-elevated);
+  border: 0.5px solid var(--border-ring);
+  border-radius: 12px;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
 }
 
+/* dsh .sectionHeader — 36px 줄, 14/400/20 tertiary, 행 글자와 같은 세로선(12 + 4) */
 .sidebar__label {
-  padding: 4px 20px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-caption);
+  height: 36px;
+  display: flex;
+  align-items: center;
+  margin: 2px 0 4px;
+  padding-left: 16px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-tertiary);
 }
 
+/* 행은 사이드바 12px 에서 시작, 오른쪽은 5px 스크롤바 자리(gutter)를 두고 12 에 맞춘다 */
 .sidebar__sessions {
   flex-grow: 1;
   overflow-y: auto;
-  padding: 0 8px;
+  padding: 0 7px 16px 12px;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+/* 5px 스크롤바 — 포인터가 사이드바 밖이면 감춘다 (dsh scrollbar.css) */
+.sidebar__sessions::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sidebar__sessions::-webkit-scrollbar-thumb {
+  border-radius: 5px;
+  background: transparent;
+}
+
+.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+}
+
+.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
+/* 목록 끝 24px 페이드 — 마지막 행이 발치 줄에 툭 잘리지 않게 */
+.sidebar__fade {
+  position: relative;
+  flex: none;
+  height: 24px;
+  margin-top: -24px;
+  background: linear-gradient(to bottom, transparent, var(--sidebar-fill));
+  pointer-events: none;
+}
+
+/* dsh .sessionRow — 32px, 반경 12, hover·선택 모두 interactive-bg-hover. 제목은 사용자 결정으로 13px(dsh 14)·400·줄 20 */
 .session-item {
+  flex: none;
   display: flex;
   align-items: center;
-  border-radius: 8px;
+  height: 32px;
+  border-radius: 12px;
   font-size: 13px;
+  line-height: 20px;
   color: var(--text);
+}
+
+.session-item:hover {
+  background: var(--fill-hover);
 }
 
 .session-item__main {
   display: flex;
   flex: 1;
   min-width: 0;
+  height: 100%;
   align-items: center;
-  gap: 8px;
   text-align: left;
-  padding: 10px 12px;
+  padding: 0 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   font: inherit;
   color: inherit;
+}
+
+/* 상태 점 자리 — 점이 없어도 늘 있어 제목이 안 움직인다 (dsh 16×20 슬롯) */
+.session-item__slot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
 }
 
 /* 휴지통은 hover·포커스 때만 시각 자리에 — dsh ui-workspace 세션 행처럼 시각을 숨기고 버튼을 보인다 */
 .session-item__actions {
   display: none;
   align-items: center;
-  padding-right: 6px;
+  gap: 10px;
+  padding-right: 8px;
 }
 
 .session-item:hover .session-item__actions,
@@ -438,21 +525,22 @@ button {
   display: none;
 }
 
+/* dsh 행 버튼 — 16px 맨 아이콘, tertiary → primary, 바탕 없음 */
 .session-item__action {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   background: none;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
 .session-item__action:hover,
 .session-item__action:focus-visible {
-  background: var(--fill-active);
   color: var(--text);
   outline: none;
 }
@@ -472,30 +560,29 @@ button {
   display: block;
   flex: 1;
   min-width: 0;
+  margin: 0 6px 0 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .session-item--active {
-  background: var(--fill-active);
-  color: var(--text);
-  font-weight: 600;
+  background: var(--fill-hover); /* 선택은 바탕만 — 굵기·색 그대로 (dsh, 사용자 결정 2026-10-02) */
 }
 
 .sidebar__foot {
-  padding: 6px 8px;
+  padding: 0 12px 6px;
 }
 
-/* dsh ui-sidebar 메뉴 줄(.panelRow)과 같은 모양 — 36px 줄, 20px 톱니, 본문 글자색. dsh 발치에는 구분선이 없다 */
+/* dsh ui-sidebar 설정 줄(.trigger) — 42px 줄, 16px 톱니, 본문 글자색, 열림 표시 없음. dsh 발치에는 구분선이 없다 */
 .settings-trigger {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: calc(100% - 4px);
-  min-height: 36px;
-  margin: 0 2px;
-  padding: 7px 8px;
+  width: calc(100% + 4px);
+  height: 42px;
+  margin: 4px -2px;
+  padding: 0 10px 0 8px;
   box-sizing: border-box;
   border: none;
   border-radius: 12px;
@@ -517,11 +604,6 @@ button {
 .settings-trigger:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-
-.settings-trigger--active,
-.settings-trigger--active:hover {
-  background: var(--fill-active);
 }
 
 .status-dot {
@@ -1032,24 +1114,26 @@ button {
   position: fixed;
   z-index: 100;
   width: 244px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 16px;
-  border-radius: 12px;
-  background: var(--tooltip-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  border-radius: 16px;
+  background: var(--hover-card-bg);
+  box-shadow: var(--shadow-lv3);
   pointer-events: none;
 }
 
 .hover-card__name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
   color: var(--tooltip-text);
 }
 
 .hover-card__path {
-  margin-top: 6px;
   font-size: 12px;
-  line-height: 1.5;
-  color: var(--tooltip-detail);
+  line-height: 16px;
+  color: var(--hover-card-detail);
   word-break: break-all;
 }
 
@@ -1148,15 +1232,16 @@ button {
 }
 
 .sidebar-toggle:hover {
-  background: var(--border-light);
+  background: var(--fill-hover);
   color: var(--text);
 }
 
-/* 마지막 활동 시각 — dsh 세션 행 오른쪽의 작은 회색 글자 */
+/* 마지막 활동 시각 — dsh 세션 행 오른쪽의 작은 회색 글자 (10 / 16 tertiary) */
 .session-item__time {
   flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-caption);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-tertiary);
 }
 
 /* 모델을 바꾼 뒤 버튼 위에 잠깐 뜨는 작은 알림 */
