@@ -18,6 +18,10 @@ import { ShellCard, type ShellCardView } from './ShellCard.tsx'
 import { useSettings, useT } from './settingsStore.ts'
 import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
+import { useSendQueue } from './useSendQueue.ts'
+import { QueueDock } from './QueueDock.tsx'
+import { RunningCount, RunningFilter } from './Background.tsx'
+import { runningIn, runningOutside } from './backgroundView.ts'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -408,6 +412,15 @@ export function App() {
   const chosen = findModel(providers, selected)
   /** 알림 — 메인이 쥔 대화별 상태(점)와 앞일 때의 토스트. 지금 보는 대화를 메인에 알린다 */
   const notices = useNotices(active?.id)
+  /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다 (정본은 알림 상태) */
+  const running = runningIn(notices.state, project?.path)
+  const [runningOnly, setRunningOnly] = useState(false)
+  const listed = runningOnly && running.length > 0 ? visible.filter((session) => running.includes(session.id)) : visible
+  /** 답하는 중에 보낸 것 — 대화별 화면 큐. 그 대화의 턴이 끝나면 합쳐 한 번에 보낸다 (useSendQueue) */
+  const queue = useSendQueue(sessions, (id, merged) => {
+    const target = sessionsRef.current.find((session) => session.id === id)
+    if (target) void send(merged, target)
+  })
 
   /** 알림(토스트·PC 알림)을 누르면 — 기존 프로젝트 열기 경로로 그 프로젝트를 열고(목록에서 빠졌으면 다시 넣는다) 그 대화를 고른다.
    *  대화가 지워졌으면 프로젝트만 열고 안내, 폴더가 없으면 팝오버에 "폴더를 열 수 없습니다" (결정 Q8) */
@@ -563,15 +576,16 @@ export function App() {
     setLastModel(next)
   }
 
-  /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display */
-  async function send(command?: { text: string; display: string }): Promise<void> {
+  /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display. queued: 큐가 턴 끝에 보내는 대화 (입력창은 건드리지 않는다).
+   *  그 대화의 턴이 도는 중이면 보내지 않고 큐에 쌓는다 */
+  async function send(command?: { text: string; display?: string }, queued?: Session): Promise<void> {
+    const target = queued ?? active // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
     const prompt = command?.text ?? draft.trim()
     const shown = command?.display ?? prompt
-    if (!prompt || !selected || !chosen || !active || active.pending || !canWrite(active)) return
-
-    // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
-    const target = active
-    setDraft('')
+    const selected = target?.model ?? initialModel(providers, lastModel)
+    if (!prompt || !selected || !findModel(providers, selected) || !target || !canWrite(target)) return
+    if (!queued) setDraft('')
+    if (queue.submit(target.id, { text: prompt, display: command?.display }, !!target.pending)) return
     following.current = true
     const sentAt = Date.now()
     const start = (session: Session): Session => ({
@@ -733,6 +747,11 @@ export function App() {
             {otherProjectsStatus(notices.state, project?.path) && (
               <StatusDot status={otherProjectsStatus(notices.state, project?.path)!} className="project-switch__notice" />
             )}
+            <RunningCount
+              count={runningOutside(notices.state, project?.path)}
+              label={t('sidebar.runningElsewhere', { count: runningOutside(notices.state, project?.path) })}
+              className="project-switch__running"
+            />
             <span className="project-switch__caret">▾</span>
           </button>
           {switching && (
@@ -740,6 +759,7 @@ export function App() {
               projects={projects ?? []}
               current={project?.path}
               statusOf={(dir) => projectStatus(notices.state, dir)}
+              runningOf={(dir) => runningIn(notices.state, dir).length}
               busy={picking}
               error={openError}
               onPick={(picked) => void pickRecent(picked)}
@@ -770,12 +790,15 @@ export function App() {
           </button>
         </div>
 
-        <div className="sidebar__label">{t('sidebar.conversations')}</div>
+        <div className="sidebar__label">
+          {t('sidebar.conversations')}
+          <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
+        </div>
 
         <div className="sidebar__sessions">
           {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
               바뀌고 한 번 더 눌러야 지운다(설정 화면 provider 삭제와 같은 방식). 포커스를 잃거나 Esc 면 되돌린다 */}
-          {visible.map((session) => (
+          {listed.map((session) => (
             <div
               key={session.id}
               data-hover-row
@@ -940,6 +963,14 @@ export function App() {
             )}
 
             <div className="composer">
+              <QueueDock
+                items={queue.items(active.id)}
+                onRestore={() => {
+                  const taken = queue.take(active.id)
+                  if (taken) setDraft((now) => [taken.display ?? taken.text, now.trim()].filter(Boolean).join('\n'))
+                  trigger.inputRef.current?.focus()
+                }}
+              />
               {/* dsh InputBar: 둥근 카드 하나에 입력칸과 아래 줄(왼쪽 +, 오른쪽 모델 선택·둥근 보내기)을 담고, 카드 밑에 통계 줄 */}
               <div className={`composer__box${trigger.query?.tone ? ` composer__box--${trigger.query.tone}` : ''}`}>
                 <TriggerPopup trigger={trigger} />
@@ -978,7 +1009,7 @@ export function App() {
                       aria-label={t('composer.send')}
                       title={t('composer.sendTitle')}
                       onClick={submit}
-                      disabled={active.pending || !chosen || !draft.trim() || !canWrite(active)}
+                      disabled={!chosen || !draft.trim() || !canWrite(active)}
                     >
                       {/* dsh 보내기 화살표 (16 격자) */}
                       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -1053,6 +1084,8 @@ interface ProjectPopoverProps {
   current?: string
   /** 그 프로젝트 대화의 알림 점 (없으면 점 없음) */
   statusOf(project: string): ConversationStatus | undefined
+  /** 그 프로젝트에서 도는 대화 수 — 실행 중 점 대신 점 + 숫자 */
+  runningOf(project: string): number
   /** 여는 중 — 행을 막는다 */
   busy: boolean
   error?: string
@@ -1072,7 +1105,7 @@ interface ProjectPopoverProps {
  *  다른 창이 포커스를 가져가면 실물 테스트 도중 팝오버가 닫혀 실패했다, 2026-09-30.) 목록이 길면 목록만 스크롤하고
  *  "폴더 열기" 는 아래에 고정한다. 행의 ☆·× 는 dsh ui-workspace 의 행 hover 버튼처럼 hover·포커스 때만 보인다
  *  (화살표는 행끼리만 걷고, 행 안의 버튼은 Tab 으로 닿는다). */
-function ProjectPopover({ projects, current, statusOf, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose }: ProjectPopoverProps) {
+function ProjectPopover({ projects, current, statusOf, runningOf, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose }: ProjectPopoverProps) {
   const t = useT()
   const [query, setQuery] = useState('')
   // 이름 바꾸는 중인 행 — dsh ui-workspace 처럼 그 자리에서 입력칸으로 바뀐다. Enter·바깥으로 나가면 저장, Esc 는 취소
@@ -1174,7 +1207,9 @@ function ProjectPopover({ projects, current, statusOf, busy, error, onPick, onOp
                         <span className="project-item__name">{project.name}</span>
                         <span className="project-switch__path marquee">{project.displayPath}</span>
                       </span>
-                      {statusOf(project.path) && <StatusDot status={statusOf(project.path)!} />}
+                      {/* 실행 중은 점 대신 점 + 숫자, 그 밖의 상태(답 필요·안 본 끝남)는 점 그대로 */}
+                      {statusOf(project.path) && statusOf(project.path) !== 'running' && <StatusDot status={statusOf(project.path)!} />}
+                      <RunningCount count={runningOf(project.path)} label={t('sidebar.running', { count: runningOf(project.path) })} />
                       {project.path === current && <CheckIcon />}
                     </button>
                     )}

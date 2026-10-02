@@ -58,6 +58,8 @@ export function GeneralPage() {
   const t = useT()
   const settings = useSettings()
   const [error, setError] = useState<string>()
+  const [version, setVersion] = useState<string>()
+  useEffect(() => void window.litecode.getAppVersion().then(setVersion, () => {}), [])
   const save = (patch: Partial<Settings>): void =>
     void updateSettings(patch).then(
       () => setError(undefined),
@@ -163,6 +165,9 @@ export function GeneralPage() {
           <span className="settings-switch__thumb" />
         </button>
       </div>
+
+      {/* 맨 아래 한 줄 — dsh CurrentVersionRow. 못 받으면 줄째 없다 */}
+      {version && <div className="settings-version">{t('settings.currentVersion', { version })}</div>}
     </div>
   )
 }

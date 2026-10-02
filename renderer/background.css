@@ -1,0 +1,152 @@
+/* 답하는 중 큐 미리보기(QueueDock)와 백그라운드 진행 표시(Background.tsx). 색은 토큰만 */
+
+/* 입력 카드 위에 붙은 판 — dsh QueueDock: 카드보다 양쪽 16px 좁고, 위만 둥글고, 아래는 카드 밑으로 3px 숨는다 */
+.queue-dock {
+  box-sizing: border-box;
+  width: calc(100% - 32px);
+  max-width: calc(clamp(712px, calc((100% + 32px) * 0.64 + 32px), 952px) - 32px);
+  margin-bottom: -3px;
+  padding: 2px 0 5px;
+  border: 0.5px solid var(--border);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  background: var(--menu);
+  backdrop-filter: blur(20px);
+}
+
+.queue-dock__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 4px 8px 4px 12px;
+  color: var(--text);
+}
+
+.queue-dock__count {
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.queue-dock__restore {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.queue-dock__restore:hover,
+.queue-dock__restore:focus-visible {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.queue-dock__list {
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queue-dock__item {
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 12px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 36px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-dock__item + .queue-dock__item {
+  box-shadow: inset 0 0.5px 0 var(--border);
+}
+
+/* 실행 중 점 — 알림의 running 점(notices.css)과 같은 10px 자리·6px 숨 쉬는 점 */
+.running-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  color: var(--text-tertiary);
+}
+
+.running-dot::after {
+  content: '';
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  background: currentColor;
+  animation: notice-breathe 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running-dot::after {
+    animation: none;
+  }
+}
+
+/* 점 + 숫자 */
+.running-count {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.project-switch__running {
+  margin-right: 2px;
+}
+
+/* 대화 목록 머리 오른쪽 — 섹션 머리 글자(14/20 tertiary)보다 한 단계 작은 알약 */
+.running-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin-left: auto;
+  margin-right: 12px;
+  padding: 0 8px 0 6px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.running-filter:hover,
+.running-filter:focus-visible {
+  background: var(--fill-hover);
+  color: var(--text-secondary);
+}
+
+.running-filter[aria-pressed='true'] {
+  background: var(--fill-active);
+  color: var(--text);
+}
+
+/* 설정 > 일반 맨 아래 — dsh CurrentVersionRow: 위아래 16, 14/22 */
+.settings-version {
+  padding: 16px 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
