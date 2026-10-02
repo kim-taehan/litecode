@@ -4,6 +4,7 @@ import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap, useFollowBottom } from './Minimap.tsx'
+import { ScrollToBottom } from './ScrollToBottom.tsx'
 import { upsertItem } from './turnView.ts'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
 import { ModelSelect } from './ModelSelect.tsx'
@@ -19,6 +20,7 @@ import { useSettings, useT } from './settingsStore.ts'
 import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
+import { OpenInButton } from './OpenInButton.tsx'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -911,7 +913,10 @@ export function App() {
         )}
         {active && (
           <>
-            <div className="main__header">{titleOf(active)}</div>
+            <div className="main__header">
+              {titleOf(active)}
+              <OpenInButton directory={active.project} />
+            </div>
             {/* 설정 > 일반의 코딩 뷰를 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
             {settings.codingView && (
               <div className="main__tabs" role="tablist" aria-label={t('main.views')}>
@@ -994,6 +999,7 @@ export function App() {
               </div>
             </div>
             <Minimap scroller={listRef} turns={active.messages.filter((message) => message.role === 'user').map((message) => message.text)} />
+            <ScrollToBottom scroller={listRef} following={following} />
             </div>
             )}
 

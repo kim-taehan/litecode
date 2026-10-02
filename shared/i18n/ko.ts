@@ -38,6 +38,13 @@ export const ko = {
   // 본문 탭
   'main.views': '보기',
   'main.tabChat': '대화',
+  // 다른 앱에서 열기 (대화 머리)
+  'openIn.openWith': '{app}에서 열기',
+  'openIn.default': '{app} (기본)',
+  'openIn.more': '다른 앱에서 열기',
+  'openIn.unknownApp': '열 수 없는 앱입니다',
+  'openIn.notProject': '목록에 있는 프로젝트 폴더만 열 수 있습니다',
+  'openIn.failed': '{app}에서 열지 못했습니다: {message}',
   'main.tabTrajectory': '추론 과정',
   // 대화 — 답 모양·진행 줄·미니맵, 마크다운, `!명령` 카드
   'chat.loading': '불러오는 중…',
@@ -65,6 +72,7 @@ export const ko = {
   'chat.messageCopied': '복사됨',
   'chat.minimap': '대화 위치',
   'chat.minimapTurn': '{index}. {text}',
+  'chat.toBottom': '맨 아래로',
   'markdown.codeBlock': '코드 블록',
   'markdown.wrapOff': '줄바꿈 끄기',
   'markdown.wrapOn': '줄바꿈 켜기',

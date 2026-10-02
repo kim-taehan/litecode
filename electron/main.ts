@@ -25,6 +25,8 @@ import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
+import { OpenInService } from '../src/services/openIn.ts'
+import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -289,6 +291,17 @@ const notifyHost = notifyTest ? recordingHost(notifyTest) : systemHost(windows)
 if (notifyTest) Object.assign(globalThis, { __litecodeNotifyTest: { record: notifyTest, emit: (name: string, ...args: unknown[]) => (ctx.emit as (...all: unknown[]) => void)(name, ...args) } })
 mounted.push(ctx.plugin(NotificationsService, notifyHost))
 app.on('second-instance', () => notifyHost.reveal())
+
+// 다른 앱에서 열기 (대화 머리 분할 버튼) — 실물 테스트는 실행을 기록만 한다(globalThis.__litecodeOpenInTest). 제품은 이 길이 없다
+const openInTest: OpenInTestRecord | undefined = hiddenForTests ? { launches: [] } : undefined
+if (openInTest) Object.assign(globalThis, { __litecodeOpenInTest: openInTest })
+mounted.push(ctx.plugin(OpenInService, { host: openInTest ? recordingOpenInHost(openInTest) : systemOpenInHost }))
+function openInBridge(ctx: Context): void {
+  handle(ctx, Channel.OPEN_IN_APPS, async () => ctx.openIn.apps())
+  handle(ctx, Channel.OPEN_IN, async (_event, appId: string, directory: string) => ctx.openIn.open(appId, directory))
+}
+openInBridge.inject = ['openIn']
+mounted.push(ctx.plugin(openInBridge))
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({

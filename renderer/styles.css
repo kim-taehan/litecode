@@ -45,7 +45,10 @@
   /* 사이드바 (dsh ui-sidebar·ui-workspace, _workspace/01j_sidebar.md) */
   --sidebar-fill: #f9fafb;             /* specific-sidebar-fill (bluish-50) */
   --fill-elevated: #ffffff;            /* button-elevated-fill — 새 대화·프로젝트 전환 */
+  --fill-floating: #ffffff;            /* button-floating-fill — 맨 아래로 버튼 */
   --fill-floating-hover: #f1f3f5;      /* button-floating-hover */
+  /* elevation-panel — 0.5px border-l3 선 + 옅은 그림자 (맨 아래로 버튼) */
+  --shadow-panel: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
   --scrollbar: #e5e5e5;                /* scrollbar-bg-l2 */
   --scrollbar-hover: #d4d4d4;          /* scrollbar-hover-l2 */
   --hover-card-bg: #2c2c2e;            /* HoverCard 판 — 두 테마 같음 */
@@ -97,7 +100,9 @@
     --switch-thumb: #adb2b8;
     --sidebar-fill: #1b1b1c;
     --fill-elevated: #43454a;
+    --fill-floating: #2c2c2e;
     --fill-floating-hover: #353638;
+    --shadow-panel: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
     --scrollbar: #545557;
     --scrollbar-hover: #65676b;
   }

@@ -24,6 +24,8 @@ export interface Settings {
   notifications: boolean
   /** 새 대화가 시작하는 모드 (입력창 칩의 처음 값). 대화마다의 모드는 ctx.sessions 에 */
   defaultMode: Mode
+  /** "다른 앱에서 열기" 의 기본 앱 id — 메뉴에서 마지막으로 고른 앱 (dsh 방식, 설정 화면 없음). 없으면 목록 첫 앱 (ctx.openIn) */
+  openInApp?: string
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9). 새 대화는 기본 모드(01k §6) */
@@ -45,13 +47,14 @@ declare module 'cordis' {
   }
 }
 
-const valid: { [K in keyof Settings]: (value: unknown) => value is Settings[K] } = {
+const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K] } = {
   language: isLanguage,
   appearance: (value): value is Appearance => value === 'light' || value === 'dark' || value === 'system',
   fontSize: (value): value is number => Number.isInteger(value) && (value as number) >= FONT_SIZE_MIN && (value as number) <= FONT_SIZE_MAX,
   codingView: (value): value is boolean => typeof value === 'boolean',
   notifications: (value): value is boolean => typeof value === 'boolean',
   defaultMode: isMode,
+  openInApp: (value): value is string => typeof value === 'string',
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 
