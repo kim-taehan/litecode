@@ -272,8 +272,9 @@ describe('알림', () => {
     await setForeground(false)
     await resetRecord()
     await page.locator('.new-chat').click()
-    await submit('[call:question {"questions":[{"question":"Which OS?","header":"OS","options":[{"label":"mac","description":"m"},{"label":"linux","description":"l"}]}]}]')
-    const title = '[call:question {"questio' // 제목은 첫 24자
+    const prompt = '[call:question {"questions":[{"question":"Which OS?","header":"OS","options":[{"label":"mac","description":"m"},{"label":"linux","description":"l"}]}]}]'
+    await submit(prompt)
+    const title = prompt.slice(0, 80) // 제목은 첫 줄 80자까지
     await expect.poll(shown, { timeout: 30_000 }).toEqual([{ title, body: 'beta-app · 질문에 답을 기다립니다', closed: false }])
     await expect.poll(() => rowDot(title).getAttribute('data-status'), { timeout: 5_000 }).toBe('attention')
     const card = page.locator('.attention-card[data-kind="question"]')

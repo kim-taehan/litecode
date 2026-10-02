@@ -85,6 +85,14 @@ function isBlank(session: Session): boolean {
   return session.messages.length === 0 && !session.history && !session.shells?.length
 }
 
+/** 대화 제목 = 첫 메시지의 첫 줄. 목록 행은 흘러가며·옆 카드는 줄바꿈해 전체를 보이므로 카드가 너무 커지지 않을 만큼만 자른다 */
+const TITLE_MAX = 80
+
+function titleFrom(text: string): string {
+  const line = text.split('\n').find((part) => part.trim()) ?? text
+  return line.trim().slice(0, TITLE_MAX)
+}
+
 /** 저장할 목록 정보 (말풍선·대기 상태·카드는 빼고 — 카드는 메인이 저장한다) */
 function toConversation({ id, project, engineSessionId, title, updatedAt, model, mode, usage }: Session): Conversation {
   return { id, project, engineSessionId, title, updatedAt, model, mode, usage }
@@ -632,7 +640,7 @@ export function App() {
       updatedAt: Date.now(),
       model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
       mode: turnMode, // 모드도 — 설정의 기본 모드가 나중에 바뀌어도 이 대화는 그대로
-      title: isBlank(session) ? shown.slice(0, 24) : session.title,
+      title: isBlank(session) ? titleFrom(shown) : session.title,
       messages: [...session.messages, { role: 'user', text: shown, at: sentAt, mode: turnMode }],
     })
     updateSession(target.id, start)
@@ -688,7 +696,7 @@ export function App() {
     const start = (session: Session): Session => ({
       ...session,
       updatedAt: Date.now(),
-      title: isBlank(session) ? `!${command}`.slice(0, 24) : session.title,
+      title: isBlank(session) ? titleFrom(`!${command}`) : session.title,
       shells: [...(session.shells ?? []), card],
     })
     updateSession(target.id, start)
