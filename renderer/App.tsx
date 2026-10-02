@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Conversation, HistoryMessage, Project, ProviderSummary } from '../shared/ipc.ts'
+import type { Conversation, ConversationStatus, HistoryMessage, OpenTarget, Project, ProviderSummary } from '../shared/ipc.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { Markdown } from './Markdown.tsx'
@@ -13,6 +13,8 @@ import { useTriggers } from './useTriggers.ts'
 import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
 import { useSettings, useT } from './settingsStore.ts'
+import { StatusDot, Toasts, useNotices } from './Notices.tsx'
+import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -294,6 +296,12 @@ export function App() {
     settingsRef.current?.focus()
   }, [])
 
+  /** 첫 목록을 다 올렸나 — 그 전에 온 알림 열기 신호는 첫 목록 뒤에 당겨 간다 */
+  const loaded = useRef(false)
+  /** 비동기 이동(알림 열기)이 지금 대화 목록을 보게 */
+  const sessionsRef = useRef<Session[]>([])
+  sessionsRef.current = sessions
+
   /** 대화 id → 마지막으로 저장한 목록 정보(JSON) — 바뀐 대화만 저장한다 */
   const saved = useRef(new Map<string, string>())
 
@@ -312,7 +320,14 @@ export function App() {
         setSessions(withBlankFor(list[0].path))
       }
       setProjects((loaded) => loaded ?? list)
+      // 눌린 PC 알림으로 창이 새로 생겼으면 열 곳이 기다리고 있다 — 목록을 다 올린 뒤에 당겨 간다 (그 전엔 대화가 "지워졌다" 로 보인다)
+      loaded.current = true
+      await pullPendingOpen()
     })()
+    const offOpen = window.litecode.onNotificationOpen(() => {
+      if (loaded.current) void pullPendingOpen()
+    })
+    return offOpen
   }, [])
 
   // 대화 목록 정보가 바뀌면 저장한다 (제목·시각·엔진 세션·모델·통계). 빈 새 대화는 저장하지 않는다.
@@ -344,6 +359,28 @@ export function App() {
   /** 이 대화의 모델 — 설정에서 지워졌으면 chosen 이 없고 보내기가 막힌다 */
   const selected = active?.model ?? initialModel(providers, lastModel)
   const chosen = findModel(providers, selected)
+  /** 알림 — 메인이 쥔 대화별 상태(점)와 앞일 때의 토스트. 지금 보는 대화를 메인에 알린다 */
+  const notices = useNotices(active?.id)
+
+  /** 알림(토스트·PC 알림)을 누르면 — 기존 프로젝트 열기 경로로 그 프로젝트를 열고(목록에서 빠졌으면 다시 넣는다) 그 대화를 고른다.
+   *  대화가 지워졌으면 프로젝트만 열고 안내, 폴더가 없으면 팝오버에 "폴더를 열 수 없습니다" (결정 Q8) */
+  async function openNotice(target: OpenTarget): Promise<void> {
+    setSwitching(false)
+    const outcome = await pick(() => window.litecode.openProject(target.project), cannotOpen(target.project), target.project)
+    if (outcome === 'failed') {
+      setSwitching(true)
+      return
+    }
+    if (outcome !== 'opened') return
+    if (sessionsRef.current.some((session) => session.id === target.conversationId)) setActiveIds((now) => ({ ...now, [target.project]: target.conversationId }))
+    else notices.say(t('notify.conversationGone'))
+  }
+
+  async function pullPendingOpen(): Promise<void> {
+    const target = await window.litecode.takePendingOpen().catch(() => undefined)
+    if (target) await openNotice(target)
+  }
+
   /** 휴지통을 눌러 "삭제 확인" 을 기다리는 대화 */
   const [confirming, setConfirming] = useState<string>()
   /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
@@ -546,12 +583,16 @@ export function App() {
               <span className="project-switch__name">{project?.name ?? t('sidebar.noProject')}</span>
               {project && <span className="project-switch__path marquee">{project.displayPath}</span>}
             </span>
+            {otherProjectsStatus(notices.state, project?.path) && (
+              <StatusDot status={otherProjectsStatus(notices.state, project?.path)!} className="project-switch__notice" />
+            )}
             <span className="project-switch__caret">▾</span>
           </button>
           {switching && (
             <ProjectPopover
               projects={projects ?? []}
               current={project?.path}
+              statusOf={(dir) => projectStatus(notices.state, dir)}
               busy={picking}
               error={openError}
               onPick={(picked) => void pickRecent(picked)}
@@ -610,6 +651,7 @@ export function App() {
                 onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
               >
                 <span className="session-item__title marquee">{titleOf(session)}</span>
+                {notices.state[session.id] && <StatusDot status={notices.state[session.id]!.status} className="session-item__notice" />}
                 {!isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
               </button>
               {!isBlank(session) && !session.pending && (
@@ -786,6 +828,7 @@ export function App() {
         )}
       </main>
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
+      <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
     </div>
   )
 }
@@ -827,6 +870,8 @@ function MissingConversations({ sessions, onRemove }: { sessions: Session[]; onR
 interface ProjectPopoverProps {
   projects: Project[]
   current?: string
+  /** 그 프로젝트 대화의 알림 점 (없으면 점 없음) */
+  statusOf(project: string): ConversationStatus | undefined
   /** 여는 중 — 행을 막는다 */
   busy: boolean
   error?: string
@@ -846,7 +891,7 @@ interface ProjectPopoverProps {
  *  다른 창이 포커스를 가져가면 실물 테스트 도중 팝오버가 닫혀 실패했다, 2026-09-30.) 목록이 길면 목록만 스크롤하고
  *  "폴더 열기" 는 아래에 고정한다. 행의 ☆·× 는 dsh ui-workspace 의 행 hover 버튼처럼 hover·포커스 때만 보인다
  *  (화살표는 행끼리만 걷고, 행 안의 버튼은 Tab 으로 닿는다). */
-function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose }: ProjectPopoverProps) {
+function ProjectPopover({ projects, current, statusOf, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose }: ProjectPopoverProps) {
   const t = useT()
   const [query, setQuery] = useState('')
   // 이름 바꾸는 중인 행 — dsh ui-workspace 처럼 그 자리에서 입력칸으로 바뀐다. Enter·바깥으로 나가면 저장, Esc 는 취소
@@ -948,6 +993,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                         <span className="project-item__name">{project.name}</span>
                         <span className="project-switch__path marquee">{project.displayPath}</span>
                       </span>
+                      {statusOf(project.path) && <StatusDot status={statusOf(project.path)!} />}
                       {project.path === current && <span className="project-item__dot" />}
                     </button>
                     )}

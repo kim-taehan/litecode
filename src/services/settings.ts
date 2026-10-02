@@ -19,10 +19,12 @@ export interface Settings {
   fontSize: number
   /** 본문의 추론 과정(Trajectory) 탭을 보인다 (dsh "Coding Tools") */
   codingView: boolean
+  /** PC 알림(OS 알림)을 띄운다 — 끄면 PC 알림만 없고 앱 안 토스트·점은 그대로 (ctx.notifications, 결정 Q9) */
+  notifications: boolean
 }
 
-/** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬) */
-const DEFAULTS: Settings = { language: 'en', appearance: 'light', fontSize: 14, codingView: true }
+/** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9) */
+const DEFAULTS: Settings = { language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true }
 
 export interface SettingsOptions {
   /** settings.json 경로. 없으면 메모리에만 둔다 */
@@ -45,6 +47,7 @@ const valid: { [K in keyof Settings]: (value: unknown) => value is Settings[K] }
   appearance: (value): value is Appearance => value === 'light' || value === 'dark' || value === 'system',
   fontSize: (value): value is number => Number.isInteger(value) && (value as number) >= FONT_SIZE_MIN && (value as number) <= FONT_SIZE_MAX,
   codingView: (value): value is boolean => typeof value === 'boolean',
+  notifications: (value): value is boolean => typeof value === 'boolean',
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

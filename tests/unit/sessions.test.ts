@@ -64,6 +64,16 @@ const ids = (list: Conversation[]) => list.map((entry) => entry.id)
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
 
 describe('SessionsService', () => {
+  it('지우기(수동·보관 개수 초과)는 sessions/removed 로 지운 id 를 알린다 — ctx.notifications 가 그 알림을 거둔다', async () => {
+    const { sessions } = await start({ limit: 1 })
+    const removed: string[][] = []
+    sessions['ctx'].on('sessions/removed', (ids) => void removed.push(ids))
+    await sessions.save(conversation('c1', { updatedAt: 1 }))
+    await sessions.save(conversation('c2', { updatedAt: 2 }))
+    await sessions.remove('c2')
+    expect(removed).toEqual([['c1'], ['c2']])
+  })
+
   it('처음(파일 없음)에는 빈 목록이다', async () => {
     expect(await (await start()).sessions.list()).toEqual([])
   })

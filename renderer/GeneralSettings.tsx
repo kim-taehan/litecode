@@ -145,6 +145,24 @@ export function GeneralPage() {
           <span className="settings-switch__thumb" />
         </button>
       </div>
+
+      {/* PC 알림만 끈다 — 앱 안 토스트·점은 그대로 (ctx.notifications, 결정 Q9) */}
+      <div className="settings-row">
+        <div className="settings-row__text">
+          <div className="settings-row__title">{t('settings.notifications')}</div>
+          <div className="settings-row__description">{t('settings.notifications.description')}</div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          className="settings-switch"
+          aria-checked={settings.notifications}
+          aria-label={t('settings.notifications')}
+          onClick={() => save({ notifications: !settings.notifications })}
+        >
+          <span className="settings-switch__thumb" />
+        </button>
+      </div>
     </div>
   )
 }

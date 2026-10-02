@@ -33,7 +33,20 @@ const Channel = {
   GET_SETTINGS: 'settings:get',
   SET_SETTINGS: 'settings:set',
   OPEN_SETTINGS_FILE: 'settings:open-file',
+  GET_NOTIFICATIONS: 'notifications:get',
+  VIEW_CONVERSATION: 'notifications:view',
+  TAKE_PENDING_OPEN: 'notifications:take-open',
+  NOTIFICATIONS_CHANGED: 'notifications:changed',
+  NOTIFICATION_TOAST: 'notifications:toast',
+  NOTIFICATION_OPEN: 'notifications:open',
 } as const
+
+/** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
+function listen<T extends unknown[]>(channel: string, listener: (...args: T) => void): () => void {
+  const handler = (_event: unknown, ...args: unknown[]) => listener(...(args as T))
+  ipcRenderer.on(channel, handler)
+  return () => void ipcRenderer.removeListener(channel, handler)
+}
 
 const bridge: LitecodeBridge = {
   listProviders: () => ipcRenderer.invoke(Channel.LIST_PROVIDERS),
@@ -73,6 +86,12 @@ const bridge: LitecodeBridge = {
   getSettings: () => ipcRenderer.invoke(Channel.GET_SETTINGS),
   setSettings: (patch) => ipcRenderer.invoke(Channel.SET_SETTINGS, patch),
   openSettingsFile: () => ipcRenderer.invoke(Channel.OPEN_SETTINGS_FILE),
+  getNotifications: () => ipcRenderer.invoke(Channel.GET_NOTIFICATIONS),
+  viewConversation: (conversationId) => ipcRenderer.invoke(Channel.VIEW_CONVERSATION, conversationId),
+  takePendingOpen: () => ipcRenderer.invoke(Channel.TAKE_PENDING_OPEN),
+  onNotificationsChanged: (listener) => listen(Channel.NOTIFICATIONS_CHANGED, listener),
+  onNotificationToast: (listener) => listen(Channel.NOTIFICATION_TOAST, listener),
+  onNotificationOpen: (listener) => listen(Channel.NOTIFICATION_OPEN, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)
