@@ -189,8 +189,10 @@ Electron 렌더러 (React)          Electron 메인 프로세스
     모델 없는 세션은 내장 무료 `opencode` provider(opencode.ai/zen)로 갔다 — `model` 로 막음. 지킴이 `egress-guard.live`(바깥 요청 0)
   - **웹 도구** (#14): 끄려면 전역 `permission` deny **와** 에이전트마다 맨 뒤 deny — 하나만이면 litecode-ask(`webfetch:ask`)·litecode-full(`"*":"allow"`)에서 되살아난다.
     레거시 `task` 하위 에이전트는 상위 모드 deny 를 안 물려받는다(전역 deny 로 막힘)
-  - **자동 요약** (#20): 문턱 = context − (limit.output 이 0 이면 32000) — 우리 설정이면 context − 32000(`compaction.reserved` 안 쓰임), context ≤ 32000 이면 끝없이 돈다
-    (`ctx.llm` 이 한 턴 3번에서 끊음, 설정 경고 48000 미만 — 추정). 보고 토큰이 문턱을 넘은 스텝 뒤, 그리고 게이트웨이 한도 초과(`ContextOverflowError`) 뒤에(한도를 비워도) 돈다.
+  - **자동 요약** (#20·#27): 문턱 = context − (min(limit.output, 32000) || 32000)(`compaction.reserved` 안 쓰임). **limit.output 은 모든 요청(요약 포함)의 `max_tokens` 로도 실린다**
+    — 0/없으면 32000, 32000 초과는 잘림. 앱은 모델의 "최대 출력"(비우면 컨텍스트의 1/4, 최대 32000 — `shared/outputLimit.ts`)을 넣어 문턱이 컨텍스트의 75% 가 되게 한다
+    (24000·출력 0 은 한 턴에 요약 19번, 4000 은 1번). 최대 출력 ≥ 컨텍스트는 저장 거부, 설정 경고는 문턱 16000 미만, `ctx.llm` 의 한 턴 3번 상한은 안전망.
+    게이트웨이가 큰 max_tokens 를 거절하는지는 미측정. 보고 토큰이 문턱을 넘은 스텝 뒤, 그리고 게이트웨이 한도 초과(`ContextOverflowError`) 뒤에(한도를 비워도) 돈다.
     순서: 요약 user(compaction 파트) → 요약 답(summary:true) → 이음 user(합성 "Continue…" 또는 앞 user 복사본) → `session.compacted` → 그 답 → idle. 요약도 넘치면 이음 없이 idle.
     `ctx.llm` 은 턴 안의 요약·이음 user 를 그 턴 것으로 보고 이음의 답을 그 턴 답으로 쓴다
   - **diff** (#20): `apply_patch` 는 모델 id 에 `gpt-` 가 있을 때만 있고 그때는 edit·write 가 없다. edit `metadata.filediff{file(절대), patch}`, write `metadata{filepath, exists}`,
@@ -270,3 +272,4 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-10-02 | GitHub 흐름 — 라운드마다 이슈 → 브랜치 → PR → main 머지(머지는 사용자 확인). 원격 kim-taehan/litecode | skills/litecode-build | 사용자 지시 |
 | 2026-10-02 | main 머지는 리더가 직접 검증(typecheck·단위·실물 전체 초록)한 뒤 묻지 않고 한다 | skills/litecode-build | 사용자 "머지까지 알아서 해" |
 | 2026-10-02 | 채팅을 opencode 레거시 경로로 — "신규 세대만 쓴다" 원칙 폐기, 프로토콜 절에 레거시 묶음 | CLAUDE.md | 사용자 결정 (MCP·task) |
+| 2026-10-02 | 디자인 이야기는 전부 HTML 시안(Artifact 캔버스)으로 — 구현자에겐 "시안: <링크>" | skills/litecode-build, agents/litecode-dev | 사용자 "모든 디자인은 html 시안으로 말한다" |

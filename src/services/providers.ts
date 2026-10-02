@@ -18,6 +18,9 @@ export interface ModelCatalogEntry {
   /** 컨텍스트 길이(토큰, 선택) — opencode 는 custom 모델의 한도를 모른다(01_probe). 엔진이 opencode.json 의 limit 으로 넘기고
    *  통계 줄의 컨텍스트 % 에 쓴다. 없으면 % 는 "—" */
   contextLength?: number
+  /** 최대 출력(토큰, 선택, 이슈 #27) — opencode limit.output 으로 넘어가 요청의 max_tokens 이자 자동 요약 문턱(context − 출력)의 몫이 된다.
+   *  비우면 엔진이 컨텍스트 길이의 1/4(최대 32000)를 넣는다 (shared/outputLimit.ts) */
+  maxOutput?: number
 }
 
 export interface ProviderConfig {
@@ -115,10 +118,16 @@ export class ProviderRegistry extends Service {
       id: model.id.trim(),
       displayName: model.displayName.trim() || model.id.trim(),
       ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
+      ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
     }))
     if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
       throw new Error(tr('error.contextLength'))
     }
+    // 컨텍스트 길이 이상이면 문턱이 0 이하라 요약이 끝없이 돈다
+    const badOutput = (model: ModelCatalogEntry) =>
+      model.maxOutput !== undefined &&
+      !(Number.isSafeInteger(model.maxOutput) && model.maxOutput > 0 && (model.contextLength === undefined || model.maxOutput < model.contextLength))
+    if (models.some(badOutput)) throw new Error(tr('error.maxOutput'))
     if (models.length === 0 || models.some((model) => !model.id)) throw new Error(tr('error.modelsRequired'))
     if (new Set(models.map((model) => model.id)).size !== models.length) throw new Error(tr('error.modelIdDuplicate'))
     const apiKey = input.apiKey?.trim()

@@ -41,6 +41,7 @@ import type { AddressInfo } from 'node:net'
 //   lastChat 은 마지막 요청의 model 과 messages 요약(역할·글자 앞 80자) — 모델을 바꾼 뒤에도 앞 턴 맥락이 실렸는지 본다.
 //   lastChat.tools 는 그 요청에 실린 도구 이름(정렬) — 모드(에이전트)가 도구를 뺐는지 LLM 요청 본문으로 본다 (approval.live.test.ts)
 //   lastChatText 는 마지막 요청 messages 의 글 전체를 이은 것 — 긴 맥락(`!` 카드 출력)이 실렸는지 본다
+//   lastChat.maxTokens 는 그 요청 본문의 max_tokens — 모델의 최대 출력(opencode limit.output)이 실렸는지 본다 (compaction.live.test.ts, 이슈 #27)
 //   cut 은 답하기 전에 끊긴 `[slow]`·`[late]` 요청의 마지막 user 글 — 답변 중지가 LLM 스트림까지 끊었는지 본다 (stop.live.test.ts)
 // - `GET /v1/models` 는 OpenAI 호환 모델 목록 FAKE_MODELS 를 준다 (설정 > 모델의 "사용 가능한 모델 가져오기")
 // - 스트림 답마다 finish 청크 뒤·[DONE] 앞에 `choices: []` + FAKE_USAGE 청크를 보낸다 (opencode 가 stream_options.include_usage
@@ -146,7 +147,7 @@ export async function startFakeLlm(): Promise<FakeLlm> {
   let modelsAuth: string | undefined
   let chatAuth: string | undefined
   const chatModels: string[] = []
-  let lastChat: { model: string; messages: { role: string; text: string }[]; tools: string[] } | undefined
+  let lastChat: { model: string; messages: { role: string; text: string }[]; tools: string[]; maxTokens?: number } | undefined
   let lastChatText = ''
   /** 답하기 전에 끊긴 `[slow]`·`[late]` 요청의 마지막 user 글 (받은 순서) */
   const cut: string[] = []
@@ -173,13 +174,14 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       }
       count++
       chatAuth = req.headers.authorization
-      const body = JSON.parse(raw) as { model: string; messages: ChatMessage[]; tools?: { function?: { name?: string } }[] }
+      const body = JSON.parse(raw) as { model: string; messages: ChatMessage[]; tools?: { function?: { name?: string } }[]; max_tokens?: number }
       chatModels.push(body.model)
       const messages = body.messages
       lastChat = {
         model: body.model,
         messages: messages.map((message) => ({ role: message.role, text: contentText(message).slice(0, 80) })),
         tools: (body.tools ?? []).map((entry) => entry.function?.name ?? '').sort(),
+        maxTokens: body.max_tokens,
       }
       lastChatText = messages.map(contentText).join('\n')
       const text = lastUserText(messages)

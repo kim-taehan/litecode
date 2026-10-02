@@ -30,18 +30,26 @@ describe('한도 초과 알아보기', () => {
 })
 
 describe('화면 계산', () => {
-  it('문턱 = (한도 − 32000) / 한도 — 레거시는 출력 한도(우리 설정은 0 = 모름 → 32000)를 뺀다. 60K 면 28K·47%, 128K 면 75%. 한도를 모르거나 32000 이하면 없다', () => {
-    expect(compactionThreshold(60_000)).toEqual({ tokens: 28_000, percent: 47 })
-    expect(compactionThreshold(128_000)?.percent).toBe(75)
+  // 이슈 #27 실측(opencode 1.18.18 레거시): 문턱 = context − (min(limit.output, 32000) || 32000), 앱은 최대 출력을 비우면 context/4(최대 32000)를 넣는다
+  it('문턱 = 한도 − 출력 한도 — 최대 출력을 비우면 한도의 1/4(최대 32000)라 75%. 적으면 그 값, 32000 을 넘으면 32000. 한도를 모르거나 문턱이 0 이하면 없다', () => {
+    expect(compactionThreshold(60_000)).toEqual({ tokens: 45_000, percent: 75 })
+    expect(compactionThreshold(24_000)).toEqual({ tokens: 18_000, percent: 75 })
+    expect(compactionThreshold(200_000)).toEqual({ tokens: 168_000, percent: 84 })
+    expect(compactionThreshold(24_000, 4_000)).toEqual({ tokens: 20_000, percent: 83 })
+    expect(compactionThreshold(100_000, 64_000)).toEqual({ tokens: 68_000, percent: 68 })
     expect(compactionThreshold(undefined)).toBeUndefined()
-    expect(compactionThreshold(32_000)).toBeUndefined()
+    expect(compactionThreshold(undefined, 8_000)).toBeUndefined()
+    expect(compactionThreshold(24_000, 24_000)).toBeUndefined()
   })
 
-  it('48000 미만만 경고 (문턱이 시스템 프롬프트·도구 정의보다 작으면 요약이 끝없이 돈다) — 빈 칸은 경고하지 않는다', () => {
-    expect(isLowContext(undefined)).toBe(false)
-    expect(isLowContext(32_000)).toBe(true)
-    expect(isLowContext(47_999)).toBe(true)
-    expect(isLowContext(48_000)).toBe(false)
+  it('문턱(한도 − 출력 한도)이 16000 미만만 경고 (시스템 프롬프트·도구 정의보다 작으면 요약이 끝없이 돈다) — 빈 칸은 경고하지 않는다', () => {
+    expect(isLowContext({})).toBe(false)
+    expect(isLowContext({ maxOutput: 8_000 })).toBe(false)
+    expect(isLowContext({ contextLength: 24_000 })).toBe(false) // 기본 출력 6000 → 문턱 18000
+    expect(isLowContext({ contextLength: 21_000 })).toBe(true) // 5250 → 15750
+    expect(isLowContext({ contextLength: 24_000, maxOutput: 8_001 })).toBe(true)
+    expect(isLowContext({ contextLength: 48_000, maxOutput: 32_000 })).toBe(false)
+    expect(isLowContext({ contextLength: 47_999, maxOutput: 64_000 })).toBe(true) // opencode 가 32000 으로 자른다
   })
 
   it('끝난 턴: 끝난 압축은 구분선으로 따로, 실패한 압축은 버리고, 나머지 줄 순서는 그대로', () => {

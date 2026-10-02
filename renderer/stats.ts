@@ -38,7 +38,7 @@ export function addTurn(chat: ChatUsage | undefined, turn: TurnUsage): ChatUsage
 
 /** 화면에 보일 통계. 출력은 reasoning 을 포함한다 (OpenAI completion_tokens 와 같은 뜻 — opencode output 은 reasoning 을 뺀 값).
  *  컨텍스트 구성은 opencode 가 안 줘서 메시지 몫만 어림하고 나머지를 "시스템·도구" 한 줄로 둔다 — 둘로 나누지 않는다 (지어내지 않는다) */
-export function chatStats(chat: ChatUsage | undefined, contextLimit?: number): ChatStats {
+export function chatStats(chat: ChatUsage | undefined, contextLimit?: number, maxOutput?: number): ChatStats {
   if (!chat) return {}
   const output = chat.tokens.output + chat.tokens.reasoning
   const used = chat.lastContextTokens
@@ -51,7 +51,7 @@ export function chatStats(chat: ChatUsage | undefined, contextLimit?: number): C
     ttftMs: chat.ttftSteps > 0 ? chat.ttftMs / chat.ttftSteps : undefined,
     tokensPerSecond: chat.llmMs > 0 ? output / (chat.llmMs / 1_000) : undefined,
     tokens: { input: chat.tokens.input, cacheRead: chat.tokens.cacheRead, cacheWrite: chat.tokens.cacheWrite, output },
-    context: { used, limit: contextLimit, messages, systemAndTools: messages === undefined ? undefined : used - messages },
+    context: { used, limit: contextLimit, maxOutput, messages, systemAndTools: messages === undefined ? undefined : used - messages },
   }
 }
 
@@ -69,7 +69,8 @@ export interface ChatStats {
   /** input 은 캐시 안 된 입력. 넷은 서로 겹치지 않는다 */
   tokens?: { input: number; cacheRead: number; cacheWrite: number; output: number }
   /** 지금 컨텍스트 크기와 모델 한도, 그 구성 (구성은 추정치라 ~ 를 붙인다) */
-  context?: { used: number; limit?: number; systemAndTools?: number; messages?: number }
+  /** maxOutput — 모델 설정의 최대 출력(자동 요약 문턱 눈금에 쓴다, 이슈 #27) */
+  context?: { used: number; limit?: number; maxOutput?: number; systemAndTools?: number; messages?: number }
 }
 
 export const NONE = '—'

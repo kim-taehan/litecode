@@ -1141,7 +1141,7 @@ export function App() {
                 </div>
               </div>
               {/* 컨텍스트 % 의 한도는 지금 고른 모델의 설정값 (설정 > 모델의 "컨텍스트 길이") */}
-              <StatsBar stats={chatStats(active.usage, chosen?.model.contextLength)} />
+              <StatsBar stats={chatStats(active.usage, chosen?.model.contextLength, chosen?.model.maxOutput)} />
             </div>
             {terminalOn && shellOpen[active.project] && (
               <ShellDrawer
