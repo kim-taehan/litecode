@@ -225,6 +225,8 @@ export const en = {
   'feature.notifications.description': 'Status dots, toasts, desktop notifications and the dock badge when a task finishes or needs you',
   'feature.openIn': 'Open in another app',
   'feature.openIn.description': 'A button in the chat header opens the project folder in an editor, terminal or other app',
+  'feature.web': 'Web tools',
+  'feature.web.description': 'Lets the AI search the web and read web pages (off by default — changing it restarts the engine and stops an answer in progress)',
   'settings.openFile': 'Open configuration file',
   'settings.openFileError': 'Could not open configuration file',
   'settings.saveError': 'Could not save. Please try again.',
