@@ -30,6 +30,9 @@ const Channel = {
   TERMINAL_EXIT: 'terminal:exit',
   OPEN_EXTERNAL: 'shell:open-external',
   LOAD_TRAJECTORY: 'trajectory:load',
+  GET_SETTINGS: 'settings:get',
+  SET_SETTINGS: 'settings:set',
+  OPEN_SETTINGS_FILE: 'settings:open-file',
 } as const
 
 const bridge: LitecodeBridge = {
@@ -67,6 +70,9 @@ const bridge: LitecodeBridge = {
   },
   openExternal: (url) => ipcRenderer.invoke(Channel.OPEN_EXTERNAL, url),
   loadTrajectory: (directory, sessionId) => ipcRenderer.invoke(Channel.LOAD_TRAJECTORY, directory, sessionId),
+  getSettings: () => ipcRenderer.invoke(Channel.GET_SETTINGS),
+  setSettings: (patch) => ipcRenderer.invoke(Channel.SET_SETTINGS, patch),
+  openSettingsFile: () => ipcRenderer.invoke(Channel.OPEN_SETTINGS_FILE),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

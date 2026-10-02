@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -14,6 +14,8 @@ import { AtTrigger } from '../src/triggers/at.ts'
 import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
 import { TrajectoryService } from '../src/services/trajectory.ts'
+import { SettingsService, type Settings } from '../src/services/settings.ts'
+import { tr } from '../src/i18n.ts'
 import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { canSealKeys } from './keyStorage.ts'
@@ -26,6 +28,13 @@ const ctx = new Context()
 const mounted: { dispose(): Promise<void> }[] = []
 // userData 는 --user-data-dir 스위치를 따른다 (실물 테스트가 이걸로 격리한다).
 const userData = app.getPath('userData')
+// 설정 > 일반 — 맨 먼저 올린다: 언어(메인 오류 문구)·테마(첫 창 배경)가 다른 서비스·창보다 먼저 정해지게.
+// 실물 테스트는 LITECODE_TEST_LANGUAGE=ko 로 첫 실행 언어를 한국어로 고정한다(셀렉터가 한국어). 제품은 이 변수를 안 쓴다
+const settingsFiber = ctx.plugin(SettingsService, {
+  file: path.join(userData, 'settings.json'),
+  defaults: process.env.LITECODE_TEST_LANGUAGE === 'ko' ? { language: 'ko' } : undefined,
+})
+mounted.push(settingsFiber)
 mounted.push(ctx.plugin(ProviderRegistry, {
   file: path.join(userData, 'providers.json'),
   keysFile: path.join(userData, 'provider-keys.json'),
@@ -147,8 +156,19 @@ function bootstrap(ctx: Context): void {
     return true
   })
   handle(ctx, Channel.LOAD_TRAJECTORY, async (_event, directory: string, sessionId: string) => ctx.trajectory.read(directory, sessionId))
+  handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
+  handle(ctx, Channel.SET_SETTINGS, async (_event, patch: Partial<Settings>) => ctx.settings.set(patch))
+  // dsh 처럼 설정 정본 파일을 연다 (없으면 만든다). openPath 는 OS 연결 프로그램 — 실패하면 사유 문자열을 준다
+  handle(ctx, Channel.OPEN_SETTINGS_FILE, async () => {
+    const file = ctx.settings.ensureFile()
+    if (!file || (await shell.openPath(file))) throw new Error(tr('settings.openFileError'))
+  })
+  // 테마는 nativeTheme 에만 넣는다 — 렌더러의 prefers-color-scheme 이 즉시 따라와 CSS 미디어 쿼리 하나로 셋이 다 된다 (01f 실측)
+  ctx.on('settings/changed', (settings) => {
+    nativeTheme.themeSource = settings.appearance
+  })
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory']
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory', 'settings']
 mounted.push(ctx.plugin(bootstrap))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).
@@ -173,6 +193,8 @@ function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    // 첫 그림 전 깜빡임 막기 — 테마 바탕(--bg)과 같은 색. themeSource 는 창보다 먼저 넣었다
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#151517' : '#ffffff',
     show: !hiddenForTests,
     paintWhenInitiallyHidden: true,
     webPreferences: {
@@ -208,7 +230,11 @@ function createWindow(): void {
   }
 }
 
-void app.whenReady().then(createWindow)
+void app.whenReady().then(async () => {
+  await settingsFiber // 설정 서비스가 올라온 뒤 — 테마를 창보다 먼저 정한다
+  nativeTheme.themeSource = ctx.settings.get().appearance
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

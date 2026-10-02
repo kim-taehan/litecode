@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Trajectory as TrajectoryData, TrajectoryRecord } from '../shared/ipc.ts'
 import { formatDuration, groupTurns, matchesSearch, timeline, type TimelineMode } from './trajectoryView.ts'
+import { useT, type Translate } from './settingsStore.ts'
 
 // Trajectory 탭 — 한 대화의 스텝·도구 호출을 턴별 목록과 시간축으로 본다. dsh ui-trajectory 참조(모양·동작만):
 // 툴바(Duration 토글·Turns/Calls 전체 접기·검색), 3레인 시간축(Input·Model·Tools), 턴별 목록(USER·ASSISTANT·TOOL·CONTEXT).
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function Trajectory({ directory, sessionId, pending }: Props) {
+  const t = useT()
   const [data, setData] = useState<TrajectoryData>()
   const [mode, setMode] = useState<TimelineMode>('sequence')
   const [query, setQuery] = useState('')
@@ -67,16 +69,16 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
     return next
   }
 
-  if (!data) return <div className="trajectory"><div className="empty">불러오는 중…</div></div>
+  if (!data) return <div className="trajectory"><div className="empty">{t('trajectory.loading')}</div></div>
 
   return (
     <div className="trajectory">
-      <div className="trajectory__toolbar" role="toolbar" aria-label="Trajectory 도구">
+      <div className="trajectory__toolbar" role="toolbar" aria-label={t('trajectory.toolbar')}>
         <button
           type="button"
           className="trajectory__toggle"
           aria-pressed={mode === 'duration'}
-          title={mode === 'duration' ? '같은 너비로 보기' : '실제 걸린 시간으로 보기'}
+          title={mode === 'duration' ? t('trajectory.sameWidth') : t('trajectory.realTime')}
           onClick={() => setMode(mode === 'duration' ? 'sequence' : 'duration')}
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
@@ -89,7 +91,7 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
           type="button"
           className="trajectory__toggle"
           aria-pressed={allTurnsFolded}
-          title={allTurnsFolded ? '모든 턴 펴기' : '모든 턴 접기'}
+          title={allTurnsFolded ? t('trajectory.unfoldTurns') : t('trajectory.foldTurns')}
           onClick={() => setFoldedTurns(allTurnsFolded ? new Set() : new Set(turns.map((turn) => turn.number)))}
         >
           <span aria-hidden="true">{allTurnsFolded ? '⊞' : '⊟'}</span> Turns
@@ -98,7 +100,7 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
           type="button"
           className="trajectory__toggle"
           aria-pressed={allCallsFolded}
-          title={allCallsFolded ? '모든 도구 호출 펴기' : '모든 도구 호출 접기'}
+          title={allCallsFolded ? t('trajectory.unfoldCalls') : t('trajectory.foldCalls')}
           onClick={() => setFoldedCalls(allCallsFolded ? new Set() : new Set(callsOf.keys()))}
         >
           <span aria-hidden="true">{allCallsFolded ? '⊞' : '⊟'}</span> Calls
@@ -106,22 +108,22 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
         <input
           type="search"
           className="trajectory__search"
-          aria-label="기록 검색"
-          placeholder="검색"
+          aria-label={t('trajectory.search')}
+          placeholder={t('trajectory.searchPlaceholder')}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
 
       {data.missingFolder ? (
-        <div className="empty" role="alert">폴더가 없습니다: {directory}</div>
+        <div className="empty" role="alert">{t('trajectory.missingFolder', { dir: directory })}</div>
       ) : data.error ? (
         <div className="empty" role="alert">{data.error}</div>
       ) : records.length === 0 ? (
-        <div className="empty">아직 기록이 없습니다</div>
+        <div className="empty">{t('trajectory.empty')}</div>
       ) : (
         <>
-          <div className="trajectory__timeline" data-mode={mode} aria-label="시간축">
+          <div className="trajectory__timeline" data-mode={mode} aria-label={t('trajectory.timeline')}>
             {LANES.map((lane, index) => (
               <div key={lane} className="trajectory__lane">
                 <span className="trajectory__lane-name">{lane}</span>
@@ -139,7 +141,7 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
                           className={`trajectory__bar${span.error ? ' trajectory__bar--error' : ''}${span.open ? ' trajectory__bar--open' : ''}`}
                           data-kind={record.kind}
                           style={{ left: `${left}%`, width: `${width}%`, ...(wait > 0 ? { ['--wait' as string]: `${wait}%` } : {}) }}
-                          title={barTitle(record)}
+                          title={barTitle(record, t)}
                         />
                       )
                     })}
@@ -179,7 +181,7 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
               )
             })}
             {searching && turns.every((turn) => turn.items.every(({ record }) => !matchesSearch(record, query))) && (
-              <div className="empty">일치하는 기록이 없습니다</div>
+              <div className="empty">{t('trajectory.noMatch')}</div>
             )}
           </div>
         </>
@@ -189,13 +191,14 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
 }
 
 function Row({ record, calls, callsFolded, onToggleCalls }: { record: TrajectoryRecord; calls?: number; callsFolded: boolean; onToggleCalls: () => void }) {
+  const t = useT()
   const error = 'error' in record ? record.error : undefined
   const took = record.kind === 'assistant' || record.kind === 'tool' ? (record.end === undefined ? '…' : formatDuration(record.end - record.start)) : ''
   return (
     <div className={`trajectory__row${error ? ' trajectory__row--error' : ''}`} data-kind={record.kind}>
       <span className="trajectory__fold">
         {calls !== undefined && (
-          <button type="button" aria-label={callsFolded ? '도구 호출 펴기' : '도구 호출 접기'} aria-expanded={!callsFolded} onClick={onToggleCalls}>
+          <button type="button" aria-label={callsFolded ? t('trajectory.unfoldCall') : t('trajectory.foldCall')} aria-expanded={!callsFolded} onClick={onToggleCalls}>
             {callsFolded ? '▸' : '▾'}
           </button>
         )}
@@ -208,7 +211,7 @@ function Row({ record, calls, callsFolded, onToggleCalls }: { record: Trajectory
               {record.name} {record.input}
             </span>
             <span className="trajectory__result">
-              → {error ? firstLine(error) : firstLine(record.result) || '(빈 결과)'}
+              → {error ? firstLine(error) : firstLine(record.result) || t('trajectory.emptyResult')}
               {record.exit !== undefined && record.exit !== 0 && ` · exit ${record.exit}`}
             </span>
           </>
@@ -223,11 +226,11 @@ function Row({ record, calls, callsFolded, onToggleCalls }: { record: Trajectory
   )
 }
 
-function barTitle(record: TrajectoryRecord): string {
-  if (record.kind === 'tool') return `${record.name} · ${record.end === undefined ? '끝나지 않음' : formatDuration(record.end - record.start)}`
+function barTitle(record: TrajectoryRecord, t: Translate): string {
+  if (record.kind === 'tool') return `${record.name} · ${record.end === undefined ? t('trajectory.unfinished') : formatDuration(record.end - record.start)}`
   if (record.kind === 'assistant') {
-    if (record.end === undefined) return 'ASSISTANT · 끝나지 않음'
-    return `ASSISTANT · 대기 ${formatDuration(record.firstAt - record.start)} · 생성 ${formatDuration(record.end - record.firstAt)}`
+    if (record.end === undefined) return `ASSISTANT · ${t('trajectory.unfinished')}`
+    return `ASSISTANT · ${t('trajectory.stepTiming', { wait: formatDuration(record.firstAt - record.start), generate: formatDuration(record.end - record.firstAt) })}`
   }
   return `${TAG[record.kind]} · ${firstLine(record.text)}`
 }

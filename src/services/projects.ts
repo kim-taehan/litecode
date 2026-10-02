@@ -2,6 +2,7 @@ import { Context, Service } from 'cordis'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { tr } from '../i18n.ts'
 
 // 최근 프로젝트 목록 — 프로젝트 = 폴더. 재시작해도 남도록 작은 JSON 파일 하나에 둔다 (앱에서는 userData 아래).
 // 목록 맨 앞이 마지막으로 연 프로젝트다 — 앱을 켜면 그것을 연다.
@@ -61,7 +62,7 @@ export class ProjectsService extends Service {
   /** 폴더를 열어 최근 목록 맨 앞에 올린다. 폴더가 아니면(없는 경로·파일) 목록을 안 바꾸고 throw 한다. */
   async open(dir: string): Promise<Project> {
     const real = await fs.realpath(dir)
-    if (!(await fs.stat(real)).isDirectory()) throw new Error(`폴더가 아니다: ${dir}`)
+    if (!(await fs.stat(real)).isDirectory()) throw new Error(tr('error.notFolder', { dir }))
 
     const stored = await this.update((current) => ({ ...current, recent: [real, ...current.recent.filter((entry) => entry !== real)] }))
     return toProjects(stored).find((project) => project.path === real)!

@@ -12,6 +12,7 @@ import { addTurn, chatStats, type ChatUsage } from './stats.ts'
 import { useTriggers } from './useTriggers.ts'
 import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
+import { useSettings, useT } from './settingsStore.ts'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -40,7 +41,7 @@ interface Session {
 }
 
 function newSession(project: string): Session {
-  return { id: crypto.randomUUID(), project, title: '새 대화', messages: [], updatedAt: Date.now() }
+  return { id: crypto.randomUUID(), project, title: '', messages: [], updatedAt: Date.now() }
 }
 
 /** 아직 아무것도 안 보낸 새 대화 — 저장하지 않고, 지울 것도 없다 */
@@ -98,8 +99,6 @@ function Badge({ project }: { project: Project }) {
     </span>
   )
 }
-
-const cannotOpen = (dir: string) => `폴더를 열 수 없습니다: ${dir}`
 
 // 잘린 경로를 보여주는 방식은 dsh ui-workspace 의 세션 행을 따른다: 마우스를 올리면 잘린 글자가 일정한 속도로 흘러가
 // 끝부분을 보이고(양 끝은 페이드), 떼면 한 번에 제자리로. 거의 안 잘린 것(8px 이하)은 흔들림으로 보여 움직이지 않는다.
@@ -237,6 +236,11 @@ function HoverCard({ card }: { card?: HoverCardContent & { top: number; left: nu
 }
 
 export function App() {
+  const t = useT()
+  const settings = useSettings()
+  /** 새 대화는 제목 없이 두고 보일 때 번역한다 — 언어를 바꾸면 같이 바뀐다 (첫 메시지가 제목이 된다) */
+  const titleOf = (session: Session) => session.title || t('sidebar.untitled')
+  const cannotOpen = (dir: string) => t('project.cannotOpen', { dir })
   const [providers, setProviders] = useState<ProviderSummary[]>([])
   /** 최근 프로젝트(즐겨찾기 포함, 최근 순). 불러오기 전에는 undefined */
   const [projects, setProjects] = useState<Project[]>()
@@ -405,7 +409,7 @@ export function App() {
 
   async function openFolder(): Promise<void> {
     closeSwitcher(false) // 대화상자를 띄우기 전에 팝오버를 닫는다 (dsh ui-workspace)
-    const outcome = await pick(() => window.litecode.pickProjectFolder(), '폴더를 열 수 없습니다')
+    const outcome = await pick(() => window.litecode.pickProjectFolder(), t('project.cannotOpenPicked'))
     if (outcome === 'opened') switchRef.current?.focus()
     if (outcome === 'failed' && current) setSwitching(true) // 사유를 팝오버에 (프로젝트가 없으면 안내 화면에 보인다)
   }
@@ -500,7 +504,7 @@ export function App() {
           className="sidebar__resize"
           role="separator"
           aria-orientation="vertical"
-          aria-label="사이드바 폭"
+          aria-label={t('sidebar.resize')}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId)
             drag.current = { x: event.clientX, width: layout.width }
@@ -521,8 +525,8 @@ export function App() {
           <button
             type="button"
             className="sidebar-toggle"
-            aria-label="사이드바 숨기기"
-            title="사이드바 숨기기"
+            aria-label={t('sidebar.hide')}
+            title={t('sidebar.hide')}
             onClick={() => setLayout((now) => ({ ...now, hidden: true }))}
           >
             <SidebarIcon />
@@ -539,7 +543,7 @@ export function App() {
           >
             {project && <Badge project={project} />}
             <span className="project-switch__text" onMouseEnter={(event) => startMarquee(event.currentTarget)} onMouseLeave={(event) => stopMarquee(event.currentTarget)}>
-              <span className="project-switch__name">{project?.name ?? '프로젝트 없음'}</span>
+              <span className="project-switch__name">{project?.name ?? t('sidebar.noProject')}</span>
               {project && <span className="project-switch__path marquee">{project.displayPath}</span>}
             </span>
             <span className="project-switch__caret">▾</span>
@@ -574,11 +578,11 @@ export function App() {
               setActiveIds((current) => ({ ...current, [project.path]: session.id }))
             }}
           >
-            + 새 대화
+            {t('sidebar.newChat')}
           </button>
         </div>
 
-        <div className="sidebar__label">대화 목록</div>
+        <div className="sidebar__label">{t('sidebar.conversations')}</div>
 
         <div className="sidebar__sessions">
           {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
@@ -595,17 +599,17 @@ export function App() {
                 onClick={() => setActiveIds((current) => ({ ...current, [session.project]: session.id }))}
                 onMouseEnter={(event) =>
                   sessionHover.enter(event.currentTarget, {
-                    title: session.title,
+                    title: titleOf(session),
                     detail: session.pending
-                      ? '답을 기다리는 중'
+                      ? t('sidebar.waiting')
                       : session.history === 'unloaded' || session.history === 'loading'
                         ? undefined
-                        : `메시지 ${session.messages.length}개`,
+                        : t('sidebar.messageCount', { count: session.messages.length }),
                   }, true)
                 }
                 onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
               >
-                <span className="session-item__title marquee">{session.title}</span>
+                <span className="session-item__title marquee">{titleOf(session)}</span>
                 {!isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
               </button>
               {!isBlank(session) && !session.pending && (
@@ -619,14 +623,14 @@ export function App() {
                       onBlur={() => setConfirming(undefined)}
                       onKeyDown={(event) => event.key === 'Escape' && setConfirming(undefined)}
                     >
-                      삭제 확인
+                      {t('sidebar.confirmDelete')}
                     </button>
                   ) : (
                     <button
                       type="button"
                       className="session-item__action"
-                      aria-label="대화 삭제"
-                      title="대화 삭제"
+                      aria-label={t('sidebar.deleteChat')}
+                      title={t('sidebar.deleteChat')}
                       onClick={() => setConfirming(session.id)}
                     >
                       <TrashIcon />
@@ -647,7 +651,7 @@ export function App() {
             onClick={() => setSettingsOpen(true)}
           >
             <GearIcon />
-            설정
+            {t('sidebar.settings')}
           </button>
         </div>
       </aside>
@@ -658,8 +662,8 @@ export function App() {
           <button
             type="button"
             className="sidebar-toggle sidebar-toggle--floating"
-            aria-label="사이드바 보이기"
-            title="사이드바 보이기"
+            aria-label={t('sidebar.show')}
+            title={t('sidebar.show')}
             onClick={() => setLayout((now) => ({ ...now, hidden: false }))}
           >
             <SidebarIcon />
@@ -678,24 +682,27 @@ export function App() {
                 onRemove={removeConversation}
               />
             )}
-            <p>작업할 폴더를 열어 주세요</p>
+            <p>{t('guide.prompt')}</p>
             <button type="button" className="open-guide__button" disabled={picking} onClick={() => void openFolder()}>
-              폴더 열기…
+              {t('guide.openFolder')}
             </button>
           </div>
         )}
         {active && (
           <>
-            <div className="main__header">{active.title}</div>
-            <div className="main__tabs" role="tablist" aria-label="보기">
-              {(['chat', 'trajectory'] as const).map((tab) => (
-                <button key={tab} type="button" role="tab" className="main__tab" aria-selected={view === tab} onClick={() => setView(tab)}>
-                  {tab === 'chat' ? 'Chat' : 'Trajectory'}
-                </button>
-              ))}
-            </div>
+            <div className="main__header">{titleOf(active)}</div>
+            {/* 설정 > 일반의 코딩 뷰를 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
+            {settings.codingView && (
+              <div className="main__tabs" role="tablist" aria-label={t('main.views')}>
+                {(['chat', 'trajectory'] as const).map((tab) => (
+                  <button key={tab} type="button" role="tab" className="main__tab" aria-selected={view === tab} onClick={() => setView(tab)}>
+                    {tab === 'chat' ? t('main.tabChat') : t('main.tabTrajectory')}
+                  </button>
+                ))}
+              </div>
+            )}
 
-            {view === 'trajectory' ? (
+            {settings.codingView && view === 'trajectory' ? (
               <Trajectory key={active.id} directory={active.project} sessionId={active.engineSessionId} pending={!!active.pending} />
             ) : (
             <div className="main__messages" ref={listRef}>
@@ -725,7 +732,7 @@ export function App() {
                   ref={trigger.inputRef}
                   {...trigger.inputProps}
                   className="composer__input"
-                  placeholder="메시지를 입력하세요…"
+                  placeholder={t('composer.placeholder')}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -741,8 +748,8 @@ export function App() {
                 />
                 <div className="composer__row">
                   {/* dsh 에선 첨부 메뉴. 첨부 기능이 생길 때까지 모양만 두고 막는다 — 막힌 버튼은 툴팁을 못 띄워 감싼 쪽에 둔다 */}
-                  <span className="composer__add-wrap" title="준비 중">
-                    <button type="button" className="composer__add" aria-label="첨부 (준비 중)" disabled>
+                  <span className="composer__add-wrap" title={t('composer.comingSoon')}>
+                    <button type="button" className="composer__add" aria-label={t('composer.attach')} disabled>
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" strokeWidth="1.3" aria-hidden="true">
                         <path d="M8 2V14M2 8H14" stroke="currentColor" />
                       </svg>
@@ -753,8 +760,8 @@ export function App() {
                     <button
                       type="button"
                       className="composer__send"
-                      aria-label="보내기"
-                      title="보내기 (Enter)"
+                      aria-label={t('composer.send')}
+                      title={t('composer.sendTitle')}
                       onClick={submit}
                       disabled={active.pending || !chosen || !draft.trim() || !canWrite(active)}
                     >
@@ -786,14 +793,15 @@ export function App() {
 /** 못 연(폴더가 없는) 프로젝트의 저장된 대화 — 열 수 없고 지우기만 된다. 내용을 부르지 않는다(없는 경로를 opencode 에 넘기면
  *  그 경로가 재시작 전까지 500 — 01c Q5). 지우기는 대화 목록 행과 같은 휴지통 → "삭제 확인" */
 function MissingConversations({ sessions, onRemove }: { sessions: Session[]; onRemove(session: Session): Promise<void> }) {
+  const t = useT()
   const [confirming, setConfirming] = useState<string>()
   if (sessions.length === 0) return null
   return (
-    <ul className="missing-list" aria-label="이 폴더의 대화">
+    <ul className="missing-list" aria-label={t('missing.list')}>
       {sessions.map((session) => (
         <li key={session.id} className="missing-list__item">
           <span className="missing-list__title">{session.title}</span>
-          <span className="missing-list__note">폴더가 없습니다</span>
+          <span className="missing-list__note">{t('missing.note')}</span>
           {confirming === session.id ? (
             <button
               type="button"
@@ -803,10 +811,10 @@ function MissingConversations({ sessions, onRemove }: { sessions: Session[]; onR
               onBlur={() => setConfirming(undefined)}
               onKeyDown={(event) => event.key === 'Escape' && setConfirming(undefined)}
             >
-              삭제 확인
+              {t('sidebar.confirmDelete')}
             </button>
           ) : (
-            <button type="button" className="session-item__action" aria-label="대화 삭제" title="대화 삭제" onClick={() => setConfirming(session.id)}>
+            <button type="button" className="session-item__action" aria-label={t('sidebar.deleteChat')} title={t('sidebar.deleteChat')} onClick={() => setConfirming(session.id)}>
               <TrashIcon />
             </button>
           )}
@@ -839,6 +847,7 @@ interface ProjectPopoverProps {
  *  "폴더 열기" 는 아래에 고정한다. 행의 ☆·× 는 dsh ui-workspace 의 행 hover 버튼처럼 hover·포커스 때만 보인다
  *  (화살표는 행끼리만 걷고, 행 안의 버튼은 Tab 으로 닿는다). */
 function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose }: ProjectPopoverProps) {
+  const t = useT()
   const [query, setQuery] = useState('')
   // 이름 바꾸는 중인 행 — dsh ui-workspace 처럼 그 자리에서 입력칸으로 바뀐다. Enter·바깥으로 나가면 저장, Esc 는 취소
   const [editing, setEditing] = useState<string>()
@@ -882,8 +891,8 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
   const filtered = projects.filter((project) => project.name.toLowerCase().includes(needle))
   // 즐겨찾기한 것은 즐겨찾기 묶음에만 — 최근에 중복으로 안 나온다 (00_request B)
   const groups = [
-    { name: '즐겨찾기', items: filtered.filter((project) => project.favorite) },
-    { name: '최근', items: filtered.filter((project) => !project.favorite) },
+    { name: t('project.favorites'), items: filtered.filter((project) => project.favorite) },
+    { name: t('project.recent'), items: filtered.filter((project) => !project.favorite) },
   ]
 
   return (
@@ -891,7 +900,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
       <input
         ref={searchRef}
         className="project-popover__search"
-        placeholder="프로젝트 검색…"
+        placeholder={t('project.search')}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         autoFocus
@@ -907,7 +916,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                     {editing === project.path ? (
                       <input
                         className="project-item__rename"
-                        aria-label="프로젝트 이름"
+                        aria-label={t('project.nameLabel')}
                         defaultValue={project.name}
                         autoFocus
                         onFocus={(event) => event.currentTarget.select()}
@@ -951,8 +960,8 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                       <button
                         type="button"
                         className="project-item__action"
-                        aria-label="이름 바꾸기"
-                        title="이름 바꾸기 (폴더 이름은 그대로)"
+                        aria-label={t('project.rename')}
+                        title={t('project.renameTitle')}
                         disabled={busy}
                         onClick={() => setEditing(project.path)}
                       >
@@ -961,8 +970,8 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                       <button
                         type="button"
                         className="project-item__action"
-                        aria-label={project.favorite ? '즐겨찾기에서 빼기' : '즐겨찾기에 추가'}
-                        title={project.favorite ? '즐겨찾기에서 빼기' : '즐겨찾기에 추가'}
+                        aria-label={project.favorite ? t('project.unfavorite') : t('project.favorite')}
+                        title={project.favorite ? t('project.unfavorite') : t('project.favorite')}
                         disabled={busy}
                         onClick={() => onToggleFavorite(project)}
                       >
@@ -971,8 +980,8 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
                       <button
                         type="button"
                         className="project-item__action"
-                        aria-label="목록에서 빼기"
-                        title="목록에서 빼기 (폴더는 그대로)"
+                        aria-label={t('project.remove')}
+                        title={t('project.removeTitle')}
                         disabled={busy}
                         // 뺀 행의 포커스가 사라지므로 검색 입력으로 돌려 키보드를 이어 쓰게 한다
                         onClick={() => void onRemove(project).then(() => searchRef.current?.focus())}
@@ -985,7 +994,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
               </div>
             ),
         )}
-        {needle && filtered.length === 0 && <div className="project-popover__empty">일치하는 프로젝트 없음</div>}
+        {needle && filtered.length === 0 && <div className="project-popover__empty">{t('project.noMatch')}</div>}
       </div>
       {error && (
         <div className="project-popover__error" role="alert">
@@ -994,7 +1003,7 @@ function ProjectPopover({ projects, current, busy, error, onPick, onOpenFolder, 
       )}
       <div className="project-popover__divider" />
       <button type="button" className="project-popover__open" disabled={busy} onClick={onOpenFolder}>
-        ＋ 폴더 열기…
+        {t('project.openFolder')}
       </button>
       <HoverCard card={hover.card} />
     </div>

@@ -1,6 +1,7 @@
 /* 답 말풍선 마크다운 — dsh ui-primitives markdown/MarkdownText.module.css·CodeBlock.module.css 의 간격·모양을 litecode 토큰으로.
    말풍선(.bubble)은 pre-wrap 이라 여기서 끈다 — 빈 줄은 문단 간격 하나로만 보인다 (코드 블록 안은 그대로) */
 .md {
+  font-size: var(--chat-font-size); /* 설정 > 일반의 글자 크기 — 제목은 기준 + delta, 표는 한 단계 작게 (dsh ui-theme) */
   white-space: normal;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -11,10 +12,10 @@
 
 .md strong { font-weight: 600; }
 .md p { margin: 10px 0; }
-.md h1 { font-size: 20px; line-height: 28px; font-weight: 600; margin: 20px 0 10px; }
-.md h2 { font-size: 17px; line-height: 26px; font-weight: 600; margin: 18px 0 8px; }
-.md h3 { font-size: 15px; line-height: 24px; font-weight: 600; margin: 16px 0 8px; }
-.md :where(h4, h5, h6) { font-size: 14px; font-weight: 600; margin: 12px 0 6px; }
+.md h1 { font-size: calc(20px + var(--chat-font-delta)); line-height: calc(28px + var(--chat-font-delta)); font-weight: 600; margin: 20px 0 10px; }
+.md h2 { font-size: calc(17px + var(--chat-font-delta)); line-height: calc(26px + var(--chat-font-delta)); font-weight: 600; margin: 18px 0 8px; }
+.md h3 { font-size: calc(15px + var(--chat-font-delta)); line-height: calc(24px + var(--chat-font-delta)); font-weight: 600; margin: 16px 0 8px; }
+.md :where(h4, h5, h6) { font-size: var(--chat-font-size); font-weight: 600; margin: 12px 0 6px; }
 
 .md a {
   color: var(--accent);
@@ -54,7 +55,7 @@
 }
 
 .md-table { max-width: 100%; overflow-x: auto; margin: 10px 0; }
-.md table { border-collapse: collapse; font-size: 13px; }
+.md table { border-collapse: collapse; font-size: var(--chat-font-size-secondary); }
 .md :where(th, td) { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
 .md th { background: var(--fill-selector); font-weight: 600; }
 

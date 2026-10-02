@@ -26,6 +26,63 @@
   --danger: #e5484d;
   --danger-bg: #fdecec;
   --ok: #3fa66b;
+  /* 설정 > 일반 라운드에서 하드코딩 색을 토큰으로 (01f 3절) */
+  --surface: #ffffff;                  /* bg-layer-1 — 카드·입력칸·말풍선 */
+  --surface-panel: #ffffff;            /* bg-layer-2 — 설정 판 */
+  --on-text: #ffffff;                  /* label-primary-foreground — var(--text) 바탕 위 글자 */
+  --tooltip-bg: #2c2c2e;               /* tooltip-bg */
+  --tooltip-text: #ffffff;
+  --tooltip-detail: #b8b8bd;
+  --mask: rgba(0, 0, 0, 0.24);         /* bg-mask-1 */
+  --module: #f5f6f7;                   /* bg-module-platform — 드롭다운·글자 크기 알약·고른 테마 카드 */
+  --nav-hover: #f1f3f5;                /* sidebar-nav-item-hover */
+  --nav-active: #ebeef2;               /* sidebar-nav-item-active */
+  --switch-thumb: #ffffff;
+  --selected-ring: #adb2b8;            /* neutral-bluish-400 — 두 테마 같음 */
+  /* 대화 본문 글자 크기 (설정 > 일반) — 렌더러가 설정값으로 덮는다. 제목은 기준 + delta, 표 등 한 단계 작은 글자는 secondary */
+  --chat-font-size: 14px;
+  --chat-font-delta: 0px;
+  --chat-font-size-secondary: 13px;
+  color-scheme: light dark;
+}
+
+/* 다크 — dsh design-platform.css 의 같은 alias 다크 값 (01f 대응표). 메인이 설정값을 nativeTheme.themeSource 에 넣으면
+   prefers-color-scheme 이 따라와 라이트·다크·시스템 셋이 이 쿼리 하나로 된다 (01f 실측, Electron 33) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151517;
+    --bg-sidebar: #1b1b1c;
+    --text: #f9fafb;
+    --text-strong-hover: #ebeef2;
+    --text-secondary: #cfd3d6;
+    --text-tertiary: #adb2b8;
+    --text-caption: #81858c;
+    --border: rgba(255, 255, 255, 0.12);
+    --border-light: rgba(255, 255, 255, 0.06);
+    --border-strong: rgba(255, 255, 255, 0.2);
+    --border-ring: rgba(255, 255, 255, 0.16);
+    --fill-hover: rgba(255, 255, 255, 0.08);
+    --fill-active: rgba(255, 255, 255, 0.14);
+    --accent: #7aaaff;
+    --accent-soft: #34415b;
+    --accent-hover: #4176e6;
+    --fill-selector: #353638;
+    --menu: rgba(48, 49, 54, 0.94);
+    --shadow-soft: 0 0 0 0.5px rgba(255, 255, 255, 0.2), 0 4px 16px 0 rgba(0, 0, 0, 0.03), 0 0 24px 0 rgba(0, 0, 0, 0.03);
+    --shadow-prominent: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
+    --danger: #f25a5a;
+    --danger-bg: rgba(242, 90, 90, 0.15);
+    --ok: #22c55e;
+    --surface: #232324;
+    --surface-panel: #2c2c2e;
+    --on-text: #0f1115;
+    --tooltip-bg: #434549;
+    --mask: rgba(0, 0, 0, 0.5);
+    --module: #353638;
+    --nav-hover: #2c2c2e;
+    --nav-active: #434549;
+    --switch-thumb: #adb2b8;
+  }
 }
 
 * {
@@ -70,7 +127,7 @@ button {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   text-align: left;
@@ -124,10 +181,10 @@ button {
   z-index: 10;
   width: 300px;
   padding: 8px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(15, 17, 21, 0.1);
+  box-shadow: var(--shadow-prominent);
 }
 
 .project-popover__search {
@@ -528,7 +585,7 @@ button {
 .bubble {
   max-width: 78%;
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: var(--chat-font-size); /* 설정 > 일반의 글자 크기 */
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -542,7 +599,7 @@ button {
 
 .bubble--assistant {
   align-self: flex-start;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border-light);
   border-radius: 4px 14px 14px 14px;
 }
@@ -980,7 +1037,7 @@ button {
   width: 244px;
   padding: 12px 16px;
   border-radius: 12px;
-  background: #2c2c2e;
+  background: var(--tooltip-bg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
   pointer-events: none;
 }
@@ -988,14 +1045,14 @@ button {
 .hover-card__name {
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
+  color: var(--tooltip-text);
 }
 
 .hover-card__path {
   margin-top: 6px;
   font-size: 12px;
   line-height: 1.5;
-  color: #b8b8bd;
+  color: var(--tooltip-detail);
   word-break: break-all;
 }
 
@@ -1010,259 +1067,6 @@ button {
   font-family: inherit;
   font-size: 13px;
   color: var(--text);
-}
-
-/* 설정 모달 — dsh ui-settings-general SettingsRoot: 가림막 위 가운데 패널, 왼쪽 탭 목록 + 오른쪽 페이지 */
-.settings-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.settings-mask {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 17, 21, 0.32);
-}
-
-.settings-panel {
-  position: relative;
-  display: flex;
-  width: min(880px, calc(100vw - 64px));
-  height: min(640px, calc(100vh - 64px));
-  background: var(--bg);
-  border-radius: 14px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
-  overflow: hidden;
-}
-
-.settings-nav {
-  width: 200px;
-  flex-shrink: 0;
-  padding: 16px 8px;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.settings-nav__title {
-  padding: 4px 10px 12px;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.settings-nav__item {
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  text-align: left;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.settings-nav__item--active {
-  background: var(--fill-active);
-  color: var(--text);
-  font-weight: 600;
-}
-
-.settings-content {
-  position: relative;
-  flex-grow: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 24px 32px;
-}
-
-.settings-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  font-size: 18px;
-  color: var(--text-secondary);
-}
-
-.settings-close:hover {
-  background: var(--fill-hover);
-}
-
-.models-page__title {
-  margin: 0 0 4px;
-  font-size: 18px;
-}
-
-.models-page__hint {
-  margin: 0 0 16px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.provider-card {
-  margin-bottom: 10px;
-  padding: 12px 14px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.provider-card__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-}
-
-.provider-card__name {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.provider-card__tag {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-sidebar);
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.provider-card__actions {
-  margin-left: auto;
-  display: flex;
-  gap: 6px;
-}
-
-.settings-button {
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  font-size: 12px;
-  color: var(--text);
-}
-
-.settings-button:hover:not(:disabled) {
-  background: var(--bg-sidebar);
-}
-
-.settings-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.settings-button--primary {
-  background: var(--text);
-  border-color: var(--text);
-  color: #fff;
-}
-
-.settings-button--primary:hover:not(:disabled) {
-  background: var(--text-strong-hover);
-}
-
-.settings-button--danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.models-page__add {
-  width: 100%;
-  padding: 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 10px;
-  background: none;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.models-page__add:hover {
-  background: var(--bg-sidebar);
-}
-
-.provider-editor {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.settings-field {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  align-items: center;
-  gap: 12px;
-}
-
-.settings-field__label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.settings-input {
-  width: 100%;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  font-family: inherit;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.settings-input--readonly {
-  background: var(--bg-sidebar);
-  color: var(--text-caption);
-}
-
-.model-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 112px 28px;
-  gap: 6px;
-}
-
-.model-row .settings-input:first-child {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-}
-
-.settings-icon-button {
-  border: none;
-  border-radius: 6px;
-  background: none;
-  font-size: 16px;
-  color: var(--text-secondary);
-}
-
-.settings-icon-button:hover:not(:disabled) {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.provider-editor__model-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.provider-editor__footer {
-  display: flex;
-  justify-content: space-between;
-  padding-top: 6px;
-}
-
-.settings-error {
-  margin: 0;
-  font-size: 12px;
-  color: var(--danger);
 }
 
 /* 사이드바 오른쪽 경계를 끌어 폭 조절 (dsh ui-layout DragHandle) — 보이는 선은 테두리, 잡는 자리는 조금 넓게 */

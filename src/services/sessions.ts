@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { History } from './llm.ts'
 import './llm.ts'
+import { tr } from '../i18n.ts'
 
 // 대화 목록 정보 (ctx.sessions) — 재시작해도 대화 목록이 남게 작은 JSON 파일 하나에 둔다 (앱에서는 userData/sessions.json).
 // 대화 **내용**의 정본은 opencode DB 다 — 여기는 목록에 보일 것만 쥔다: opencode 는 제목을 안 만들고 time.updated 도 안 바꾼다
@@ -117,7 +118,7 @@ export class SessionsService extends Service {
   /** 대화 하나의 말풍선 — 엔진 세션이 아직 없으면(첫 메시지가 세션을 만들기 전에 실패) 빈 목록 */
   async history(id: string): Promise<History> {
     const conversation = (await this.read()).conversations.find((entry) => entry.id === id)
-    if (!conversation) return { messages: [], error: '없는 대화입니다' }
+    if (!conversation) return { messages: [], error: tr('error.noConversation') }
     if (!conversation.engineSessionId) return { messages: [] }
     const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId)
     const labels = conversation.labels ?? {}

@@ -7,6 +7,7 @@ import type { Project } from '../src/services/projects.ts'
 import type { Conversation } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 import type { Trajectory } from '../src/services/trajectory.ts'
+import type { Settings } from '../src/services/settings.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -15,6 +16,7 @@ export type { Project } from '../src/services/projects.ts'
 export type { Conversation } from '../src/services/sessions.ts'
 export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
+export type { Appearance, Settings } from '../src/services/settings.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -44,6 +46,9 @@ export const Channel = {
   TERMINAL_EXIT: 'terminal:exit',
   OPEN_EXTERNAL: 'shell:open-external',
   LOAD_TRAJECTORY: 'trajectory:load',
+  GET_SETTINGS: 'settings:get',
+  SET_SETTINGS: 'settings:set',
+  OPEN_SETTINGS_FILE: 'settings:open-file',
 } as const
 
 export interface LitecodeBridge {
@@ -103,6 +108,12 @@ export interface LitecodeBridge {
   openExternal(url: string): Promise<boolean>
   /** 대화 하나의 스텝·도구 기록 (Trajectory 탭). directory 는 그 대화의 작업 폴더 — 없으면 엔진에 묻지 않고 missingFolder */
   loadTrajectory(directory: string, sessionId: string): Promise<Trajectory>
+  /** 설정 > 일반의 값 (ctx.settings) */
+  getSettings(): Promise<Settings>
+  /** 바꿀 값만 — 저장된 전체 값을 준다. 잘못된 값이면 지금 언어의 사유로 거절 */
+  setSettings(patch: Partial<Settings>): Promise<Settings>
+  /** userData/settings.json 을 OS 연결 프로그램으로 연다 (없으면 만든다). 못 열면 지금 언어의 사유로 거절 */
+  openSettingsFile(): Promise<void>
 }
 
 declare global {

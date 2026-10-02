@@ -1,6 +1,7 @@
 import type { Context } from 'cordis'
 import '../services/triggers.ts'
 import '../services/llm.ts'
+import { tr } from '../i18n.ts'
 
 // `/` 명령 — 입력 첫 글자일 때만 (closed-code composerMode: 경로·날짜의 `/` 를 명령으로 잡지 않는다).
 // 목록은 그 폴더의 opencode 명령(내장 init·review, 설정 폴더·프로젝트 .opencode/command·opencode.json). 실행은 앱이 template 을
@@ -24,7 +25,7 @@ export function SlashTrigger(ctx: Context): void {
         const commands = (await ctx.llm.listCommands(scope.directory)).filter((command) => command.name.toLowerCase().includes(needle))
         // 이름이 질의로 시작하는 것이 먼저 (dsh menu: 접두가 먼저)
         commands.sort((a, b) => Number(!a.name.toLowerCase().startsWith(needle)) - Number(!b.name.toLowerCase().startsWith(needle)))
-        return commands.map((command) => ({ id: command.name, label: `/${command.name}`, detail: command.description, icon: 'command', group: '명령' }))
+        return commands.map((command) => ({ id: command.name, label: `/${command.name}`, detail: command.description, icon: 'command', group: tr('trigger.group.commands') }))
       },
       // 고르면 이름만 채운다 — 인자를 이어 치고 Enter 로 낸다
       async pick(_scope, id) {
@@ -34,7 +35,7 @@ export function SlashTrigger(ctx: Context): void {
         const match = /^\/(\S*)\s*([\s\S]*)$/.exec(line)
         const name = match?.[1] ?? ''
         const command = name ? (await ctx.llm.listCommands(scope.directory)).find((entry) => entry.name === name) : undefined
-        if (!command) return { kind: 'error', message: name ? `모르는 명령입니다: /${name}` : '명령 이름을 입력하세요' }
+        if (!command) return { kind: 'error', message: name ? tr('error.unknownCommand', { name }) : tr('error.commandName') }
         return { kind: 'send', text: expandTemplate(command.template, match![2]!.trim()), display: line }
       },
     }),

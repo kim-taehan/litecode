@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { TriggerCandidate } from '../shared/ipc.ts'
 import { optionId, type Triggers } from './useTriggers.ts'
 import './triggers.css'
+import { useT } from './settingsStore.ts'
 
 // 입력창 위에 뜨는 공용 트리거 메뉴 하나 — 어떤 트리거의 후보인지 모른다. 모양은 dsh ui-input-trigger MenuView 를 따른다:
 // 그룹 제목 + 행(아이콘·이름·오른쪽 정렬 설명), 강조는 하나(키보드·마우스 공용), 폴더 행은 강조됐을 때 Tab 안내와 › (들어가기).
@@ -21,6 +22,7 @@ function Icon({ kind }: { kind: TriggerCandidate['icon'] }) {
 
 export function TriggerPopup({ trigger }: { trigger: Triggers }) {
   const { query, open, active, notice } = trigger
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const dismiss = useRef(trigger.dismiss)
   dismiss.current = trigger.dismiss
@@ -47,7 +49,7 @@ export function TriggerPopup({ trigger }: { trigger: Triggers }) {
     )
   }
   return (
-    <div className="trigger-menu" ref={ref} role="listbox" aria-label="입력 후보">
+    <div className="trigger-menu" ref={ref} role="listbox" aria-label={t('trigger.candidates')}>
       {query.candidates.map((candidate, index) => (
         <div key={candidate.id} role="presentation">
           {candidate.group && candidate.group !== query.candidates[index - 1]?.group && (
@@ -74,7 +76,7 @@ export function TriggerPopup({ trigger }: { trigger: Triggers }) {
                 <kbd className="trigger-menu__key">Tab</kbd>
                 <span
                   className="trigger-menu__chevron"
-                  aria-label="들어가기"
+                  aria-label={t('trigger.drill')}
                   onMouseDown={(event) => {
                     event.preventDefault()
                     event.stopPropagation()
