@@ -3,6 +3,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import { findOpencodeBinary, notFoundMessage } from './opencodeBinary.ts'
 import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
@@ -46,7 +47,7 @@ export interface EngineConnection {
 }
 
 export interface EngineOptions {
-  /** OPENCODE_CONFIG_DIR — 앱이 opencode.json 을 생성한다. opencode 가 여기에 package.json·node_modules 도 만든다 */
+  /** OPENCODE_CONFIG_DIR — 앱이 opencode.json 과 npm 설치 표식(package.json·package-lock.json·빈 node_modules)을 생성한다 */
   configDir: string
   /** OPENCODE_DB — 사용자 CLI opencode 의 세션 기록과 가른다 */
   db: string
@@ -56,6 +57,8 @@ export interface EngineOptions {
   env?: NodeJS.ProcessEnv
   /** 설치본에 실린 opencode·rg (opencodeBinary.ts bundledPaths). 개발 실행에는 없다 */
   bundled?: { opencode: string; rgDir: string }
+  /** 프로젝트 opencode 설정을 막는다 (OPENCODE_DISABLE_PROJECT_CONFIG, engineEnv 참고). 기본 꺼짐 — L1(레거시 보내기 + AGENTS.md 주입)과 같이 켠다 */
+  blockProjectConfig?: boolean
 }
 
 interface RunningServer extends EngineConnection {
@@ -117,8 +120,25 @@ const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 �
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
 
+/** 앱이 정의하는 MCP 서버 (opencode McpLocalConfig 모양) — 정의할 화면은 아직 없다(01w L4) */
+export interface EngineMcp {
+  type: 'local'
+  command: string[]
+  environment?: Record<string, string>
+}
+
+/** MCP 자식에 빈 값으로 덮어 넘길 env 이름. opencode 는 MCP 자식에 자기 env 전체(서버 비밀번호·DB 경로 포함)를 넘긴다
+ *  (01u 실측 5, 01w 3-2). 설정의 environment 에 빈 값을 넣으면 덮인다(1/1) — 지우는 길은 없다. 이름 규칙은 dsh 의 stdio env 걸러 내기 */
+function hiddenEnvNames(env: NodeJS.ProcessEnv): string[] {
+  return Object.keys(env).filter((name) => /^(OPENCODE|LITECODE)_/.test(name) || /KEY|PASSWORD|SECRET|TOKEN/i.test(name))
+}
+
 /** 생성할 opencode.json — 모든 provider 가 키 프록시를 거친다. 진짜 키·저장된 baseURL 은 없다 */
-export function engineConfig(providers: ProviderConfig[], proxy: Pick<KeyProxy, 'token' | 'baseURLFor'>): Record<string, unknown> {
+export function engineConfig(
+  providers: ProviderConfig[],
+  proxy: Pick<KeyProxy, 'token' | 'baseURLFor'>,
+  extra: { mcp?: Record<string, EngineMcp>; childEnv?: NodeJS.ProcessEnv } = {},
+): Record<string, unknown> {
   const provider: Record<string, unknown> = {}
   for (const config of providers) {
     // provider·모델 id 는 우리 id 그대로 — ctx.llm 이 그대로 넘긴다
@@ -136,11 +156,84 @@ export function engineConfig(providers: ProviderConfig[], proxy: Pick<KeyProxy, 
       ),
     }
   }
-  return { $schema: 'https://opencode.ai/config.json', provider, agent: ENGINE_AGENTS }
+  const hidden = Object.fromEntries(hiddenEnvNames(extra.childEnv ?? {}).map((name) => [name, '']))
+  const mcp =
+    extra.mcp &&
+    Object.fromEntries(Object.entries(extra.mcp).map(([name, def]) => [name, { ...def, environment: { ...hidden, ...def.environment } }]))
+  return {
+    $schema: 'https://opencode.ai/config.json',
+    provider,
+    agent: ENGINE_AGENTS,
+    // 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 데이터 폴더에 만든다(큰 저장소에서 비용). litecode 는 revert 를 안 쓴다 (01w 1절)
+    snapshot: false,
+    ...(mcp && { mcp }),
+  }
+}
+
+// npm 설치 막기 (01w 4절, 사용자 결정 00_next_legacy 3). opencode 는 설정 폴더(앱 CONFIG_DIR·사용자 $XDG_CONFIG_HOME/opencode·
+// ~/.opencode·프로젝트 .opencode) 중 쓰기 가능한 곳마다 @opencode-ai/plugin 을 백그라운드 npm 설치한다 — 끄는 플래그는 없다.
+// node_modules/ 가 있고 package.json 의 의존성(+플러그인)이 package-lock.json packages[""] 에 다 있으면 건너뛴다(코드 Npm.install,
+// 표식만으로 레지스트리 요청 0 — 1/1). 우리는 사용자 플러그인이 없어 본체는 필요 없다. 프로젝트 .opencode 는 blockProjectConfig 를 켜야 빠진다
+const PLUGIN_PACKAGE = '@opencode-ai/plugin'
+const PLUGIN_VERSION = '1.18.18' // 동봉 opencode 버전 (scripts/fetch-opencode.mjs)
+
+/** 표식을 둘 폴더. create=false 면 이미 있을 때만 (opencode 도 없는 ~/.opencode 는 안 본다 — 01w "있다면") */
+export function installMarkerDirs(configDir: string, env: NodeJS.ProcessEnv): { dir: string; create: boolean }[] {
+  const home = env['HOME']?.trim() || os.homedir()
+  const xdgConfig = env['XDG_CONFIG_HOME']?.trim() || path.join(home, '.config')
+  return [
+    { dir: configDir, create: true },
+    // opencode 가 기동 때 스스로 만드는 전역 설정 폴더다 — 우리가 먼저 만들어도 같다
+    { dir: path.join(xdgConfig, 'opencode'), create: true },
+    { dir: path.join(home, '.opencode'), create: false },
+  ]
+}
+
+/** 없는 표식만 만든다 — 있는 것은 내용이 달라도 안 덮고, 폴더의 다른 파일은 안 본다. 잠금 파일은 package.json 이 플러그인만
+ *  가질 때만 둔다(다른 의존성이 있으면 사용자 것이라 맞지 않는 잠금을 지어내지 않는다 — 그 폴더는 설치가 시도된다) */
+export function plantInstallMarkers(dir: string): void {
+  fs.mkdirSync(path.join(dir, 'node_modules'), { recursive: true })
+  const pkgFile = path.join(dir, 'package.json')
+  writeIfMissing(pkgFile, { dependencies: { [PLUGIN_PACKAGE]: PLUGIN_VERSION } })
+  let deps: Record<string, string>
+  try {
+    deps = (JSON.parse(fs.readFileSync(pkgFile, 'utf8')) as { dependencies?: Record<string, string> }).dependencies ?? {}
+  } catch {
+    return // 망가진 package.json — 사용자 것이다
+  }
+  if (Object.keys(deps).some((name) => name !== PLUGIN_PACKAGE)) return
+  writeIfMissing(path.join(dir, 'package-lock.json'), {
+    lockfileVersion: 3,
+    packages: { '': { dependencies: { [PLUGIN_PACKAGE]: deps[PLUGIN_PACKAGE] ?? PLUGIN_VERSION } } },
+  })
+}
+
+function writeIfMissing(file: string, value: unknown): void {
+  try {
+    fs.writeFileSync(file, JSON.stringify(value), { flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
+}
+
+/** 기동 전에 표식을 둔다. 못 쓰는 폴더는 넘어간다 — opencode 도 쓰기 불가 폴더엔 설치하지 않는다 */
+function prepareInstallMarkers(configDir: string, env: NodeJS.ProcessEnv): void {
+  for (const { dir, create } of installMarkerDirs(configDir, env)) {
+    try {
+      if (create) fs.mkdirSync(dir, { recursive: true })
+      else if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) continue
+      plantInstallMarkers(dir)
+    } catch (error) {
+      console.warn('[engine] 설치 표식을 못 뒀다', dir, (error as Error).message)
+    }
+  }
 }
 
 /** opencode 자식 프로세스 env — 진짜 키는 없다 (키 프록시) */
-export function engineEnv(base: NodeJS.ProcessEnv, opts: { configDir: string; db: string; password: string; rgDir?: string }): NodeJS.ProcessEnv {
+export function engineEnv(
+  base: NodeJS.ProcessEnv,
+  opts: { configDir: string; db: string; password: string; rgDir?: string; blockProjectConfig?: boolean },
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...base,
     OPENCODE_CONFIG_DIR: opts.configDir,
@@ -148,6 +241,12 @@ export function engineEnv(base: NodeJS.ProcessEnv, opts: { configDir: string; db
     OPENCODE_SERVER_PASSWORD: opts.password,
     // models.opencode.ai 카탈로그 받기를 끈다 — 폐쇄망에서 나가는 시도 6번이 사라지고 카탈로그·턴은 그대로 된다 (01b_offline 실측 2/2)
     OPENCODE_DISABLE_MODELS_FETCH: '1',
+  }
+  if (opts.blockProjectConfig) {
+    // 프로젝트 opencode.json·.opencode/ 를 안 읽는다 — 레거시는 그 안의 MCP 를 묻지 않고 띄우고 .opencode 에 npm 설치를 한다 (01w 3-1,
+    // 사용자 결정 00_next_legacy 2). 대가로 프로젝트 AGENTS.md/CLAUDE.md 도 안 읽힌다 — 신규 세대 경로에서도 그렇다(trajectory.live 의
+    // AGENTS.md 줄이 깨진다, 2026-10-02). 그래서 ctx.llm 이 AGENTS.md 를 prompt system 으로 넣는 L1 과 같이 켠다
+    env['OPENCODE_DISABLE_PROJECT_CONFIG'] = '1'
   }
   delete env['OPENCODE_SERVER_USERNAME'] // Basic 사용자명은 기본값 opencode 로 고정한다
   if (opts.rgDir) {
@@ -245,12 +344,20 @@ export class EngineService extends Service {
     })
     const proxy = await this.proxy
     await this.purgeDeleted() // 다른 연결이 없을 때 — 지난 실행이 정리 전에 끝났어도 여기서 걷힌다
-    fs.mkdirSync(this.opts.configDir, { recursive: true })
-    fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(engineConfig(this.ctx.providers.all(), proxy), null, 2))
-
     const password = randomBytes(24).toString('base64url')
     const port = await freePort()
-    const env = engineEnv(base, { configDir: this.opts.configDir, db: this.opts.db, password, rgDir: this.opts.bundled?.rgDir })
+    const env = engineEnv(base, {
+      configDir: this.opts.configDir,
+      db: this.opts.db,
+      password,
+      rgDir: this.opts.bundled?.rgDir,
+      blockProjectConfig: this.opts.blockProjectConfig,
+    })
+
+    fs.mkdirSync(this.opts.configDir, { recursive: true })
+    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env })
+    fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(config, null, 2))
+    prepareInstallMarkers(this.opts.configDir, env)
 
     const args = ['serve', '--hostname', '127.0.0.1', '--port', String(port), '--pure']
     const child = spawn(bin, args, {

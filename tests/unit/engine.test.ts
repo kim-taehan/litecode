@@ -1,6 +1,8 @@
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { ENGINE_AGENTS, engineConfig, engineEnv, isOurServer, MODE_AGENT } from '../../src/services/engine.ts'
+import { afterEach, describe, expect, it } from 'vitest'
+import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isOurServer, MODE_AGENT, plantInstallMarkers } from '../../src/services/engine.ts'
 import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
@@ -26,7 +28,56 @@ describe('engineConfig — 앱이 생성하는 opencode.json', () => {
         b: { npm: '@ai-sdk/openai-compatible', name: 'B', options: { baseURL: 'http://127.0.0.1:9/b', apiKey: 'proxy-token' }, models: { m1: { name: 'Model 1' } } },
       },
       agent: ENGINE_AGENTS,
+      snapshot: false,
     })
+  })
+
+  // 01w 1절 스냅샷 행: 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 ~/.local/share/opencode 에 만든다 — litecode 는 revert 를 안 쓴다
+  it('스냅샷을 끈다', () => {
+    expect(engineConfig([], { token: 't', baseURLFor: () => '' }).snapshot).toBe(false)
+  })
+})
+
+// 01w 3-2 / 01u 실측 5: opencode 는 MCP 자식에 자기 env 전체(서버 비밀번호 포함)를 넘긴다. 앱이 정의한 서버는 environment 에 빈 값을 넣으면 덮인다
+describe('engineConfig — 앱이 정의한 MCP 의 자식 env', () => {
+  const proxy = { token: 't', baseURLFor: () => '' }
+  const childEnv = {
+    PATH: '/bin',
+    HOME: '/home/u',
+    OPENCODE_SERVER_PASSWORD: 'pw',
+    OPENCODE_DB: '/d.db',
+    LITECODE_GATEWAY_URL: 'http://x',
+    GITHUB_TOKEN: 'ghp',
+    MY_API_KEY: 'k',
+    db_password: 'p',
+    AWS_SECRET_ACCESS_KEY: 's',
+  }
+
+  it('opencode 자식 env 의 OPENCODE_*·LITECODE_*·KEY/PASSWORD/SECRET/TOKEN 이름을 빈 값으로 덮고, 정의의 environment 는 그 위에 얹는다', () => {
+    const config = engineConfig([], proxy, {
+      childEnv,
+      mcp: { tools: { type: 'local', command: ['node', 'srv.js'], environment: { MY_API_KEY: 'for-this-server', MODE: 'x' } } },
+    })
+    expect(config.mcp).toEqual({
+      tools: {
+        type: 'local',
+        command: ['node', 'srv.js'],
+        environment: {
+          OPENCODE_SERVER_PASSWORD: '',
+          OPENCODE_DB: '',
+          LITECODE_GATEWAY_URL: '',
+          GITHUB_TOKEN: '',
+          db_password: '',
+          AWS_SECRET_ACCESS_KEY: '',
+          MY_API_KEY: 'for-this-server',
+          MODE: 'x',
+        },
+      },
+    })
+  })
+
+  it('정의가 없으면 mcp 를 싣지 않는다', () => {
+    expect(engineConfig([], proxy, { childEnv })).not.toHaveProperty('mcp')
   })
 })
 
@@ -78,6 +129,12 @@ describe('engineEnv — opencode 자식 프로세스 env', () => {
     })
   })
 
+  // 01w 3-1 / 사용자 결정 00_next_legacy 2. AGENTS.md 도 같이 꺼지므로(신규 경로 포함) L1 의 AGENTS.md 주입과 같이 켠다 — 기본 꺼짐
+  it('blockProjectConfig 면 프로젝트 opencode 설정을 막는 플래그를 싣는다', () => {
+    expect(engineEnv({}, { configDir: '/c', db: '/d.db', password: 'pw', blockProjectConfig: true })['OPENCODE_DISABLE_PROJECT_CONFIG']).toBe('1')
+    expect(engineEnv({}, { configDir: '/c', db: '/d.db', password: 'pw' })).not.toHaveProperty('OPENCODE_DISABLE_PROJECT_CONFIG')
+  })
+
   // 01b_offline: rg 가 PATH 에 없으면 grep·glob 도구가 github 에서 받으려 한다 — 폐쇄망에선 실패하거나 ~300초 멈춘다
   it('동봉 rg 폴더가 있으면 PATH 맨 앞에 붙인다', () => {
     const env = engineEnv({ PATH: `/usr/bin${path.delimiter}/bin` }, { configDir: '/c', db: '/d.db', password: 'pw', rgDir: '/app/Resources/rg' })
@@ -89,6 +146,70 @@ describe('engineEnv — opencode 자식 프로세스 env', () => {
     const env = engineEnv({ Path: 'C:\\Windows' }, { configDir: '/c', db: '/d.db', password: 'pw', rgDir: 'C:\\app\\rg' })
     expect(env['Path']).toBe(['C:\\app\\rg', 'C:\\Windows'].join(path.delimiter))
     expect(env['PATH']).toBeUndefined()
+  })
+})
+
+// 01w 4절: opencode 는 설정 폴더마다 @opencode-ai/plugin 을 npm 으로 설치하려 한다(끄는 플래그 없음). node_modules/ + package.json +
+// package-lock.json(packages[""] 에 같은 의존성) 이 있으면 건너뛴다 — 사용자 결정(00_next_legacy 3): 개인 폴더에도 표식만, 있는 것은 안 덮는다
+describe('설치 표식 — npm 설치 시도 0', () => {
+  const made: string[] = []
+  const tmp = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'litecode-marker-'))
+    made.push(dir)
+    return dir
+  }
+  const read = (file: string) => fs.readFileSync(file, 'utf8')
+  afterEach(() => {
+    for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('빈 폴더엔 01w 모양 그대로 세 개를 둔다', () => {
+    const dir = tmp()
+    plantInstallMarkers(dir)
+    expect(fs.statSync(path.join(dir, 'node_modules')).isDirectory()).toBe(true)
+    expect(fs.readdirSync(path.join(dir, 'node_modules'))).toEqual([])
+    expect(JSON.parse(read(path.join(dir, 'package.json')))).toEqual({ dependencies: { '@opencode-ai/plugin': '1.18.18' } })
+    expect(JSON.parse(read(path.join(dir, 'package-lock.json')))).toEqual({
+      lockfileVersion: 3,
+      packages: { '': { dependencies: { '@opencode-ai/plugin': '1.18.18' } } },
+    })
+  })
+
+  it('있는 표식은 내용이 달라도 덮지 않는다 — 없는 것만 만든다', () => {
+    const dir = tmp()
+    fs.mkdirSync(path.join(dir, 'node_modules', 'x'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'package-lock.json'), 'USER LOCK')
+    fs.writeFileSync(path.join(dir, 'opencode.json'), 'USER CONFIG')
+    plantInstallMarkers(dir)
+    expect(read(path.join(dir, 'package-lock.json'))).toBe('USER LOCK')
+    expect(read(path.join(dir, 'opencode.json'))).toBe('USER CONFIG')
+    expect(fs.readdirSync(path.join(dir, 'node_modules'))).toEqual(['x'])
+    expect(JSON.parse(read(path.join(dir, 'package.json')))).toEqual({ dependencies: { '@opencode-ai/plugin': '1.18.18' } })
+  })
+
+  it('package.json 이 다른 의존성을 가지면 잠금 파일을 지어내지 않는다 (사용자 것이라 맞지 않는 잠금이 된다)', () => {
+    const dir = tmp()
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ dependencies: { 'my-plugin': '1.0.0' } }))
+    plantInstallMarkers(dir)
+    expect(JSON.parse(read(path.join(dir, 'package.json')))).toEqual({ dependencies: { 'my-plugin': '1.0.0' } })
+    expect(fs.existsSync(path.join(dir, 'package-lock.json'))).toBe(false)
+  })
+
+  it('opencode 가 남긴 package.json(플러그인만, 설치 실패로 잠금 없음)이면 그 버전으로 잠금을 둔다', () => {
+    const dir = tmp()
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ dependencies: { '@opencode-ai/plugin': '1.18.10' } }))
+    plantInstallMarkers(dir)
+    expect(JSON.parse(read(path.join(dir, 'package-lock.json'))).packages['']).toEqual({ dependencies: { '@opencode-ai/plugin': '1.18.10' } })
+  })
+
+  it('대상: 앱 설정 폴더 + 사용자 $XDG_CONFIG_HOME/opencode(없으면 ~/.config/opencode) + 있으면 ~/.opencode', () => {
+    const home = tmp()
+    expect(installMarkerDirs('/app/opencode', { HOME: home })).toEqual([
+      { dir: '/app/opencode', create: true },
+      { dir: path.join(home, '.config', 'opencode'), create: true },
+      { dir: path.join(home, '.opencode'), create: false },
+    ])
+    expect(installMarkerDirs('/app/opencode', { HOME: home, XDG_CONFIG_HOME: '/x' })[1]).toEqual({ dir: path.join('/x', 'opencode'), create: true })
   })
 })
 
