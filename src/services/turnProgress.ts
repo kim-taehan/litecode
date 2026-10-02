@@ -20,16 +20,23 @@ export type TurnItem =
   | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[] }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
   | { kind: 'context'; id: string; text: string }
+  /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
+   *  이어졌다)는 그리지 않는다 (01o) */
+  | { kind: 'compaction'; id: string; status: 'running' | 'done' | 'failed' }
 
 const PREFIX = 'session.next.'
 
 /** 한 턴의 진행 줄을 쥐고, 이벤트 하나마다 바뀐 줄을 준다 (없으면 undefined) */
 export class TurnTracker {
   private readonly items = new Map<string, TurnItem>()
+  /** 끝나지 않은 압축 줄 */
+  private compacting?: string
 
   observe(type: string, data: Record<string, unknown>): TurnItem | undefined {
     if (!type.startsWith(PREFIX)) return undefined
     const event = type.slice(PREFIX.length)
+    const compaction = this.compaction(event, data)
+    if (compaction) return compaction
     const message = String(data['assistantMessageID'] ?? '')
     switch (event) {
       case 'reasoning.started':
@@ -71,6 +78,25 @@ export class TurnTracker {
       default:
         return undefined
     }
+  }
+
+  /** 자동 압축 (01o 2d·4): compaction.started → ended 둘뿐이고 같은 messageID. 요약 요청이 실패하면 ended 없이 step.started 가 온다 */
+  private compaction(event: string, data: Record<string, unknown>): TurnItem | undefined {
+    if (event === 'compaction.started') {
+      this.compacting = `compaction:${String(data['messageID'] ?? data['timestamp'])}`
+      return this.mark(this.compacting, 'running')
+    }
+    if (!this.compacting) return undefined
+    if (event === 'compaction.ended') return this.mark(this.compacting, 'done', true)
+    if (event.startsWith('step.')) return this.mark(this.compacting, 'failed', true)
+    return undefined
+  }
+
+  private mark(id: string, status: Extract<TurnItem, { kind: 'compaction' }>['status'], last = false): TurnItem {
+    const item: TurnItem = { kind: 'compaction', id, status }
+    this.items.set(id, item)
+    if (last) this.compacting = undefined
+    return item
   }
 
   private textual(kind: 'think' | 'text', id: string, event: string, data: Record<string, unknown>): TurnItem | undefined {

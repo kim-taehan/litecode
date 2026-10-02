@@ -22,6 +22,11 @@ import type { AddressInfo } from 'node:net'
 // - 마지막 user 메시지에 `[think]` 가 있으면 답(또는 도구 호출) 앞에 생각(`reasoning_content`)을 THINK_REPLY 두 조각으로 THINK_MS 씩
 //   벌려 보낸다 — opencode 가 생각으로 인식하는 형식(01g 2d). 진행 중 "생각" 줄이 조각으로 채워지는지 본다 (chat-layout.live.test.ts)
 // - 그 밖에는 `echo: <마지막 user 메시지>` 를 두 조각으로 나눠 스트리밍한다
+// - 자동 요약(압축) 요청(도구 없음 + `<conversation>`, 01o 2b)이면 COMPACT_MS 뒤 COMPACT_SUMMARY 를 답한다 — 화면의 "요약 중" 을 볼 틈.
+//   `/requests` 의 compactions 가 받은 압축 요청 수 (compaction.live.test.ts)
+// - 마지막 user 메시지에 `[pad:N]` 이 있으면 답 끝에 x 를 N 개 붙인다 — 기록을 키워 압축을 일으킨다
+// - 대화의 user 메시지 중 하나라도 `[overflow]` 가 있으면 400 context_length_exceeded — 한도를 넘은 대화는 이후 턴도 계속 실패하는
+//   실제 게이트웨이처럼 (01o 결론 1)
 // - `GET /requests` 는 지금까지 받은 chat/completions 요청 수를 JSON 으로 준다 — 테스트 프로세스는
 //   globalSetup 과 달라 requestCount() 를 직접 못 부르므로 HTTP 로 연다. 마지막 `/v1/models` 요청의 Authorization
 //   헤더(modelsAuth)와 마지막 chat/completions 요청의 Authorization(chatAuth)도 함께 준다 — 설정 화면이 저장한 키가
@@ -48,6 +53,10 @@ export const DRIP_MS = 1_500
 export const THINK_REPLY = ['**Planning** the answer line one\n\n', 'Second paragraph of thought.']
 /** `[think]` 조각 사이 간격 */
 export const THINK_MS = 1_500
+/** 압축 요청 답을 미루는 시간 */
+export const COMPACT_MS = 2_500
+/** 압축 요청의 답 */
+export const COMPACT_SUMMARY = '## Objective\nfake summary of the earlier conversation'
 /** 답마다 돌려주는 usage (OpenAI 모양) */
 export const FAKE_USAGE = { prompt_tokens: 1_000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 300 } }
 const USAGE_CHUNK = `data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 0, model: 'echo', choices: [], usage: FAKE_USAGE })}\n\n`
@@ -121,12 +130,13 @@ export async function startFakeLlm(): Promise<FakeLlm> {
   let lastChatText = ''
   /** 답하기 전에 끊긴 `[slow]`·`[late]` 요청의 마지막 user 글 (받은 순서) */
   const cut: string[] = []
+  let compactions = 0
   const server = http.createServer((req, res) => {
     let raw = ''
     req.on('data', (part) => (raw += part))
     req.on('end', () => {
       if (req.method === 'GET' && req.url === '/requests') {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ count, modelsAuth, chatAuth, chatModels, lastChat, lastChatText, cut }))
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ count, modelsAuth, chatAuth, chatModels, lastChat, lastChatText, cut, compactions }))
         return
       }
       if (req.method === 'GET' && req.url === '/v1/models') {
@@ -151,6 +161,23 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       }
       lastChatText = messages.map(contentText).join('\n')
       const text = lastUserText(messages)
+      if (!body.tools?.length && text.includes('<conversation>')) {
+        compactions++
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        const timer = setTimeout(() => {
+          res.write(chunk({ role: 'assistant', content: COMPACT_SUMMARY }))
+          res.write(chunk({}, 'stop'))
+          res.write(USAGE_CHUNK)
+          res.end('data: [DONE]\n\n')
+        }, COMPACT_MS)
+        res.on('close', () => clearTimeout(timer))
+        return
+      }
+      if (messages[messages.length - 1]?.role !== 'tool' && messages.some((message) => message.role === 'user' && contentText(message).includes('[overflow]'))) {
+        res.writeHead(400, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: "This model's maximum context length is 8000 tokens. However, your messages resulted in 9000 tokens.", code: 'context_length_exceeded' } }))
+        return
+      }
       if (text.includes('[fail]')) {
         const fail = (): void => {
           res.writeHead(500, { 'content-type': 'application/json' })
@@ -189,7 +216,8 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       }
       const reply = last?.role !== 'tool' && text.includes('[md]')
         ? MARKDOWN_REPLY
-        : (last?.role !== 'tool' && text.includes('[lead]') ? '\n\n' : '') + (last?.role === 'tool' ? `tool: ${contentText(last)}` : `echo: ${text}`)
+        : (last?.role !== 'tool' && text.includes('[lead]') ? '\n\n' : '') + (last?.role === 'tool' ? `tool: ${contentText(last)}` : `echo: ${text}`) +
+          (last?.role !== 'tool' && /\[pad:(\d+)\]/.test(text) ? ` ${'x'.repeat(Number(/\[pad:(\d+)\]/.exec(text)![1]))}` : '')
       const half = Math.ceil(reply.length / 2)
       const answer = (): void => thinkFirst(() => {
         res.write(chunk({ role: 'assistant', content: reply.slice(0, half) }))

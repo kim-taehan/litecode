@@ -164,6 +164,12 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   (`msg_…`)는 앱이 정할 수 있다(중복 409). 새 폴더의 첫 `/api/command` 는 빈 배열 — 0.1~0.3초 뒤 다시. 명령 파일 변경은 재시작해야 반영
 - **`/message` 로 스텝 다시 그리기** (실측 2026-10-01, `_workspace/01e_trajectory.md`): assistant 메시지 하나 = 스텝 하나, `time.created` 는 step.started(= 응답이 오기 시작한 때) — 모델 대기는 직전 시각부터 잰다. 도구 파트 `{type:"tool", name, state:{status, input, content, structured, error?}, time:{created, ran, completed}}`, 실패는 `status:"error"` + `error.message` 뿐(코드 없음). 지시문(AGENTS.md)이 대화 중 바뀌면 `type:"system"` 메시지가 남고 그 턴 user 메시지 뒤에 `<system-update>…Instructions from: <경로>…` 로 LLM 에 실린다. 도구 목록 변경 이력은 없다
 - **opencode pty** (실측 2026-10-01, 1.18.18): `POST /api/pty?location[directory]=<dir>` `{cwd, title}` → `{id, command:"/bin/zsh", args:["-l"], cwd, status, pid}` (args 는 주지 않는다 — 서버가 `-l` 을 붙인다). 웹소켓 `GET /api/pty/{id}/connect?location[directory]=<dir>&cursor=0` 에 **Basic Authorization 헤더 그대로**(없으면 401). 키 바이트를 그대로 보내고, 출력은 텍스트 프레임, 바이너리 프레임(`0x00{"cursor":N}`)은 제어라 버린다. `cursor=0` 이면 지금까지 출력을 재생. **다른 폴더로 붙으면 열리지도 닫히지도 않고 멈춘다**(기한 필요). 크기는 `PUT /api/pty/{id}` `{size:{rows,cols}}`. opencode 가 끝나면 셸도 끝난다. 네이티브 모듈 불필요 — 메인은 `ws`(Electron 33 의 Node 20 엔 전역 WebSocket 이 없다), 화면은 `@xterm/xterm`. 셸은 opencode env 를 물려받는다(서버 비밀번호 포함)
+- **자동 압축** (실측 2026-10-02, `_workspace/01o_compaction.md`): 모델 `limit.context` 가 0/없으면 안 돈다 — 대화가 한도를 넘으면 `step.failed` 이고 그 대화는 이후 모든 턴이 실패한다.
+  한도를 주면 매 스텝 `추정(요청 JSON 글자/4) > context − max(output, 20000)` **그리고** 직렬화 기록(도구 결과는 2000자로 셈)이 8000 토큰을 넘을 때 돈다 — 보고된 usage 와 무관.
+  그래서 큰 도구 출력이 몇 번 오면 압축 전에 한도를 넘을 수 있고, context 가 ~24000 미만이면 첫 압축 뒤 다시 못 한다. SSE 는 `session.next.compaction.started`·`.ended`(data.text=요약)
+  둘뿐이라 턴 끝 판정과 무관하고, 실패(요약 요청 오류)면 `ended` 없이 원래 요청이 나간다. 압축 뒤 앞 대화는 user 메시지 하나(`<conversation-checkpoint>`)로 바뀌고,
+  `/message` 엔 `type:"compaction"` 이 끼며 원래 메시지는 남는다. `limit` 엔 **`output` 이 필수**다(빠지면 설정 파일 전체가 무시돼 provider 가 사라진다).
+  화면(이슈 #5): 진행 줄 `compaction`(요약 중 → 구분선, ended 없이 step.* 면 지움), 한도 초과 오류는 "새 대화로" 안내(`contextOverflow.ts`), 설정의 컨텍스트 길이는 기본값 없음·24000 미만 경고, 통계 % 에 문턱 눈금
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.

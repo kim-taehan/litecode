@@ -1,0 +1,51 @@
+/* 자동 요약 — 구분선은 모드 구분선과 같은 모양(가운데 글자 + 양옆 얇은 선, 여기는 점선), 요약 중 줄은 진행 줄처럼 숨 쉰다 */
+.compaction-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 12px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.compaction-divider::before,
+.compaction-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 0.5px dashed var(--border-strong);
+}
+
+.compaction-running {
+  padding: 4px 0;
+  color: var(--accent);
+  font-size: calc(var(--chat-font-size, 14px) - 1px);
+}
+
+.compaction-running__text {
+  animation: turn-shimmer 1.6s ease-in-out infinite;
+}
+
+/* 통계 줄 컨텍스트 막대의 압축 문턱 눈금 */
+.stats-bar { position: relative; }
+
+.stats-bar__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--warn);
+}
+
+/* 설정 > 모델 — 컨텍스트 길이 안내·경고 */
+.context-length-hint {
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.context-length-hint--warn { color: var(--warn); }
+
+@media (prefers-reduced-motion: reduce) {
+  .compaction-running__text { animation: none; }
+}

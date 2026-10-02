@@ -127,6 +127,7 @@ export function engineConfig(providers: ProviderConfig[], proxy: Pick<KeyProxy, 
       name: config.displayName,
       options: { baseURL: proxy.baseURLFor(config.id), apiKey: proxy.token },
       // 컨텍스트 길이를 주면 opencode 가 /api/model 의 limit 으로 그대로 안다 (01_probe 2026-10-01). output 0 = 모름 (요청에 안 실린다)
+      // output 은 빼면 안 된다 — limit 에 output 이 없으면 설정 파일 전체가 무시돼 provider 가 사라진다. 한도를 줘야 자동 압축이 돈다 (01o)
       models: Object.fromEntries(
         config.models.map((model) => [
           model.id,
