@@ -197,6 +197,10 @@ Electron 렌더러 (React)          Electron 메인 프로세스
     `ctx.llm` 은 턴 안의 요약·이음 user 를 그 턴 것으로 보고 이음의 답을 그 턴 답으로 쓴다
   - **diff** (#20): `apply_patch` 는 모델 id 에 `gpt-` 가 있을 때만 있고 그때는 edit·write 가 없다. edit `metadata.filediff{file(절대), patch}`, write `metadata{filepath, exists}`,
     apply_patch `metadata.files[]{filePath, type, patch}`. git 이 아닌 폴더의 worktree 는 `/` — 경로는 세션 폴더 기준으로 앱이 계산
+  - **하위 작업(task)** (#31, 실측 2026-10-02 `_workspace/probe-31/`): 한 메시지의 task 여럿은 동시에 돈다. 자식 세션은 `session.created{info.parentID}`, 부모 task 파트
+    `state.metadata.sessionId` 로 이어진다. 자식 이벤트·승인 요청(sessionID = 자식)은 같은 `/event` 로 오고, 부모 턴 끝은 부모 idle 만 본다. **자식은 부모 모드 권한을 안 물려받는다** —
+    매번 묻기에서 general 이 묻지 않고 bash 를 실행했고 레거시 explore 엔 bash 가 있다 → 매번 묻기는 `general-ask`(묻는 하위 에이전트)만, 계획은 `task: deny`, `general-ask` 는 다른 모드에서 deny
+    (`hidden` 으로는 목록에서 안 빠진다). 부모 abort 는 자식까지 멈춘다(task 오류 "Task cancelled"). 재시작하면 task·자식 도구가 running 으로 남는다. 자식 토큰은 부모 합계에 안 넣는다(dsh)
   - **옛 대화 이어 쓰기** (#21): 신규 세대 기록과 레거시 기록은 같은 세션 id 여도 서로 안 보인다. 다시 열 때 신규 기록(`/api/session/{id}/message`, 읽기 전용)을 앞에 붙이고,
     레거시 기록이 없고 신규 기록이 있는 세션의 첫 레거시 입력 직전에 옛 user·답 글을 `prompt_async {noReply, parts:[{synthetic:true, text:"<previous-conversation>…"}]}` 로 한 번
     (id 는 이번 입력 바로 앞, 뒤에서 12,000자). "한 번" 은 DB 의 레거시 기록 유무로 판단(`limit=1`). 추론 과정 탭엔 옛 기록이 없다. `src/services/migrate.ts`
@@ -273,3 +277,4 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-10-02 | main 머지는 리더가 직접 검증(typecheck·단위·실물 전체 초록)한 뒤 묻지 않고 한다 | skills/litecode-build | 사용자 "머지까지 알아서 해" |
 | 2026-10-02 | 채팅을 opencode 레거시 경로로 — "신규 세대만 쓴다" 원칙 폐기, 프로토콜 절에 레거시 묶음 | CLAUDE.md | 사용자 결정 (MCP·task) |
 | 2026-10-02 | 디자인 이야기는 전부 HTML 시안(Artifact 캔버스)으로 — 구현자에겐 "시안: <링크>" | skills/litecode-build, agents/litecode-dev | 사용자 "모든 디자인은 html 시안으로 말한다" |
+| 2026-10-02 | 실물 테스트 전체는 리더만 머지 전에 — 구현자는 자기 실물 파일만 | skills/litecode-build, agents/litecode-dev | 사용자 "실물 테스트는 니가 하는걸로 하자" (에이전트 50분대, 전체를 두 번 돌림) |
