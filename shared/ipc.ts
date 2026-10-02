@@ -8,6 +8,8 @@ import type { Conversation, ShellCard } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 import type { Trajectory } from '../src/services/trajectory.ts'
 import type { TurnItem } from '../src/services/turnProgress.ts'
+import type { Settings } from '../src/services/settings.ts'
+import type { NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -17,6 +19,8 @@ export type { Project } from '../src/services/projects.ts'
 export type { Conversation, ShellCard } from '../src/services/sessions.ts'
 export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
+export type { Appearance, Settings } from '../src/services/settings.ts'
+export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -55,6 +59,18 @@ export const Channel = {
   /** 메인 → 화면 (runId, chunk) */
   SHELL_DATA: 'shell:data',
   SHARE_SHELL: 'shell:share',
+  GET_SETTINGS: 'settings:get',
+  SET_SETTINGS: 'settings:set',
+  OPEN_SETTINGS_FILE: 'settings:open-file',
+  GET_NOTIFICATIONS: 'notifications:get',
+  VIEW_CONVERSATION: 'notifications:view',
+  TAKE_PENDING_OPEN: 'notifications:take-open',
+  /** 메인 → 화면 (NoticeState) */
+  NOTIFICATIONS_CHANGED: 'notifications:changed',
+  /** 메인 → 화면 (Toast) */
+  NOTIFICATION_TOAST: 'notifications:toast',
+  /** 메인 → 화면 — PC 알림을 눌렀다. 화면은 takePendingOpen 으로 열 곳을 당겨 간다 */
+  NOTIFICATION_OPEN: 'notifications:open',
 } as const
 
 export interface LitecodeBridge {
@@ -128,6 +144,21 @@ export interface LitecodeBridge {
   onShellData(listener: (runId: string, chunk: string) => void): () => void
   /** 카드를 AI 에게 — 그 대화 엔진 세션의 맥락에만 넣는다(LLM 은 안 돈다). 세션이 없으면 그 모델로 만든다. 턴이 도는 중이면 거절 */
   shareShell(conversationId: string, cardId: string, providerId: string, modelId: string): Promise<{ ok: boolean; sessionId?: string; error?: string }>
+  /** 설정 > 일반의 값 (ctx.settings) */
+  getSettings(): Promise<Settings>
+  /** 바꿀 값만 — 저장된 전체 값을 준다. 잘못된 값이면 지금 언어의 사유로 거절 */
+  setSettings(patch: Partial<Settings>): Promise<Settings>
+  /** userData/settings.json 을 OS 연결 프로그램으로 연다 (없으면 만든다). 못 열면 지금 언어의 사유로 거절 */
+  openSettingsFile(): Promise<void>
+  /** 대화별 알림 상태 (실행 중·답 필요·안 본 끝남) — 대화 행·프로젝트 점 (ctx.notifications) */
+  getNotifications(): Promise<NoticeState>
+  /** 화면이 지금 보여 주는 대화 — 앱이 앞이면 읽음, 그 대화의 사건은 알리지 않는다 */
+  viewConversation(conversationId?: string): Promise<void>
+  /** 누른 PC 알림의 열 곳 — 한 번 당겨 가면 비워진다 */
+  takePendingOpen(): Promise<OpenTarget | undefined>
+  onNotificationsChanged(listener: (state: NoticeState) => void): () => void
+  onNotificationToast(listener: (toast: Toast) => void): () => void
+  onNotificationOpen(listener: () => void): () => void
 }
 
 declare global {

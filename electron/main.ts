@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -17,11 +17,25 @@ import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
 import { TrajectoryService } from '../src/services/trajectory.ts'
 import { existingFiles, projectFile } from '../src/services/fileMentions.ts'
+import { SettingsService, type Settings } from '../src/services/settings.ts'
+import { NotificationsService } from '../src/services/notifications.ts'
+import { recordingHost, systemHost, type NotifyTestRecord, type WindowAccess } from './notificationHost.ts'
+import { tr } from '../src/i18n.ts'
 import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { canSealKeys } from './keyStorage.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// 앱은 하나만 (userData 마다 — 실물 테스트는 --user-data-dir 로 갈려 서로 막지 않는다). 두 번째 실행은 첫 실행의 창을 앞으로 부르고(second-instance)
+// 바로 끝난다. 서비스를 올리기 **전에** 끝내야 한다 — ctx.engine 은 올라오자마자 PID 기록으로 "이전 실행의" opencode 를 거두는데,
+// 두 번째 실행에겐 그것이 첫 실행의 살아 있는 opencode 다. 그래서 끝날 때까지 이 모듈의 나머지를 돌리지 않는다
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0)
+  await new Promise<never>(() => {})
+}
+// Windows 토스트는 이 id 가 없으면 안 뜨거나 앱 이름이 틀린다 (electron-builder.yml appId 와 같게 — Windows 실행은 미검증)
+if (process.platform === 'win32') app.setAppUserModelId('com.litecode.desktop')
 
 // Cordis 컨텍스트는 메인 프로세스에 하나만 둔다 — 렌더러는 IPC 로만 닿는다.
 const ctx = new Context()
@@ -29,6 +43,13 @@ const ctx = new Context()
 const mounted: { dispose(): Promise<void> }[] = []
 // userData 는 --user-data-dir 스위치를 따른다 (실물 테스트가 이걸로 격리한다).
 const userData = app.getPath('userData')
+// 설정 > 일반 — 맨 먼저 올린다: 언어(메인 오류 문구)·테마(첫 창 배경)가 다른 서비스·창보다 먼저 정해지게.
+// 실물 테스트는 LITECODE_TEST_LANGUAGE=ko 로 첫 실행 언어를 한국어로 고정한다(셀렉터가 한국어). 제품은 이 변수를 안 쓴다
+const settingsFiber = ctx.plugin(SettingsService, {
+  file: path.join(userData, 'settings.json'),
+  defaults: process.env.LITECODE_TEST_LANGUAGE === 'ko' ? { language: 'ko' } : undefined,
+})
+mounted.push(settingsFiber)
 mounted.push(ctx.plugin(ProviderRegistry, {
   file: path.join(userData, 'providers.json'),
   keysFile: path.join(userData, 'provider-keys.json'),
@@ -177,9 +198,43 @@ function bootstrap(ctx: Context): void {
   handle(ctx, Channel.SHARE_SHELL, async (_event, conversationId: string, cardId: string, providerId: string, modelId: string) =>
     ctx.sessions.shareShell(conversationId, cardId, providerId, modelId),
   )
+  handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
+  handle(ctx, Channel.SET_SETTINGS, async (_event, patch: Partial<Settings>) => ctx.settings.set(patch))
+  // dsh 처럼 설정 정본 파일을 연다 (없으면 만든다). openPath 는 OS 연결 프로그램 — 실패하면 사유 문자열을 준다
+  handle(ctx, Channel.OPEN_SETTINGS_FILE, async () => {
+    const file = ctx.settings.ensureFile()
+    if (!file || (await shell.openPath(file))) throw new Error(tr('settings.openFileError'))
+  })
+  // 테마는 nativeTheme 에만 넣는다 — 렌더러의 prefers-color-scheme 이 즉시 따라와 CSS 미디어 쿼리 하나로 셋이 다 된다 (01f 실측)
+  ctx.on('settings/changed', (settings) => {
+    nativeTheme.themeSource = settings.appearance
+  })
 }
-bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory', 'shell']
+bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'terminals', 'trajectory', 'shell', 'settings']
 mounted.push(ctx.plugin(bootstrap))
+
+/** 모든 앱 창에 보낸다 */
+function broadcast(channel: string, ...args: unknown[]): void {
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
+}
+
+// 알림 IPC — bootstrap 과 따로 둔다: ctx.notifications 를 빼면 이 줄들만 사라지고 나머지 앱은 그대로다
+function notificationsBridge(ctx: Context): void {
+  handle(ctx, Channel.GET_NOTIFICATIONS, async () => ctx.notifications.snapshot())
+  handle(ctx, Channel.VIEW_CONVERSATION, async (_event, conversationId?: string) => ctx.notifications.view(conversationId))
+  handle(ctx, Channel.TAKE_PENDING_OPEN, async () => ctx.notifications.takePendingOpen())
+  ctx.on('notifications/changed', (state) => broadcast(Channel.NOTIFICATIONS_CHANGED, state))
+  ctx.on('notifications/toast', (toast) => broadcast(Channel.NOTIFICATION_TOAST, toast))
+  ctx.on('notifications/open', () => broadcast(Channel.NOTIFICATION_OPEN))
+  // 창이 앞으로 오면 보고 있던 대화를 읽음으로 (뒤에 있는 동안 끝난 것)
+  ctx.effect(() => {
+    const onFocus = () => ctx.notifications.focused()
+    app.on('browser-window-focus', onFocus)
+    return () => void app.off('browser-window-focus', onFocus)
+  })
+}
+notificationsBridge.inject = ['notifications']
+mounted.push(ctx.plugin(notificationsBridge))
 
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).
 // GUI 앱에는 자식을 데려가 줄 터미널이 없어 흘려보내면 opencode 가 남는다 (closed-code app/quitGuard.ts). Cordis 의 dispose 는
@@ -199,10 +254,31 @@ app.on('before-quit', (event) => {
 const hiddenForTests = process.env.LITECODE_TEST_HIDDEN === '1'
 if (hiddenForTests) app.dock?.hide()
 
-function createWindow(): void {
+/** 앱 창은 하나 — 알림 클릭·dock·두 번째 실행이 이 창을 앞으로 부른다. macOS 에서 창을 닫으면 없다(앱은 산다) */
+let mainWindow: BrowserWindow | undefined
+const windows: WindowAccess = {
+  current: () => mainWindow,
+  reveal() {
+    const win = mainWindow ?? createWindow()
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  },
+}
+// 실물 테스트는 OS 알림·배지·창 앞으로 부르기 대신 기록하고, 앞/뒤 판정을 주입한다 — 사용자 화면에 알림을 띄우지 않는다.
+// 테스트는 app.evaluate 로 globalThis.__litecodeNotifyTest 의 record 를 읽고, emit 으로 ctx.llm 의 이벤트를 흉내 낸다. 제품은 이 길이 없다
+const notifyTest: NotifyTestRecord | undefined = hiddenForTests ? { foreground: false, shown: [], badge: [], reveals: 0 } : undefined
+const notifyHost = notifyTest ? recordingHost(notifyTest) : systemHost(windows)
+if (notifyTest) Object.assign(globalThis, { __litecodeNotifyTest: { record: notifyTest, emit: (name: string, ...args: unknown[]) => (ctx.emit as (...all: unknown[]) => void)(name, ...args) } })
+mounted.push(ctx.plugin(NotificationsService, notifyHost))
+app.on('second-instance', () => notifyHost.reveal())
+
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    // 첫 그림 전 깜빡임 막기 — 테마 바탕(--bg)과 같은 색. themeSource 는 창보다 먼저 넣었다
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#151517' : '#ffffff',
     show: !hiddenForTests,
     paintWhenInitiallyHidden: true,
     webPreferences: {
@@ -236,9 +312,23 @@ function createWindow(): void {
     // __dirname 은 dist-electron/electron — vite 는 <root>/dist/renderer 에 쓴다 (설치본에선 app.asar 안의 같은 자리)
     void win.loadFile(path.join(__dirname, '../../dist/renderer/index.html'))
   }
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = undefined
+  })
+  return win
 }
 
-void app.whenReady().then(createWindow)
+void app.whenReady().then(async () => {
+  await settingsFiber // 설정 서비스가 올라온 뒤 — 테마를 창보다 먼저 정한다
+  nativeTheme.themeSource = ctx.settings.get().appearance
+  createWindow()
+})
+
+// macOS: 창을 닫아도 앱은 산다 — dock 을 누르면 새 창 (알림 클릭과 같은 창 함수)
+app.on('activate', () => {
+  if (app.isReady() && !mainWindow) createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

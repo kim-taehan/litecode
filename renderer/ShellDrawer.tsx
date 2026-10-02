@@ -3,16 +3,28 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './triggers.css'
+import { useT, type Translate } from './settingsStore.ts'
 
 // 본문 아래 터미널 칸 (closed-code 셸 서랍) — 그 프로젝트 폴더의 셸 하나. ⌘↓ 로 펴서 내려오고 ⌘↑ 로 접는다(App). `!명령` 은 여기가
 // 아니라 대화 카드로 돈다. 대화 맥락에는 안 들어간다.
 // 셸은 메인(ctx.terminals → 엔진)이 쥐고 출력도 쌓아 둔다: 칸을 접었다 펴면 쌓인 출력을 받아 다시 그리고, 그 뒤 조각만 이어 쓴다
 // (end — 받은 출력의 끝 위치 — 이하인 조각은 이미 그렸다). 키는 그대로 셸로 보낸다.
 
-const ENDED = '\r\n\x1b[2m[셸이 끝났습니다 — 키를 누르면 새로 엽니다]\x1b[0m\r\n'
+const ended = (t: Translate) => `\r\n\x1b[2m[${t('shell.ended')}]\x1b[0m\r\n`
+
+/** xterm 은 CSS 를 따르지 않는다 — 테마 토큰(--bg 등)을 읽어 넘기고, 테마가 바뀌면(prefers-color-scheme) 다시 넘긴다 */
+function terminalTheme() {
+  const css = getComputedStyle(document.documentElement)
+  const token = (name: string) => css.getPropertyValue(name).trim()
+  return { background: token('--bg'), foreground: token('--text'), cursor: token('--accent'), selectionBackground: token('--accent-soft') }
+}
 
 /** focusSignal 이 바뀌면(⌘↓) 키를 칸으로 가져온다 */
 export function ShellDrawer({ directory, focusSignal, onClose }: { directory: string; focusSignal: number; onClose(): void }) {
+  const t = useT()
+  /** 셸 안 문구는 이미 그린 출력이라 다시 그리지 않는다 — 효과는 폴더가 바뀔 때만 다시 돈다 */
+  const tRef = useRef(t)
+  tRef.current = t
   const host = useRef<HTMLDivElement>(null)
   const screen = useRef<Terminal>(undefined)
 
@@ -25,8 +37,13 @@ export function ShellDrawer({ directory, focusSignal, onClose }: { directory: st
       fontFamily: 'Menlo, Monaco, monospace',
       fontSize: 12,
       cursorBlink: true,
-      theme: { background: '#ffffff', foreground: '#0f1115', cursor: '#4176e6', selectionBackground: '#e4edfd' },
+      theme: terminalTheme(),
     })
+    const scheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const onScheme = (): void => {
+      terminal.options.theme = terminalTheme()
+    }
+    scheme.addEventListener('change', onScheme)
     const fit = new FitAddon()
     terminal.loadAddon(fit)
     terminal.open(host.current!)
@@ -46,7 +63,7 @@ export function ShellDrawer({ directory, focusSignal, onClose }: { directory: st
     })
     const offExit = window.litecode.onTerminalExit((from) => {
       if (from !== directory) return
-      terminal.write(ENDED)
+      terminal.write(ended(tRef.current))
       drawn = 0 // 새 셸은 0 부터 센다
     })
     const resize = (): void => {
@@ -68,7 +85,7 @@ export function ShellDrawer({ directory, focusSignal, onClose }: { directory: st
         }
         resize()
       },
-      (error: Error) => terminal.write(`터미널을 열지 못했습니다: ${error.message}\r\n`),
+      (error: Error) => terminal.write(`${tRef.current('terminal.openFailed', { message: error.message })}\r\n`),
     )
     const input = terminal.onData((data) => void window.litecode.writeTerminal(directory, data).catch(() => {}))
     const observer = new ResizeObserver(resize)
@@ -78,16 +95,17 @@ export function ShellDrawer({ directory, focusSignal, onClose }: { directory: st
       offExit()
       input.dispose()
       observer.disconnect()
+      scheme.removeEventListener('change', onScheme)
       terminal.dispose()
     }
   }, [directory])
 
   return (
-    <section className="shell-drawer" aria-label="터미널">
+    <section className="shell-drawer" aria-label={t('shell.title')}>
       <div className="shell-drawer__bar">
-        <span className="shell-drawer__title">터미널</span>
+        <span className="shell-drawer__title">{t('shell.title')}</span>
         <span className="shell-drawer__path">{directory}</span>
-        <button type="button" className="shell-drawer__close" aria-label="터미널 접기" title="터미널 접기 (⌘↑)" onClick={onClose}>
+        <button type="button" className="shell-drawer__close" aria-label={t('shell.close')} title={`${t('shell.close')} (⌘↑)`} onClick={onClose}>
           ×
         </button>
       </div>

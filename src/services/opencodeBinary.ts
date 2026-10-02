@@ -1,6 +1,7 @@
 import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { tr } from '../i18n.ts'
 
 // opencode 실행 파일을 찾는다 — closed-code/desktop `electron/opencode/binary.ts` 의 순서를 따른다.
 // 순서: `OPENCODE_BIN` > 앱에 동봉 > PATH > 알려진 설치 자리. 동봉이 PATH 를 이긴다 — 실측한 버전(1.18.18)으로 고정한다.
@@ -52,7 +53,7 @@ export function findOpencodeBinary(
     if (executable(explicit)) return { path: explicit, searched }
   }
   if (bundled) {
-    searched.push(`${bundled} (동봉)`)
+    searched.push(tr('error.binaryBundled', { path: bundled }))
     if (executable(bundled)) return { path: bundled, searched }
   }
 
@@ -68,8 +69,8 @@ export function findOpencodeBinary(
 
 export function notFoundMessage(lookup: BinaryLookup): string {
   return [
-    'opencode 실행 파일을 찾지 못했습니다. OPENCODE_BIN 환경변수로 경로를 지정하거나 opencode 를 설치하세요.',
-    '찾아본 자리:',
+    tr('error.binaryNotFound'),
+    tr('error.binarySearched'),
     ...lookup.searched.map((entry) => `  · ${entry}`),
   ].join('\n')
 }

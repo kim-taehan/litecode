@@ -1,4 +1,5 @@
 import { Context, Service } from 'cordis'
+import { tr } from '../i18n.ts'
 
 // 입력창 트리거 등록소 (ctx.triggers) — `@`·`/`·`!` 같은 트리거 문자와 그 후보·실행을 플러그인이 등록한다
 // (사용자 결정 2026-10-01, _workspace/00_next_triggers.md). 화면은 어떤 트리거가 있는지 모르고 IPC 로 "이 입력의 후보" /
@@ -141,7 +142,7 @@ export class TriggerRegistry extends Service {
 
   async pick(scope: TriggerScope, char: string, id: string, action: 'pick' | 'drill'): Promise<TriggerResult> {
     const source = this.sources.get(char)
-    if (!source) return { kind: 'error', message: `${char} 트리거가 없습니다` }
+    if (!source) return { kind: 'error', message: tr('error.noTrigger', { char }) }
     return source.pick(scope, id, action)
   }
 

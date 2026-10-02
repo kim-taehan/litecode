@@ -64,7 +64,8 @@ afterAll(async () => {
 })
 
 const replies = () => page.locator('.bubble--assistant')
-const tab = (name: 'Chat' | 'Trajectory') => page.getByRole('tab', { name })
+// 탭 이름은 한국어 화면에서 '대화'·'추론 과정' (사용자 결정 2026-10-02) — 테스트 앱은 한국어로 뜬다
+const tab = (name: 'Chat' | 'Trajectory') => page.getByRole('tab', { name: name === 'Chat' ? '대화' : '추론 과정' })
 const rows = () => page.locator('.trajectory__row')
 const tags = () => page.locator('.trajectory__row .trajectory__tag').allTextContents()
 const rowTexts = () => page.locator('.trajectory__row').allInnerTexts()

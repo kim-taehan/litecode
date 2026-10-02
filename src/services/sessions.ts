@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { History } from './llm.ts'
 import { shellContext, type ShellResult } from './shell.ts'
 import './llm.ts'
+import { tr } from '../i18n.ts'
 
 // 대화 목록 정보 (ctx.sessions) — 재시작해도 대화 목록이 남게 작은 JSON 파일 하나에 둔다 (앱에서는 userData/sessions.json).
 // 대화 **내용**의 정본은 opencode DB 다 — 여기는 목록에 보일 것만 쥔다: opencode 는 제목을 안 만들고 time.updated 도 안 바꾼다
@@ -16,6 +17,10 @@ import './llm.ts'
 declare module 'cordis' {
   interface Context {
     sessions: SessionsService
+  }
+  interface Events {
+    /** 대화가 목록에서 빠졌다 (수동 삭제·보관 개수 초과) — ctx.notifications 가 그 알림을 거둔다 */
+    'sessions/removed'(ids: string[]): void
   }
 }
 
@@ -107,7 +112,10 @@ export class SessionsService extends Service {
       removed = [...same].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, Math.max(0, same.length - limit))
       return dropping(conversations, stored.orphans, removed)
     })
-    if (removed.length > 0) void this.sweep()
+    if (removed.length > 0) {
+      this.ctx.emit('sessions/removed', removed.map((entry) => entry.id))
+      void this.sweep()
+    }
     return removed.map((entry) => entry.id)
   }
 
@@ -167,13 +175,14 @@ export class SessionsService extends Service {
   /** 목록에서 빼고 엔진 세션도 지운다. 되돌리기 없음 */
   async remove(id: string): Promise<void> {
     await this.update((stored) => dropping(stored.conversations, stored.orphans, stored.conversations.filter((entry) => entry.id === id)))
+    this.ctx.emit('sessions/removed', [id])
     void this.sweep()
   }
 
   /** 대화 하나의 말풍선 — 엔진 세션이 아직 없으면(첫 메시지가 세션을 만들기 전에 실패) 빈 목록 */
   async history(id: string): Promise<History> {
     const conversation = (await this.read()).conversations.find((entry) => entry.id === id)
-    if (!conversation) return { messages: [], error: '없는 대화입니다' }
+    if (!conversation) return { messages: [], error: tr('error.noConversation') }
     if (!conversation.engineSessionId) return { messages: [] }
     const shared = new Set((conversation.shells ?? []).flatMap((card) => (card.sharedMessageId ? [card.sharedMessageId] : [])))
     const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId, shared)

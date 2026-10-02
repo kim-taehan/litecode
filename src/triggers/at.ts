@@ -2,6 +2,7 @@ import type { Context } from 'cordis'
 import type { TriggerCandidate } from '../services/triggers.ts'
 import '../services/triggers.ts'
 import '../services/llm.ts'
+import { tr } from '../i18n.ts'
 
 // `@` 파일 참조 — 본문에 `@경로` 텍스트만 넣는다(사용자 결정 2026-10-01, dsh 방식). 모델이 read 도구로 읽는다.
 // opencode 의 prompt.files 는 쓰지 않는다 — openai-compatible 경로에선 텍스트 첨부가 step.failed 를 내고 그 세션의 이후 턴이
@@ -47,7 +48,7 @@ function candidate(entry: { path: string; type: 'file' | 'directory' }): Trigger
     label: trimmed.slice(cut + 1) + (folder ? '/' : ''),
     detail: cut > 0 ? trimmed.slice(0, cut) : undefined,
     icon: folder ? 'folder' : 'file',
-    group: '파일',
+    group: tr('trigger.group.files'),
     drill: folder,
   }
 }

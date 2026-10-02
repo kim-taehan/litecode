@@ -35,6 +35,8 @@ export function isolatedEnv(root: string): NodeJS.ProcessEnv {
     XDG_CONFIG_HOME: path.join(root, 'xdg', 'config'),
     XDG_DATA_HOME: path.join(root, 'xdg', 'data'),
     XDG_STATE_HOME: path.join(root, 'xdg', 'state'),
+    // 앱의 첫 실행 언어를 한국어로 — 실물 테스트의 셀렉터·기대 문구가 한국어다 (제품 기본은 영어, settings.json 이 있으면 그것)
+    LITECODE_TEST_LANGUAGE: 'ko',
   }
 }
 

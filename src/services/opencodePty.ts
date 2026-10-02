@@ -1,5 +1,6 @@
 import WebSocket from 'ws'
 import type { EngineConnection } from './engine.ts'
+import { tr } from '../i18n.ts'
 
 // opencode 서버의 pty 에 붙는다 (ctx.llm.openTerminal 만 쓴다). 셸은 opencode 가 띄운다 — node-pty 같은 네이티브 모듈이 없다
 // (closed-code electron/pty 와 같은 길). 실측 2026-10-01, opencode 1.18.18 (closed-code 의 1.17.18 실측과 같았다):
@@ -32,7 +33,7 @@ export async function openPty(conn: EngineConnection, directory: string, on: Ter
     headers: { ...conn.headers, 'content-type': 'application/json' },
     body: JSON.stringify({ cwd: directory, title: 'litecode' }),
   })
-  if (!created.ok) throw new Error(`터미널 생성 실패 (${created.status})`)
+  if (!created.ok) throw new Error(tr('error.ptyCreate', { status: created.status }))
   const { id } = ((await created.json()) as { data: { id: string } }).data
 
   const socket = new WebSocket(`${conn.url.replace(/^http/, 'ws')}/api/pty/${id}/connect?${new URLSearchParams({ ...location, cursor: '0' })}`, {
@@ -40,9 +41,9 @@ export async function openPty(conn: EngineConnection, directory: string, on: Ter
   })
   socket.on('error', () => {}) // 끊김은 close 로 알린다
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => (socket.terminate(), reject(new Error('터미널 연결 시간 초과'))), OPEN_TIMEOUT_MS)
+    const timer = setTimeout(() => (socket.terminate(), reject(new Error(tr('error.ptyTimeout')))), OPEN_TIMEOUT_MS)
     socket.once('open', () => (clearTimeout(timer), resolve()))
-    socket.once('error', (error) => (clearTimeout(timer), reject(new Error(`터미널 연결 실패: ${error.message}`))))
+    socket.once('error', (error) => (clearTimeout(timer), reject(new Error(tr('error.ptyConnect', { message: error.message })))))
   })
   socket.on('message', (data, binary) => {
     if (!binary) on.data(data.toString())

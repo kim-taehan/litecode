@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ProviderSummary } from '../shared/ipc.ts'
 import { findModel, type ModelRef } from './modelChoice.ts'
+import { useT } from './settingsStore.ts'
 
 interface ModelSelectProps {
   providers: ProviderSummary[]
@@ -12,6 +13,7 @@ interface ModelSelectProps {
 /** 입력창 아래 모델 드롭다운 (dsh ui-model-selection 참조). 설정의 모든 모델을 provider 묶음으로 보이고, 지금 모델 줄에 체크.
  *  열면 그 줄에 포커스, ↑/↓ 로 옮기고 Enter·클릭으로 고른다. Esc·바깥 클릭은 고르지 않고 닫는다. 닫히면 포커스는 버튼으로 */
 export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   // 바꾼 뒤 버튼 위에 잠깐 띄우는 작은 알림 — 바뀐 것을 알아채게 (사용자 요청 2026-10-01)
   const [toast, setToast] = useState<string>()
@@ -21,9 +23,9 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const current = findModel(providers, value)
-  const label = current?.model.displayName ?? (providers.length === 0 ? '모델 불러오는 중…' : '모델 없음')
+  const label = current?.model.displayName ?? (providers.length === 0 ? t('model.loading') : t('model.none'))
   // 지워진 모델은 dsh 처럼 저장된 provider/모델 id 를 보여 준다 (툴팁)
-  const detail = current ? `${current.provider.displayName} · ${current.model.id}` : value && `${value.providerId}/${value.modelId} — 설정에 없습니다`
+  const detail = current ? `${current.provider.displayName} · ${current.model.id}` : value && t('model.missing', { ref: `${value.providerId}/${value.modelId}` })
 
   const rows = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])]
 
@@ -72,7 +74,7 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
         type="button"
         className="model-select__trigger"
         ref={triggerRef}
-        aria-label={`모델: ${label}`}
+        aria-label={t('model.label', { name: label })}
         aria-haspopup="menu"
         aria-expanded={open}
         title={detail}
@@ -86,7 +88,7 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
         </svg>
       </button>
       {open && (
-        <div className="model-menu" role="menu" aria-label="모델" ref={menuRef} onKeyDown={onMenuKeyDown}>
+        <div className="model-menu" role="menu" aria-label={t('model.menu')} ref={menuRef} onKeyDown={onMenuKeyDown}>
           {providers
             .filter((provider) => provider.models.length > 0)
             .map((provider) => (
@@ -105,7 +107,7 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
                       onChange({ providerId: provider.id, modelId: model.id })
                       close()
                       if (!changed) return
-                      setToast(`${model.displayName}(으)로 바뀜`)
+                      setToast(t('model.changed', { name: model.displayName }))
                       clearTimeout(toastTimer.current)
                       toastTimer.current = setTimeout(() => setToast(undefined), 2_000)
                     }}

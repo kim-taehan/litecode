@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { statsReadings, type ChatStats } from './stats.ts'
+import { useT } from './settingsStore.ts'
 
 // 입력창 아래 통계 줄 — dsh ui-chat StatsPills(⏱·🗄 두 칸)와 ui-conversation ContextMeter(◔) 를 한 줄에.
 // dsh 는 눌러서 여는 팝업이지만 여기서는 머물면(또는 포커스) 뜬다 (00_request "호버 팝업")
@@ -105,6 +106,7 @@ const Ring = ({ percent }: { percent?: number }) => (
 )
 
 export function StatsBar({ stats }: { stats?: ChatStats }) {
+  const t = useT()
   const r = statsReadings(stats)
   const percent = r.percent === undefined ? '—' : `${r.percent}%`
   const c = stats?.context
@@ -116,28 +118,28 @@ export function StatsBar({ stats }: { stats?: ChatStats }) {
 
   return (
     <div className="composer-stats">
-      <Pill icon={<GaugeIcon />} parts={r.pace} title="세션 통계" align="left">
+      <Pill icon={<GaugeIcon />} parts={r.pace} title={t('stats.session')} align="left">
         <Rows
           rows={[
-            ['LLM 시간', r.session.llm],
-            ['도구 시간', r.session.tool],
-            ['첫 토큰까지 평균 (TTFT)', r.session.ttft],
-            ['초당 토큰 (TPS)', r.session.tps],
+            [t('stats.llmTime'), r.session.llm],
+            [t('stats.toolTime'), r.session.tool],
+            [t('stats.ttft'), r.session.ttft],
+            [t('stats.tps'), r.session.tps],
           ]}
         />
       </Pill>
-      <Pill icon={<DatabaseIcon />} parts={r.usage} title="토큰 사용량" align="center">
+      <Pill icon={<DatabaseIcon />} parts={r.usage} title={t('stats.tokens')} align="center">
         <Rows
           rows={[
-            ['합계', r.tokens.total],
-            ['캐시 적중', r.tokens.cacheHit],
-            ['캐시 안 된 입력', r.tokens.uncached],
-            ['캐시된 입력', r.tokens.cached],
-            ['출력', r.tokens.output],
+            [t('stats.total'), r.tokens.total],
+            [t('stats.cacheHit'), r.tokens.cacheHit],
+            [t('stats.uncached'), r.tokens.uncached],
+            [t('stats.cached'), r.tokens.cached],
+            [t('stats.output'), r.tokens.output],
           ]}
         />
       </Pill>
-      <Pill icon={<Ring percent={r.percent} />} parts={[percent]} title="컨텍스트 사용" value={r.context.figures} align="right">
+      <Pill icon={<Ring percent={r.percent} />} parts={[percent]} title={t('stats.context')} value={r.context.figures} align="right">
         <div className="stats-bar">
           {r.percent !== undefined &&
             r.percent > 0 &&
@@ -152,8 +154,8 @@ export function StatsBar({ stats }: { stats?: ChatStats }) {
         <Rows
           rows={[
             // opencode 는 시스템 프롬프트·도구 정의를 따로 알려 주지 않는다 — 나누지 않고 한 줄로 (01_probe)
-            ['시스템·도구', r.context.systemAndTools, 'system'],
-            ['메시지', r.context.messages, 'messages'],
+            [t('stats.systemTools'), r.context.systemAndTools, 'system'],
+            [t('stats.messages'), r.context.messages, 'messages'],
           ]}
         />
       </Pill>

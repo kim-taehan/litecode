@@ -116,6 +116,16 @@ describe('ProjectsService', () => {
   })
 
   // 목록에서 빼기는 목록만 고친다 — 사용자 폴더는 디스크에 그대로 (00_request C)
+  it('remove 는 projects/removed 로 뺀 폴더를 알린다 — ctx.notifications 가 그 프로젝트의 알림을 거둔다', async () => {
+    const service = await projects()
+    const dir = await folder('notify')
+    await service.open(dir)
+    const removed: string[] = []
+    service['ctx'].on('projects/removed', (entry) => void removed.push(entry))
+    await service.remove(dir)
+    expect(removed).toEqual([dir])
+  })
+
   it('remove 는 목록·즐겨찾기에서만 빼고 폴더는 지우지 않는다', async () => {
     const a = await folder('alpha')
     await fs.writeFile(path.join(a, 'keep.txt'), 'x')

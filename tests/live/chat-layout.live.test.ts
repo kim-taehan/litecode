@@ -185,8 +185,8 @@ describe('채팅 답 모양·진행 표시', () => {
     await expect.poll(() => marks.last().getAttribute('aria-current')).toBe('true')
   })
 
-  it('상단: 제목 밑 Chat/Trajectory 탭 — 고른 탭은 파란 밑줄', async () => {
-    const chat = page.getByRole('tab', { name: 'Chat' })
+  it('상단: 제목 밑 대화/추론 과정 탭(테스트 언어 ko) — 고른 탭은 파란 밑줄', async () => {
+    const chat = page.getByRole('tab', { name: '대화' })
     expect(await chat.getAttribute('aria-selected')).toBe('true')
     expect(await chat.evaluate((element) => getComputedStyle(element).borderBottomColor)).toBe('rgb(65, 118, 230)')
   })

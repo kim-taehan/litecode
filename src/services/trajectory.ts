@@ -1,6 +1,7 @@
 import { Context, Service } from 'cordis'
 import { realDirectory } from './llm.ts'
 import './llm.ts'
+import { tr } from '../i18n.ts'
 
 // Trajectory 탭의 데이터 (ctx.trajectory) — 한 대화의 스텝·도구 호출을 시간 순 중립 레코드로 준다. 화면은 opencode 형식을 모른다.
 // 원천은 대화 영속화와 같은 GET /api/session/{id}/message (ctx.llm.readMessages) — 같은 응답을 Chat 은 말풍선으로(historyMessages),
@@ -89,7 +90,7 @@ export function trajectoryRecords(raw: readonly unknown[]): TrajectoryRecord[] {
     if (message.type === 'system') {
       const at = created ?? cursor
       const sources = [...(message.text ?? '').matchAll(/^Instructions from: (.+)$/gm)].map((match) => match[1]!.trim())
-      records.push({ kind: 'context', text: sources.length > 0 ? `지시문 바뀜 · ${sources.join(', ')}` : '지시문 바뀜', at })
+      records.push({ kind: 'context', text: sources.length > 0 ? tr('trajectory.contextChangedFrom', { sources: sources.join(', ') }) : tr('trajectory.contextChanged'), at })
       reach(at)
       continue
     }
@@ -108,7 +109,7 @@ export function trajectoryRecords(raw: readonly unknown[]): TrajectoryRecord[] {
       const { input = 0, output = 0, reasoning = 0, cache } = message.tokens
       step.tokens = { input, output, reasoning, cacheRead: cache?.read ?? 0 }
     }
-    if (message.error) step.error = message.error.message ?? '알 수 없는 오류'
+    if (message.error) step.error = message.error.message ?? tr('error.unknown')
     records.push(step)
     reach(step.end)
 
@@ -122,7 +123,7 @@ export function trajectoryRecords(raw: readonly unknown[]): TrajectoryRecord[] {
         result: (state.content ?? []).map((item) => item.text ?? '').join(''),
         start: part.time?.created ?? firstAt,
       }
-      if (state.status === 'error') call.error = state.error?.message ?? '알 수 없는 오류'
+      if (state.status === 'error') call.error = state.error?.message ?? tr('error.unknown')
       if (part.time?.ran !== undefined) call.ranAt = part.time.ran
       if (part.time?.completed !== undefined) call.end = part.time.completed
       if (typeof state.structured?.exit === 'number') call.exit = state.structured.exit
@@ -148,7 +149,7 @@ export class TrajectoryService extends Service {
       const conn = await this.ctx.engine.connection()
       return { records: trajectoryRecords(await this.ctx.llm.readMessages(conn, sessionId)) }
     } catch (error) {
-      return { records: [], error: `기록을 불러오지 못했습니다: ${(error as Error).message}` }
+      return { records: [], error: tr('error.trajectoryLoad', { message: (error as Error).message }) }
     }
   }
 }
