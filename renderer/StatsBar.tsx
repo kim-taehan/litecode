@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from 'react'
-import { statsReadings, type ChatStats } from './stats.ts'
+import { compactTokens, statsReadings, type ChatStats } from './stats.ts'
+import { compactionThreshold } from './compaction.ts'
+import './compaction.css'
 import { useT } from './settingsStore.ts'
 
 // 입력창 아래 통계 줄 — dsh ui-chat StatsPills(⏱·🗄 두 칸)와 ui-conversation ContextMeter(◔) 를 한 줄에.
@@ -115,6 +117,8 @@ export function StatsBar({ stats }: { stats?: ChatStats }) {
     ? ([['system', c.systemAndTools], ['messages', c.messages]] as const)
     : undefined
   const sum = parts?.reduce((total, [, size]) => total + size, 0) ?? 0
+  // 자동 요약 문턱 눈금 (01o) — 한도를 모르면(요약 꺼짐) 눈금·줄이 없다
+  const compactAt = compactionThreshold(c?.limit)
 
   return (
     <div className="composer-stats">
@@ -150,12 +154,14 @@ export function StatsBar({ stats }: { stats?: ChatStats }) {
                 style={{ width: `${(r.percent! * size) / (parts ? sum : 1)}%` }}
               />
             ))}
+          {compactAt && <div className="stats-bar__tick" style={{ left: `${compactAt.percent}%` }} title={t('stats.compactAt')} />}
         </div>
         <Rows
           rows={[
             // opencode 는 시스템 프롬프트·도구 정의를 따로 알려 주지 않는다 — 나누지 않고 한 줄로 (01_probe)
             [t('stats.systemTools'), r.context.systemAndTools, 'system'],
             [t('stats.messages'), r.context.messages, 'messages'],
+            ...(compactAt ? [[t('stats.compactAt'), `~${compactTokens(compactAt.tokens)} · ${compactAt.percent}%`] as [string, string]] : []),
           ]}
         />
       </Pill>

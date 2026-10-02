@@ -3,6 +3,7 @@ import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../share
 import { providerIdFor } from '../shared/providerId.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
 import { useT } from './settingsStore.ts'
+import { ContextLengthNotes } from './ContextLengthNotes.tsx'
 import './settings.css'
 
 // 설정 모달 — 틀은 dsh ui-settings-general SettingsRoot(왼쪽 메뉴·오른쪽 머리줄[설정 파일 열기][×]·내용, 가림막 클릭·Esc 로 닫기),
@@ -366,6 +367,7 @@ function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
           </button>
         </div>
       ))}
+      <ContextLengthNotes models={models} />
       <div className="provider-editor__model-actions">
         <button type="button" className="settings-button" disabled={busy} onClick={() => setModels((current) => [...current, { id: '', displayName: '' }])}>
           {t('models.addModel')}

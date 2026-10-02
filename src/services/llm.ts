@@ -9,6 +9,7 @@ import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
 import { contextText, messageItems, TurnTracker, type TurnItem } from './turnProgress.ts'
+import { turnError } from './contextOverflow.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
 
@@ -729,7 +730,7 @@ export class LlmService extends Service {
     }
     if (event.type === 'session.next.step.failed') {
       const error = event.data['error'] as { message?: string } | undefined
-      return { ok: false, text: texts.join(''), error: error?.message ?? tr('error.unknown'), usage: meter.usage() }
+      return { ok: false, text: texts.join(''), error: error?.message ? turnError(error.message) : tr('error.unknown'), usage: meter.usage() }
     }
     // 앱이 거절한 승인·질문 — 그 도구의 tool.failed("Tool execution interrupted") 하나로 끝나고 step.* 가 안 온다 (01f 1-d, 01i 2-c)
     if (event.type === 'session.next.tool.failed' && declined.has(String(event.data['callID']))) {
@@ -903,7 +904,12 @@ export function historyMessages(raw: OpencodeMessage[], running: boolean): Histo
       context.push({ kind: 'context', id: `context:${message.id ?? context.length}`, text: contextText(message.text ?? '') })
       continue
     }
-    if (message.type !== 'assistant') continue // 모델 바꿈·압축 등은 말풍선이 아니다
+    // 자동 압축(01o 2c) — 그 턴 user 뒤(또는 도구 스텝 사이)에 낀다. 다음 답의 진행 줄에 실어 실시간 턴과 같은 자리에 구분선
+    if (message.type === 'compaction') {
+      context.push({ kind: 'compaction', id: `compaction:${message.id ?? context.length}`, status: 'done' })
+      continue
+    }
+    if (message.type !== 'assistant') continue // 모델 바꿈 등은 말풍선이 아니다
     if (message.agent) {
       agent = message.agent
       const mode = modeOf(agent)
@@ -918,7 +924,7 @@ export function historyMessages(raw: OpencodeMessage[], running: boolean): Histo
     const completed = message.time?.completed
     if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
     else delete reply.duration // 마지막 스텝이 안 끝났다
-    if (message.error) reply.error = message.error.message ?? tr('error.unknown')
+    if (message.error) reply.error = message.error.message ? turnError(message.error.message) : tr('error.unknown')
     // 턴의 마지막 답 메시지가 정한다 — 앞 스텝의 실패한 도구(예: 계획의 "Unknown tool")는 다음 스텝이 이어 덮는다
     if (endedByDecline(message)) reply.declined = true
     else delete reply.declined

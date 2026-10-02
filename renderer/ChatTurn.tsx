@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { Attention, AttentionAnswer, TurnItem } from '../shared/ipc.ts'
 import { AttentionCard } from './Attention.tsx'
 import { DiffCard, DiffStat } from './DiffCard.tsx'
+import { CompactionMark } from './Compaction.tsx'
+import { takeCompactions } from './compaction.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
@@ -69,7 +71,9 @@ interface AssistantTurnProps {
 }
 
 export function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = [], onAnswer }: AssistantTurnProps) {
-  const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(items)
+  // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다)
+  const { compactions, rest } = takeCompactions(items)
+  const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(rest)
   const foldable = !running && !failed && work.length > 0
   const [open, setOpen] = useState(false)
   const t = useT()
@@ -77,6 +81,7 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
 
   return (
     <div className="turn" data-state={running ? 'running' : interrupted ? 'interrupted' : failed ? 'failed' : 'done'}>
+      {!running && compactions.map((item) => <CompactionMark key={item.id} item={item} />)}
       {!running &&
         (foldable ? (
           <button
@@ -96,9 +101,9 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
         ))}
       {showWork && work.length > 0 && (
         <div className="turn__work">
-          {work.map((item) => (
-            <WorkRow key={item.id} item={item} directory={directory} />
-          ))}
+          {work.map((item) =>
+            item.kind === 'compaction' ? <CompactionMark key={item.id} item={item} /> : <WorkRow key={item.id} item={item} directory={directory} />,
+          )}
         </div>
       )}
       {/* 답 — 기존 셀렉터(.bubble--assistant)를 그대로 쓴다. 모양은 말풍선이 아니다. 모델이 빈 줄로 답을 시작하기도 해서 앞뒤 공백은 뗀다 */}
@@ -115,7 +120,7 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
 }
 
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운 */
-function WorkRow({ item, directory }: { item: TurnItem; directory: string }) {
+function WorkRow({ item, directory }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string }) {
   const [open, setOpen] = useState(false)
   const t = useT()
   if (item.kind === 'text') {
