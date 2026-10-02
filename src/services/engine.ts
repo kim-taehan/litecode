@@ -183,7 +183,25 @@ export function engineConfig(
     ...(!extra.webTools && { permission: WEB_TOOLS_DENY }),
     // 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 데이터 폴더에 만든다(큰 저장소에서 비용). litecode 는 revert 를 안 쓴다 (01w 1절)
     snapshot: false,
+    ...engineDefaults(providers),
     ...(mcp && { mcp }),
+  }
+}
+
+/** opencode 가 묻지 않고 밖으로 나가는 기능을 앱 값으로 고정한다 (01x, 이슈 #19). 레거시는 사용자 ~/.config/opencode/opencode.json 도 읽지만
+ *  이 폴더(CONFIG_DIR) 값이 이긴다(01x 2-5 실측) — 원격 instructions 배열만은 합쳐져 못 지운다(사용자 결정 대기) */
+function engineDefaults(providers: ProviderConfig[]): Record<string, unknown> {
+  // 모델 없이 만든 세션은 바이너리 내장 opencode Zen(opencode.ai/zen, 키 없음)으로 프롬프트를 보낸다 — enabled_providers 로는 안 막히고
+  // model 이 막는다(01x 2-4, 5/5). ctx.llm 은 늘 모델을 주므로 이중 방어다. 고를 모델이 없으면 없는 모델을 가리키지 않게 뺀다
+  const first = providers.find((config) => config.models.length > 0)
+  return {
+    ...(first && { model: `${first.id}/${first.models[0]!.id}` }),
+    // 레거시 provider 목록에서 Zen 을 빼고, 사용자 전역의 enabled_providers 가 앱 provider 를 끄는 것(모든 턴 Model not found, 01x 4)을 덮는다
+    enabled_providers: providers.map((config) => config.id),
+    share: 'disabled', // share:"auto" 면 세션마다 opncd.ai 로 대화 전체를 동기화한다 (01x 5)
+    autoupdate: false, // serve 에선 안 돈다(정적) — 보험
+    lsp: false, // 켜지면 레거시가 파일을 쓸 때 언어 서버를 npm·gem·github 에서 받는다 — 막힌 망에서 72~972초 (01x 7)
+    formatter: false, // 레거시 write·edit 뒤 파일을 고치고, prettier·biome 은 npm 설치 (01x 8)
   }
 }
 
@@ -246,18 +264,34 @@ function prepareInstallMarkers(configDir: string, env: NodeJS.ProcessEnv): void 
   }
 }
 
+/** 자식에 물려주지 않는 env 이름 — 앱이 정한 OPENCODE_* 는 engineEnv 가 다시 넣는다 (01x 2-8 "망·외부 켜기"·"설정 주입") */
+const INHERITED_ENGINE_ENV = /^(OPENCODE_|OTEL_|EXA_API_KEY$|PARALLEL_API_KEY$)/i
+
 /** opencode 자식 프로세스 env — 진짜 키는 없다 (키 프록시) */
 export function engineEnv(
   base: NodeJS.ProcessEnv,
   opts: { configDir: string; db: string; password: string; rgDir?: string; blockProjectConfig?: boolean },
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    ...base,
+    // 물려받은 opencode 설정 env 는 버린다 (01x 7, 이슈 #19) — OPENCODE_EXPERIMENTAL 하나로 레거시에 exa 검색·lsp 도구가 생기고, OTEL_* 는
+    // trace 를 내보내고, OPENCODE_CONFIG_CONTENT 등은 앱 설정을 흔든다. 개발 셸에만 OPENCODE_DISABLE_* 가 있어 개발·테스트와 Finder 실행본이
+    // 달랐다 — 앱이 아래에 정한 것만 남긴다. OPENCODE_SERVER_USERNAME 도 여기서 빠진다(Basic 사용자명은 기본값 opencode 로 고정)
+    ...Object.fromEntries(Object.entries(base).filter(([name]) => !INHERITED_ENGINE_ENV.test(name))),
     OPENCODE_CONFIG_DIR: opts.configDir,
     OPENCODE_DB: opts.db,
     OPENCODE_SERVER_PASSWORD: opts.password,
     // models.opencode.ai 카탈로그 받기를 끈다 — 폐쇄망에서 나가는 시도 6번이 사라지고 카탈로그·턴은 그대로 된다 (01b_offline 실측 2/2)
     OPENCODE_DISABLE_MODELS_FETCH: '1',
+    // 아래 셋은 생성한 opencode.json 의 share·autoupdate·lsp 와 겹친다 — 설정이 덮이거나 무시돼도 꺼지게 (01x 2-8). LSP_DOWNLOAD 는
+    // typescript 서버를 못 막는다(코드에 검사 없음) — 그래서 lsp:false 가 본체다
+    OPENCODE_DISABLE_SHARE: '1',
+    OPENCODE_DISABLE_AUTOUPDATE: '1',
+    OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
+    // Claude Code 자료를 묻지 않고 싣지 않는다 (사용자 결정 2026-10-02: "Claude Code 스킬 함께 쓰기" 기본 꺼짐, 켜는 스위치는 #7).
+    // 레거시는 ~/.claude/CLAUDE.md·~/.claude/skills·~/.agents/skills 와 프로젝트 CLAUDE.md·.claude/skills 를 싣는다 — 두 플래그로 다섯 다 빠진다.
+    // 신규 세대는 원래 다섯 다 안 싣는다(프로젝트 AGENTS.md 만) — 그래서 지금 동작은 그대로다 (#19 실측 2026-10-02, 1.18.18 각 1)
+    OPENCODE_DISABLE_CLAUDE_CODE: '1', // CLAUDE.md(전역·프로젝트) + .claude/skills
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: '1', // .claude·.agents 스킬 탐색 전부 (설정의 skills.paths 는 그대로 읽힌다 — 코드상)
   }
   if (opts.blockProjectConfig) {
     // 프로젝트 opencode.json·.opencode/ 를 안 읽는다 — 레거시는 그 안의 MCP 를 묻지 않고 띄우고 .opencode 에 npm 설치를 한다 (01w 3-1,
@@ -265,7 +299,6 @@ export function engineEnv(
     // AGENTS.md 줄이 깨진다, 2026-10-02). 그래서 ctx.llm 이 AGENTS.md 를 prompt system 으로 넣는 L1 과 같이 켠다
     env['OPENCODE_DISABLE_PROJECT_CONFIG'] = '1'
   }
-  delete env['OPENCODE_SERVER_USERNAME'] // Basic 사용자명은 기본값 opencode 로 고정한다
   if (opts.rgDir) {
     // grep·glob 도구는 rg 를 PATH 에서 찾고, 없으면 github 에서 받으려 한다 — 폐쇄망에선 실패하거나 ~300초 멈춘다 (01b_offline 실측).
     // 동봉 rg 를 맨 앞에 둔다. Windows 는 이름이 Path 일 수 있다 — 있는 키에 붙여야 PATH 가 둘이 되지 않는다
