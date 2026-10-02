@@ -1,16 +1,18 @@
 // 턴 중 진행 줄 (생각·도구·글·지시문) — opencode 이벤트를 화면이 그리는 중립 모양(TurnItem)으로 바꾼다. 화면은 opencode 이벤트
 // 이름을 모른다. opencode 형식을 아는 것은 이 파일과 llm.ts 뿐이다 — 엔진을 바꾸면 이것도 바꾼다.
 //
-// 실측 (2026-10-01, opencode 1.18.18, _workspace/01g_stream_progress.md):
-// - 세션 SSE: reasoning.started 는 생각 시작 즉시, 내용은 reasoning.ended.text 에 한 번. text.started 는 글 시작 때 오지만 text.ended 와
-//   tool.called(입력 전체)는 **스트림 끝**에 온다. tool.input.started{callID,name} 만 인자 스트리밍 시작 때 온다
-// - 조각(reasoning.delta·text.delta)은 **전역 /api/event 에만** 온다 (durable 아님, 재생 없음). 놓쳐도 *.ended 가 완성본으로 덮는다
-// - reasoningID·textID 는 스텝마다 `-0` 부터 다시 → assistantMessageID 와 묶어 id 로 쓴다
-// - 줄 순서는 처음 나타난 순서다: 도구 앞에 쓴 글은 text.started 가 tool.input.started 보다 먼저 와서 도구 위에 선다
-// - 한 스텝의 여러 도구는 동시에 돌고 끝난 순서로 tool.success 가 온다 → callID 로 맞춘다
-// - 파일을 바꾼 도구(edit·apply_patch·write)는 tool.success.structured 에 바꾼 내용이 온다 → diffs (toolDiffs.ts, 01p)
+// 레거시 경로 실측 (2026-10-02, opencode 1.18.18, _workspace/01w_legacy_migration.md 1절 — 이슈 #13 L1):
+// - 이벤트는 `GET /event?directory=` 의 `{type, properties}`. 한 프롬프트가 만든 assistant 메시지는 모두 `info.parentID = 그 user messageID` 다
+//   → TurnScope 가 그것으로 이 턴 메시지를 가린다 (같은 세션에 다른 클라이언트가 보낸 턴·자식 세션은 섞이지 않는다)
+// - 글·생각: `message.part.updated{part:{type:"text"|"reasoning", id, messageID, text, time:{start,end?}}}` 가 시작(빈 글)과 끝(완성본, time.end)에
+//   오고, 그 사이 `message.part.delta{messageID, partID, field, delta}` 가 온다. ⚠️ delta 의 field 는 생각에서도 "text" 다 → partID → 종류 표로 가른다
+// - 사용자 메시지의 글도 text part.updated 로 온다(에코) → assistant 메시지 것만 줄로 만든다
+// - 도구: 같은 part id 를 덮어쓴다 — pending{input:{}} → running{input, time.start} → (bash) running{metadata.output: 누적 출력} 여러 번 →
+//   completed{output, metadata, time} | error{error(문자열)}
+// - 줄 순서는 처음 나타난 순서다 (Map 삽입 순서)
+// - 파일을 바꾼 도구의 diffs(레거시 metadata.filediff)는 L2 — 지금은 싣지 않는다
 
-import { toolDiffs, type FileDiff } from './toolDiffs.ts'
+import type { FileDiff } from './toolDiffs.ts'
 
 /** 진행 줄 하나. 같은 id 의 새 값이 오면 통째로 바꾼다 (누적 전체를 싣는다 — 조각을 놓쳐도 화면이 틀어지지 않는다) */
 export type TurnItem =
@@ -24,100 +26,133 @@ export type TurnItem =
    *  이어졌다)는 그리지 않는다 (01o) */
   | { kind: 'compaction'; id: string; status: 'running' | 'done' | 'failed' }
 
-const PREFIX = 'session.next.'
+type Props = Record<string, unknown>
 
-/** 한 턴의 진행 줄을 쥐고, 이벤트 하나마다 바뀐 줄을 준다 (없으면 undefined) */
-export class TurnTracker {
-  private readonly items = new Map<string, TurnItem>()
-  /** 끝나지 않은 압축 줄 */
-  private compacting?: string
+/** 레거시 메시지 파트 중 우리가 읽는 필드 (01w 실측) */
+export interface EnginePart {
+  id?: string
+  messageID?: string
+  type: string
+  text?: string
+  synthetic?: boolean
+  time?: { start?: number; end?: number }
+  /** tool */
+  tool?: string
+  callID?: string
+  state?: {
+    status?: string
+    input?: unknown
+    output?: string
+    error?: string
+    metadata?: { output?: unknown; exit?: unknown }
+    time?: { start?: number; end?: number }
+  }
+  /** step-finish */
+  tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
+  reason?: string
+}
 
-  observe(type: string, data: Record<string, unknown>): TurnItem | undefined {
-    if (!type.startsWith(PREFIX)) return undefined
-    const event = type.slice(PREFIX.length)
-    const compaction = this.compaction(event, data)
-    if (compaction) return compaction
-    const message = String(data['assistantMessageID'] ?? '')
-    switch (event) {
-      case 'reasoning.started':
-      case 'reasoning.delta':
-      case 'reasoning.ended':
-        return this.textual('think', `${message}:${String(data['reasoningID'])}`, event, data)
-      case 'text.started':
-      case 'text.delta':
-      case 'text.ended':
-        return this.textual('text', `${message}:${String(data['textID'])}`, event, data)
-      case 'tool.input.started':
-        return this.tool(`${message}:${String(data['callID'])}`, { name: String(data['name'] ?? '') })
-      case 'tool.called': {
-        const input = data['input']
-        return this.tool(`${message}:${String(data['callID'])}`, {
-          name: String(data['tool'] ?? ''),
-          status: 'running',
-          input: JSON.stringify(input ?? {}),
-          summary: toolSummary(input),
-        })
-      }
-      case 'tool.success': {
-        if (!this.items.has(`${message}:${String(data['callID'])}`)) return undefined // 앞 턴에서 끊긴 도구의 매듭 (01c) — 이 턴 줄이 아니다
-        const content = (data['content'] as { text?: string }[] | undefined) ?? []
-        const previous = this.items.get(`${message}:${String(data['callID'])}`) as Extract<TurnItem, { kind: 'tool' }>
-        const diffs = toolDiffs(previous.name, previous.input ? JSON.parse(previous.input) : undefined, data['structured'])
-        return this.tool(`${message}:${String(data['callID'])}`, { status: 'done', result: content.map((part) => part.text ?? '').join(''), ...(diffs && { diffs }) })
-      }
-      case 'tool.failed': {
-        if (!this.items.has(`${message}:${String(data['callID'])}`)) return undefined
-        const error = data['error'] as { message?: string } | undefined
-        return this.tool(`${message}:${String(data['callID'])}`, { status: 'error', error: error?.message ?? '알 수 없는 오류' })
-      }
-      case 'context.updated': {
-        const item: TurnItem = { kind: 'context', id: `context:${String(data['messageID'] ?? data['timestamp'])}`, text: contextText(String(data['text'] ?? '')) }
-        this.items.set(item.id, item)
-        return item
-      }
-      default:
-        return undefined
+/** 레거시 메시지 정보 중 우리가 읽는 필드 */
+export interface EngineMessageInfo {
+  id: string
+  sessionID?: string
+  role: 'user' | 'assistant'
+  parentID?: string
+  agent?: string
+  /** assistant 의 summary:true 는 자동 요약 답이다 (user 는 {diffs} 객체) */
+  summary?: unknown
+  time?: { created?: number; completed?: number }
+  error?: { name?: string; data?: { message?: string } }
+}
+
+/** 이 턴(내가 보낸 user 메시지)에 속한 이벤트를 가린다. 답 메시지는 message.updated 의 parentID 로 배운다 — 답의 파트보다 먼저 온다 (01w 실측) */
+export class TurnScope {
+  private readonly assistants = new Set<string>()
+
+  constructor(
+    readonly sessionId: string,
+    readonly userMessageId: string,
+  ) {}
+
+  /** 이 턴의 user 메시지 이벤트면 'user', 답 메시지 이벤트면 'assistant', 아니면 undefined */
+  of(type: string, props: Props): 'user' | 'assistant' | undefined {
+    if (type === 'message.updated') {
+      const info = props['info'] as EngineMessageInfo | undefined
+      if (!info || info.sessionID !== this.sessionId) return undefined
+      if (info.id === this.userMessageId) return 'user'
+      if (info.role === 'assistant' && info.parentID === this.userMessageId) this.assistants.add(info.id)
+      return this.assistants.has(info.id) ? 'assistant' : undefined
     }
+    const messageId =
+      type === 'message.part.updated' ? (props['part'] as EnginePart | undefined)?.messageID : type === 'message.part.delta' ? props['messageID'] : undefined
+    if (typeof messageId !== 'string' || props['sessionID'] !== this.sessionId) return undefined
+    if (messageId === this.userMessageId) return 'user'
+    return this.assistants.has(messageId) ? 'assistant' : undefined
   }
 
-  /** 자동 압축 (01o 2d·4): compaction.started → ended 둘뿐이고 같은 messageID. 요약 요청이 실패하면 ended 없이 step.started 가 온다 */
-  private compaction(event: string, data: Record<string, unknown>): TurnItem | undefined {
-    if (event === 'compaction.started') {
-      this.compacting = `compaction:${String(data['messageID'] ?? data['timestamp'])}`
-      return this.mark(this.compacting, 'running')
+  /** 이 턴의 답 메시지인가 (승인·질문 요청의 tool.messageID 를 가린다) */
+  owns(messageId: string | undefined): boolean {
+    return messageId !== undefined && this.assistants.has(messageId)
+  }
+}
+
+/** 한 턴의 진행 줄을 쥐고, 이 턴 답 메시지의 이벤트 하나마다 바뀐 줄을 준다 (없으면 undefined). 걸러 넣는 것은 TurnScope */
+export class TurnTracker {
+  private readonly items = new Map<string, TurnItem>()
+  /** partID → 줄 id (delta 는 partID 만 싣는다) */
+  private readonly ids = new Map<string, string>()
+
+  observe(type: string, props: Props): TurnItem | undefined {
+    if (type === 'message.part.updated') {
+      const part = props['part'] as EnginePart
+      const item = partItem(part, false)
+      if (!item) return undefined
+      this.ids.set(part.id ?? '', item.id)
+      const previous = this.items.get(item.id)
+      if (previous && (previous.kind === 'think' || previous.kind === 'text') && previous.done) return undefined
+      if (previous && JSON.stringify(previous) === JSON.stringify(item)) return undefined
+      // 시작(빈 글)이 조각보다 늦게 와도 쌓인 조각을 지우지 않는다
+      if (previous && (item.kind === 'think' || item.kind === 'text') && !item.done && item.text === '' && previous.kind === item.kind) return undefined
+      this.items.set(item.id, item)
+      return item
     }
-    if (!this.compacting) return undefined
-    if (event === 'compaction.ended') return this.mark(this.compacting, 'done', true)
-    if (event.startsWith('step.')) return this.mark(this.compacting, 'failed', true)
+    if (type === 'message.part.delta') {
+      const id = this.ids.get(String(props['partID']))
+      const previous = id ? this.items.get(id) : undefined
+      if (!previous || (previous.kind !== 'think' && previous.kind !== 'text') || previous.done) return undefined
+      const item: TurnItem = { ...previous, text: previous.text + String(props['delta'] ?? '') }
+      this.items.set(item.id, item)
+      return item
+    }
     return undefined
   }
 
-  private mark(id: string, status: Extract<TurnItem, { kind: 'compaction' }>['status'], last = false): TurnItem {
-    const item: TurnItem = { kind: 'compaction', id, status }
-    this.items.set(id, item)
-    if (last) this.compacting = undefined
-    return item
+  /** 이 턴 답의 글 — 글 줄을 나타난 순서대로 잇는다 (도구 결과·생각은 빼고) */
+  text(): string {
+    return [...this.items.values()].map((item) => (item.kind === 'text' ? item.text : '')).join('')
   }
+}
 
-  private textual(kind: 'think' | 'text', id: string, event: string, data: Record<string, unknown>): TurnItem | undefined {
-    const previous = this.items.get(id) as Extract<TurnItem, { kind: 'think' | 'text' }> | undefined
-    if (previous?.done) return undefined // 완성본 뒤에 늦게 온 조각
-    let item: TurnItem
-    if (event.endsWith('.ended')) item = { kind, id, text: String(data['text'] ?? previous?.text ?? ''), done: true }
-    else if (event.endsWith('.delta')) item = { kind, id, text: (previous?.text ?? '') + String(data['delta'] ?? ''), done: false }
-    else if (previous) return undefined // started 가 조각보다 늦게 왔다 (스트림이 둘이다)
-    else item = { kind, id, text: '', done: false }
-    this.items.set(id, item)
-    return item
+/** 파트 하나 → 진행 줄 (줄이 아닌 파트면 undefined). done 이면 끝난 기록이다 (다시 열기) */
+function partItem(part: EnginePart, done: boolean): TurnItem | undefined {
+  const id = `${part.messageID ?? ''}:${part.id ?? ''}`
+  if (part.type === 'reasoning' || part.type === 'text') {
+    if (part.synthetic) return undefined
+    return { kind: part.type === 'reasoning' ? 'think' : 'text', id, text: part.text ?? '', done: done || part.time?.end !== undefined }
   }
-
-  private tool(id: string, patch: Partial<Extract<TurnItem, { kind: 'tool' }>>): TurnItem {
-    const previous = this.items.get(id) as Extract<TurnItem, { kind: 'tool' }> | undefined
-    const item: TurnItem = { kind: 'tool', id, name: '', status: 'preparing', ...previous, ...patch }
-    if (!item.name && previous?.name) item.name = previous.name
-    this.items.set(id, item)
-    return item
+  if (part.type !== 'tool') return undefined
+  const state = part.state ?? {}
+  const status = state.status === 'error' ? 'error' : state.status === 'completed' ? 'done' : state.status === 'pending' ? 'preparing' : 'running'
+  const item: Extract<TurnItem, { kind: 'tool' }> = { kind: 'tool', id, name: part.tool ?? '', status }
+  const input = state.input
+  if (input !== undefined && input !== '' && !(typeof input === 'object' && input !== null && Object.keys(input).length === 0)) {
+    item.input = JSON.stringify(input)
+    item.summary = toolSummary(input)
   }
+  if (status === 'done') item.result = state.output ?? ''
+  else if (status === 'running' && typeof state.metadata?.output === 'string' && state.metadata.output !== '') item.result = state.metadata.output // bash 실시간 출력
+  if (status === 'error') item.error = state.error || '알 수 없는 오류'
+  return item
 }
 
 /** 도구 줄의 한 줄 요약 — bash 는 description(필수 인자, 01g), 없으면 command. 그 밖의 도구는 흔한 인자 하나 */
@@ -131,42 +166,7 @@ export function toolSummary(input: unknown): string | undefined {
   return undefined
 }
 
-/** 지시문 바뀜 본문(`Instructions from: <경로>` 줄들) → 한 줄. Trajectory 의 CONTEXT 줄과 같은 글 */
-export function contextText(text: string): string {
-  const sources = [...text.matchAll(/^Instructions from: (.+)$/gm)].map((match) => match[1]!.trim().split('/').pop())
-  return sources.length > 0 ? `지시문 바뀜 · ${sources.join(', ')}` : '지시문 바뀜'
-}
-
-/** GET /message 의 assistant 파트 (01g 2e) — 지난 대화를 다시 열 때 같은 줄을 만든다 */
-interface MessagePart {
-  type: string
-  id?: string
-  text?: string
-  name?: string
-  state?: { status?: string; input?: unknown; content?: { text?: string }[]; structured?: unknown; error?: { message?: string } }
-}
-
-/** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다 (진행 중 파트는 내용이 "" — 그대로 둔다) */
-export function messageItems(messageId: string, parts: readonly MessagePart[]): TurnItem[] {
-  const items: TurnItem[] = []
-  parts.forEach((part, index) => {
-    const id = `${messageId}:${part.id ?? index}`
-    if (part.type === 'reasoning') items.push({ kind: 'think', id, text: part.text ?? '', done: true })
-    else if (part.type === 'text') items.push({ kind: 'text', id, text: part.text ?? '', done: true })
-    else if (part.type === 'tool') {
-      const state = part.state ?? {}
-      const status = state.status === 'error' ? 'error' : state.status === 'completed' ? 'done' : state.status === 'pending' ? 'preparing' : 'running'
-      const item: TurnItem = { kind: 'tool', id, name: part.name ?? '', status }
-      if (state.input !== undefined && state.input !== '') {
-        item.input = JSON.stringify(state.input)
-        item.summary = toolSummary(state.input)
-      }
-      if (state.content) item.result = state.content.map((content) => content.text ?? '').join('')
-      if (state.error) item.error = state.error.message ?? '알 수 없는 오류'
-      const diffs = toolDiffs(item.name, state.input, state.structured)
-      if (diffs) item.diffs = diffs
-      items.push(item)
-    }
-  })
-  return items
+/** assistant 메시지 하나(스텝)의 파트 → 진행 줄. 끝난 기록이라 생각·글은 done 이다 */
+export function messageItems(parts: readonly EnginePart[]): TurnItem[] {
+  return parts.flatMap((part) => partItem(part, true) ?? [])
 }

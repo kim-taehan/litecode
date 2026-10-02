@@ -5,10 +5,11 @@ import type { AddressInfo } from 'node:net'
 // opencode·SSE·IPC·화면은 전부 실물이다. 사내 게이트웨이가 없는 곳에서도 턴을 끝까지 돌리려고 둔다.
 //
 // 응답 규칙 (테스트가 기대값을 알 수 있게 결정적이다):
-// - 마지막 user 메시지에 `[fail]` 이 있으면 HTTP 500 → opencode 는 session.next.step.failed 를 낸다
+// - 마지막 user 메시지에 `[fail]` 이 있으면 HTTP 400 → opencode 는 그 턴을 실패로 끝낸다. 500 이 아닌 이유: 레거시 경로는 500 을 5번 재시도한다
+//   (~71초, 01w) — 재시도하지 않는 4xx 로 바로 실패시킨다 (이슈 #13)
 // - 마지막 user 메시지에 `[slow]` 가 있으면 SLOW_MS 동안 답을 미룬 뒤 echo 한다 — "답을 기다리는 중" 을 만든다.
 //   그 사이 opencode 가 끊으면(재시작) 타이머를 버린다
-// - 마지막 user 메시지에 `[late]` 가 있으면 답(`[fail]` 의 500 포함)을 LATE_MS 미룬다 — 보낸 뒤 다른 대화·프로젝트로 옮겨 가서
+// - 마지막 user 메시지에 `[late]` 가 있으면 답(`[fail]` 의 400 포함)을 LATE_MS 미룬다 — 보낸 뒤 다른 대화·프로젝트로 옮겨 가서
 //   "보고 있지 않은 대화가 끝남" 을 실제 턴으로 만든다 (notifications.live.test.ts)
 // - 마지막 user 메시지에 `[drip]` 이 있으면 두 조각 사이를 DRIP_MS 벌린다 — 중간(키 프록시)이 스트림을 버퍼링하지 않는지 본다
 // - 마지막 메시지가 도구 결과(role: tool)면 `tool: <그 결과>` 를 텍스트로 스트리밍한다
@@ -110,9 +111,14 @@ function contentText(message: ChatMessage): string {
   return (message.content ?? []).map((part) => part.text ?? '').join('') // 도구를 부른 assistant 메시지는 content 가 null
 }
 
+/** 마지막 user 글 — opencode 가 덧붙인 `<system-reminder>…</system-reminder>`(레거시: 계획 모드에서 나온 턴의 모드 바뀜 알림 등, 01w)는 뺀다.
+ *  echo 가 사용자가 친 글만 되돌리게. 알림이 실렸는지는 lastChatText 로 본다 */
 function lastUserText(messages: ChatMessage[]): string {
   const last = [...messages].reverse().find((message) => message.role === 'user')
-  return last ? contentText(last) : ''
+  if (!last) return ''
+  const text = contentText(last)
+  const stripped = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+  return stripped === text ? text : stripped.trimEnd()
 }
 
 function chunk(delta: Record<string, unknown>, finish: string | null = null): string {
@@ -180,7 +186,7 @@ export async function startFakeLlm(): Promise<FakeLlm> {
       }
       if (text.includes('[fail]')) {
         const fail = (): void => {
-          res.writeHead(500, { 'content-type': 'application/json' })
+          res.writeHead(400, { 'content-type': 'application/json' })
           res.end(JSON.stringify({ error: { message: 'fake-llm: 요청된 실패' } }))
         }
         if (!text.includes('[late]')) return fail()

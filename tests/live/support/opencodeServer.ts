@@ -35,6 +35,9 @@ export function isolatedEnv(root: string): NodeJS.ProcessEnv {
     XDG_CONFIG_HOME: path.join(root, 'xdg', 'config'),
     XDG_DATA_HOME: path.join(root, 'xdg', 'data'),
     XDG_STATE_HOME: path.join(root, 'xdg', 'state'),
+    // 레거시 경로는 설정 폴더마다 npm 설치(@opencode-ai/plugin)를 백그라운드로 시도한다(01w 4절) — 테스트에선 막힌 주소로 돌려 바깥 전송을 0 으로.
+    // 소문자가 대문자보다 이긴다 (01w). bash 도구도 물려받지만 테스트는 npm 을 안 쓴다
+    npm_config_registry: 'http://127.0.0.1:9/',
     // 앱의 첫 실행 언어를 한국어로 — 실물 테스트의 셀렉터·기대 문구가 한국어다 (제품 기본은 영어, settings.json 이 있으면 그것)
     LITECODE_TEST_LANGUAGE: 'ko',
   }
@@ -47,6 +50,7 @@ export function engineOptions(root: string): EngineOptions {
     db: path.join(root, 'opencode.db'),
     pidFile: path.join(root, 'opencode-server.json'),
     env: isolatedEnv(root),
+    blockProjectConfig: true, // 제품과 같게 (electron/main.ts) — 프로젝트 AGENTS.md 는 ctx.llm 이 넣는다
   }
 }
 
