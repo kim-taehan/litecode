@@ -46,6 +46,8 @@ const Channel = {
   NOTIFICATIONS_CHANGED: 'notifications:changed',
   NOTIFICATION_TOAST: 'notifications:toast',
   NOTIFICATION_OPEN: 'notifications:open',
+  OPEN_IN_APPS: 'openIn:apps',
+  OPEN_IN: 'openIn:open',
 } as const
 
 /** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
@@ -115,6 +117,8 @@ const bridge: LitecodeBridge = {
   onNotificationsChanged: (listener) => listen(Channel.NOTIFICATIONS_CHANGED, listener),
   onNotificationToast: (listener) => listen(Channel.NOTIFICATION_TOAST, listener),
   onNotificationOpen: (listener) => listen(Channel.NOTIFICATION_OPEN, listener),
+  openInApps: () => ipcRenderer.invoke(Channel.OPEN_IN_APPS),
+  openIn: (appId, directory) => ipcRenderer.invoke(Channel.OPEN_IN, appId, directory),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

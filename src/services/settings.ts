@@ -21,6 +21,8 @@ export interface Settings {
   codingView: boolean
   /** PC 알림(OS 알림)을 띄운다 — 끄면 PC 알림만 없고 앱 안 토스트·점은 그대로 (ctx.notifications, 결정 Q9) */
   notifications: boolean
+  /** "다른 앱에서 열기" 의 기본 앱 id — 메뉴에서 마지막으로 고른 앱 (dsh 방식, 설정 화면 없음). 없으면 목록 첫 앱 (ctx.openIn) */
+  openInApp?: string
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9) */
@@ -42,12 +44,13 @@ declare module 'cordis' {
   }
 }
 
-const valid: { [K in keyof Settings]: (value: unknown) => value is Settings[K] } = {
+const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K] } = {
   language: isLanguage,
   appearance: (value): value is Appearance => value === 'light' || value === 'dark' || value === 'system',
   fontSize: (value): value is number => Number.isInteger(value) && (value as number) >= FONT_SIZE_MIN && (value as number) <= FONT_SIZE_MAX,
   codingView: (value): value is boolean => typeof value === 'boolean',
   notifications: (value): value is boolean => typeof value === 'boolean',
+  openInApp: (value): value is string => typeof value === 'string',
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 
