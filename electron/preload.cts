@@ -57,6 +57,7 @@ const Channel = {
   GET_FEATURES: 'features:get',
   FEATURES_CHANGED: 'features:changed',
   WINDOW_FULLSCREEN: 'window:fullscreen',
+  LIST_SKILLS: 'skills:list',
 } as const
 
 /** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
@@ -136,6 +137,7 @@ const bridge: LitecodeBridge = {
   openFileIn: (appId, directory, token) => ipcRenderer.invoke(Channel.OPEN_FILE_IN, appId, directory, token),
   getFeatures: () => ipcRenderer.invoke(Channel.GET_FEATURES),
   onFeaturesChanged: (listener) => listen(Channel.FEATURES_CHANGED, listener),
+  listSkills: (directory) => ipcRenderer.invoke(Channel.LIST_SKILLS, directory),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

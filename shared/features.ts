@@ -3,7 +3,8 @@
 // (새 기능이 생겨도 기본 켜짐). FEATURE_DEFAULT_OFF 에 든 기능만 기본 꺼짐이고 true 로 적어야 켜진다. 파일에는 기본값과 다른 값만 남긴다.
 // 바탕(대화·엔진·설정·provider·프로젝트·대화 저장)은 여기에 없다 — 끌 수 없다.
 
-export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'web'] as const
+// skills(이슈 #7)는 묶음(ctx.skills — 설정 > 스킬 목록·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
+export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'web'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 기본 꺼짐 — 웹 도구(opencode 내장 webfetch·websearch, 이슈 #14): 폐쇄망에서 멈추거나(외부 주소 대기) 검색어가 밖으로 나간다.

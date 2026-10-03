@@ -25,13 +25,14 @@
 // - 자식 토큰은 부모 턴 합계에 넣지 않는다 (dsh ui-subagent 처럼 자식 줄에 따로 — 부모 컨텍스트 % 가 자식 대화로 부풀지 않게)
 
 import { toolDiffs, type FileDiff } from './toolDiffs.ts'
+import { skillSource, type SkillSource } from '../../shared/skills.ts'
 
 /** 진행 줄 하나. 같은 id 의 새 값이 오면 통째로 바꾼다 (누적 전체를 싣는다 — 조각을 놓쳐도 화면이 틀어지지 않는다) */
 export type TurnItem =
   | { kind: 'think'; id: string; text: string; done: boolean }
   | { kind: 'text'; id: string; text: string; done: boolean }
   /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글 */
-  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[] }
+  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
   | { kind: 'context'; id: string; text: string }
   /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
@@ -58,6 +59,12 @@ export interface Subtask {
   error?: string
   tokens?: number
   items: TurnItem[]
+}
+
+/** skill 도구 줄 (이슈 #7) — 부른 스킬 이름과 출처(배지). 출처는 끝난 결과의 metadata.dir 로 안다 — 그 전엔 없다 */
+export interface ToolSkill {
+  name: string
+  source?: SkillSource
 }
 
 type Props = Record<string, unknown>
@@ -378,6 +385,13 @@ function partItem(part: EnginePart, done: boolean, root: string, children?: Subt
   }
   else if (status === 'running' && typeof state.metadata?.output === 'string' && state.metadata.output !== '') item.result = state.metadata.output // bash 실시간 출력
   if (status === 'error') item.error = state.error || '알 수 없는 오류'
+  // skill 도구 (레거시 실측 2026-10-02): input {name}, 끝나면 metadata {name, dir, truncated}, output 은 `<skill_content name=…>본문…</skill_content>`
+  const skillName = item.name === 'skill' && input && typeof input === 'object' ? (input as { name?: unknown }).name : undefined
+  if (typeof skillName === 'string' && skillName) {
+    const dir = state.metadata?.['dir']
+    item.skill = { name: skillName, ...(typeof dir === 'string' && { source: skillSource(dir) }) }
+    item.summary = skillName
+  }
   return item
 }
 

@@ -32,9 +32,9 @@ export interface TriggerCandidate {
   /** 그 트리거 안에서 유일. pick 에 그대로 돌아온다 (경로·명령 이름) */
   id: string
   label: string
-  /** 오른쪽 설명 (명령 설명, 파일의 상위 폴더) */
+  /** 오른쪽 설명 (명령·스킬 설명, 파일의 상위 폴더) */
   detail?: string
-  icon: 'file' | 'folder' | 'command'
+  icon: 'file' | 'folder' | 'command' | 'skill'
   /** 그룹 제목 */
   group?: string
   /** Tab 으로 한 단계 들어갈 수 있다 (폴더) */

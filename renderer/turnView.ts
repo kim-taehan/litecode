@@ -35,6 +35,13 @@ export function thinkSummary(text: string, done: boolean): string {
 }
 
 /** 도구 이름 첫 글자를 대문자로 (bash → Bash) */
+/** skill 도구 결과 → 지침 본문만 (이슈 #7). opencode 결과는 `<skill_content name=…>` · `# Skill: 이름` · 본문 · `Base directory…` · 파일 목록 모양이다
+ *  (레거시 실측 2026-10-02). 모양이 다르면 받은 그대로 — 기록만으로 그린다(지금 스킬 목록을 다시 묻지 않는다, dsh) */
+export function skillInstructions(result: string): string {
+  const match = /^<skill_content[^>]*>\r?\n# Skill: [^\n]*\n\n([\s\S]*?)\n\nBase directory for this skill:/.exec(result.trim())
+  return match ? match[1]!.trim() : result
+}
+
 export function toolTitle(name: string): string {
   return name ? name[0]!.toUpperCase() + name.slice(1) : '?'
 }

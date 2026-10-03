@@ -3,6 +3,7 @@ import type { TriggerCandidate } from '../shared/ipc.ts'
 import { optionId, type Triggers } from './useTriggers.ts'
 import './triggers.css'
 import { useT } from './settingsStore.ts'
+import { SKILL_ICON_PATH } from './SkillBadge.tsx'
 
 // 입력창 위에 뜨는 공용 트리거 메뉴 하나 — 어떤 트리거의 후보인지 모른다. 모양은 dsh ui-input-trigger MenuView 를 따른다:
 // 그룹 제목 + 행(아이콘·이름·오른쪽 정렬 설명), 강조는 하나(키보드·마우스 공용), 폴더 행은 강조됐을 때 Tab 안내와 › (들어가기).
@@ -12,6 +13,7 @@ function Icon({ kind }: { kind: TriggerCandidate['icon'] }) {
   const path =
     kind === 'folder' ? 'M2 4.5C2 3.67 2.67 3 3.5 3H6.3L7.8 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z'
     : kind === 'file' ? 'M4 2.5H9.5L12 5V13.5H4V2.5ZM9.5 2.5V5H12'
+    : kind === 'skill' ? SKILL_ICON_PATH
     : 'M6 13L10 3'
   return (
     <svg className="trigger-menu__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
