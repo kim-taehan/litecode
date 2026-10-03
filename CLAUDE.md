@@ -204,6 +204,14 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   - **옛 대화 이어 쓰기** (#21): 신규 세대 기록과 레거시 기록은 같은 세션 id 여도 서로 안 보인다. 다시 열 때 신규 기록(`/api/session/{id}/message`, 읽기 전용)을 앞에 붙이고,
     레거시 기록이 없고 신규 기록이 있는 세션의 첫 레거시 입력 직전에 옛 user·답 글을 `prompt_async {noReply, parts:[{synthetic:true, text:"<previous-conversation>…"}]}` 로 한 번
     (id 는 이번 입력 바로 앞, 뒤에서 12,000자). "한 번" 은 DB 의 레거시 기록 유무로 판단(`limit=1`). 추론 과정 탭엔 옛 기록이 없다. `src/services/migrate.ts`
+  - **스킬** (#7, `_workspace/01r_skills.md`): 레거시는 앱 CONFIG_DIR/skills 를 읽어 시스템 프롬프트 끝 `<available_skills>` 에 싣는다(목록·본문은 폴더별 캐시 — 재시작해야 바뀜),
+    목록은 `GET /skill?directory=`. `OPENCODE_DISABLE_PROJECT_CONFIG` 가 프로젝트 `.opencode/skills` 도 끄므로 `skills.paths` 로 되살린다(세션 폴더 기준). Claude Code 스킬
+    (`~/.claude/skills`·`.claude/skills`)은 같은 `skills.paths` 로 — 스위치 기본 꺼짐. 내장 customize-opencode 는 `permission.skill` deny 를 전역 **과** 에이전트마다 맨 뒤에.
+    `skill:"deny"` 면 도구·목록이 통째로 빠진다(기능 끔)
+  - **MCP** (#28, `_workspace/01u_mcp.md`): `GET /mcp?directory=` 상태, `POST /mcp?directory=` `{name, config}` 로 **그 폴더 인스턴스에만** 붙인다(파일에 안 쓰고 비밀은 opencode 메모리에만,
+    연결까지 기다림), `POST /mcp/{name}/disconnect`. 엔진을 다시 띄우면 사라져 `ctx.mcp` 가 매 턴(`llm/before-turn`) 다시 붙인다. 도구·권한 이름은 `<서버>_<도구>` — 와일드카드 `*_*`
+    로 계획 deny·매번 묻기 ask(하위 에이전트 general-ask 도). `*_*` 는 밑줄 있는 내장 권한(external_directory·doom_loop·plan_enter·plan_exit)에도 걸려 기본값을 다시 적는다.
+    로컬 서버 자식엔 opencode env 가 통째로 가므로 비밀 이름을 빈 값으로 덮는다. 원격은 `oauth:false`
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.
@@ -228,6 +236,9 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | 알림 | `ctx.notifications`(2026-10-02) — `llm/turn-*`·`llm/attention*` 을 받아 창이 없거나 포커스가 없으면 PC 알림(대화마다 최신 하나, 제목 + "프로젝트 · 상태"), 앞이면 토스트·대화 행/프로젝트 점, 보고 있는 대화면 없음. 중단은 앱 안만. 클릭 → reveal + pendingOpen → 화면이 `openProject` 로 연다. dock 배지. `requestSingleInstanceLock` 은 서비스보다 먼저(engine 이 이전 실행 opencode 를 거두므로), macOS `activate` 는 창 생성. 테스트는 기록 host(`__litecodeNotifyTest`) |
 | 승인·질문 카드 + 모드 | 라운드 A (2026-10-02). 입력창 왼쪽 모드 칩 계획/기본/매번 묻기/전체 권한(`shared/modes.ts`, opencode 에이전트 plan 덮어쓰기·build·litecode-ask·litecode-full — 계획은 edit·bash·webfetch deny 로 도구가 실제로 빠지고 `.opencode/plans` 도 막힘), Shift+Tab 은 계획→기본→매번 묻기(전체 권한은 메뉴 + 확인), 턴 중 잠금, 계획 턴 끝 "이 계획대로 실행", 전환 구분선, 새 대화 기본 모드(설정 > 일반). 권한·질문 대기는 전역 `/api/event` + 정본 GET 조회 → 턴 안 카드(허용 한 번/거절, 보기 + 자유 입력), 거절의 tool.failed 종료를 턴 끝으로. `llm/attention`·`llm/attention-resolved` 이벤트 → 알림 "답 필요" |
 | 입력 트리거 | `ctx.triggers` 등록소 + `src/triggers/{at,slash,bang}.ts` 플러그인(effect 등록, 2026-10-01). `@` 는 경로 텍스트만, `/` 는 앱이 template 을 풀어 보내고 prompt `id`(`msg_litecode_…`)로 `ctx.sessions.labels` 에 친 글을 적어 다시 열어도 `/hi world` 로 보인다, 모르는 `/xxx` 는 막는다, `!` 는 `ctx.terminals`(프로젝트별 opencode pty, 화면 xterm)에서 돌고 대화 맥락에 안 들어간다 |
+| 스킬 | `ctx.skills`(2026-10-03, #7) — 설정 > 스킬(지금 프로젝트의 스킬 목록·본문), `/` 후보, 대화의 "스킬 · 이름" 줄. 기능 `skills` 를 끄면 엔진에서 skill 도구째 빠진다. "Claude Code 스킬 함께 쓰기"는 기본 꺼짐 |
+| MCP | `ctx.mcp`(2026-10-03, #28) — 설정 > MCP(원격·로컬 서버 추가·켜기/끄기·붙어 보기), 정의는 userData `mcp.json`, 비밀은 `mcp-secrets.json`(safeStorage). 프로젝트의 MCP 정의는 그 폴더를 열 때 자동으로 붙는다(사용자 결정). 대화엔 "MCP · 서버 · 도구" 줄 |
+| 오른쪽 패널 | 2026-10-03 (#29, dsh 방식) — 파일 탭 + 폴더 탐색(`fileTree.ts`) + HTML 실행 미리보기(sandbox iframe `allow-scripts` 만, srcdoc + CSP, 창 이동 차단). 대화의 파일 칩을 누르면 여기서 열린다 |
 | 프로젝트 전환 | 시안대로 구현 (2026-09-30). 사이드바 전환 버튼 + 팝오버(검색·즐겨찾기·최근·폴더 열기), 목록에서 빼기(폴더는 안 지움), 이름 바꾸기(보이는 이름만), 잘린 경로·대화 제목은 마우스를 올리면 흘러가며 보이고 옆 카드에 전체 내용(dsh 방식), 앱을 켜면 마지막 프로젝트. 목록은 `ctx.projects`(userData `projects.json`). 대화는 프로젝트별로 메모리에만 — **대화 영속화는 아직 없다** |
 
 ## 실행
