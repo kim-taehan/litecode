@@ -248,7 +248,8 @@ button.turn-row__line:disabled { cursor: default; }
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(calc(100% - 32px), clamp(680px, 64%, 920px));
+  /* 폭은 스크롤 칸 안쪽(100%)이 아니라 대화 칸(.chat-pane, cqw) 기준 — 스크롤바가 늘 보이는 환경에서도 입력 카드(열 + 32)와 폭·가운데가 맞는다 */
+  width: min(calc(100% - 32px), clamp(680px, 64cqw, 920px));
   margin: 0 auto;
 }
 

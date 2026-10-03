@@ -668,6 +668,8 @@ button {
   /* 스크롤 칸은 전체 폭(스크롤바가 창 끝에), 글은 안쪽 열(.chat-column, chat.css)만 — dsh 대화 열 폭 축 */
   padding: 28px 0;
   width: 100%;
+  /* 늘 보이는 스크롤바(마우스 연결 등)가 안쪽 열을 왼쪽으로 밀지 않게 양쪽에 같은 자리를 둔다 — 겹쳐 뜨는 스크롤바에선 아무 일도 없다 */
+  scrollbar-gutter: stable both-edges;
 }
 
 .empty {
