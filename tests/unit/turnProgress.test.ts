@@ -256,6 +256,9 @@ describe('TurnTracker — 하위 작업 (task, 이슈 #31)', () => {
       items: [{ name: 'bash' }],
     })
     expect(tracker.subtaskOf('ses_c2')).toMatchObject({ agent: 'general', description: 'job t2' })
+    // 하위 작업 줄 id → 그 자식 세션 (하나만 멈출 때, #32)
+    expect(tracker.childSession(`${A}:t2`)).toBe('ses_c2')
+    expect(tracker.childSession('other:t9')).toBeUndefined()
     expect(tracker.text()).toBe('') // 자식 글은 부모 답이 아니다
   })
 

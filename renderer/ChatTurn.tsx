@@ -268,7 +268,7 @@ function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory
 }
 
 /** 1초마다 지금 시각 — on 일 때만 돈다 */
-function useNow(on: boolean): number {
+export function useNow(on: boolean): number {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (!on) return
