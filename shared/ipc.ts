@@ -74,6 +74,7 @@ export const Channel = {
   TURN_ATTENTION: 'chat:attention',
   REPLY_ATTENTION: 'chat:reply-attention',
   STOP_TURN: 'chat:stop',
+  STOP_SUBTASK: 'chat:stop-subtask',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   PREVIEW_FILE: 'chat:preview-file',
@@ -180,6 +181,8 @@ export interface LitecodeBridge {
   replyAttention(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void>
   /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴의 sendMessage 가 "중단됨"(interrupted) 으로 끝난다. 도는 턴이 없으면 false */
   stopTurn(conversationId: string): Promise<boolean>
+  /** 도는 턴의 하위 작업 하나만 멈춘다 (subtaskId = 그 하위 작업 진행 줄의 id) — 턴은 이어 간다. 도는 턴의 하위 작업이 아니면 false */
+  stopSubtask(subtaskId: string): Promise<boolean>
   /** 답의 인라인 코드 중 그 프로젝트 안의 실제 파일인 것만 (받은 글자 그대로) — 파일 언급 칩 */
   resolveFiles(directory: string, tokens: string[]): Promise<string[]>
   /** 프로젝트 안의 그 파일을 OS 파일 관리자에서 보여 준다 (열지·실행하지 않는다). 프로젝트 밖·없는 파일이면 false */

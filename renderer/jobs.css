@@ -1,0 +1,254 @@
+/* 도는 작업 목록 (이슈 #32) — 대화 머리 "작업 N" 버튼 + 펼침 목록. 치수는 시안 B(_workspace/mock-32/Header.dc.html), 색은 토큰만 */
+
+.jobs {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 400;
+}
+
+/* 머리 오른쪽 묶음: 작업 → 다른 앱에서 열기 → 오른쪽 패널. 작업 버튼이 있으면 그것이 묶음을 오른쪽으로 민다 */
+.main__header .jobs + .open-in,
+.main__header .jobs + .right-panel-open {
+  margin-left: 8px;
+}
+
+.jobs__button {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.jobs__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.jobs__spinner {
+  animation: jobs-spin 1s linear infinite;
+}
+
+@keyframes jobs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 버튼 오른쪽 끝에 맞춰 머리(52px) 아래 6px — 버튼(30px) 아래로는 17px */
+.jobs__panel {
+  position: absolute;
+  top: calc(100% + 17px);
+  right: 0;
+  z-index: 20;
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lv3);
+  color: var(--text);
+  -webkit-app-region: no-drag;
+}
+
+.jobs__heading {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.jobs__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  column-gap: 8px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.jobs__row[data-job='subtask']:hover {
+  background: var(--fill-hover);
+}
+
+.jobs__row[data-open] {
+  background: var(--accent-soft);
+}
+
+.jobs__cells {
+  display: grid;
+  grid-template-columns: 44px 70px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.jobs__cells {
+  cursor: pointer;
+}
+
+button.jobs__cells:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.jobs__mono,
+.jobs__time {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+}
+
+.jobs__time {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 끝난 것 — 걸린 시간은 더 오르지 않는다 */
+.jobs__row:not([data-job='main'], [data-status='running'], [data-status='preparing']) .jobs__time {
+  color: var(--text-tertiary);
+}
+
+.jobs__kind {
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jobs__kind--main {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.jobs__doing {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.jobs__activity {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jobs__tokens {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs__row[data-status='error'] .jobs__activity {
+  color: var(--danger);
+}
+
+.jobs__stop {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.jobs__stop:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.jobs__stop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 펼친 하위 작업의 최근 줄 — 종류 칸 아래에서 시작 (10 + 44 + 8) */
+.jobs__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 10px 6px 62px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-sidebar);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.jobs__detail > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs__detail [data-state='running'] {
+  color: var(--accent);
+}
+
+.jobs__detail [data-state='error'] {
+  color: var(--danger);
+}
+
+.jobs__empty {
+  color: var(--text-caption);
+}
+
+.jobs__finished-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 4px 0;
+  padding: 8px 6px 2px;
+  border-top: 1px solid var(--border-light);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.jobs__fold {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.jobs__fold:hover {
+  background: var(--fill-hover);
+}
+
+.jobs__fold[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}

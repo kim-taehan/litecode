@@ -249,6 +249,12 @@ export class TurnTracker {
     return item?.kind === 'subtask' ? item : undefined
   }
 
+  /** 그 하위 작업 줄이 도는 자식 세션 (이 턴의 줄이 아니거나 자식을 아직 모르면 undefined) — 하위 작업 하나만 멈출 때 (#32) */
+  childSession(subtaskId: string): string | undefined {
+    for (const [sessionId, child] of this.children) if (child.taskId === subtaskId) return sessionId
+    return undefined
+  }
+
   /** 자식 세션의 이벤트 하나 → 바뀐 하위 작업 줄 (없으면 undefined). 자식의 user 에코는 버리고 assistant 파트만 쌓는다 (부모와 같은 규칙) */
   child(type: string, props: Props): TurnItem | undefined {
     const info = props['info'] as EngineMessageInfo | undefined

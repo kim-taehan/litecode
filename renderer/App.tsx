@@ -22,6 +22,7 @@ import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { OpenInButton } from './OpenInButton.tsx'
+import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { useSendQueue } from './useSendQueue.ts'
 import { QueueDock } from './QueueDock.tsx'
@@ -972,6 +973,8 @@ export function App() {
           <>
             <div className="main__header">
               {titleOf(active)}
+              {/* 도는 작업 목록 (#32) — 하위 작업이 있는 턴이 도는 동안만, 열기 버튼 왼쪽 */}
+              {active.pending && <JobsButton key={active.id} items={active.progress ?? []} startedAt={active.sentAt} />}
               {features.has('openIn') && <OpenInButton directory={active.project} />}
               <RightPanelButton directory={active.project} />
             </div>

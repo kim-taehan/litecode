@@ -252,6 +252,8 @@ export class LlmService extends Service {
   private declined = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
   private watchers = new Map<string, { answered(requestId: string): void }>()
+  /** 도는 턴의 진행 줄과 폴더 — stopSubtask 가 하위 작업 줄 id 로 그 자식 세션을 찾는다. 턴이 끝나면 지운다 */
+  private running = new Set<{ tracker: TurnTracker; workdir: string }>()
   /** 폴더(realpath) → 마지막으로 본 그 인스턴스의 MCP 서버 이름 — 도구 이름 `<서버>_<도구>` 를 가른다 (mcpTool) */
   private mcpServers = new Map<string, string[]>()
 
@@ -468,6 +470,8 @@ export class LlmService extends Service {
       let admitted!: (sent: boolean) => void
       const scope = new TurnScope(id, userMessageId)
       const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
+      const live = { tracker, workdir }
+      this.running.add(live)
       const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention)
       const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop)
       try {
@@ -514,6 +518,7 @@ export class LlmService extends Service {
       } finally {
         events.stop()
         attention.stop()
+        this.running.delete(live)
         this.declined.delete(turnSession)
       }
     } catch (error) {
@@ -714,6 +719,20 @@ export class LlmService extends Service {
    *  실패는 삼킨다(결과는 어차피 "중단됨") */
   private async abort(conn: EngineConnection, sessionId: string, workdir: string): Promise<void> {
     await fetch(`${conn.url}/session/${sessionId}/abort?${at(workdir)}`, { method: 'POST', headers: conn.headers }).catch(() => {})
+  }
+
+  /** 도는 턴의 하위 작업 하나만 멈춘다 (이슈 #32). subtaskId 는 그 하위 작업 줄(TurnItem)의 id. 도는 턴의 줄이 아니면 false.
+   *  실측 2026-10-03 opencode 1.18.18 (가짜 LLM, task 2개 중 하나의 자식 세션에 abort — 3/3): 200 true, 그 자식의 bash 는 죽고(파일 안 생김),
+   *  부모의 그 task 파트는 곧바로 error "Task cancelled"(= 줄 상태 stopped)로 끝난다. 다른 자식은 끝까지 돌고, 부모는 남은 결과로 다음 스텝을
+   *  이어 턴이 ok 로 끝난다(부모 idle 한 번). 다음 턴도 정상 */
+  async stopSubtask(subtaskId: string): Promise<boolean> {
+    for (const { tracker, workdir } of this.running) {
+      const sessionId = tracker.childSession(subtaskId)
+      if (!sessionId) continue
+      await this.abort(await this.ctx.engine.connection(), sessionId, workdir)
+      return true
+    }
+    return false
   }
 
   /** 그 폴더의 /event 를 구독해 이 턴(scope)의 이벤트로 진행 줄·사용량·결과를 모은다. connected 는 server.connected 를 받으면 풀린다 — 그 뒤에 보내야

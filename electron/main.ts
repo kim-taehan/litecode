@@ -167,6 +167,7 @@ function bootstrap(ctx: Context): void {
     stop?.abort()
     return !!stop
   })
+  handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.llm.stopSubtask(String(subtaskId)))
   handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer) => ctx.llm.reply(sessionId, requestId, answer))
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
   handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))
