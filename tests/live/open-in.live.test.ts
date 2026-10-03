@@ -85,10 +85,12 @@ describe('다른 앱에서 열기', () => {
     await page.locator('.open-guide').getByRole('button', { name: '폴더 열기…' }).click()
     await split().waitFor({ timeout: 10_000 })
 
-    // 머리 오른쪽 끝 (padding 24 안쪽)
+    // 머리 오른쪽 — 오른쪽 패널 버튼(#29, 맨 끝·padding 24 안쪽) 바로 왼쪽
     const header = (await page.locator('.main__header').boundingBox())!
     const box = (await split().boundingBox())!
-    expect(Math.round(header.x + header.width - 24 - (box.x + box.width))).toBe(0)
+    const panelButton = (await page.locator('.right-panel-open').boundingBox())!
+    expect(Math.round(header.x + header.width - 24 - (panelButton.x + panelButton.width))).toBe(0)
+    expect(Math.round(panelButton.x - (box.x + box.width))).toBe(8)
     expect(await primary().getAttribute('aria-label')).toBe(`${installed[0].name}에서 열기`)
 
     await openMenu()

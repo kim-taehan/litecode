@@ -12,7 +12,8 @@ import type { TurnItem } from '../src/services/turnProgress.ts'
 import type { Settings } from '../src/services/settings.ts'
 import type { NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 import type { OpenInApp } from '../src/services/openIn.ts'
-import type { FilePreview } from '../src/services/filePreview.ts'
+import type { FilePreview, HtmlAsset } from '../src/services/filePreview.ts'
+import type { DirectoryListing } from '../src/services/fileTree.ts'
 import type { FeatureId } from './features.ts'
 import type { SkillInfo } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
@@ -30,7 +31,8 @@ export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts
 export type { Appearance, Settings } from '../src/services/settings.ts'
 export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 export type { OpenInApp } from '../src/services/openIn.ts'
-export type { FilePreview } from '../src/services/filePreview.ts'
+export type { FilePreview, HtmlAsset } from '../src/services/filePreview.ts'
+export type { DirectoryEntry, DirectoryListing } from '../src/services/fileTree.ts'
 export type { FeatureId, FeatureSwitches } from './features.ts'
 export type { SkillInfo } from '../src/services/skills.ts'
 export type { SkillSource } from './skills.ts'
@@ -75,6 +77,8 @@ export const Channel = {
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   PREVIEW_FILE: 'chat:preview-file',
+  PREVIEW_ASSETS: 'chat:preview-assets',
+  LIST_DIRECTORY: 'chat:list-directory',
   RUN_SHELL: 'shell:run',
   STOP_SHELL: 'shell:stop',
   /** 메인 → 화면 (runId, chunk) */
@@ -183,6 +187,10 @@ export interface LitecodeBridge {
   /** 파일 미리보기 패널 — 칩과 같은 (프로젝트, 답의 글자) 로 그 파일 내용(앞 1MB). 등록 안 된 폴더·밖·링크로 밖·없는 파일이면
    *  unavailable, 이진이면 내용 없이 binary. 읽기만 한다 */
   previewFile(directory: string, token: string): Promise<FilePreview>
+  /** HTML 미리보기 — 그 HTML 파일 폴더 기준 상대 경로 리소스(스크립트·스타일 글, 이미지 data: 주소). 프로젝트 밖·링크로 밖·없는 것은 빠진다 */
+  previewAssets(directory: string, token: string, references: string[]): Promise<HtmlAsset[]>
+  /** 오른쪽 패널 Files 탭 — 프로젝트 안 폴더 한 단계(relative '' = 루트). 밖을 가리키는 링크는 빠지고, 등록 안 된 폴더·밖이면 unavailable */
+  listDirectory(directory: string, relative: string): Promise<DirectoryListing>
   /** `!명령` — 그 대화의 프로젝트 폴더에서 한 번 돌리고, 끝나면 그 대화에 카드로 저장한 것을 준다. runId 는 화면이 정한다(출력 조각을
    *  onShellData 로 받으려고). position 은 대화 안 자리(앞 말풍선 수). 결과는 대화 맥락에 안 들어간다 */
   runShell(conversationId: string, runId: string, directory: string, command: string, position: number): Promise<ShellCard>
