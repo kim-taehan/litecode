@@ -239,6 +239,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | 스킬 | `ctx.skills`(2026-10-03, #7) — 설정 > 스킬(지금 프로젝트의 스킬 목록·본문), `/` 후보, 대화의 "스킬 · 이름" 줄. 기능 `skills` 를 끄면 엔진에서 skill 도구째 빠진다. "Claude Code 스킬 함께 쓰기"는 기본 꺼짐 |
 | MCP | `ctx.mcp`(2026-10-03, #28) — 설정 > MCP(원격·로컬 서버 추가·켜기/끄기·붙어 보기), 정의는 userData `mcp.json`, 비밀은 `mcp-secrets.json`(safeStorage). 프로젝트의 MCP 정의는 그 폴더를 열 때 자동으로 붙는다(사용자 결정). 대화엔 "MCP · 서버 · 도구" 줄 |
 | 오른쪽 패널 | 2026-10-03 (#29, dsh 방식) — 파일 탭 + 폴더 탐색(`fileTree.ts`) + HTML 실행 미리보기(sandbox iframe `allow-scripts` 만, srcdoc + CSP, 창 이동 차단). 대화의 파일 칩을 누르면 여기서 열린다 |
+| 도는 작업 목록 | 대화 머리 "작업 N" 버튼 (2026-10-03, #32, 시안 B·dsh `ui-jobs` 참조). 하위 작업이 있는 턴이 도는 동안만(N = 메인 1 + 도는 하위 작업), 펼치면 "진행 중 N" 아래 줄마다 경과·종류·설명 + 마지막 도구/생각·토큰, 줄을 누르면 최근 줄, "끝난 것 N" 접기, Esc·바깥 닫기. 데이터는 `chat:progress` 진행 줄 그대로(`renderer/jobsView.ts`). ■ 는 그 하위 작업만 멈춤 — `chat:stop-subtask` → `ctx.llm.stopSubtask`(자식 세션 `POST /session/{자식}/abort?directory=`, 실측 3/3: 부모 task 는 "Task cancelled" = 중단됨, 다른 자식과 부모 턴은 이어서 정상 종료). 메인 줄 토큰은 없음(진행 줄에 안 실림) |
 | 프로젝트 전환 | 시안대로 구현 (2026-09-30). 사이드바 전환 버튼 + 팝오버(검색·즐겨찾기·최근·폴더 열기), 목록에서 빼기(폴더는 안 지움), 이름 바꾸기(보이는 이름만), 잘린 경로·대화 제목은 마우스를 올리면 흘러가며 보이고 옆 카드에 전체 내용(dsh 방식), 앱을 켜면 마지막 프로젝트. 목록은 `ctx.projects`(userData `projects.json`). 대화는 프로젝트별로 메모리에만 — **대화 영속화는 아직 없다** |
 
 ## 실행
