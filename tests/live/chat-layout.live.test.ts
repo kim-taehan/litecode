@@ -200,7 +200,9 @@ describe('채팅 답 모양·진행 표시', () => {
     const box = async (selector: string) => (await page.locator(selector).last().boundingBox())!
     const [main, scroller, column, answer, composer] = await Promise.all(['.main', '.main__messages', '.chat-column', '.bubble--assistant', '.composer__box'].map(box))
     expect(Math.abs(scroller.width - main.width)).toBeLessThanOrEqual(2) // 스크롤바가 창 오른쪽 끝
-    expect(Math.abs(column.width - Math.min(920, Math.max(680, main.width * 0.64)))).toBeLessThanOrEqual(2)
+    // 열의 64% 는 스크롤 칸 안쪽 폭 기준이다 — 스크롤바가 늘 보이는 환경(마우스 연결 등)에선 그 폭(약 15px)만큼 본문보다 좁다
+    const inner = await page.locator('.main__messages').last().evaluate((element) => element.clientWidth)
+    expect(Math.abs(column.width - Math.min(920, Math.max(680, inner * 0.64)))).toBeLessThanOrEqual(2)
     expect(column.width).toBeGreaterThan(720) // 예전 고정 폭보다 넓다
     expect(Math.abs(answer.width - column.width)).toBeLessThanOrEqual(2)
     expect(Math.abs(composer.width - (column.width + 32))).toBeLessThanOrEqual(2)
