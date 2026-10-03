@@ -226,7 +226,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 | `electron/` + `renderer/` | Electron 앱. 사이드바(프로젝트 전환·새 대화·세션 목록) + 채팅창. IPC 로 위 서비스에 연결됨 |
 | 패키징 (2b) | electron-builder. `scripts/fetch-opencode.mjs` 가 opencode 1.18.18(npm 레지스트리, sha512)·ripgrep 15.1.0(sha256)을 `build/vendor/` 에 받고(레포 제외), `extraResources` 로 `Resources/opencode`·`Resources/rg` 에 싣는다. 앱은 `OPENCODE_BIN` > 동봉 > PATH 순으로 찾고, 동봉 rg 폴더를 opencode PATH 맨 앞에 둔다(폐쇄망 grep 300초 멈춤 방지). mac 서명은 키체인의 개발용 자체 서명 인증서 `litecode-dev` 가 있으면 그것(없으면 ad-hoc) — 같은 인증서라 다시 빌드해도 macOS 개인정보 허락(문서 폴더 등)이 유지된다. **공증 없음, 다른 Mac 에서 내려받은 zip 의 격리(quarantine) 동작은 미검증**. vite `base: './'` (설치본 file:// 에서 assets 경로) |
 | 설정 화면 | 사이드바 하단 ⚙ 설정 → 모달의 모델 페이지 (dsh `ui-settings-models` 참조, 2026-09-30). provider 추가·편집·삭제, 모델 목록·가져오기. 정본은 `ctx.providers`(userData `providers.json`, 키는 `safeStorage` 암호화로 `provider-keys.json`, 렌더러는 설정 여부만). **저장 키는 저장된 Base URL 로만 나간다** — 주소를 바꾸면 키 재입력. 설정한 provider 로 실제 대화된다(ctx.engine 이 opencode 에 넘김, 2a). 바이너리 동봉·패키징은 2b |
-| 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). 실물 테스트가 착지 기준이다 |
+| 테스트 | vitest 단위(`tests/unit/`) + **실물**(`tests/live/` — 격리된 진짜 opencode + 가짜 LLM + 진짜 Electron 창을 playwright 로 조작). **착지 기준은 typecheck + 단위**(2026-10-03 — 실물 테스트는 개발 과정에서 뺐다: 새로 쓰지도 머지 전에 돌리지도 않는다. 파일은 남아 있고 요청이 있을 때만 돌린다) |
 | 세션 영속화 | `ctx.sessions` (2026-10-01). 내용 정본은 opencode DB, 앱은 목록 정보만(userData `sessions.json` — 제목·마지막 활동·모델·통계). 프로젝트당 50개(넘치면 오래된 것 자동 삭제)·하나씩 수동 삭제(두 번 눌러 확인). 삭제 뒤·opencode 기동 전에 DB 정리(`BUN_BE_BUN` + checkpoint→VACUUM). 폴더 없는 프로젝트 대화는 "폴더가 없습니다"(삭제만, opencode 요청 0). 끊긴 턴은 "중단됨". `/message` 는 100개씩 끝까지(한도 200) |
 | 답 마크다운 | `renderer/Markdown.tsx` (2026-10-01). mdast + GFM → React 요소(`dangerouslySetInnerHTML` 없음, 원문 HTML 은 글자로), 한글 굵게 보정(`cjkStrong.ts`), 코드 블록 언어 머리 + 복사, 링크는 메인이 http(s) 만 OS 브라우저로(`shell:open-external`), 이미지는 alt 만(원격 요청 0), 창 이동·새 창 차단. 문법 색 없음 |
 | Trajectory 탭 | `ctx.trajectory`(`src/services/trajectory.ts`, 2026-10-01)가 `ctx.llm.readMessages` 의 `/message` 를 중립 레코드(user·assistant 스텝·tool·context)로 바꾼다. 화면 `renderer/Trajectory.tsx`: Chat/Trajectory 탭, 3레인 시간축(Input·Model·Tools, Duration = 같은 너비/실제 시간 — 쉰 구간 압축), Turns·Calls 접기, 단어 AND 검색. CONTEXT 줄은 지시문 변경만. 턴이 끝나면 다시 읽는다(실시간 아님) |
@@ -267,7 +267,7 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 
 ## 하네스: litecode 개발
 
-**목표:** opencode 실측 위에서 기능·수정을 착지시키되, 실물 테스트(진짜 opencode·Electron)가 초록일 때만 끝났다고 한다.
+**목표:** opencode 실측 위에서 기능·수정을 착지시키되, typecheck·단위 테스트가 초록일 때만 끝났다고 한다 (실물 테스트는 2026-10-03 부터 과정에서 뺐다).
 
 **트리거:** 기능 구현·버그 수정·안정화·참고 레포 이식 요청 시 `litecode-build` 스킬을 사용하라. 테스트만 돌리거나
 쓸 때는 `live-test`, opencode 동작 확인은 `opencode-probe`, 경계면 검증은 `boundary-check`. 단순 질문은 직접 응답 가능.
@@ -288,5 +288,6 @@ Electron 은 `33.4.11` 로 고정돼 있다 — 이 머신에서 최신 버전(`
 | 2026-10-02 | GitHub 흐름 — 라운드마다 이슈 → 브랜치 → PR → main 머지(머지는 사용자 확인). 원격 kim-taehan/litecode | skills/litecode-build | 사용자 지시 |
 | 2026-10-02 | main 머지는 리더가 직접 검증(typecheck·단위·실물 전체 초록)한 뒤 묻지 않고 한다 | skills/litecode-build | 사용자 "머지까지 알아서 해" |
 | 2026-10-02 | 채팅을 opencode 레거시 경로로 — "신규 세대만 쓴다" 원칙 폐기, 프로토콜 절에 레거시 묶음 | CLAUDE.md | 사용자 결정 (MCP·task) |
+| 2026-10-03 | 실물 테스트를 과정에서 뺀다 — 새로 안 쓰고 안 돌린다, 머지 기준은 typecheck·단위 | skills/litecode-build, agents/litecode-dev, CLAUDE.md | 사용자 "실물 테스트를 빼자" (전체 한 번 8~9분, 머지마다) |
 | 2026-10-02 | 디자인 이야기는 전부 HTML 시안(Artifact 캔버스)으로 — 구현자에겐 "시안: <링크>" | skills/litecode-build, agents/litecode-dev | 사용자 "모든 디자인은 html 시안으로 말한다" |
 | 2026-10-02 | 실물 테스트 전체는 리더만 머지 전에 — 구현자는 자기 실물 파일만 | skills/litecode-build, agents/litecode-dev | 사용자 "실물 테스트는 니가 하는걸로 하자" (에이전트 50분대, 전체를 두 번 돌림) |

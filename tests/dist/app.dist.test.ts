@@ -65,6 +65,7 @@ async function launch(): Promise<void> {
       HTTP_PROXY: via,
       NO_PROXY: '127.0.0.1,localhost',
       LITECODE_TEST_HIDDEN: '1',
+      LITECODE_TEST_LANGUAGE: 'ko', // 셀렉터가 한국어 — 기본 언어가 en 이 된 뒤로 빠져 있었다
     },
   })
   page = await app.firstWindow()
