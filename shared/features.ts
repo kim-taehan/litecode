@@ -7,9 +7,16 @@
 export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
-/** 기본 꺼짐 — 웹 도구(opencode 내장 webfetch·websearch, 이슈 #14): 폐쇄망에서 멈추거나(외부 주소 대기) 검색어가 밖으로 나간다.
- *  묶음이 없다 — ctx.engine 이 features/changed 를 듣고 opencode 설정을 다시 써 재시작한다 */
-export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['web']
+/** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 카드가 없다.
+ *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP. 웹 도구(opencode 내장 webfetch·websearch, 이슈 #14)는 늘 꺼짐 —
+ *  폐쇄망에서 멈추거나(외부 주소 대기) 검색어가 밖으로 나간다 */
+export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true, web: false }
+
+/** 사용자가 켜고 끄는 기능 (설정 > 기능의 카드) */
+export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
+
+/** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03). 나머지(터미널 칸·추론 과정·다른 앱에서 열기)는 기본 켜짐 */
+export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications']
 
 /** 저장된 값이 없을 때의 켜짐 */
 export function featureDefault(feature: FeatureId): boolean {
@@ -35,7 +42,9 @@ export function isFeatureSwitches(value: unknown): value is FeatureSwitches {
   )
 }
 
-/** 저장된 값으로 본 실제 켜짐 — 꺼졌거나, 필요한 기능이 꺼졌으면 false */
+/** 저장된 값으로 본 실제 켜짐 — 고정된 기능은 고정 값, 그 밖엔 꺼졌거나 필요한 기능이 꺼졌으면 false */
 export function featureOn(switches: FeatureSwitches | undefined, feature: FeatureId): boolean {
+  const fixed = FEATURE_FIXED[feature]
+  if (fixed !== undefined) return fixed
   return (switches?.[feature] ?? featureDefault(feature)) && (FEATURE_REQUIRES[feature] ?? []).every((needed) => featureOn(switches, needed))
 }
