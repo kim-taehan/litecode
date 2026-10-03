@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SettingsService } from '../../src/services/settings.ts'
 import { FeaturesService, type FeatureDefinition } from '../../src/services/features.ts'
-import { FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
+import { CHOOSABLE_FEATURES, FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
 
 // ctx.features — 기능 묶음을 settings 값으로 올리고 내린다 (이슈 #8). IPC 는 가짜 등록소로 흉내 낸다: ipcMain.handle 처럼
 // 같은 채널을 두 번 걸면 던진다 — 끄고 바로 켤 때 옛 핸들러가 다 걷힌 뒤 새로 거는지 본다.
@@ -42,12 +42,14 @@ let ipc: FakeIpc
 let tmp: string
 let file: string
 
-/** 기본 켜짐인 기능 — 웹 도구(web)만 기본 꺼짐이다 (이슈 #14) */
-const DEFAULT_ON = FEATURES.filter((feature) => feature !== 'web')
+/** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03) */
+const DEFAULT_ON = FEATURES.filter((feature) => feature !== 'web' && feature !== 'notifications')
+/** 묶음이 있는 기능 (web 은 없다) */
+const BUNDLED = FEATURES.filter((feature) => feature !== 'web')
 
 /** 기능마다 채널 하나를 거는 묶음. trajectory 는 실제처럼 서비스 + 그 서비스를 inject 한 연결. web 은 실제처럼 묶음이 없다 (ctx.engine 이 듣는다) */
 function definitions(): FeatureDefinition[] {
-  return DEFAULT_ON.map((id) => {
+  return BUNDLED.map((id) => {
     if (id === 'trajectory') {
       function bridge(ctx: Context): void {
         ctx.effect(() => {
@@ -88,7 +90,8 @@ async function start(): Promise<{ ctx: Context; settings: SettingsService; featu
 
 /** 걸린 채널 (정렬) */
 const channels = () => [...ipc.handlers.keys()].sort()
-const ALL = ['at:x', 'bang:x', 'mcp:x', 'notifications:x', 'openIn:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
+/** 기본으로 걸리는 채널 — 알림은 기본 꺼짐 */
+const ALL = ['at:x', 'bang:x', 'mcp:x', 'openIn:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
 
 beforeEach(async () => {
   ipc = new FakeIpc()
@@ -100,7 +103,7 @@ afterEach(async () => {
 })
 
 describe('FeaturesService', () => {
-  it('기본은 모두 켜짐 — 묶음이 다 올라와 채널이 다 걸리고, 켜진 목록을 한 번 알린다', async () => {
+  it('기본 — 알림·웹 도구만 빼고 묶음이 올라와 채널이 걸리고, 켜진 목록을 한 번 알린다', async () => {
     const { ctx, features, seen } = await start()
     expect(channels()).toEqual(ALL)
     expect(features.enabled()).toEqual(DEFAULT_ON)
@@ -136,25 +139,27 @@ describe('FeaturesService', () => {
     expect(channels()).toEqual(ALL)
   })
 
-  it('`!` 입력은 `!명령` 실행이 꺼지면 같이 꺼진다 (켜기 값은 그대로)', async () => {
-    const { settings, features } = await start()
-    settings.set({ features: { shell: false } })
+  // 사용자 결정 2026-10-03 — 입력 트리거(@ · / · !)·!명령 실행·스킬·MCP 는 필수, 웹 도구는 늘 꺼짐
+  it('고정된 기능은 저장된 값과 무관하다 — 필수는 꺼도 켜져 있고, 웹 도구는 켜도 꺼져 있다', async () => {
+    const { settings, features, seen } = await start()
+    settings.set({ features: { at: false, shell: false, skills: false, mcp: false, web: true } })
     await features.idle()
-    expect(channels()).toEqual(ALL.filter((channel) => channel !== 'shell:x' && channel !== 'bang:x'))
-    expect(features.isEnabled('bang')).toBe(false)
-    expect(settings.get().features).toEqual({ shell: false })
+    expect(channels()).toEqual(ALL)
+    expect(features.enabled()).toEqual(DEFAULT_ON)
+    expect(features.isEnabled('web')).toBe(false)
+    expect(seen).toHaveLength(1)
   })
 
   it('끈 값은 파일에 남아 다시 띄워도 꺼진 채로 뜬다', async () => {
     const first = await start()
-    first.settings.set({ features: { notifications: false } })
+    first.settings.set({ features: { openIn: false } })
     await first.features.idle()
     await first.fiber.dispose()
     ipc = new FakeIpc()
 
     const again = await start()
-    expect(channels()).toEqual(ALL.filter((channel) => channel !== 'notifications:x'))
-    expect(again.seen).toEqual([DEFAULT_ON.filter((feature) => feature !== 'notifications')])
+    expect(channels()).toEqual(ALL.filter((channel) => channel !== 'openIn:x'))
+    expect(again.seen).toEqual([DEFAULT_ON.filter((feature) => feature !== 'openIn')])
   })
 
   it('프로젝트 자리(directory)는 받지만 아직 전역 값을 따른다', async () => {
@@ -164,18 +169,17 @@ describe('FeaturesService', () => {
     expect(features.isEnabled('at', '/some/project')).toBe(true)
   })
 
-  // 이슈 #14 — 웹 도구는 폐쇄망 기본값(외부로 나가는 도구)이라 기본 꺼짐. 묶음은 없고 ctx.engine 이 features/changed 를 듣는다
-  it('웹 도구는 기본 꺼짐 — true 로 적어야 켜지고, 켜고 끄면 목록을 알린다(묶음·채널은 없다)', async () => {
+  it('알림은 기본 꺼짐 — true 로 적어야 켜지고, 켜고 끄면 묶음이 오르내린다', async () => {
     const { settings, features, seen } = await start()
-    expect(features.isEnabled('web')).toBe(false)
-    settings.set({ features: { web: true } })
+    expect(features.isEnabled('notifications')).toBe(false)
+    settings.set({ features: { notifications: true } })
     await features.idle()
-    expect(features.isEnabled('web')).toBe(true)
-    expect(seen.at(-1)).toEqual([...DEFAULT_ON, 'web'])
-    expect(channels()).toEqual(ALL)
+    expect(features.isEnabled('notifications')).toBe(true)
+    expect(channels()).toEqual([...ALL, 'notifications:x'].sort())
     settings.set({ features: {} })
     await features.idle()
     expect(seen.at(-1)).toEqual(DEFAULT_ON)
+    expect(channels()).toEqual(ALL)
   })
 
   it('레지스트리를 내리면 켜진 묶음이 다 내려간다 (앱 종료)', async () => {
@@ -186,11 +190,15 @@ describe('FeaturesService', () => {
 })
 
 describe('featureOn', () => {
-  it('없는 키는 기능의 기본값 — 웹 도구만 꺼짐, 나머지는 켜짐', () => {
-    expect(featureOn(undefined, 'web')).toBe(false)
-    expect(featureOn({}, 'at')).toBe(true)
-    expect(featureOn({ web: true }, 'web')).toBe(true)
-    expect(featureOn({ web: false }, 'web')).toBe(false)
+  it('고정된 기능은 고정 값, 고르는 기능은 없는 키면 기본값(알림만 꺼짐)', () => {
+    expect(featureOn({ web: true }, 'web')).toBe(false)
+    expect(featureOn({ at: false }, 'at')).toBe(true)
+    expect(featureOn({ shell: false }, 'bang')).toBe(true)
+    expect(featureOn(undefined, 'notifications')).toBe(false)
+    expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
+    expect(featureOn({}, 'terminal')).toBe(true)
+    expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn'])
   })
 })
 
