@@ -58,6 +58,11 @@ const Channel = {
   FEATURES_CHANGED: 'features:changed',
   WINDOW_FULLSCREEN: 'window:fullscreen',
   LIST_SKILLS: 'skills:list',
+  LIST_MCP: 'mcp:list',
+  SAVE_MCP: 'mcp:save',
+  REMOVE_MCP: 'mcp:remove',
+  SET_MCP_ENABLED: 'mcp:set-enabled',
+  TEST_MCP: 'mcp:test',
 } as const
 
 /** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
@@ -138,6 +143,11 @@ const bridge: LitecodeBridge = {
   getFeatures: () => ipcRenderer.invoke(Channel.GET_FEATURES),
   onFeaturesChanged: (listener) => listen(Channel.FEATURES_CHANGED, listener),
   listSkills: (directory) => ipcRenderer.invoke(Channel.LIST_SKILLS, directory),
+  listMcp: (directory) => ipcRenderer.invoke(Channel.LIST_MCP, directory),
+  saveMcp: (input) => ipcRenderer.invoke(Channel.SAVE_MCP, input),
+  removeMcp: (name) => ipcRenderer.invoke(Channel.REMOVE_MCP, name),
+  setMcpEnabled: (name, enabled) => ipcRenderer.invoke(Channel.SET_MCP_ENABLED, name, enabled),
+  testMcp: (input, directory) => ipcRenderer.invoke(Channel.TEST_MCP, input, directory),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

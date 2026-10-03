@@ -1,0 +1,131 @@
+/* 설정 > MCP (이슈 #28) — 카드·버튼·입력은 모델 페이지(settings.css) 것을 쓰고, 여기엔 MCP 줄에만 있는 것 */
+
+.mcp-card__head {
+  gap: 8px;
+}
+
+.mcp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-tertiary);
+  opacity: 0.5;
+}
+
+.mcp-dot--connected {
+  background: #2f9e44;
+  opacity: 1;
+}
+
+.mcp-dot--failed,
+.mcp-dot--needs_auth,
+.mcp-dot--needs_client_registration {
+  background: #e03131;
+  opacity: 1;
+}
+
+.mcp-card__readonly {
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.mcp-card__meta,
+.mcp-card__state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: 16px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.mcp-card__target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-tertiary);
+}
+
+.mcp-card__error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e03131;
+}
+
+.mcp-card__tools-toggle {
+  padding: 0 6px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.mcp-card__tools-toggle:hover {
+  background: var(--fill-hover);
+}
+
+.mcp-tools {
+  margin: 8px 0 0 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.mcp-tools__item {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.mcp-tools__name {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mcp-tools__description {
+  color: var(--text-tertiary);
+}
+
+.mcp-editor__types {
+  display: flex;
+  gap: 6px;
+}
+
+.mcp-editor__args {
+  height: auto;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mcp-var {
+  align-items: center;
+}
+
+.mcp-var__secret {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.mcp-editor__test {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.mcp-editor__test[data-ok='false'] {
+  color: #e03131;
+}

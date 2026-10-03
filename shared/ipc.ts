@@ -15,6 +15,7 @@ import type { OpenInApp } from '../src/services/openIn.ts'
 import type { FilePreview } from '../src/services/filePreview.ts'
 import type { FeatureId } from './features.ts'
 import type { SkillInfo } from '../src/services/skills.ts'
+import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -33,6 +34,9 @@ export type { FilePreview } from '../src/services/filePreview.ts'
 export type { FeatureId, FeatureSwitches } from './features.ts'
 export type { SkillInfo } from '../src/services/skills.ts'
 export type { SkillSource } from './skills.ts'
+export type { McpServerInput, McpServerSummary, McpTestResult, McpVarSummary } from '../src/services/mcp.ts'
+export type { McpTool } from '../src/services/mcpClient.ts'
+export type { McpToolRef } from '../src/services/turnProgress.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -98,6 +102,11 @@ export const Channel = {
   /** 메인 → preload (boolean) — 창이 전체 화면인가. preload 가 html[data-fullscreen] 으로 옮긴다 (화면 코드는 CSS 만 본다) */
   WINDOW_FULLSCREEN: 'window:fullscreen',
   LIST_SKILLS: 'skills:list',
+  LIST_MCP: 'mcp:list',
+  SAVE_MCP: 'mcp:save',
+  REMOVE_MCP: 'mcp:remove',
+  SET_MCP_ENABLED: 'mcp:set-enabled',
+  TEST_MCP: 'mcp:test',
 } as const
 
 export interface LitecodeBridge {
@@ -210,6 +219,14 @@ export interface LitecodeBridge {
   onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void
   /** 그 프로젝트에서 모델이 쓸 수 있는 스킬 (설정 > 스킬, ctx.skills) — 이름순, 본문은 파일에서 지금 읽은 것. 스킬 기능이 꺼져 있으면 핸들러가 없다 */
   listSkills(directory: string): Promise<SkillInfo[]>
+  /** 설정 > MCP 목록 (ctx.mcp, 기능 mcp 가 켜졌을 때만) — directory 는 지금 프로젝트(그 폴더의 상태·프로젝트 서버). 비밀 값은 안 오고 설정 여부만 */
+  listMcp(directory?: string): Promise<McpServerSummary[]>
+  /** 앱 서버를 넣거나 고친다 (originalName 이 있으면 고침). 비밀 var 의 빈 값은 저장된 값 유지 */
+  saveMcp(input: McpServerInput): Promise<void>
+  removeMcp(name: string): Promise<void>
+  setMcpEnabled(name: string, enabled: boolean): Promise<void>
+  /** 저장하지 않고 붙어 본다 — 도구 목록 또는 사유 */
+  testMcp(input: McpServerInput, directory?: string): Promise<McpTestResult>
 }
 
 declare global {

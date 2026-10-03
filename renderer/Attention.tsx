@@ -63,12 +63,21 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
         <SubtaskLabel request={request} />
       </div>
       <div className="attention-card__body" tabIndex={0} role="group" aria-label={t('approval.waiting')}>
-        <div className="attention-card__headline">{known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}</div>
-        {request.resources.map((resource) => (
-          <div key={resource} className="attention-card__command">
-            {resource}
+        <div className="attention-card__headline">
+          {request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
+        </div>
+        {/* MCP 도구 요청의 patterns 는 늘 ["*"] 라 서버·도구 이름을 보인다 (이슈 #28) */}
+        {request.mcp ? (
+          <div className="attention-card__command" data-mcp={`${request.mcp.server}/${request.mcp.tool}`}>
+            {`${t('mcp.chat')} · ${request.mcp.server} · ${request.mcp.tool}`}
           </div>
-        ))}
+        ) : (
+          request.resources.map((resource) => (
+            <div key={resource} className="attention-card__command">
+              {resource}
+            </div>
+          ))
+        )}
       </div>
       {error && (
         <p className="attention-card__error" role="alert">

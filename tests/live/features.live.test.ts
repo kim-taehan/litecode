@@ -24,7 +24,7 @@ let tmp: string
 let userData: string
 let project: string
 
-const ALL = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills']
+const ALL = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp']
 
 async function launch(): Promise<void> {
   app = await electron.launch({
@@ -150,7 +150,7 @@ describe('기능 켜기/끄기', () => {
 
   it('설정 > 기능 — 기능마다 카드(이름·스위치·한 줄 설명), 웹 도구만 꺼짐(이슈 #14). dsh 카드 치수', async () => {
     await openFeatures()
-    expect(await dialog().locator('.settings-nav__item').allTextContents()).toEqual(['일반', '모델', '기능', '스킬'])
+    expect(await dialog().locator('.settings-nav__item').allTextContents()).toEqual(['일반', '모델', '기능', '스킬', 'MCP'])
     expect(await dialog().locator('.feature-card__title').allTextContents()).toEqual([
       '@ 파일 언급',
       '/ 명령',
@@ -161,10 +161,11 @@ describe('기능 켜기/끄기', () => {
       '알림',
       '다른 앱에서 열기',
       '스킬',
+      'MCP 서버',
       '웹 도구',
     ])
-    expect(await dialog().locator('.feature-card__description').count()).toBe(10)
-    expect(await dialog().getByRole('switch').evaluateAll((list) => list.map((el) => el.getAttribute('aria-checked')))).toEqual([...Array(9).fill('true'), 'false'])
+    expect(await dialog().locator('.feature-card__description').count()).toBe(11)
+    expect(await dialog().getByRole('switch').evaluateAll((list) => list.map((el) => el.getAttribute('aria-checked')))).toEqual([...Array(10).fill('true'), 'false'])
     const card = dialog().locator('.feature-card').first()
     expect(await card.evaluate((el) => [getComputedStyle(el).padding, getComputedStyle(el).borderTopWidth])).toEqual(['12px 14px', '0.5px'])
     await fs.mkdir(path.join(root, 'shots'), { recursive: true })
@@ -241,6 +242,7 @@ describe('기능 켜기/끄기', () => {
 
   it('다 꺼도 대화는 된다 — 남은 바탕(대화·저장)은 그대로', async () => {
     await setFeature('스킬', false) // 엔진도 다시 뜬다 (skill 도구 빼기, 이슈 #7)
+    await setFeature('MCP 서버', false)
     await closeSettings()
     expect(await enabled()).toEqual([])
     await chatTurn('core still works')
@@ -248,7 +250,7 @@ describe('기능 켜기/끄기', () => {
   })
 
   it('다시 켜면 탭·버튼·팝업·터미널 칸·알림이 돌아온다', async () => {
-    for (const name of ['@ 파일 언급', '/ 명령', '!명령 실행', '터미널 칸', '추론 과정', '알림', '다른 앱에서 열기', '스킬']) await setFeature(name, true)
+    for (const name of ['@ 파일 언급', '/ 명령', '!명령 실행', '터미널 칸', '추론 과정', '알림', '다른 앱에서 열기', '스킬', 'MCP 서버']) await setFeature(name, true)
     expect(await featureSwitch('! 셸 입력').getAttribute('aria-checked')).toBe('true')
     await closeSettings()
     await expect.poll(enabled, { timeout: 5_000 }).toEqual(ALL)

@@ -296,7 +296,7 @@ describe('하위 작업 기록 (다시 열기)', () => {
         ],
       ],
     ])
-    expect(messageItems(parts, '', children)).toEqual([
+    expect(messageItems(parts, '', undefined, children)).toEqual([
       {
         kind: 'subtask',
         id: 'm:p1',
