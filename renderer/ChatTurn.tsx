@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { Attention, AttentionAnswer, TurnItem } from '../shared/ipc.ts'
+import type { Attention, AttentionAnswer, Subtask, TurnItem } from '../shared/ipc.ts'
 import { AttentionCard } from './Attention.tsx'
 import { DiffCard, DiffStat } from './DiffCard.tsx'
 import { CompactionMark } from './Compaction.tsx'
@@ -102,7 +102,7 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
       {showWork && work.length > 0 && (
         <div className="turn__work">
           {work.map((item) =>
-            item.kind === 'compaction' ? <CompactionMark key={item.id} item={item} /> : <WorkRow key={item.id} item={item} directory={directory} />,
+            item.kind === 'compaction' ? <CompactionMark key={item.id} item={item} /> : <WorkRow key={item.id} item={item} directory={directory} turnRunning={running} />,
           )}
         </div>
       )}
@@ -119,10 +119,11 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
   )
 }
 
-/** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운 */
-function WorkRow({ item, directory }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string }) {
+/** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다) */
+function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
   const t = useT()
+  if (item.kind === 'subtask') return <SubtaskRow item={item} directory={directory} turnRunning={turnRunning} />
   if (item.kind === 'text') {
     if (!item.text.trim()) return null
     return (
@@ -201,6 +202,70 @@ function WorkRow({ item, directory }: { item: Exclude<TurnItem, { kind: 'compact
       {open && body && <div className="turn-row__body">{body}</div>}
     </div>
   )
+}
+
+/** 하위 작업 한 줄 (task — 엔진이 자식 세션에서 따로 돌린다, 이슈 #31). 여럿이 동시에 돌면 줄마다 제 초가 오른다. 펼치면 그 자식의 생각·도구·글 줄이
+ *  (진행 중엔 실시간으로) 들여 쌓인다. 모양은 dsh ui-subagent 의 목록 행(상태 · 이름 · 설명 … 오른쪽에 걸린 시간·토큰)과 Claude Code 의 Task 블록 참조.
+ *  끝난 턴에 아직 running 으로 남은 줄(중지·엔진 재시작으로 끝 신호를 못 받음)은 "중단됨" 이다 */
+function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory: string; turnRunning: boolean }) {
+  const [open, setOpen] = useState(false)
+  const t = useT()
+  const unfinished = item.status === 'running' || item.status === 'preparing'
+  const live = turnRunning && unfinished
+  const now = useNow(live)
+  const stopped = item.status === 'stopped' || (!turnRunning && unfinished)
+  const state = stopped ? 'stopped' : item.status
+  const status =
+    item.status === 'error'
+      ? t('chat.subtaskFailed')
+      : stopped
+        ? t('chat.subtaskStopped')
+        : item.status === 'done'
+          ? item.startedAt !== undefined && item.endedAt !== undefined
+            ? t('chat.subtaskDone', { duration: formatDuration(t, item.endedAt - item.startedAt) })
+            : t('chat.completed')
+          : item.startedAt !== undefined
+            ? t('chat.subtaskRunning', { duration: formatDuration(t, now - item.startedAt) })
+            : t('chat.toolPreparing')
+  const name = [item.agent, item.description].filter(Boolean).join(' · ')
+  const rows = item.items.filter((child): child is Exclude<TurnItem, { kind: 'compaction' }> => child.kind !== 'compaction')
+  return (
+    <div className="turn-row turn-subtask" data-kind="subtask" data-status={state} data-live={live || undefined}>
+      <button type="button" className="turn-row__line" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
+        <SubtaskIcon />
+        <span className="turn-row__title">{t('chat.subtask')}</span>
+        {name && (
+          <>
+            <span className="turn-row__dot" aria-hidden="true" />
+            <span className="turn-row__summary">{name}</span>
+          </>
+        )}
+        <span className="turn-subtask__status">
+          {status}
+          {item.tokens !== undefined && <span className="turn-subtask__tokens"> · {t('chat.subtaskTokens', { count: item.tokens.toLocaleString() })}</span>}
+        </span>
+      </button>
+      {open && (
+        <div className="turn-subtask__body">
+          {rows.map((child) => <WorkRow key={child.id} item={child} directory={directory} turnRunning={turnRunning} />)}
+          {rows.length === 0 && !item.error && <p className="turn-subtask__empty">{t('chat.subtaskEmpty')}</p>}
+          {item.error && <pre className="turn-row__code turn-row__code--error">{item.error}</pre>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 1초마다 지금 시각 — on 일 때만 돈다 */
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!on) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [on])
+  return now
 }
 
 /** 진행 중 맨 아래 파란 줄 — 보낸 시각부터 초가 올라가고 점이 움직인다 (dsh RunningStatus). 시계는 이 줄만 다시 그린다 */
@@ -290,6 +355,18 @@ function ToolIcon({ name }: { name: string }) {
     <Icon>
       <circle cx="8" cy="8" r="2.25" />
       <path d="M8 1.75V3.5M8 12.5V14.25M1.75 8H3.5M12.5 8H14.25M3.6 3.6L4.8 4.8M11.2 11.2L12.4 12.4M3.6 12.4L4.8 11.2M11.2 4.8L12.4 3.6" />
+    </Icon>
+  )
+}
+
+/** 하위 작업 — 갈라지는 가지 */
+function SubtaskIcon() {
+  return (
+    <Icon>
+      <circle cx="4" cy="3.5" r="1.75" />
+      <circle cx="12" cy="8" r="1.75" />
+      <circle cx="4" cy="12.5" r="1.75" />
+      <path d="M5.75 3.5H7.5C8.6 3.5 9 4.2 9 5.25V6.75C9 7.6 9.4 8 10.25 8M5.75 12.5H7.5C8.6 12.5 9 11.8 9 10.75V9.25C9 8.4 9.4 8 10.25 8" />
     </Icon>
   )
 }

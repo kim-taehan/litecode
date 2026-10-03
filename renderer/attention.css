@@ -366,3 +366,13 @@
   gap: 8px;
   margin-top: 20px;
 }
+
+/* 하위 작업이 물었다 — 띠 오른쪽에 그 하위 작업 (이슈 #31) */
+.attention-card__from {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}

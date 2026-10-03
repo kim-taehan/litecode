@@ -8,7 +8,7 @@ import { MODE_AGENT, type EngineConnection } from './engine.ts'
 import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
-import { messageItems, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type TurnItem } from './turnProgress.ts'
+import { messageItems, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
 import { projectInstructions } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
@@ -69,7 +69,10 @@ export interface PermissionAttention {
   kind: 'permission'
   /** 답할 때 쓰는 요청 id (per_…) */
   id: string
+  /** 요청한 엔진 세션 — 하위 작업이 물으면 그 자식 세션이다 (reply 에 그대로 넘긴다) */
   sessionId: string
+  /** 하위 작업(자식 세션)이 물었다 — 카드에 어느 하위 작업인지 보인다 */
+  subtask?: AttentionSubtask
   /** opencode 권한 이름 — bash·edit·read·external_directory·webfetch 등 */
   action: string
   /** 명령·파일·폴더 패턴 (edit 요청엔 diff 가 없다 — 01f 1-c) */
@@ -81,7 +84,14 @@ export interface QuestionAttention {
   /** que_… */
   id: string
   sessionId: string
+  subtask?: AttentionSubtask
   questions: AttentionQuestion[]
+}
+
+/** 승인·질문을 낸 하위 작업 — 하위 에이전트 이름과 AI 가 붙인 설명 */
+export interface AttentionSubtask {
+  agent: string
+  description: string
 }
 
 /** opencode QuestionV2Info (01i 2-a) */
@@ -217,8 +227,8 @@ export class LlmService extends Service {
   private purgeWanted = false
   /** 턴이 도는 세션 — addContext 가 막는다 */
   private busy = new Set<string>()
-  /** 기다리는 요청 id → 그 세션·폴더·종류·도구 호출 (reply 가 쓴다). 턴이 끝나면 지운다 */
-  private requests = new Map<string, { sessionId: string; directory: string; kind: Attention['kind']; callID?: string }>()
+  /** 기다리는 요청 id → 요청한 세션(하위 작업이면 자식)·그 요청을 기다리는 턴의 세션·폴더·종류·도구 호출 (reply 가 쓴다). 턴이 끝나면 지운다 */
+  private requests = new Map<string, { sessionId: string; turn: string; directory: string; kind: Attention['kind']; callID?: string }>()
   /** 턴이 도는 세션 → 앱이 거절한 도구 호출 id. 그 도구가 error 로 끝나고 idle 이 오면 거절로 끝난 턴이다 */
   private declined = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
@@ -434,8 +444,9 @@ export class LlmService extends Service {
 
       let admitted!: (sent: boolean) => void
       const scope = new TurnScope(id, userMessageId)
-      const attention = this.watchAttention(conn, id, workdir, directory, scope, onAttention)
-      const events = this.follow(conn, scope, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop)
+      const tracker = new TurnTracker(workdir)
+      const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention)
+      const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop)
       try {
         await events.connected
         if (stop?.aborted) {
@@ -548,7 +559,8 @@ export class LlmService extends Service {
       const running = sessionId in ((await status.json()) as Record<string, unknown>)
       // 레거시 전환 전에 쌓인 기록(신규 세대)이 먼저다 — 그 뒤에 레거시로 이어 쓴 기록 (migrate.ts, #21)
       const previous = (await readPreviousMessages(conn, sessionId)).filter((message) => !message.id || !hidden.has(message.id))
-      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(raw.filter((message) => !hidden.has(message.info.id)), running, workdir)] }
+      const children = await this.subtaskMessages(conn, raw, workdir)
+      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(raw.filter((message) => !hidden.has(message.info.id)), running, workdir, children)] }
     } catch (error) {
       return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
     }
@@ -564,6 +576,18 @@ export class LlmService extends Service {
   /** 레거시 기록 그대로 (오래된 것부터) — Trajectory 탭이 읽는다. workdir 는 realDirectory 를 거친 세션 폴더 (?directory= 에 쓴다) */
   async readMessages(workdir: string, sessionId: string): Promise<EngineMessage[]> {
     return this.engineMessages(await this.ctx.engine.connection(), sessionId, workdir)
+  }
+
+  /** 기록(readMessages)의 task 파트가 띄운 하위 작업(자식 세션)의 기록 — 자식 id → 메시지. Trajectory 탭이 하위 작업 묶음을 그린다 */
+  async readSubtasks(workdir: string, raw: readonly EngineMessage[]): Promise<Map<string, EngineMessage[]>> {
+    return this.subtaskMessages(await this.ctx.engine.connection(), raw, workdir)
+  }
+
+  /** 자식 세션 기록을 이어 읽는다 (#31 — 부모 task 파트 metadata.sessionId). 자식 하나를 못 읽어도 대화는 연다 — 그 하위 작업 줄이 비어 보일 뿐 */
+  private async subtaskMessages(conn: EngineConnection, raw: readonly EngineMessage[], workdir: string): Promise<Map<string, EngineMessage[]>> {
+    const ids = [...new Set(subtaskSessions(raw))]
+    const read = await Promise.all(ids.map((id) => this.engineMessages(conn, id, workdir).then((messages) => [id, messages] as const, () => undefined)))
+    return new Map(read.filter((entry) => entry !== undefined))
   }
 
   /** 지운 대화의 본문을 DB 파일에서 걷어낸다 (ctx.engine.purgeDeleted). 답을 기다리는 턴이 있으면 다 끝난 뒤로 미룬다 */
@@ -608,6 +632,7 @@ export class LlmService extends Service {
   private follow(
     conn: EngineConnection,
     scope: TurnScope,
+    tracker: TurnTracker,
     workdir: string,
     admitted: Promise<boolean>,
     onProgress: ((item: TurnItem) => void) | undefined,
@@ -617,7 +642,6 @@ export class LlmService extends Service {
   ): { connected: Promise<void>; result: Promise<TurnOutcome>; stop: () => void } {
     const sessionId = scope.sessionId
     const controller = new AbortController()
-    const tracker = new TurnTracker(workdir)
     const meter = new TurnMeter()
     let connected!: () => void
     let failConnect!: (error: unknown) => void
@@ -691,6 +715,15 @@ export class LlmService extends Service {
             if (part?.type === 'tool' && part.state?.status === 'error' && part.callID && declined.has(part.callID)) declinedEnd = true
           }
         }
+        return
+      }
+      // 하위 작업 (task, #31): 이 턴이 띄운 자식 세션의 이벤트는 그 하위 작업 줄로. 자식의 session.idle·session.error 는 부모 턴 끝이 아니다
+      const about = props['info'] as EngineMessageInfo | undefined
+      if (event.type === 'session.created' && seenUser && about?.parentID === sessionId) return tracker.adoptChild(about.id)
+      if (tracker.isChild(props['sessionID'] ?? about?.sessionID)) {
+        if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal()
+        const item = tracker.child(event.type, props)
+        if (item) onProgress?.(item)
         return
       }
       if (props['sessionID'] !== sessionId) return
@@ -778,6 +811,7 @@ export class LlmService extends Service {
     workdir: string,
     directory: string,
     scope: TurnScope,
+    tracker: TurnTracker,
     onAttention: ((requests: Attention[]) => void) | undefined,
   ): { refresh(): void; stop(): void } {
     let pending: Attention[] = []
@@ -798,7 +832,17 @@ export class LlmService extends Service {
     const list = async <T extends Request>(kind: Attention['kind']): Promise<T[]> => {
       const res = await fetch(`${conn.url}/${kind}?${at(workdir)}`, { headers: conn.headers, signal: conn.closed })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return ((await res.json()) as T[]).filter((entry) => entry.sessionID === sessionId && scope.owns(entry.tool?.messageID))
+      // 이 턴 답 메시지의 요청 + 이 턴이 띄운 하위 작업(자식 세션)의 요청 — 자식은 이 턴에 생긴 세션이라 앞 턴의 남은 요청이 섞이지 않는다 (#31 실측:
+      // 자식의 permission.asked 는 sessionID = 자식, tool.messageID = 자식의 답 메시지. 매번 묻기 모드의 general-ask 가 bash 를 물을 때)
+      return ((await res.json()) as T[]).filter(
+        (entry) => (entry.sessionID === sessionId && scope.owns(entry.tool?.messageID)) || tracker.isChild(entry.sessionID),
+      )
+    }
+    /** 요청한 세션과, 하위 작업이 물었으면 그 하위 작업 */
+    const origin = (entry: Request): { sessionId: string; subtask?: AttentionSubtask } => {
+      if (entry.sessionID === sessionId || !entry.sessionID) return { sessionId }
+      const subtask = tracker.subtaskOf(entry.sessionID)
+      return { sessionId: entry.sessionID, ...(subtask && { subtask: { agent: subtask.agent, description: subtask.description } }) }
     }
     const read = async (): Promise<void> => {
       if (stopped) return
@@ -808,11 +852,11 @@ export class LlmService extends Service {
       ])
       if (stopped) return
       const next: Attention[] = [
-        ...permissions.map((entry): Attention => ({ kind: 'permission', id: entry.id, sessionId, action: entry.permission, resources: entry.patterns ?? [] })),
-        ...questions.map((entry): Attention => ({ kind: 'question', id: entry.id, sessionId, questions: entry.questions })),
+        ...permissions.map((entry): Attention => ({ kind: 'permission', id: entry.id, ...origin(entry), action: entry.permission, resources: entry.patterns ?? [] })),
+        ...questions.map((entry): Attention => ({ kind: 'question', id: entry.id, ...origin(entry), questions: entry.questions })),
       ]
-      for (const entry of permissions) this.requests.set(entry.id, { sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID })
-      for (const entry of questions) this.requests.set(entry.id, { sessionId, directory: workdir, kind: 'question', callID: entry.tool?.callID })
+      for (const entry of permissions) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID })
+      for (const entry of questions) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'question', callID: entry.tool?.callID })
       publish(next)
     }
     // 답한 요청은 목록 읽기를 기다리지 않고 바로 뺀다 — 카드가 곧장 사라지고, 답 직후 턴이 끝나도(stop) resolved 를 놓치지 않는다
@@ -824,7 +868,7 @@ export class LlmService extends Service {
       stop: () => {
         stopped = true
         this.watchers.delete(sessionId)
-        for (const [id, request] of this.requests) if (request.sessionId === sessionId) this.requests.delete(id)
+        for (const [id, request] of this.requests) if (request.turn === sessionId) this.requests.delete(id)
       },
     }
   }
@@ -842,7 +886,8 @@ export class LlmService extends Service {
         : Array.isArray(answer) && answer.length > 0 && answer.every((entry) => Array.isArray(entry) && entry.length > 0 && entry.every((label) => typeof label === 'string' && label.trim() !== '')))
     if (!valid) throw new Error(tr('error.attentionAnswer'))
     const conn = await this.ctx.engine.connection()
-    const declined = answer === 'reject' && request.callID ? this.declined.get(sessionId) : undefined
+    // 하위 작업의 요청을 거절하면 그 자식만 그 도구 오류로 이어 가고 부모 턴은 계속 돈다 — 부모 턴의 "거절로 끝남" 이 아니다
+    const declined = answer === 'reject' && request.callID && request.sessionId === request.turn ? this.declined.get(sessionId) : undefined
     declined?.add(request.callID!) // 보내기 전에 — 도구 error 가 응답보다 먼저 올 수 있다
     const base = `${conn.url}/${request.kind}/${requestId}`
     const query = at(request.directory)
@@ -858,7 +903,7 @@ export class LlmService extends Service {
       throw new Error(tr('error.attentionReply', { status: res.status }))
     }
     this.requests.delete(requestId)
-    this.watchers.get(sessionId)?.answered(requestId)
+    this.watchers.get(request.turn)?.answered(requestId)
   }
 }
 
@@ -911,8 +956,8 @@ function parseFrame(frame: string): EngineEvent | undefined {
  *  완료 시각 없는 assistant 면 끝에 "중단됨" 을 단다. 마지막이 아닌 턴도 같은 모양이면 중단이다. 사용자가 멈춘 턴은 MessageAbortedError 다.
  *  자동 요약(L2): 요약 user(compaction 파트)는 그 턴 답의 요약 줄(끝나면 done — 화면은 구분선)이고, 요약 답(summary:true)의 글은 답이 아니다.
  *  요약 뒤 user 하나(합성 Continue·한도 초과 뒤 앞 user 의 복사본)는 말풍선이 아니라 이음이다 — 그 답은 같은 턴 답에 붙는다 (TurnScope 와 같은 규칙).
- *  root 는 세션 폴더 — 바꾼 파일 경로를 그 기준 상대로 보인다 */
-export function historyMessages(raw: readonly EngineMessage[], running: boolean, root = ''): HistoryMessage[] {
+ *  root 는 세션 폴더 — 바꾼 파일 경로를 그 기준 상대로 보인다. children 은 task 파트가 띄운 자식 세션의 기록 — 하위 작업 줄 안에 넣는다 (#31) */
+export function historyMessages(raw: readonly EngineMessage[], running: boolean, root = '', children?: SubtaskHistory): HistoryMessage[] {
   const messages: HistoryMessage[] = []
   let sentAt: number | undefined
   let asked: HistoryMessage | undefined
@@ -978,7 +1023,7 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
     }
     const reply = currentReply()
     reply.text += parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
-    reply.items = [...(reply.items ?? []), ...messageItems(parts, root)]
+    reply.items = [...(reply.items ?? []), ...messageItems(parts, root, children)]
     lastStep = message
     finishedAt(info.time?.completed, reply)
     if (info.error?.name === 'MessageAbortedError') Object.assign(reply, { error: tr('error.stopped'), interrupted: true })

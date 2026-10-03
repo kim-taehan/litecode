@@ -668,6 +668,8 @@ button {
   /* 스크롤 칸은 전체 폭(스크롤바가 창 끝에), 글은 안쪽 열(.chat-column, chat.css)만 — dsh 대화 열 폭 축 */
   padding: 28px 0;
   width: 100%;
+  /* 늘 보이는 스크롤바(마우스 연결 등)가 안쪽 열을 왼쪽으로 밀지 않게 양쪽에 같은 자리를 둔다 — 겹쳐 뜨는 스크롤바에선 아무 일도 없다 */
+  scrollbar-gutter: stable both-edges;
 }
 
 .empty {
@@ -1536,6 +1538,19 @@ html[data-platform]:not([data-platform='darwin']) .file-preview__head {
 
 .trajectory__row[data-kind='tool'] {
   padding-left: 42px;
+}
+
+/* 하위 작업(자식 세션)의 스텝·도구 — 한 단 더 들여 왼쪽 선으로 묶는다 (이슈 #31) */
+.trajectory__row--subtask {
+  margin-left: 42px;
+  border-left: 1px solid var(--border);
+}
+.trajectory__row--subtask[data-kind='tool'] {
+  padding-left: 30px;
+}
+.trajectory__subtask {
+  margin-right: 6px;
+  color: var(--text-caption);
 }
 
 .trajectory__fold {

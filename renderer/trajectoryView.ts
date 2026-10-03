@@ -28,9 +28,9 @@ export function groupTurns(records: readonly TrajectoryRecord[]): Turn[] {
 function searchText(record: TrajectoryRecord): string {
   switch (record.kind) {
     case 'tool':
-      return [record.name, record.input, record.result, record.error ?? ''].join('\n')
+      return [record.name, record.input, record.result, record.error ?? '', record.subtask ?? ''].join('\n')
     case 'assistant':
-      return [record.text, record.error ?? ''].join('\n')
+      return [record.text, record.error ?? '', record.subtask ?? ''].join('\n')
     default:
       return record.text
   }

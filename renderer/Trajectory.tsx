@@ -48,14 +48,15 @@ export function Trajectory({ directory, sessionId, pending }: Props) {
   const records = data?.records ?? []
   const turns = useMemo(() => groupTurns(records), [records])
   const bars = useMemo(() => timeline(records, mode), [records, mode])
-  /** 도구를 부른 스텝 id → 그 도구 id 들 (스텝 바로 뒤에 온다) */
+  /** 도구를 부른 스텝 id → 그 도구 id 들 (스텝 바로 뒤에 온다). 하위 작업의 스텝·도구는 task 레코드 뒤에 끼므로 하위 작업마다 따로 센다 */
   const callsOf = useMemo(() => {
     const calls = new Map<number, number[]>()
-    let owner: number | undefined
+    const owners = new Map<string, number>()
     records.forEach((record, id) => {
-      if (record.kind === 'assistant') owner = id
-      else if (record.kind === 'tool' && owner !== undefined) calls.set(owner, [...(calls.get(owner) ?? []), id])
-      else owner = undefined
+      const scope = 'subtask' in record ? (record.subtask ?? '') : ''
+      if (record.kind === 'assistant') owners.set(scope, id)
+      else if (record.kind === 'tool' && owners.has(scope)) calls.set(owners.get(scope)!, [...(calls.get(owners.get(scope)!) ?? []), id])
+      else owners.clear()
     })
     return calls
   }, [records])
@@ -197,9 +198,15 @@ function Row({ record, calls, callsFolded, onToggleCalls }: { record: Trajectory
   const error = 'error' in record ? record.error : undefined
   const took = record.kind === 'assistant' || record.kind === 'tool' ? (record.end === undefined ? '…' : formatDuration(record.end - record.start)) : ''
   const diffs = record.kind === 'tool' && !error ? record.diffs : undefined
+  /** 하위 작업(자식 세션)의 레코드 — 들여 쓰고 어느 하위 작업인지 보인다 (이슈 #31) */
+  const subtask = record.kind === 'assistant' || record.kind === 'tool' ? record.subtask : undefined
   return (
     <>
-      <div className={`trajectory__row${error ? ' trajectory__row--error' : ''}`} data-kind={record.kind}>
+      <div
+        className={`trajectory__row${error ? ' trajectory__row--error' : ''}${subtask !== undefined ? ' trajectory__row--subtask' : ''}`}
+        data-kind={record.kind}
+        data-subtask={subtask}
+      >
         <span className="trajectory__fold">
           {calls !== undefined && (
             <button type="button" aria-label={callsFolded ? t('trajectory.unfoldCall') : t('trajectory.foldCall')} aria-expanded={!callsFolded} onClick={onToggleCalls}>
@@ -209,6 +216,7 @@ function Row({ record, calls, callsFolded, onToggleCalls }: { record: Trajectory
         </span>
         <span className="trajectory__tag">{TAG[record.kind]}</span>
         <span className="trajectory__text">
+          {subtask !== undefined && <span className="trajectory__subtask">{t('trajectory.subtask', { name: subtask })}</span>}
           {record.kind === 'tool' ? (
             <>
               <span className="trajectory__call">

@@ -160,6 +160,29 @@ button.turn-row__line:disabled { cursor: default; }
 }
 .turn-row__code--error { color: var(--danger); }
 
+/* 하위 작업 (이슈 #31) — 오른쪽에 상태·걸린 시간, 펼치면 자식의 줄을 왼쪽 선으로 묶어 들여 쌓는다 (dsh ui-subagent 목록 행) */
+.turn-subtask__status {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+.turn-subtask[data-status='error'] .turn-subtask__status { color: var(--danger); }
+.turn-subtask__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 4px 6px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+.turn-subtask__empty {
+  margin: 0;
+  color: var(--text-caption);
+}
+
 /* 진행 중에 끼어 나오는 답 글 — 본문 글자 그대로 */
 .turn-row--text {
   color: var(--text);
@@ -225,7 +248,8 @@ button.turn-row__line:disabled { cursor: default; }
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(calc(100% - 32px), clamp(680px, 64%, 920px));
+  /* 폭은 스크롤 칸 안쪽(100%)이 아니라 대화 칸(.chat-pane, cqw) 기준 — 스크롤바가 늘 보이는 환경에서도 입력 카드(열 + 32)와 폭·가운데가 맞는다 */
+  width: min(calc(100% - 32px), clamp(680px, 64cqw, 920px));
   margin: 0 auto;
 }
 

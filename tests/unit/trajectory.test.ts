@@ -111,4 +111,37 @@ describe('trajectoryRecords', () => {
   it('빈 세션은 빈 목록이다', () => {
     expect(trajectoryRecords([])).toEqual([])
   })
+
+  // 이슈 #31: task 파트의 metadata.sessionId 가 자식 세션 — 자식 스텝·도구를 그 task 레코드 바로 뒤에 subtask 표시로 잇는다. 자식 user 는 턴이 아니다
+  it('하위 작업: task 레코드 뒤에 그 자식의 스텝·도구(subtask = "에이전트 · 설명"), 자식 user 는 빠진다', () => {
+    const taskPart = (id: string, child: string, description: string): EnginePart => ({
+      type: 'tool',
+      id,
+      tool: 'task',
+      callID: id,
+      state: { status: 'completed', input: { subagent_type: 'general', description }, output: 'ok', metadata: { sessionId: child }, time: { start: 20, end: 60 } },
+    })
+    const child = (sid: string, cmd: string): EngineMessage[] => [
+      { info: { id: `${sid}u`, sessionID: sid, role: 'user', time: { created: 21 } }, parts: [{ type: 'text', id: 'q', text: 'child prompt' }] },
+      { info: { id: `${sid}a`, sessionID: sid, role: 'assistant', time: { created: 22, completed: 40 } }, parts: [tool('bash', { command: cmd }, { status: 'completed', output: cmd, time: { start: 25, end: 39 } })] },
+    ]
+    const records = trajectoryRecords(
+      [user('u', 'go', 10), assistant('a', 'u', 11, 19, [taskPart('t1', 'ses_x', 'job x'), taskPart('t2', 'ses_y', 'job y')])],
+      '',
+      new Map([
+        ['ses_x', child('ses_x', 'echo x')],
+        ['ses_y', child('ses_y', 'echo y')],
+      ]),
+    )
+    expect(records.map((record) => [record.kind, 'subtask' in record ? record.subtask : undefined, record.kind === 'tool' ? record.input : undefined])).toEqual([
+      ['user', undefined, undefined],
+      ['assistant', undefined, undefined],
+      ['tool', undefined, '{"subagent_type":"general","description":"job x"}'],
+      ['assistant', 'general · job x', undefined],
+      ['tool', 'general · job x', '{"command":"echo x"}'],
+      ['tool', undefined, '{"subagent_type":"general","description":"job y"}'],
+      ['assistant', 'general · job y', undefined],
+      ['tool', 'general · job y', '{"command":"echo y"}'],
+    ])
+  })
 })

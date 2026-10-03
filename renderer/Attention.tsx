@@ -34,6 +34,14 @@ function useAnswer(onAnswer: CardProps<Attention>['onAnswer']) {
   return { busy, error, answer }
 }
 
+/** 하위 작업(자식 세션)이 물었으면 띠 오른쪽에 어느 하위 작업인지 (이슈 #31) */
+function SubtaskLabel({ request }: { request: Attention }) {
+  const t = useT()
+  if (!request.subtask) return null
+  const name = [request.subtask.agent, request.subtask.description].filter(Boolean).join(' · ')
+  return <span className="attention-card__from">{t('approval.fromSubtask', { name })}</span>
+}
+
 const ACTIONS = ['bash', 'edit', 'read', 'external_directory', 'webfetch'] as const
 
 function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind: 'permission' }>>) {
@@ -52,6 +60,7 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
       <div className="attention-card__strip">
         <span className="attention-card__dot" aria-hidden="true" />
         {t('approval.waiting')}
+        <SubtaskLabel request={request} />
       </div>
       <div className="attention-card__body" tabIndex={0} role="group" aria-label={t('approval.waiting')}>
         <div className="attention-card__headline">{known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}</div>
@@ -103,6 +112,7 @@ function QuestionCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
       <div className="attention-card__strip">
         <span className="attention-card__dot" aria-hidden="true" />
         {t('question.waiting')}
+        <SubtaskLabel request={request} />
       </div>
       <div className="attention-card__body">
         {request.questions.map((question, index) => (
