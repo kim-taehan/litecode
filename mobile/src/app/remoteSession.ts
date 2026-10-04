@@ -68,6 +68,7 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     getState: () => connection.state,
     getStatus: () => connection.status,
     getNotice: () => notice,
+    onEvent: (listener) => connection.onEvent(listener),
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

@@ -8,7 +8,7 @@
 // 다시 붙을 때: hello(runId 대조) → events?run=&after=<적용한 마지막 seq>. 이을 수 없으면 리듀서가 resync 를 올리고, 여기서 목록과
 // 열린 대화의 스냅샷을 다시 받는다.
 
-import { REMOTE_SILENCE_TIMEOUT_MS } from '../../../shared/remote.ts'
+import { REMOTE_SILENCE_TIMEOUT_MS, type RemoteEvent } from '../../../shared/remote.ts'
 import { RemoteError, type RemoteClient } from './client.ts'
 import { initialState, reduce, type RemoteAction, type RemoteState } from './state.ts'
 
@@ -34,6 +34,7 @@ export class Connection {
   private current: RemoteState = initialState
   private currentStatus: ConnectionStatus = { kind: 'idle' }
   private readonly listeners = new Set<() => void>()
+  private readonly eventListeners = new Set<(event: RemoteEvent) => void>()
   /** 연결 시도마다 오른다 — 늦게 돌아온 옛 시도의 콜백을 버린다 */
   private generation = 0
   private attempt = 0
@@ -61,6 +62,15 @@ export class Connection {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /**
+   * 데스크탑이 낸 이벤트를 **한 번씩** 듣는다 (알림용 — 상태에 반영된 뒤에 부른다). 이미 본 seq 의 재생분은 오지 않는다.
+   * 열어 두지 않은 대화의 것도 온다 — 리듀서는 그런 이벤트를 버리지만 알림은 다른 대화의 일을 알려야 한다.
+   */
+  onEvent(listener: (event: RemoteEvent) => void): () => void {
+    this.eventListeners.add(listener)
+    return () => this.eventListeners.delete(listener)
   }
 
   start(): void {
@@ -136,7 +146,9 @@ export class Connection {
         onEvent: (event) => {
           if (stale()) return
           if (event.event === 'device.revoked') return this.revoked()
+          const fresh = event.seq === undefined || event.seq > this.current.seq
           this.dispatch({ type: 'event', event })
+          if (fresh) for (const listener of this.eventListeners) listener(event)
           void this.sync()
         },
         onEnd: (error) => {

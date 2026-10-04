@@ -3,7 +3,7 @@
 // (테스트에는 네트워크 없이 리듀서에 이벤트를 흘리는 견본 구현이 하나 더 있다 — tests/support/demoSession.ts.)
 
 import type { Attention, AttentionAnswer } from '../../../shared/contract.ts'
-import type { RemoteModel } from '../../../shared/remote.ts'
+import type { RemoteEvent, RemoteModel } from '../../../shared/remote.ts'
 import type { ConnectionStatus, RemoteState } from '../core/index.ts'
 
 /** 설정 화면 "연결된 데스크탑" 카드에 보일 것 */
@@ -28,6 +28,8 @@ export interface AppSession {
   getNotice(): SessionNotice | undefined
   /** state·status·notice 가 바뀔 때마다 부른다 */
   subscribe(listener: () => void): () => void
+  /** 데스크탑이 낸 이벤트를 한 번씩 듣는다 — 알림(alerts.ts)이 쓴다. 열어 두지 않은 대화의 것도 온다 */
+  onEvent(listener: (event: RemoteEvent) => void): () => void
   readonly desktop: DesktopInfo
   readonly models: readonly RemoteModel[]
   /** 대화를 받아 두고 이벤트를 따라가게 한다 (대화 화면에 들어갈 때). 나갈 때 close */

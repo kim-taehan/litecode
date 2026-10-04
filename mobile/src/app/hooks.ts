@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Keyboard } from 'react-native'
 import type { ConnectionStatus, RemoteState } from '../core/index.ts'
 import type { DesktopLink, LinkState } from './link.ts'
+import type { Preferences, Prefs } from './prefs.ts'
 import type { AppSession, SessionNotice } from './session.ts'
 
 /** 세션의 리듀서 상태 — 바뀌면 다시 그린다 */
@@ -22,6 +23,13 @@ export function useLinkState(link: DesktopLink): LinkState {
   return useSyncExternalStore(
     (listener) => link.subscribe(listener),
     () => link.state,
+  )
+}
+
+export function usePrefs(preferences: Preferences): Prefs {
+  return useSyncExternalStore(
+    (listener) => preferences.subscribe(listener),
+    () => preferences.value,
   )
 }
 
