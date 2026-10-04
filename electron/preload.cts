@@ -61,6 +61,7 @@ const Channel = {
   FEATURES_CHANGED: 'features:changed',
   WINDOW_FULLSCREEN: 'window:fullscreen',
   LIST_SKILLS: 'skills:list',
+  OPEN_SKILLS_FOLDER: 'skills:open-folder',
   LIST_MCP: 'mcp:list',
   SAVE_MCP: 'mcp:save',
   REMOVE_MCP: 'mcp:remove',
@@ -149,10 +150,11 @@ const bridge: LitecodeBridge = {
   getFeatures: () => ipcRenderer.invoke(Channel.GET_FEATURES),
   onFeaturesChanged: (listener) => listen(Channel.FEATURES_CHANGED, listener),
   listSkills: (directory) => ipcRenderer.invoke(Channel.LIST_SKILLS, directory),
+  openSkillsFolder: (scope, directory) => ipcRenderer.invoke(Channel.OPEN_SKILLS_FOLDER, scope, directory),
   listMcp: (directory) => ipcRenderer.invoke(Channel.LIST_MCP, directory),
-  saveMcp: (input) => ipcRenderer.invoke(Channel.SAVE_MCP, input),
-  removeMcp: (name) => ipcRenderer.invoke(Channel.REMOVE_MCP, name),
-  setMcpEnabled: (name, enabled) => ipcRenderer.invoke(Channel.SET_MCP_ENABLED, name, enabled),
+  saveMcp: (input, directory) => ipcRenderer.invoke(Channel.SAVE_MCP, input, directory),
+  removeMcp: (name, directory) => ipcRenderer.invoke(Channel.REMOVE_MCP, name, directory),
+  setMcpEnabled: (name, enabled, directory) => ipcRenderer.invoke(Channel.SET_MCP_ENABLED, name, enabled, directory),
   testMcp: (input, directory) => ipcRenderer.invoke(Channel.TEST_MCP, input, directory),
 }
 

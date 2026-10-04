@@ -17,10 +17,28 @@ declare module 'cordis' {
   }
 }
 
+/** 스킬 팝업의 묶음 (이슈 #43) — "이 프로젝트만"(프로젝트 폴더 아래의 스킬) / "모든 프로젝트"(앱 설정 폴더·홈의 스킬) */
+export type SkillScope = 'project' | 'all'
+
+/** 스킬 파일 위치 → 묶음. roots 는 그 프로젝트 폴더(받은 경로와 realpath 한 경로 — 엔진은 realpath 로 돌려준다) */
+export function skillScope(location: string, roots: readonly string[]): SkillScope {
+  const inside = roots.some((root) => {
+    const relative = path.relative(root, location)
+    return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+  })
+  return inside ? 'project' : 'all'
+}
+
+export interface SkillsOptions {
+  /** 앱 스킬 폴더 (앱 설정 폴더의 skills — "모든 프로젝트" 묶음의 "폴더 열기") */
+  appDir?: string
+}
+
 export interface SkillInfo {
   name: string
   description: string
   source: SkillSource
+  scope: SkillScope
   /** SKILL.md 경로 */
   location: string
   /** frontmatter 를 뺀 본문 (파일에서 지금 읽은 것) */
@@ -51,18 +69,30 @@ export function skillPrompt(skill: Pick<SkillInfo, 'name' | 'location' | 'body'>
 export class SkillsService extends Service {
   static readonly inject = ['llm']
 
-  constructor(ctx: Context) {
+  constructor(
+    ctx: Context,
+    private opts: SkillsOptions = {},
+  ) {
     super(ctx, 'skills')
+  }
+
+  /** 스킬 팝업의 "폴더 열기" 가 열 폴더 — 없으면 만든다(빈 폴더). 프로젝트 묶음은 `<프로젝트>/.opencode/skills`, 모든 프로젝트는 앱 스킬 폴더 */
+  async folder(scope: SkillScope, directory: string): Promise<string | undefined> {
+    const dir = scope === 'project' ? path.join(directory, '.opencode', 'skills') : this.opts.appDir
+    if (dir) await fs.mkdir(dir, { recursive: true })
+    return dir
   }
 
   /** 그 프로젝트에서 모델이 쓸 수 있는 스킬 (이름순). 파일을 못 읽으면 엔진이 준 본문 */
   async list(directory: string): Promise<SkillInfo[]> {
     const listed = (await this.ctx.llm.listSkills(directory)).filter((skill) => path.isAbsolute(skill.location))
+    const roots = [directory, await fs.realpath(directory).catch(() => directory)]
     const skills = await Promise.all(
       listed.map(async (skill) => ({
         name: skill.name,
         description: skill.description ?? '',
         source: skillSource(skill.location),
+        scope: skillScope(skill.location, roots),
         location: skill.location,
         body: await fs.readFile(skill.location, 'utf8').then(skillBody, () => skill.content?.trim() ?? ''),
       })),

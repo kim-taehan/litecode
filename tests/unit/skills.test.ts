@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ENGINE_AGENTS, engineConfig, MODE_AGENT } from '../../src/services/engine.ts'
 import type { EngineSkill } from '../../src/services/llm.ts'
-import { skillBody, SkillsService } from '../../src/services/skills.ts'
+import { skillBody, skillScope, SkillsService } from '../../src/services/skills.ts'
 import { messageItems } from '../../src/services/turnProgress.ts'
 import { skillSource } from '../../shared/skills.ts'
 import { skillInstructions } from '../../renderer/turnView.ts'
@@ -71,6 +71,18 @@ describe('skillSource — 출처 배지', () => {
   })
 })
 
+// 이슈 #43 — 스킬 팝업의 두 묶음: 그 프로젝트 폴더 아래에 있으면 "이 프로젝트만", 밖(앱 설정 폴더·홈)이면 "모든 프로젝트"
+describe('skillScope — 묶음', () => {
+  it('프로젝트 폴더 아래 = project, 그 밖 = all (이름이 앞부분만 같은 옆 폴더는 밖이다)', () => {
+    expect(skillScope('/work/app/.opencode/skills/x/SKILL.md', ['/work/app'])).toBe('project')
+    expect(skillScope('/work/app/.claude/skills/x/SKILL.md', ['/work/app'])).toBe('project')
+    expect(skillScope('/Users/u/.claude/skills/x/SKILL.md', ['/work/app'])).toBe('all')
+    expect(skillScope('/Users/u/Library/Application Support/litecode/opencode/skills/x/SKILL.md', ['/work/app'])).toBe('all')
+    expect(skillScope('/work/app-two/.opencode/skills/x/SKILL.md', ['/work/app'])).toBe('all')
+    expect(skillScope('/private/var/p/.opencode/skills/x/SKILL.md', ['/var/p', '/private/var/p'])).toBe('project') // realpath 한 폴더로도 본다
+  })
+})
+
 describe('skillBody', () => {
   it('frontmatter 를 뺀 본문', () => {
     expect(skillBody('---\nname: a\ndescription: d\n---\n# Title\n\nbody\n')).toBe('# Title\n\nbody')
@@ -106,10 +118,12 @@ describe('ctx.skills.list', () => {
       { name: 'a-gone', location: path.join(dir, 'gone', 'SKILL.md'), content: ' CACHED ' },
     ]
     expect(await skills.list(dir)).toEqual([
-      { name: 'a-gone', description: '', source: 'app', location: path.join(dir, 'gone', 'SKILL.md'), body: 'CACHED' },
-      { name: 'b-proj', description: 'proj', source: 'project', location: file, body: 'FRESH' },
+      { name: 'a-gone', description: '', source: 'app', scope: 'project', location: path.join(dir, 'gone', 'SKILL.md'), body: 'CACHED' },
+      { name: 'b-proj', description: 'proj', source: 'project', scope: 'project', location: file, body: 'FRESH' },
     ])
     expect((await skills.find(dir, 'b-proj'))?.body).toBe('FRESH')
+    llm.skills = [{ name: 'c-app', location: path.join(os.tmpdir(), 'litecode-unit-elsewhere', 'skills', 'c-app', 'SKILL.md'), content: 'x' }]
+    expect((await skills.list(dir))[0]).toMatchObject({ name: 'c-app', scope: 'all' }) // 프로젝트 폴더 밖 = 모든 프로젝트
     await fs.rm(dir, { recursive: true, force: true })
   })
 })

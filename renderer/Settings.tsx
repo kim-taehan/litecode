@@ -3,17 +3,14 @@ import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../share
 import { providerIdFor } from '../shared/providerId.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
-import { SkillsPage } from './SkillsSettings.tsx'
-import { SKILL_ICON_PATH } from './SkillBadge.tsx'
-import { McpPage } from './McpSettings.tsx'
-import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
 import { ContextLengthNotes } from './ContextLengthNotes.tsx'
 import { defaultOutputLimit } from '../shared/outputLimit.ts'
 import './settings.css'
 
 // 설정 모달 — 틀은 dsh ui-settings-general SettingsRoot(왼쪽 메뉴·오른쪽 머리줄[설정 파일 열기][×]·내용, 가림막 클릭·Esc 로 닫기),
-// 치수는 01f 디자인 표 그대로(800×800 판·반경 28·메뉴 188 바탕 없음). 페이지는 일반(GeneralSettings.tsx)·모델.
+// 치수는 01f 디자인 표 그대로(800×800 판·반경 28·메뉴 188 바탕 없음). 페이지는 일반(GeneralSettings.tsx)·모델·기능(FeaturesSettings.tsx).
+// 스킬·MCP 는 입력창 `+` 메뉴의 팝업으로 옮겼다 (이슈 #43 — 같은 것이 두 군데 있지 않게).
 // 모델 페이지는 dsh ui-settings-models(ModelsSection·CustomProviderCard·ModelListEditor·ModelRow·EditorFooter)를 따른다:
 // provider 카드 목록, 편집 카드는 한 번에 하나, API 키는 쓰기 전용(저장된 값은 안 보이고 설정 여부만), 삭제는 한 번 더 확인.
 // dsh 와 다른 점: "모델 가져오기" 는 고르는 창 없이 없는 id 만 목록에 더한다(00_request 성공 기준 4).
@@ -25,14 +22,12 @@ export function reason(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
-type Page = 'general' | 'models' | 'features' | 'skills' | 'mcp'
+type Page = 'general' | 'models' | 'features'
 
 interface SettingsModalProps {
   providers: ProviderSummary[]
   onProvidersChange(providers: ProviderSummary[]): void
   onClose(): void
-  /** 지금 프로젝트 — 스킬 페이지가 그 프로젝트에서 쓸 수 있는 스킬을, MCP 페이지가 그 폴더의 상태·프로젝트 서버를 본다 */
-  directory?: string
 }
 
 /** 16px 외곽선 톱니 — 일반 메뉴 */
@@ -64,24 +59,6 @@ function PuzzleIcon() {
   )
 }
 
-/** 16px 스킬(네 갈래 별) — 스킬 메뉴 */
-function SkillIcon() {
-  return (
-    <svg className="settings-nav__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
-      <path d={SKILL_ICON_PATH} />
-    </svg>
-  )
-}
-
-/** 16px 플러그 — MCP 메뉴 */
-function PlugIcon() {
-  return (
-    <svg className="settings-nav__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5.5 1.75V4.5M10.5 1.75V4.5M3.75 4.5H12.25V7.5A4.25 4.25 0 0 1 3.75 7.5ZM8 11.75V14.25" />
-    </svg>
-  )
-}
-
 function CloseIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
@@ -90,10 +67,8 @@ function CloseIcon() {
   )
 }
 
-export function SettingsModal({ providers, onProvidersChange, onClose, directory }: SettingsModalProps) {
+export function SettingsModal({ providers, onProvidersChange, onClose }: SettingsModalProps) {
   const t = useT()
-  const features = useFeatures()
-  const mcpOn = features.has('mcp') // 꺼지면 ctx.mcp 와 그 IPC 가 내려간다 — 메뉴도 없다
   const [page, setPage] = useState<Page>('general') // 첫 페이지는 일반 (dsh)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -107,11 +82,8 @@ export function SettingsModal({ providers, onProvidersChange, onClose, directory
     { id: 'general', label: t('settings.nav.general'), icon: <GearIcon /> },
     { id: 'models', label: t('settings.nav.models'), icon: <DataIcon /> },
     { id: 'features', label: t('settings.nav.features'), icon: <PuzzleIcon /> },
-    // 스킬 기능을 끄면 페이지가 없다 (보던 중이면 일반으로)
-    ...(features.has('skills') ? [{ id: 'skills' as const, label: t('settings.nav.skills'), icon: <SkillIcon /> }] : []),
-    ...(mcpOn ? [{ id: 'mcp' as const, label: t('settings.nav.mcp'), icon: <PlugIcon /> }] : []),
   ]
-  const shown = pages.some((entry) => entry.id === page) ? page : 'general'
+  const shown = page
 
   return (
     <div className="settings-overlay" role="presentation">
@@ -148,10 +120,6 @@ export function SettingsModal({ providers, onProvidersChange, onClose, directory
               <GeneralPage />
             ) : shown === 'features' ? (
               <FeaturesPage />
-            ) : shown === 'skills' ? (
-              <SkillsPage directory={directory} />
-            ) : shown === 'mcp' ? (
-              <McpPage directory={directory} />
             ) : (
               <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />
             )}

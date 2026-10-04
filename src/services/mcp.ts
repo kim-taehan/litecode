@@ -27,6 +27,16 @@ import './llm.ts'
 // 서버 프로세스는 폴더(인스턴스)마다 하나씩 뜬다 — opencode 레거시 방식 그대로 (upstream #51003 메모리 문제는 남는다).
 //
 // 도구 목록: opencode 에 MCP 도구 목록 API 가 없다 → 앱이 직접 잠깐 붙어 묻는다 (mcpClient.ts). 정의가 같으면 앱 실행 동안 기억한다.
+//
+// 프로젝트 기준 (이슈 #43, 사용자 결정 2026-10-04 — _workspace/00_next_plus_popup.md). 화면은 입력창 `+` 메뉴의 MCP 팝업이고 두 묶음이다:
+// - "이 프로젝트만": 프로젝트 폴더의 정의(위 "프로젝트", 읽기 전용) + **앱에서 그 프로젝트에만 추가한 서버**. 뒤의 것은 프로젝트 폴더가 아니라
+//   앱 안(userData mcp-projects.json, 프로젝트 realpath 별)에 둔다 — 비밀이 프로젝트 폴더·git 에 들어가지 않게. 비밀은 같은 mcp-secrets.json
+// - "모든 프로젝트": 앱 서버(mcp.json — 예전 모양 그대로)와 개인 설정
+// - 켜기/끄기는 **그 프로젝트에서만**: mcp-projects.json 의 프로젝트별 enabled 가 기본값을 덮는다. 기본값은 앱 서버 = 정의의 enabled
+//   (예전 앱 전체 스위치로 꺼 둔 서버는 모든 프로젝트에서 꺼진 채로 남는다), 폴더 정의 = 파일의 enabled, 개인 설정 = 켜짐.
+//   개인 설정 서버는 opencode 가 스스로 띄우므로 끈 프로젝트에서는 매 턴 끊고(disconnect), 다시 켜면 잇는다(connect)
+// - 이름: opencode 인스턴스에서 이름 하나 = 서버 하나다. 앱 서버끼리는 묶음이 달라도 저장할 때 거절하고(같은 프로젝트의 전용 서버·모든 프로젝트
+//   서버·어느 프로젝트든 전용 서버와 겹치는 모든 프로젝트 서버), 폴더 정의는 앱 서버(어느 묶음이든)와 이름이 같으면 붙이지 않는다(shadowed)
 
 declare module 'cordis' {
   interface Context {
@@ -35,6 +45,16 @@ declare module 'cordis' {
 }
 
 export type McpSource = 'app' | 'personal' | 'project'
+/** 팝업의 묶음 — "이 프로젝트만"(앱이 그 프로젝트에 저장한 서버·폴더 정의) / "모든 프로젝트"(앱 서버·개인 설정) */
+export type McpScope = 'project' | 'all'
+
+/** mcp-projects.json 의 프로젝트 하나 (키는 프로젝트 realpath) */
+interface McpProjectRecord {
+  /** 앱에서 "이 프로젝트만" 으로 추가한 서버 */
+  servers: McpServerRecord[]
+  /** 이 프로젝트에서 켜고 끈 값 (서버 이름 → 켜짐). 없는 이름은 기본값 */
+  enabled: Record<string, boolean>
+}
 
 /** 로컬 env 하나 또는 원격 헤더 하나 — 저장 모양 (비밀이면 value 없음) */
 export interface McpVarRecord {
@@ -65,11 +85,15 @@ export interface McpVarSummary {
 export interface McpServerSummary {
   name: string
   source: McpSource
+  scope: McpScope
+  /** 프로젝트 폴더 정의가 적힌 파일 (`.mcp.json`·`opencode.json` 등, 프로젝트 기준 상대 경로) */
+  origin?: string
   /** 개인 설정 파일에 없는(그래서 모양을 모르는) 서버는 없다 */
   type?: 'local' | 'remote'
   command?: string[]
   url?: string
   vars: McpVarSummary[]
+  /** 그 프로젝트에서 켜져 있나 (프로젝트 없이 물으면 기본값) */
   enabled: boolean
   /** opencode 상태 (connected·failed·disabled·needs_auth…). 열린 프로젝트가 없으면 없다 */
   status?: string
@@ -81,9 +105,11 @@ export interface McpServerSummary {
   shadowed?: boolean
 }
 
-/** 설정 화면의 저장·연결 테스트. originalName 이 있으면 그 서버를 고친다. 비밀 var 의 빈 value 는 "저장된 값 그대로" */
+/** 팝업의 저장·연결 테스트. originalName 이 있으면 그 서버를 고친다. 비밀 var 의 빈 value 는 "저장된 값 그대로" */
 export interface McpServerInput {
   originalName?: string
+  /** 새 서버를 넣을 묶음 (기본 all). 고칠 때는 그 서버가 있는 묶음 그대로다 */
+  scope?: McpScope
   name: string
   type: 'local' | 'remote'
   command?: string[]
@@ -103,6 +129,8 @@ export interface McpServiceOptions {
   file?: string
   /** 암호화한 비밀 JSON (서버 → 이름 → base64) */
   secretsFile?: string
+  /** 프로젝트별 서버·켜기 값 JSON (프로젝트 realpath → {servers, enabled}) */
+  projectsFile?: string
   cipher?: KeyCipher
   /** 개인 설정 위치(XDG_CONFIG_HOME·HOME)와 로컬 서버 env 를 읽을 환경 (기본 process.env) */
   env?: NodeJS.ProcessEnv
@@ -122,8 +150,12 @@ export class McpService extends Service {
   static readonly inject = ['llm']
 
   private servers: McpServerRecord[] = []
-  /** 서버 → var 이름 → 암호문(base64) */
+  /** 프로젝트(realpath) → 그 프로젝트 전용 서버·켜기 값 */
+  private projects: Record<string, McpProjectRecord> = {}
+  /** 서버 → var 이름 → 암호문(base64). 프로젝트 전용 서버의 키는 `<프로젝트 경로>#<이름>` (secretKey) */
   private secrets: Record<string, Record<string, string>> = {}
+  /** 폴더(realpath) → 이 프로젝트에서 꺼서 앱이 끊은 개인 설정 서버 — 다시 켜면 잇는다 */
+  private paused = new Map<string, Set<string>>()
   /** 폴더(realpath) → 붙인 서버 이름 → 정의 지문. 엔진 재시작으로 사라졌는지는 opencode 상태로 본다 */
   private attached = new Map<string, Map<string, string>>()
   /** 폴더(realpath) → 앱이 그 인스턴스에 한 번이라도 붙인 이름. 지운 서버는 opencode 상태에 disabled 로 남는다(지우는 API 가 없다) —
@@ -141,6 +173,8 @@ export class McpService extends Service {
     super(ctx, 'mcp')
     this.servers = (opts.file && readJson<McpServerRecord[]>(opts.file)) || []
     this.secrets = (opts.secretsFile && readJson<Record<string, Record<string, string>>>(opts.secretsFile)) || {}
+    const projects = (opts.projectsFile && readJson<Record<string, Partial<McpProjectRecord>>>(opts.projectsFile)) || {}
+    this.projects = Object.fromEntries(Object.entries(projects).map(([dir, entry]) => [dir, { servers: entry.servers ?? [], enabled: entry.enabled ?? {} }]))
     ctx.on('llm/before-turn', (directory) => this.prepare(directory))
     // 기능을 끄면(묶음이 내려가면) 붙인 앱·프로젝트 서버를 끊는다 — 개인 설정 서버는 opencode 것이라 그대로다
     // 내려가는 중엔 ctx.llm 을 못 꺼낸다 (inactive context) — 올라올 때 쥔다
@@ -150,7 +184,8 @@ export class McpService extends Service {
     })
   }
 
-  /** 설정 > MCP 목록 — directory 는 지금 프로젝트(그 폴더 인스턴스의 상태·프로젝트 서버). 없으면 앱·개인 서버만, 상태 없이 */
+  /** MCP 팝업 목록 — directory 는 지금 프로젝트(그 폴더 인스턴스의 상태·그 프로젝트의 서버와 켜기 값). 없으면 앱·개인 서버만, 상태 없이.
+   *  순서: 이 프로젝트만(앱이 저장한 것 → 폴더 정의) → 모든 프로젝트(앱 → 개인 설정) */
   async list(directory?: string): Promise<McpServerSummary[]> {
     const workdir = directory ? await realDirectory(directory) : undefined
     let status: Record<string, McpStatus> = {}
@@ -158,23 +193,36 @@ export class McpService extends Service {
       await this.prepare(workdir)
       status = await this.ctx.llm.mcpStatus(workdir).catch(() => ({}))
     }
-    const project = workdir ? projectServers(workdir) : []
-    const appNames = new Set(this.servers.map((server) => server.name))
+    const mine = (workdir && this.projects[workdir]) || undefined
+    const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
+    const own = mine?.servers ?? []
+    const ownNames = new Set(own.map((server) => server.name))
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames])
     const entries: { summary: McpServerSummary; def?: EngineMcp }[] = [
-      ...this.servers.map((server) => ({ summary: appSummary(server, this.secrets[server.name] ?? {}), def: this.engineDef(server) })),
-      ...project.map(({ name, def, enabled }) => ({
-        summary: { ...readOnlySummary(name, 'project', def), enabled, ...(appNames.has(name) && { shadowed: true }) },
+      ...own.map((server) => ({
+        summary: { ...appSummary(server, 'project', this.secrets[secretKey(server.name, workdir)] ?? {}), enabled: on(server.name, server.enabled) },
+        def: this.engineDef(server, workdir),
+      })),
+      ...(workdir ? projectServers(workdir) : []).map(({ name, def, enabled, origin }) => ({
+        summary: { ...readOnlySummary(name, 'project', def), origin, enabled: on(name, enabled), ...(appNames.has(name) && { shadowed: true }) },
         def: appNames.has(name) ? undefined : def,
+      })),
+      // 같은 이름의 전용 서버가 있으면(파일을 손으로 고친 경우) 전용 서버가 이긴다 — 모든 프로젝트 것은 이 프로젝트에서 안 보인다
+      ...this.servers.filter((server) => !ownNames.has(server.name)).map((server) => ({
+        summary: { ...appSummary(server, 'all', this.secrets[server.name] ?? {}), enabled: on(server.name, server.enabled) },
+        def: this.engineDef(server),
       })),
     ]
     const known = new Set(entries.map((entry) => entry.summary.name))
     for (const { name, def, enabled } of personalServers(this.opts.env ?? process.env)) {
       if (known.has(name)) continue
       known.add(name)
-      entries.push({ summary: { ...readOnlySummary(name, 'personal', def), enabled }, def: substituted(def) ? undefined : def })
+      entries.push({ summary: { ...readOnlySummary(name, 'personal', def), enabled: on(name, enabled) }, def: substituted(def) ? undefined : def })
     }
     const ours = (workdir && this.ever.get(workdir)) || new Set<string>()
-    for (const name of Object.keys(status)) if (!known.has(name) && !ours.has(name)) entries.push({ summary: { name, source: 'personal', vars: [], enabled: true } })
+    for (const name of Object.keys(status)) {
+      if (!known.has(name) && !ours.has(name)) entries.push({ summary: { name, source: 'personal', scope: 'all', vars: [], enabled: on(name, true) } })
+    }
 
     return Promise.all(
       entries.map(async ({ summary, def }) => {
@@ -191,43 +239,78 @@ export class McpService extends Service {
     )
   }
 
-  /** 앱 서버를 넣거나 고친다. 다음 목록 읽기·다음 턴에 그 폴더에 다시 붙는다 */
-  save(input: McpServerInput): void {
-    const existing = input.originalName !== undefined ? this.servers.find((server) => server.name === input.originalName) : undefined
-    if (input.originalName !== undefined && !existing) throw new Error(tr('mcp.error.gone'))
-    const { record, secrets } = this.resolve(input, existing)
-    if (this.servers.some((server) => server.name === record.name && server !== existing)) throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
+  /** 앱 서버를 넣거나 고친다. 다음 목록 읽기·다음 턴에 그 폴더에 다시 붙는다.
+   *  directory 는 지금 프로젝트 — 새 서버의 scope 가 project 면 그 프로젝트에만 저장하고, 고칠 때는 그 프로젝트의 전용 서버를 먼저 찾는다 */
+  save(input: McpServerInput, directory?: string): void {
+    const workdir = directory ? realpathOf(directory) : undefined
+    const mine = (workdir && this.projects[workdir]?.servers) || []
+    const edited = input.originalName !== undefined
+    const own = edited ? mine.find((server) => server.name === input.originalName) : undefined
+    const existing = own ?? (edited ? this.servers.find((server) => server.name === input.originalName) : undefined)
+    if (edited && !existing) throw new Error(tr('mcp.error.gone'))
+    const scope: McpScope = edited ? (own ? 'project' : 'all') : (input.scope ?? 'all')
+    if (scope === 'project' && !workdir) throw new Error(tr('mcp.error.noProject'))
+    const owner = scope === 'project' ? workdir : undefined
+    const { record, secrets } = this.resolve(input, existing, owner)
+    // 이름 하나 = 서버 하나 — 이 프로젝트에서 보이는 앱 서버끼리, 그리고 모든 프로젝트 서버는 어느 프로젝트의 전용 서버와도 겹치지 않게
+    if ([...this.servers, ...(scope === 'project' ? mine : [])].some((server) => server.name === record.name && server !== existing)) {
+      throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
+    }
+    if (scope === 'all') {
+      const clash = Object.entries(this.projects).find(([, entry]) => entry.servers.some((server) => server.name === record.name))
+      if (clash) throw new Error(tr('mcp.error.nameTakenProject', { name: record.name, project: path.basename(clash[0]) }))
+    }
     const cipher = this.opts.cipher
     if (Object.keys(secrets).length > 0 && !cipher?.available()) throw new Error(tr('error.keyStorage'))
-    this.servers = existing ? this.servers.map((server) => (server === existing ? record : server)) : [...this.servers, record]
-    if (existing) delete this.secrets[existing.name]
+    const replaced = (list: McpServerRecord[]) => (existing ? list.map((server) => (server === existing ? record : server)) : [...list, record])
+    if (owner) this.project(owner).servers = replaced(mine)
+    else this.servers = replaced(this.servers)
+    if (existing) {
+      delete this.secrets[secretKey(existing.name, owner)]
+      // 이름을 바꿔도 프로젝트별 켜기 값은 따라간다
+      for (const entry of owner ? [this.project(owner)] : Object.values(this.projects)) {
+        if (existing.name === record.name || !(existing.name in entry.enabled)) continue
+        entry.enabled[record.name] = entry.enabled[existing.name]!
+        delete entry.enabled[existing.name]
+      }
+    }
     if (Object.keys(secrets).length > 0) {
-      this.secrets[record.name] = Object.fromEntries(Object.entries(secrets).map(([name, value]) => [name, cipher!.encrypt(value).toString('base64')]))
+      this.secrets[secretKey(record.name, owner)] = Object.fromEntries(Object.entries(secrets).map(([name, value]) => [name, cipher!.encrypt(value).toString('base64')]))
     }
     this.forget(existing?.name ?? record.name)
     this.persist()
   }
 
-  remove(name: string): void {
-    this.servers = this.servers.filter((server) => server.name !== name)
-    delete this.secrets[name]
+  /** 앱 서버를 지운다 — directory(지금 프로젝트)의 전용 서버를 먼저 찾고, 없으면 모든 프로젝트 서버. 그 이름의 켜기 값도 같이 지운다 */
+  remove(name: string, directory?: string): void {
+    const workdir = directory ? realpathOf(directory) : undefined
+    const mine = (workdir && this.projects[workdir]) || undefined
+    if (mine?.servers.some((server) => server.name === name)) {
+      mine.servers = mine.servers.filter((server) => server.name !== name)
+      delete mine.enabled[name]
+      delete this.secrets[secretKey(name, workdir)]
+    } else {
+      this.servers = this.servers.filter((server) => server.name !== name)
+      for (const entry of Object.values(this.projects)) delete entry.enabled[name]
+      delete this.secrets[name]
+    }
     this.persist() // 붙어 있던 폴더에서는 다음 붙이기가 끊는다 (attached 에 남아 있다)
   }
 
-  setEnabled(name: string, enabled: boolean): void {
-    const server = this.servers.find((entry) => entry.name === name)
-    if (!server) throw new Error(tr('mcp.error.gone'))
-    server.enabled = enabled
-    this.forget(name)
+  /** 그 프로젝트에서만 켜고 끈다 (앱 서버·폴더 정의·개인 설정 모두 — 정의는 안 고친다). 다음 목록 읽기·다음 턴에 붙이거나 끊는다 */
+  setEnabled(name: string, enabled: boolean, directory: string): void {
+    this.project(realpathOf(directory)).enabled[name] = enabled
     this.persist()
   }
 
   /** 저장하지 않고 붙어 본다 — 도구 목록 또는 사유. directory 는 로컬 서버를 띄울 폴더(지금 프로젝트) */
   async test(input: McpServerInput, directory?: string): Promise<McpTestResult> {
     try {
-      const existing = input.originalName !== undefined ? this.servers.find((server) => server.name === input.originalName) : undefined
-      const { record, secrets } = this.resolve(input, existing)
-      const cwd = (directory && (await realDirectory(directory))) || this.opts.fallbackCwd || os.homedir()
+      const workdir = directory ? await realDirectory(directory) : undefined
+      const own = input.originalName !== undefined && workdir ? this.projects[workdir]?.servers.find((server) => server.name === input.originalName) : undefined
+      const existing = own ?? (input.originalName !== undefined ? this.servers.find((server) => server.name === input.originalName) : undefined)
+      const { record, secrets } = this.resolve(input, existing, own ? workdir : undefined)
+      const cwd = workdir || this.opts.fallbackCwd || os.homedir()
       const tools = await listMcpTools(defOf(record, secrets), { cwd, env: this.opts.env })
       return { ok: true, tools }
     } catch (error) {
@@ -235,7 +318,7 @@ export class McpService extends Service {
     }
   }
 
-  /** 그 폴더 인스턴스에 앱(켠 것)·프로젝트 서버를 붙이고, 더는 붙일 것이 아닌 것은 끊는다. 폴더마다 한 줄로 돈다 */
+  /** 그 폴더 인스턴스에 그 프로젝트에서 켠 서버(앱·프로젝트 전용·폴더 정의)를 붙이고, 더는 붙일 것이 아닌 것은 끊는다. 폴더마다 한 줄로 돈다 */
   prepare(workdir: string): Promise<void> {
     const previous = this.chains.get(workdir) ?? Promise.resolve()
     const next = previous.then(() => this.attach(workdir)).catch((error: unknown) => console.error('[mcp] 붙이기 실패', workdir, (error as Error).message))
@@ -244,13 +327,24 @@ export class McpService extends Service {
   }
 
   private async attach(workdir: string): Promise<void> {
+    const mine = this.projects[workdir]
+    const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
+    const own = mine?.servers ?? []
+    const ownNames = new Set(own.map((server) => server.name))
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames])
+    const folder = projectServers(workdir)
     const wanted = new Map<string, EngineMcp>()
-    const appNames = new Set(this.servers.map((server) => server.name))
-    for (const { name, def, enabled } of projectServers(workdir)) if (enabled && !appNames.has(name)) wanted.set(name, def)
-    for (const server of this.servers) if (server.enabled) wanted.set(server.name, this.engineDef(server))
+    for (const { name, def, enabled } of folder) if (on(name, enabled) && !appNames.has(name)) wanted.set(name, def)
+    for (const server of this.servers) if (!ownNames.has(server.name) && on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server))
+    for (const server of own) if (on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server, workdir))
+    // 이 프로젝트에서 끈 이름 중 앱·폴더 정의가 아닌 것 = 개인 설정 서버 (opencode 가 스스로 띄운다)
+    const ours = new Set([...appNames, ...folder.map((server) => server.name)])
+    const off = Object.keys(mine?.enabled ?? {}).filter((name) => !mine!.enabled[name] && !ours.has(name))
+    const paused = this.paused.get(workdir) ?? new Set<string>()
     const record = this.attached.get(workdir) ?? new Map<string, string>()
-    if (wanted.size === 0 && record.size === 0) return // 붙일 것도 끊을 것도 없다 — opencode 에 묻지 않는다
+    if (wanted.size === 0 && record.size === 0 && off.length === 0 && paused.size === 0) return // 붙일 것도 끊을 것도 없다 — opencode 에 묻지 않는다
     this.attached.set(workdir, record)
+    this.paused.set(workdir, paused)
     const status = await this.ctx.llm.mcpStatus(workdir)
     await Promise.all(
       [...wanted].map(async ([name, def]) => {
@@ -265,6 +359,16 @@ export class McpService extends Service {
       if (wanted.has(name)) continue
       record.delete(name)
       if (status[name] && status[name].status !== 'disabled') await this.ctx.llm.mcpDisconnect(workdir, name)
+    }
+    for (const name of off) {
+      if (!status[name] || status[name].status === 'disabled') continue
+      await this.ctx.llm.mcpDisconnect(workdir, name)
+      paused.add(name)
+    }
+    for (const name of [...paused]) {
+      if (off.includes(name)) continue
+      paused.delete(name)
+      if (status[name]?.status === 'disabled') await this.ctx.llm.mcpConnect(workdir, name)
     }
   }
 
@@ -294,8 +398,9 @@ export class McpService extends Service {
     return cached
   }
 
-  private engineDef(server: McpServerRecord): EngineMcp {
-    const sealed = this.secrets[server.name] ?? {}
+  /** owner 는 프로젝트 전용 서버의 프로젝트(realpath) */
+  private engineDef(server: McpServerRecord, owner?: string): EngineMcp {
+    const sealed = this.secrets[secretKey(server.name, owner)] ?? {}
     const secrets = Object.fromEntries(
       Object.entries(sealed).flatMap(([name, value]) => {
         try {
@@ -309,7 +414,7 @@ export class McpService extends Service {
   }
 
   /** 입력 → 저장 모양 + 이번에 쓸 비밀 값 (새로 넣은 것 + 그대로 둔 저장 값). 잘못된 입력이면 던진다 */
-  private resolve(input: McpServerInput, existing: McpServerRecord | undefined): { record: McpServerRecord; secrets: Record<string, string> } {
+  private resolve(input: McpServerInput, existing: McpServerRecord | undefined, owner?: string): { record: McpServerRecord; secrets: Record<string, string> } {
     const name = input.name.trim()
     if (!NAME_PATTERN.test(name)) throw new Error(tr('mcp.error.name'))
     const type = input.type === 'remote' ? 'remote' : 'local'
@@ -324,7 +429,7 @@ export class McpService extends Service {
     // 헤더 값은 HTTP 헤더에 실린다 — 줄바꿈·제어 문자·비ASCII 는 붙여넣기 실수다 (provider 키와 같은 규칙). 메시지에 값은 넣지 않는다
     if (type === 'remote' && vars.some((entry) => entry.value && !/^[\x20-\x7e]+$/.test(entry.value))) throw new Error(tr('error.keyChars'))
 
-    const sealed = existing ? (this.secrets[existing.name] ?? {}) : {}
+    const sealed = existing ? (this.secrets[secretKey(existing.name, owner)] ?? {}) : {}
     const sameTarget = !!existing && existing.type === type && JSON.stringify(existing.command) === JSON.stringify(command) && existing.url === url
     const secrets: Record<string, string> = {}
     for (const entry of vars) {
@@ -347,9 +452,30 @@ export class McpService extends Service {
     return { record, secrets }
   }
 
+  /** 그 프로젝트의 기록 — 없으면 만든다 */
+  private project(workdir: string): McpProjectRecord {
+    return (this.projects[workdir] ??= { servers: [], enabled: {} })
+  }
+
   private persist(): void {
     if (this.opts.file) writeJson(this.opts.file, this.servers)
     if (this.opts.secretsFile) writeJson(this.opts.secretsFile, this.secrets)
+    if (this.opts.projectsFile) writeJson(this.opts.projectsFile, this.projects)
+  }
+}
+
+/** 비밀 파일의 키 — 모든 프로젝트 서버는 이름 그대로(예전 모양), 프로젝트 전용 서버는 `<프로젝트 경로>#<이름>`.
+ *  이름엔 `#`·경로 구분자가 못 들어가므로(NAME_PATTERN) 둘이 겹치지 않는다 */
+function secretKey(name: string, owner?: string): string {
+  return owner ? `${owner}#${name}` : name
+}
+
+/** 프로젝트 기록의 키 — realpath (ctx.projects·ctx.llm 과 같은 값). 폴더가 없어졌으면 받은 그대로 */
+function realpathOf(directory: string): string {
+  try {
+    return fs.realpathSync(directory)
+  } catch {
+    return directory
   }
 }
 
@@ -364,10 +490,11 @@ function defOf(server: McpServerRecord, secrets: Record<string, string>): Engine
     : { type: 'local', command: server.command!, ...(Object.keys(values).length > 0 && { environment: values }) }
 }
 
-function appSummary(server: McpServerRecord, sealed: Record<string, string>): McpServerSummary {
+function appSummary(server: McpServerRecord, scope: McpScope, sealed: Record<string, string>): McpServerSummary {
   return {
     name: server.name,
     source: 'app',
+    scope,
     type: server.type,
     ...(server.command && { command: server.command }),
     ...(server.url && { url: server.url }),
@@ -379,11 +506,12 @@ function appSummary(server: McpServerRecord, sealed: Record<string, string>): Mc
 }
 
 /** 프로젝트·개인 서버 — 값은 안 보인다(파일에 토큰이 있을 수 있다), 이름만 */
-function readOnlySummary(name: string, source: McpSource, def: EngineMcp): McpServerSummary {
+function readOnlySummary(name: string, source: 'personal' | 'project', def: EngineMcp): McpServerSummary {
   const vars = def.type === 'remote' ? def.headers : def.environment
   return {
     name,
     source,
+    scope: source === 'project' ? 'project' : 'all',
     type: def.type,
     ...(def.type === 'local' ? { command: def.command } : { url: def.url }),
     vars: Object.keys(vars ?? {}).map((key) => ({ name: key, secret: true, hasValue: true })),
@@ -404,15 +532,17 @@ interface ParsedServer {
   name: string
   def: EngineMcp
   enabled: boolean
+  /** 프로젝트 폴더 정의가 적힌 파일 (프로젝트 기준 상대 경로) */
+  origin?: string
 }
 
 /** 프로젝트 폴더의 MCP 정의 — `.mcp.json` → `opencode.json(c)` → `.opencode/opencode.json(c)` 순으로 겹쳐 뒤가 이긴다 (opencode 의 프로젝트·.opencode 순서).
  *  위 폴더(git 루트까지)는 안 본다 */
 export function projectServers(directory: string): ParsedServer[] {
   const merged = new Map<string, ParsedServer>()
-  for (const server of claudeServers(readJsonc(path.join(directory, '.mcp.json')))) merged.set(server.name, server)
+  for (const server of claudeServers(readJsonc(path.join(directory, '.mcp.json')))) merged.set(server.name, { ...server, origin: '.mcp.json' })
   for (const file of ['opencode.json', 'opencode.jsonc', '.opencode/opencode.json', '.opencode/opencode.jsonc']) {
-    for (const server of opencodeServers(readJsonc(path.join(directory, file)))) merged.set(server.name, server)
+    for (const server of opencodeServers(readJsonc(path.join(directory, file)))) merged.set(server.name, { ...server, origin: file })
   }
   return [...merged.values()]
 }

@@ -29,7 +29,7 @@ import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
-import { SkillsService } from '../src/services/skills.ts'
+import { SkillsService, type SkillScope } from '../src/services/skills.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 import { McpService, type McpServerInput } from '../src/services/mcp.ts'
 
@@ -345,18 +345,24 @@ function openInBridge(ctx: Context): void {
 }
 openInBridge.inject = ['openIn']
 
-// 스킬 (이슈 #7) — 설정 > 스킬 목록. `/` 후보·본문 붙이기는 SlashTrigger 가 ctx.skills 를 쓴다
+// 스킬 (이슈 #7) — 입력창 `+` 메뉴의 스킬 팝업 목록(#43). `/` 후보·본문 붙이기는 SlashTrigger 가 ctx.skills 를 쓴다
 function skillsBridge(ctx: Context): void {
   handle(ctx, Channel.LIST_SKILLS, async (_event, directory: string) => ctx.skills.list(directory))
+  // "폴더 열기" — 등록된 프로젝트일 때만 (화면이 오염돼도 아무 폴더에나 .opencode/skills 를 만들지 않는다). 경로는 메인이 정한다
+  handle(ctx, Channel.OPEN_SKILLS_FOLDER, async (_event, scope: SkillScope, directory: string) => {
+    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const folder = registered ? await ctx.skills.folder(scope === 'project' ? 'project' : 'all', directory) : undefined
+    if (!folder || (await shell.openPath(folder))) throw new Error(tr('skills.openFolderError'))
+  })
 }
-skillsBridge.inject = ['skills']
+skillsBridge.inject = ['skills', 'projects']
 
-// MCP (이슈 #28) — 설정 > MCP 의 IPC. 기능을 끄면 ctx.mcp 와 같이 내려가 붙인 서버를 끊는다
+// MCP (이슈 #28) — 입력창 `+` 메뉴의 MCP 팝업(#43)의 IPC. directory 는 지금 프로젝트 — 프로젝트 전용 서버·프로젝트별 켜기 값의 열쇠다
 function mcpBridge(ctx: Context): void {
   handle(ctx, Channel.LIST_MCP, async (_event, directory?: string) => ctx.mcp.list(directory))
-  handle(ctx, Channel.SAVE_MCP, async (_event, input: McpServerInput) => ctx.mcp.save(input))
-  handle(ctx, Channel.REMOVE_MCP, async (_event, name: string) => ctx.mcp.remove(name))
-  handle(ctx, Channel.SET_MCP_ENABLED, async (_event, name: string, enabled: boolean) => ctx.mcp.setEnabled(name, enabled))
+  handle(ctx, Channel.SAVE_MCP, async (_event, input: McpServerInput, directory?: string) => ctx.mcp.save(input, directory))
+  handle(ctx, Channel.REMOVE_MCP, async (_event, name: string, directory?: string) => ctx.mcp.remove(name, directory))
+  handle(ctx, Channel.SET_MCP_ENABLED, async (_event, name: string, enabled: boolean, directory: string) => ctx.mcp.setEnabled(name, enabled, String(directory)))
   handle(ctx, Channel.TEST_MCP, async (_event, input: McpServerInput, directory?: string) => ctx.mcp.test(input, directory))
 }
 mcpBridge.inject = ['mcp']
@@ -405,7 +411,7 @@ const features: FeatureDefinition[] = [
     // 끄면 엔진도 skill 도구를 뺀다 — ctx.engine 이 features/changed 를 듣고 재시작한다
     id: 'skills',
     plugin: (ctx) => {
-      ctx.plugin(SkillsService)
+      ctx.plugin(SkillsService, { appDir: path.join(userData, 'opencode', 'skills') }) // 앱 설정 폴더(ctx.engine 의 configDir)의 skills
       ctx.plugin(skillsBridge)
     },
   },
@@ -417,6 +423,7 @@ const features: FeatureDefinition[] = [
       ctx.plugin(McpService, {
         file: path.join(userData, 'mcp.json'),
         secretsFile: path.join(userData, 'mcp-secrets.json'),
+        projectsFile: path.join(userData, 'mcp-projects.json'),
         cipher: keyCipher,
         fallbackCwd: userData,
       })

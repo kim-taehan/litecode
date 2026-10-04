@@ -1,23 +1,27 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { McpServerInput, McpServerSummary, McpTestResult } from '../shared/ipc.ts'
+import type { McpScope, McpServerInput, McpServerSummary, McpTestResult, Project } from '../shared/ipc.ts'
+import { PlusDialog, PlusGroup } from './PlusDialog.tsx'
+import { byScope, mcpState } from './plusView.ts'
 import { reason } from './Settings.tsx'
 import { useT } from './settingsStore.ts'
 import './mcp.css'
 
-// 설정 > MCP (이슈 #28). 모양은 모델 페이지(dsh ui-settings-models 의 카드 목록·편집 카드 하나·쓰기 전용 비밀·두 번 눌러 삭제)를 그대로 따르고,
-// 줄 하나에 01u 화면 스케치 ①의 정보(이름·출처 배지·종류·주소/명령·상태·도구 수·켜기)를 담는다. 상태 점은 dsh ui-primitives 의 상태 점.
-// - 앱 서버만 고칠 수 있다. 프로젝트(.mcp.json·opencode.json)·개인 설정(~/.config/opencode) 서버는 읽기 전용이고 값은 안 보인다(이름만)
-// - 상태는 지금 프로젝트 폴더 기준이다 (opencode 는 폴더마다 서버를 띄운다). 프로젝트가 없으면 상태 없이
-// - 비밀(헤더·env 값 중 "비밀" 표시)은 쓰기 전용 — 저장된 값은 안 보이고 "저장됨" 만. 빈 칸으로 두면 그대로 둔다
-// - 연결 테스트는 저장하지 않고 앱이 직접 잠깐 붙어 도구 목록을 본다
+// MCP 서버 팝업 (이슈 #43 — 입력창 `+` 메뉴 > MCP 서버, 시안 _workspace/mock-plus/Mcp.dc.html). 설정 > MCP(이슈 #28)에 있던 것을 프로젝트 기준으로 옮겼다.
+// - 두 묶음: "이 프로젝트만"(앱이 이 프로젝트에만 저장한 서버 + 프로젝트 폴더의 .mcp.json·opencode.json 정의) · "모든 프로젝트"(앱 서버 + 개인 설정).
+//   묶음마다 "+ 서버 추가" — 그 묶음에 저장된다. 묶음은 메인(ctx.mcp)이 정한 scope 로 가른다
+// - 줄: 이름(+ 출처 배지: 폴더 정의는 파일 이름, 개인 설정) · 명령/주소 · 상태(연결됨 · 도구 N / 실패 · 사유 / 꺼짐) · 스위치.
+//   **스위치는 이 프로젝트에서만** 켜고 끈다. 줄을 누르면 도구 목록·편집·삭제가 펼쳐진다
+// - 앱 서버만 고칠 수 있다. 폴더 정의·개인 설정 서버는 읽기 전용이고 값은 안 보인다(이름만)
+// - 편집 폼은 #28 그대로(dsh ui-settings-models 의 편집 카드 하나·쓰기 전용 비밀·두 번 눌러 삭제): 비밀(헤더·env 값 중 "비밀" 표시)은 쓰기 전용 —
+//   저장된 값은 안 보이고 "저장됨" 만, 빈 칸으로 두면 그대로 둔다. 연결 테스트는 저장하지 않고 앱이 직접 잠깐 붙어 도구 목록을 본다
 
-const NEW = Symbol('new')
-
-export function McpPage({ directory }: { directory?: string }) {
+export function McpPopup({ project, onClose }: { project: Project; onClose(): void }) {
   const t = useT()
+  const directory = project.path
   const [servers, setServers] = useState<McpServerSummary[]>()
   const [error, setError] = useState<string>()
-  const [editing, setEditing] = useState<string | typeof NEW>()
+  /** 편집 중인 카드 — 서버 이름, 새로 추가하는 중이면 그 묶음 (`new:project`·`new:all`). 한 번에 하나 */
+  const [editing, setEditing] = useState<string>()
   const [confirming, setConfirming] = useState<string>()
 
   const reload = useCallback(async () => {
@@ -39,71 +43,68 @@ export function McpPage({ directory }: { directory?: string }) {
       setError(reason(failure))
     }
   }
+  const done = (saved: boolean): void => {
+    setEditing(undefined)
+    if (saved) void reload()
+  }
 
-  return (
-    <div className="models-page mcp-page">
-      <h2 className="models-page__title">{t('mcp.title')}</h2>
-      <p className="models-page__hint">{t('mcp.hint')}</p>
-      {!directory && <p className="models-page__hint">{t('mcp.noProject')}</p>}
-      {error && (
-        <p className="settings-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!servers && <p className="models-page__hint">{t('mcp.loading')}</p>}
-      {servers?.length === 0 && editing !== NEW && <p className="models-page__hint">{t('mcp.empty')}</p>}
-      {servers?.map((server) => (
-        <div key={`${server.source}:${server.name}`} className="provider-card mcp-card" data-mcp={server.name} data-source={server.source}>
+  const groups = byScope(servers ?? [])
+  const group = (scope: McpScope) => (
+    <PlusGroup
+      label={t(`plus.scope.${scope}`)}
+      hint={t(`mcp.scope.${scope}.hint`, { project: project.name })}
+      action={
+        <button type="button" className="plus-group__action" disabled={editing === `new:${scope}`} onClick={() => setEditing(`new:${scope}`)}>
+          {t('mcp.add')}
+        </button>
+      }
+    >
+      {!servers && <p className="plus-group__note">{t('mcp.loading')}</p>}
+      {servers && groups[scope].length === 0 && editing !== `new:${scope}` && <p className="plus-group__note">{t('mcp.empty')}</p>}
+      {groups[scope].map((server) => (
+        <div key={`${server.source}:${server.name}`} className="plus-card mcp-row" data-mcp={server.name} data-source={server.source} data-scope={server.scope}>
           <ServerRow
             server={server}
-            editable={editing !== server.name}
+            editing={server.source === 'app' && editing === server.name}
             confirming={confirming === server.name}
             onEdit={() => setEditing(server.name)}
             onDelete={() => setConfirming(server.name)}
             onCancelDelete={() => setConfirming(undefined)}
             onConfirmDelete={() => {
               setConfirming(undefined)
-              void act(() => window.litecode.removeMcp(server.name))
+              void act(() => window.litecode.removeMcp(server.name, directory))
             }}
-            onToggle={(on) => void act(() => window.litecode.setMcpEnabled(server.name, on))}
+            onToggle={(on) => void act(() => window.litecode.setMcpEnabled(server.name, on, directory))}
           />
-          {editing === server.name && (
-            <ServerEditor
-              server={server}
-              directory={directory}
-              onDone={(saved) => {
-                setEditing(undefined)
-                if (saved) void reload()
-              }}
-            />
-          )}
+          {server.source === 'app' && editing === server.name && <ServerEditor server={server} directory={directory} onDone={done} />}
         </div>
       ))}
-      {editing === NEW ? (
-        <div className="provider-card mcp-card" data-mcp="">
-          <div className="provider-card__head">
-            <span className="provider-card__name">{t('mcp.newServer')}</span>
-          </div>
-          <ServerEditor
-            directory={directory}
-            onDone={(saved) => {
-              setEditing(undefined)
-              if (saved) void reload()
-            }}
-          />
+      {editing === `new:${scope}` && (
+        <div className="plus-card mcp-row" data-mcp="">
+          <div className="mcp-row__new">{t('mcp.newServer')}</div>
+          <ServerEditor scope={scope} directory={directory} onDone={done} />
         </div>
-      ) : (
-        <button type="button" className="models-page__add" onClick={() => setEditing(NEW)}>
-          {t('mcp.add')}
-        </button>
       )}
-    </div>
+    </PlusGroup>
+  )
+
+  return (
+    <PlusDialog project={project} title={t('mcp.title')} subtitle={t('mcp.subtitle', { project: project.name })} onClose={onClose}>
+      {error && (
+        <p className="settings-error" role="alert">
+          {error}
+        </p>
+      )}
+      {group('project')}
+      {group('all')}
+      <p className="plus-dialog__footnote">{t('mcp.footer')}</p>
+    </PlusDialog>
   )
 }
 
 interface RowProps {
   server: McpServerSummary
-  editable: boolean
+  editing: boolean
   confirming: boolean
   onEdit(): void
   onDelete(): void
@@ -112,83 +113,91 @@ interface RowProps {
   onToggle(on: boolean): void
 }
 
-function ServerRow({ server, editable, confirming, onEdit, onDelete, onCancelDelete, onConfirmDelete, onToggle }: RowProps) {
+function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDelete, onConfirmDelete, onToggle }: RowProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const app = server.source === 'app'
   const target = server.type === 'remote' ? server.url : server.command?.join(' ')
-  const status = server.status ?? (server.enabled ? undefined : 'disabled')
-  const statusText = status ? (isKnownStatus(status) ? t(`mcp.status.${status}`) : status) : undefined
+  const state = mcpState(server)
+  // 출처 배지 — 폴더 정의는 그 파일 이름(시안의 ".mcp.json"), 개인 설정은 "개인 설정". 앱에서 만든 서버는 배지 없음
+  const badge = server.source === 'project' ? server.origin : server.source === 'personal' ? t('mcp.source.personal') : undefined
+  const stateText =
+    state === 'shadowed'
+      ? t('mcp.shadowed')
+      : state === 'connected' && server.tools
+        ? t('mcp.testOk', { count: server.tools.length })
+        : state === 'failed' && server.error
+          ? `${t('mcp.status.failed')} · ${server.error}`
+          : state
+            ? isKnownStatus(state)
+              ? t(`mcp.status.${state}`)
+              : state
+            : undefined
   return (
     <>
-      <div className="provider-card__head mcp-card__head">
-        <span className={`mcp-dot mcp-dot--${status ?? 'none'}`} aria-hidden="true" />
-        <span className="provider-card__name mcp-card__name">{server.name}</span>
-        <span className="provider-card__tag mcp-card__source">{t(`mcp.source.${server.source}`)}</span>
-        <span className="provider-card__actions">
-          {app && confirming ? (
-            <>
-              <button type="button" className="settings-button settings-button--danger" onClick={onConfirmDelete}>
-                {t('mcp.confirmDelete')}
-              </button>
-              <button type="button" className="settings-button" onClick={onCancelDelete}>
-                {t('mcp.cancel')}
-              </button>
-            </>
-          ) : app && editable ? (
-            <>
-              <button type="button" className="settings-button" onClick={onEdit}>
-                {t('mcp.edit')}
-              </button>
-              <button type="button" className="settings-button" onClick={onDelete}>
-                {t('mcp.delete')}
-              </button>
-            </>
-          ) : (
-            !app && <span className="mcp-card__readonly">{t('mcp.readOnly')}</span>
+      <div className="mcp-row__main">
+        <button type="button" className="mcp-row__toggle" aria-expanded={open} title={t('mcp.expand', { name: server.name })} onClick={() => setOpen((now) => !now)}>
+          <span className="mcp-row__name">
+            {server.name}
+            {badge && <span className="provider-card__tag mcp-row__badge">{badge}</span>}
+          </span>
+          {target && <span className="mcp-row__target">{target}</span>}
+        </button>
+        {stateText && (
+          <span className="mcp-row__state" data-state={state} title={stateText}>
+            {stateText}
+          </span>
+        )}
+        <button
+          type="button"
+          role="switch"
+          className="settings-switch"
+          aria-checked={server.enabled}
+          aria-label={t('mcp.enabled', { name: server.name })}
+          disabled={!!server.shadowed}
+          onClick={() => onToggle(!server.enabled)}
+        >
+          <span className="settings-switch__thumb" />
+        </button>
+      </div>
+      {open && (
+        <div className="mcp-row__detail">
+          {server.type && target && (
+            <div className="mcp-row__line">
+              <span>{t(`mcp.type.${server.type}`)}</span>
+              <span className="mcp-row__full-target">{target}</span>
+            </div>
           )}
-          {app && (
-            <button
-              type="button"
-              role="switch"
-              className="settings-switch"
-              aria-checked={server.enabled}
-              aria-label={t('mcp.enabled', { name: server.name })}
-              onClick={() => onToggle(!server.enabled)}
-            >
-              <span className="settings-switch__thumb" />
-            </button>
-          )}
-        </span>
-      </div>
-      <div className="mcp-card__meta">
-        {server.type && <span>{t(`mcp.type.${server.type}`)}</span>}
-        {target && (
-          <span className="mcp-card__target" title={target}>
-            {target}
-          </span>
-        )}
-      </div>
-      <div className="mcp-card__state">
-        {statusText && <span className="mcp-card__status">{statusText}</span>}
-        {server.error && (
-          <span className="mcp-card__error" title={server.error}>
-            {server.error}
-          </span>
-        )}
-        {server.shadowed && <span className="mcp-card__error">{t('mcp.shadowed')}</span>}
-        {server.tools && (
-          <button type="button" className="mcp-card__tools-toggle" aria-expanded={open} title={open ? t('mcp.hideTools') : t('mcp.showTools')} onClick={() => setOpen((now) => !now)}>
-            {t('mcp.toolCount', { count: server.tools.length })}
-          </button>
-        )}
-        {server.toolsError && (
-          <span className="mcp-card__error" title={server.toolsError}>
-            {server.toolsError}
-          </span>
-        )}
-      </div>
-      {open && server.tools && <ToolList tools={server.tools} />}
+          {server.error && <div className="mcp-row__line mcp-row__line--error">{server.error}</div>}
+          {server.toolsError && <div className="mcp-row__line mcp-row__line--error">{server.toolsError}</div>}
+          {server.tools && <ToolList tools={server.tools} />}
+          <div className="mcp-row__actions">
+            {!app ? (
+              <span className="mcp-card__readonly">{t('mcp.readOnly')}</span>
+            ) : confirming ? (
+              <>
+                <button type="button" className="settings-button settings-button--danger" onClick={onConfirmDelete}>
+                  {t('mcp.confirmDelete')}
+                </button>
+                <button type="button" className="settings-button" onClick={onCancelDelete}>
+                  {t('mcp.cancel')}
+                </button>
+              </>
+            ) : (
+              !editing && (
+                <>
+                  <button type="button" className="settings-button" onClick={onEdit}>
+                    {t('mcp.edit')}
+                  </button>
+                  <button type="button" className="settings-button" onClick={onDelete}>
+                    {t('mcp.delete')}
+                  </button>
+                </>
+              )
+            )}
+          </div>
+        </div>
+      )}
     </>
   )
 }
@@ -220,7 +229,8 @@ interface VarDraft {
 
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL/i
 
-function ServerEditor({ server, directory, onDone }: { server?: McpServerSummary; directory?: string; onDone(saved: boolean): void }) {
+/** server 가 있으면 그 서버를 고치고, 없으면 scope 묶음에 새로 넣는다 */
+function ServerEditor({ server, scope, directory, onDone }: { server?: McpServerSummary; scope?: McpScope; directory: string; onDone(saved: boolean): void }) {
   const t = useT()
   const [name, setName] = useState(server?.name ?? '')
   const [type, setType] = useState<'local' | 'remote'>(server?.type ?? 'local')
@@ -236,7 +246,7 @@ function ServerEditor({ server, directory, onDone }: { server?: McpServerSummary
   const [testing, setTesting] = useState(false)
 
   const input = (): McpServerInput => ({
-    ...(server && { originalName: server.name }),
+    ...(server ? { originalName: server.name } : { scope }),
     name,
     type,
     ...(type === 'local'
@@ -280,7 +290,7 @@ function ServerEditor({ server, directory, onDone }: { server?: McpServerSummary
     })
   const save = () =>
     run(async () => {
-      await window.litecode.saveMcp(input())
+      await window.litecode.saveMcp(input(), directory)
       onDone(true)
     })
 
@@ -315,6 +325,7 @@ function ServerEditor({ server, directory, onDone }: { server?: McpServerSummary
             <span className="settings-field__label">{t('mcp.command')}</span>
             <input className="settings-input" aria-label={t('mcp.command')} placeholder={t('mcp.commandPlaceholder')} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} />
           </label>
+          <p className="models-page__hint">{t('mcp.hint')}</p>
           <label className="settings-field">
             <span className="settings-field__label">{t('mcp.args')}</span>
             <textarea className="settings-input mcp-editor__args" aria-label={t('mcp.args')} rows={2} value={args} disabled={busy} onChange={(event) => setArgs(event.target.value)} />
