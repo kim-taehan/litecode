@@ -8,12 +8,16 @@ import { MODE_AGENT, type EngineConnection, type EngineMcp } from './engine.ts'
 import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
-import { mcpToolOf, messageItems, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolRef, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
+import { mcpToolOf, messageItems, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
 import { projectInstructions } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
+import type { Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
+
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
 
 // opencode 를 감싸는 서비스 — 위층(세션·UI)은 이 ctx.llm 키만 알고 opencode 를 직접 모른다.
 // 나중에 엔진을 바꾸더라도 이 서비스만 교체하면 된다 (Cordis: 서비스는 키로 찾는다).
@@ -64,57 +68,11 @@ declare module 'cordis' {
   }
 }
 
-/** 턴이 기다리는 사람의 답 하나 — 승인 요청(권한) 또는 AI 의 질문. 화면이 카드로 그리고 reply 로 답한다 */
-export type Attention = PermissionAttention | QuestionAttention
-
-export interface PermissionAttention {
-  kind: 'permission'
-  /** 답할 때 쓰는 요청 id (per_…) */
-  id: string
-  /** 요청한 엔진 세션 — 하위 작업이 물으면 그 자식 세션이다 (reply 에 그대로 넘긴다) */
-  sessionId: string
-  /** 하위 작업(자식 세션)이 물었다 — 카드에 어느 하위 작업인지 보인다 */
-  subtask?: AttentionSubtask
-  /** opencode 권한 이름 — bash·edit·read·external_directory·webfetch 등 */
-  action: string
-  /** 명령·파일·폴더 패턴 (edit 요청엔 diff 가 없다 — 01f 1-c) */
-  resources: string[]
-  /** MCP 도구 실행 요청이면 그 서버·도구 (action 이 `<서버>_<도구>`, 이슈 #28) */
-  mcp?: McpToolRef
-}
-
 /** opencode 의 MCP 서버 상태 (레거시 GET /mcp — connected·disabled·failed·needs_auth·needs_client_registration) */
 export interface McpStatus {
   status: string
   error?: string
 }
-
-export interface QuestionAttention {
-  kind: 'question'
-  /** que_… */
-  id: string
-  sessionId: string
-  subtask?: AttentionSubtask
-  questions: AttentionQuestion[]
-}
-
-/** 승인·질문을 낸 하위 작업 — 하위 에이전트 이름과 AI 가 붙인 설명 */
-export interface AttentionSubtask {
-  agent: string
-  description: string
-}
-
-/** opencode QuestionV2Info (01i 2-a) */
-export interface AttentionQuestion {
-  question: string
-  header?: string
-  options: { label: string; description?: string }[]
-  /** 여럿 고르기 */
-  multiple?: boolean
-}
-
-/** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'. "항상 허용" 은 없다(사용자 결정) */
-export type AttentionAnswer = 'once' | 'reject' | string[][]
 
 export interface TurnInfo {
   sessionId: string
@@ -132,35 +90,6 @@ export interface ChatResult {
   interrupted?: boolean
   /** 사용자가 승인·질문을 거절해 끝났다 — 실패가 아니다 (ok 는 true) */
   declined?: boolean
-}
-
-/** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */
-export interface HistoryMessage {
-  /** 엔진 메시지 id (user 만) — chat 에 messageId 로 넘긴 값이 그대로 온다 */
-  id?: string
-  role: 'user' | 'assistant'
-  text: string
-  error?: string
-  /** user: 보낸 시각(ms) */
-  at?: number
-  /** user: 이 턴을 돌린 모드 (그 턴 답의 에이전트, 없으면 앞서 바꾼 에이전트) — 화면이 모드가 바뀐 자리에 구분선을 긋는다 */
-  mode?: Mode
-  /** assistant: 그 턴의 진행 줄 (생각·도구·글·지시문) — 실시간 턴의 chat onProgress 와 같은 모양 */
-  items?: TurnItem[]
-  /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
-  duration?: number
-  /** assistant: 끊겨서 끝났다 (error 는 interruptedError()) — 실패와 가른다 */
-  interrupted?: boolean
-  /** assistant: 승인·질문을 거절해 끝났다 */
-  declined?: boolean
-}
-
-export interface History {
-  messages: HistoryMessage[]
-  /** 작업 폴더가 없어 opencode 에 묻지 않았다 */
-  missingFolder?: boolean
-  /** 불러오지 못한 사유 */
-  error?: string
 }
 
 /** 레거시 GET /session/{id}/message 의 항목 (01w 실측 — 감싸지 않은 배열, 오래된 것부터) */

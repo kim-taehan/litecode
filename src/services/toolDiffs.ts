@@ -1,4 +1,8 @@
 import path from 'node:path'
+import type { FileDiff } from '../../shared/contract.ts'
+
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { FileDiff } from '../../shared/contract.ts'
 
 // 도구가 바꾼 파일 — opencode 도구 결과를 화면이 그리는 중립 모양(FileDiff)으로 바꾼다. 진행 이벤트(turnProgress.ts)와
 // 기록(turnProgress.messageItems·trajectory.ts)이 같은 함수를 쓴다. opencode 형식을 아는 곳이라 엔진을 바꾸면 이것도 바꾼다.
@@ -13,17 +17,6 @@ import path from 'node:path'
 //   delete 의 deletions 는 줄 수 + 1 로 센다(`split("\n")`) → 추가·삭제 수는 patch 의 줄에서 다시 센다
 // - 경로는 세션 폴더(root) 기준 상대로 바꾼다 — opencode 의 title·relativePath 는 worktree 기준인데 git 이 아닌 폴더의 worktree 는 `/` 다
 // - 화면의 diffRows 는 @@ 앞 머리 줄을 건너뛰므로 patch 는 머리째 넘긴다
-
-/** 파일 하나의 변경. patch 는 unified diff (@@ hunk 들, 앞에 파일 머리가 있을 수 있다) */
-export interface FileDiff {
-  path: string
-  status: 'added' | 'modified' | 'deleted'
-  added: number
-  removed: number
-  patch: string
-  /** write 로 덮어써서 이전 내용을 모른다 — patch 는 새 내용 전부를 추가로 */
-  unknownBefore?: true
-}
 
 interface RawFile {
   filePath?: unknown

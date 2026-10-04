@@ -3,6 +3,10 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { tr } from '../i18n.ts'
+import type { Project } from '../../shared/contract.ts'
+
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { Project } from '../../shared/contract.ts'
 
 // 최근 프로젝트 목록 — 프로젝트 = 폴더. 재시작해도 남도록 작은 JSON 파일 하나에 둔다 (앱에서는 userData 아래).
 // 목록 맨 앞이 마지막으로 연 프로젝트다 — 앱을 켜면 그것을 연다.
@@ -22,16 +26,6 @@ declare module 'cordis' {
     /** 최근 목록에서 뺐다 (폴더는 그대로) — ctx.notifications 가 그 프로젝트의 알림을 거둔다 */
     'projects/removed'(dir: string): void
   }
-}
-
-export interface Project {
-  /** realpath 한 절대 경로 — 식별자이자 작업 디렉터리 */
-  path: string
-  /** 화면에 보이는 이름 — 붙인 별명, 없으면 폴더 이름 */
-  name: string
-  /** 홈 아래면 `~/…` 로 줄인 경로 (화면 표시용) */
-  displayPath: string
-  favorite: boolean
 }
 
 interface Stored {

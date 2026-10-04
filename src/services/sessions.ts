@@ -2,10 +2,14 @@ import { Context, Service } from 'cordis'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { History } from './llm.ts'
-import { shellContext, type ShellResult } from './shell.ts'
-import { isMode, type Mode } from '../../shared/modes.ts'
+import { shellContext } from './shell.ts'
+import { isMode } from '../../shared/modes.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
+import type { Conversation, ShellCard } from '../../shared/contract.ts'
+
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { Conversation, ShellCard } from '../../shared/contract.ts'
 
 // 대화 목록 정보 (ctx.sessions) — 재시작해도 대화 목록이 남게 작은 JSON 파일 하나에 둔다 (앱에서는 userData/sessions.json).
 // 대화 **내용**의 정본은 opencode DB 다 — 여기는 목록에 보일 것만 쥔다: opencode 는 제목을 안 만들고 time.updated 도 안 바꾼다
@@ -23,40 +27,6 @@ declare module 'cordis' {
     /** 대화가 목록에서 빠졌다 (수동 삭제·보관 개수 초과) — ctx.notifications 가 그 알림을 거둔다 */
     'sessions/removed'(ids: string[]): void
   }
-}
-
-/** 대화 하나의 목록 정보 */
-export interface Conversation {
-  /** 앱 대화 id */
-  id: string
-  /** 작업 디렉터리 (ctx.projects 의 path 그대로) */
-  project: string
-  /** 엔진 세션 id — 첫 메시지를 보낼 때 생긴다 */
-  engineSessionId?: string
-  title: string
-  /** 마지막 활동 시각(ms) — 목록의 `38min`·`1d` 와 보관 개수 제한의 기준 */
-  updatedAt: number
-  /** 이 대화에서 고른 모델 */
-  model?: { providerId: string; modelId: string }
-  /** 이 대화의 모드 (입력창 칩). 없으면 새 대화 기본 모드(설정)를 따른다 — 보낼 때 ctx.llm 이 엔진 세션의 에이전트를 맞춘다 */
-  mode?: Mode
-  /** 화면이 턴마다 더한 통계 합계 — 모양은 화면(renderer/stats.ts)이 정하고 여기는 그대로 보관한다 */
-  usage?: unknown
-  /** 엔진 메시지 id → 말풍선에 보일 글. `/` 명령처럼 보낸 본문(풀어 쓴 template)과 사용자가 친 글이 다른 입력만 (label) */
-  labels?: Record<string, string>
-  /** `!명령` 결과 카드 — opencode 는 모르는 로컬 기록이다(AI 에게 보내기 전까지). 메인만 고친다(addShell·shareShell) */
-  shells?: ShellCard[]
-}
-
-/** 대화 안의 `!명령` 결과 카드 하나 */
-export interface ShellCard extends ShellResult {
-  id: string
-  /** 실행한 시각(ms) */
-  at: number
-  /** 대화 안 자리 — 이 카드 앞에 있던 말풍선(내 말·답) 수 */
-  position: number
-  /** "AI 에게 보내기" 로 맥락에 넣은 엔진 메시지 id — 다시 열 때 그 메시지는 말풍선으로 안 그린다(카드가 대신 "보냄") */
-  sharedMessageId?: string
 }
 
 interface Stored {

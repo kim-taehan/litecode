@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "litecode",
+    "slug": "litecode-mobile",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "platforms": ["android"],
+    "android": {
+      "package": "com.litecode.mobile"
+    }
+  }
+}
