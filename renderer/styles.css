@@ -657,11 +657,6 @@ button {
   font-weight: 600;
 }
 
-/* 사이드바를 숨기면 왼쪽 위에 다시 열기 버튼이 앉는다 */
-.main--full .main__header {
-  padding-left: 52px;
-}
-
 .main__messages {
   flex-grow: 1;
   overflow-y: auto;
@@ -1190,7 +1185,7 @@ button {
   position: relative;
 }
 
-/* 사이드바 숨기기·보이기 — 본문 왼쪽 위에 늘 있다 (숨겨도 다시 열 수 있게) */
+/* 사이드바 접기 — 로고 줄 오른쪽 끝. 접힌 뒤엔 아이콘 줄(.rail)의 펼치기 버튼이 연다 */
 .sidebar-toggle {
   flex: none;
   width: 28px;
@@ -1205,12 +1200,104 @@ button {
   color: var(--text-secondary);
 }
 
-/* 사이드바를 숨겼을 때 본문 왼쪽 위 — 머리 줄(52px) 가운데 */
-.sidebar-toggle--floating {
+/* 접힌 사이드바 — 56px 아이콘 줄 (이슈 #60 시안, dsh ui-sidebar collapsed rail). 바탕·경계는 펼친 사이드바와 같다.
+   버튼 36×36·아이콘 18·줄 사이 6. 본문(.main)과 나란히 놓여 대화 머리와 겹치지 않는다 */
+.rail {
+  position: relative;
+  flex: none;
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+  background: var(--sidebar-fill);
+  border-right: 0.5px solid var(--border-ring);
+}
+
+/* macOS 창 버튼 자리 — 그 밖에서는 없다 (아래 "제목 표시줄 없는 창") */
+.rail__top {
+  display: none;
+}
+
+.rail__button {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-secondary);
+}
+
+.rail__button:hover:not(:disabled) {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.rail__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.rail__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 새 대화 — 펼친 사이드바의 새 대화 버튼과 같은 재질(elevated + 0.5px 링) */
+.rail__button--raised {
+  background: var(--fill-elevated);
+  box-shadow: 0 0 0 0.5px var(--border-ring), 0 1px 3px rgba(0, 0, 0, 0.05);
+  color: var(--text);
+}
+
+.rail__project {
+  position: relative;
+}
+
+.rail .project-switch__badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+/* 팝오버는 배지 옆으로 — 줄 경계(56)에서 4px 떨어져 뜬다 (버튼 오른쪽 끝 46 + 14) */
+.rail .project-popover {
+  top: 0;
+  left: calc(100% + 14px);
+}
+
+.rail__notice,
+.rail__count {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 6;
+  top: 2px;
+  right: 2px;
+}
+
+.rail__count {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail__spacer {
+  flex-grow: 1;
 }
 
 /* 로고 줄 — dsh ui-sidebar .logoRow(높이 60, 패딩 8 0 8 4)·.brandIdentity(간격 8, 24px 아이콘)·.brandName(18/24 600) */
@@ -1256,10 +1343,14 @@ button {
 }
 
 /* ── 제목 표시줄 없는 창 (이슈 #25, dsh 데스크톱 macOS hiddenInset 방식) ──
-   창 끌기: 맨 위 줄들(사이드바 로고 줄·대화 머리·파일 미리보기 머리)이 자기 상자만큼 끌기 영역이다. Electron 은 끌기 영역을 쌓임이
+   창 끌기: 맨 위 줄들(사이드바 로고 줄·접힌 줄의 창 버튼 자리·대화 머리·파일 미리보기 머리)이 자기 상자만큼 끌기 영역이다. Electron 은 끌기 영역을 쌓임이
    아니라 문서 순서로 합치므로, 그 위에 놓이는 누를 것(버튼·입력·메뉴·대화상자·가림막)은 아래 규칙 하나로 빠진다 — 가림막·메뉴는
-   끌기 줄보다 문서 뒤에 있어야 한다. 사이드바 경계 손잡이는 로고 줄보다 앞이라 맨 위 줄 높이만큼은 끌기가 이긴다(폭 조절은 그 아래로) */
+   끌기 줄보다 문서 뒤에 있어야 한다. 사이드바 경계 손잡이는 로고 줄보다 앞이라 맨 위 줄 높이만큼은 끌기가 이긴다(폭 조절은 그 아래로).
+   접힌 줄(.rail)의 버튼은 어느 끌기 상자와도 겹치지 않는다 — 줄은 본문 왼쪽에 나란히 있고(대화 머리는 x ≥ 56 에서 시작), 줄 안의
+   끌기 상자(.rail__top)는 버튼 위쪽 52px 뿐이다. 줄에서 뜨는 전환 팝오버·이름 카드도 대화 머리(52px) 아래에서 시작한다
+   (macOS 가 아니면 펼치기 버튼의 이름 카드만 머리 높이에 걸치는데, 그 카드는 누르는 것이 아니다) */
 .sidebar__logo,
+.rail__top,
 .main__header,
 .file-preview__head {
   -webkit-app-region: drag;
@@ -1282,14 +1373,23 @@ html[data-platform='darwin']:not([data-fullscreen]) .sidebar__logo {
   padding: 0 12px 2px 88px;
 }
 
-/* 사이드바를 숨기면 다시 열기 버튼이 창 버튼 오른쪽에(같은 줄), 대화 머리 글은 그 뒤에서 시작 (88 + 28 + 12) */
-html[data-platform='darwin']:not([data-fullscreen]) .sidebar-toggle--floating {
-  top: 11px;
-  left: 88px;
+/* 사이드바를 접으면 — 창 버튼(16~70px)이 접힌 줄(56px)보다 넓다. 줄의 맨 위 52px 는 창 버튼 자리로 비우고(끌기 영역) 아이콘은 그 아래부터
+   (.rail__top 이 줄 사이 6px 를 되돌려 첫 아이콘이 52 에서 시작한다). 창 버튼이 본문으로 14px(70 − 56) 넘어오므로 대화 머리 글은
+   그만큼 + 여백 22 = 36px 에서 시작한다 (시안). 전체 화면·Windows·Linux 는 창 버튼이 없어 줄은 맨 위(12px)부터, 머리는 원래 24px */
+html[data-platform='darwin']:not([data-fullscreen]) .rail {
+  padding-top: 0;
 }
 
-html[data-platform='darwin']:not([data-fullscreen]) .main--full .main__header {
-  padding-left: 128px;
+html[data-platform='darwin']:not([data-fullscreen]) .rail__top {
+  display: block;
+  flex: none;
+  align-self: stretch;
+  height: 52px;
+  margin-bottom: -6px;
+}
+
+html[data-platform='darwin']:not([data-fullscreen]) .main--railed .main__header {
+  padding-left: calc(70px - 56px + 22px);
 }
 
 /* Windows·Linux — 창 버튼 덮개(titleBarOverlay)가 오른쪽 위를 덮는다. 맨 오른쪽 머리가 원래 여백에 그만큼 더 비운다

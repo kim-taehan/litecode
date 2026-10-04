@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
 import type { AttachmentKind, ChatEvent, Conversation, ConversationStatus, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
 import { titleFrom } from '../shared/chat.ts'
 import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from './chatState.ts'
@@ -90,9 +90,9 @@ function withBlankFor(project: string) {
 }
 
 /** 16px 외곽선 톱니 — dsh 사이드바 설정 줄의 아이콘 자리 */
-function GearIcon() {
+function GearIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
       <path d="M15.64 8.26L17.35 8.51L17.35 11.49L15.64 11.74L15.22 12.75L16.25 14.14L14.14 16.25L12.75 15.22L11.74 15.64L11.49 17.35L8.51 17.35L8.26 15.64L7.25 15.22L5.86 16.25L3.75 14.14L4.78 12.75L4.36 11.74L2.65 11.49L2.65 8.51L4.36 8.26L4.78 7.25L3.75 5.86L5.86 3.75L7.25 4.78L8.26 4.36L8.51 2.65L11.49 2.65L11.74 4.36L12.75 4.78L14.14 3.75L16.25 5.86L15.22 7.25Z" />
       <circle cx="10" cy="10" r="2.5" />
     </svg>
@@ -202,9 +202,9 @@ function readLayout(): { width: number; hidden: boolean } {
   }
 }
 
-function SidebarIcon() {
+function SidebarIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2" stroke="currentColor" strokeWidth="1.5" />
       <path d="M7.5 4V16" stroke="currentColor" strokeWidth="1.5" />
     </svg>
@@ -574,6 +574,21 @@ export function App() {
     else closeSwitcher(true)
   }
 
+  /** 전환 버튼(사이드바 카드·접힌 줄의 배지) — 고를 최근 프로젝트가 없으면 한 줄짜리 팝오버 대신 바로 폴더 열기 (dsh ui-workspace) */
+  function toggleSwitcher(): void {
+    if (projects?.length === 0) void openFolder()
+    else setSwitching((open) => !open)
+  }
+
+  /** 새 대화 — 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace). 이미 있으면 새로 만들지 않고 그리로 간다 */
+  function startNewChat(): void {
+    if (!project) return
+    const blank = sessions.find((session) => session.project === project.path && isBlank(session))
+    const session = blank ?? newSession(project.path)
+    if (!blank) setSessions((sessionsNow) => [session, ...sessionsNow])
+    setActiveIds((current) => ({ ...current, [project.path]: session.id }))
+  }
+
   function updateSession(id: string, mutate: (session: Session) => Session): void {
     setSessions((sessionsNow) => sessionsNow.map((session) => (session.id === id ? mutate(session) : session)))
   }
@@ -711,8 +726,48 @@ export function App() {
     return !session.history || session.history === 'loaded'
   }
 
+  // 프로젝트 전환 팝오버 — 펼친 사이드바에선 전환 카드 아래, 접힌 줄에선 배지 옆에 뜬다 (한 번에 한 곳)
+  const popover = switching && (
+    <ProjectPopover
+      projects={projects ?? []}
+      current={project?.path}
+      statusOf={(dir) => projectStatus(notices.state, dir)}
+      runningOf={(dir) => runningIn(notices.state, dir).length}
+      busy={picking}
+      error={openError}
+      onPick={(picked) => void pickRecent(picked)}
+      onOpenFolder={() => void openFolder()}
+      onToggleFavorite={(target) => void toggleFavorite(target)}
+      onRemove={remove}
+      onRename={async (target, name) => setProjects(await window.litecode.renameProject(target.path, name))}
+      onClose={closeSwitcher}
+    />
+  )
+
   return (
     <div className="app">
+      {/* 사이드바를 접으면 56px 아이콘 줄이 남는다 (이슈 #60 시안). 대화 머리(창 끌기 줄)와 나란히 놓여 겹치지 않으므로 줄의 버튼은
+          끌기 영역에 덮이지 않는다 (styles.css 창 끌기 주석) */}
+      {layout.hidden && (
+        <Rail
+          project={project}
+          picking={picking}
+          notice={otherProjectsStatus(notices.state, project?.path)}
+          running={running.length}
+          switchRef={switchRef}
+          settingsRef={settingsRef}
+          onExpand={() => setLayout((now) => ({ ...now, hidden: false }))}
+          onNewChat={startNewChat}
+          onSwitch={toggleSwitcher}
+          onRunning={() => {
+            setLayout((now) => ({ ...now, hidden: false }))
+            setRunningOnly(true)
+          }}
+          onSettings={() => setSettingsOpen(true)}
+        >
+          {popover}
+        </Rail>
+      )}
       <aside className="sidebar" style={{ width: layout.width, display: layout.hidden ? 'none' : undefined }}>
         <div
           className="sidebar__resize"
@@ -750,10 +805,9 @@ export function App() {
           <button
             type="button"
             className="project-switch"
-            ref={switchRef}
+            ref={layout.hidden ? undefined : switchRef}
             disabled={picking}
-            // 고를 최근 프로젝트가 없으면 한 줄짜리 팝오버 대신 바로 폴더 열기 (dsh ui-workspace)
-            onClick={() => (projects?.length === 0 ? void openFolder() : setSwitching((open) => !open))}
+            onClick={toggleSwitcher}
           >
             {project && <Badge project={project} />}
             <span className="project-switch__text" onMouseEnter={(event) => startMarquee(event.currentTarget)} onMouseLeave={(event) => stopMarquee(event.currentTarget)}>
@@ -770,22 +824,7 @@ export function App() {
             />
             <span className="project-switch__caret">▾</span>
           </button>
-          {switching && (
-            <ProjectPopover
-              projects={projects ?? []}
-              current={project?.path}
-              statusOf={(dir) => projectStatus(notices.state, dir)}
-              runningOf={(dir) => runningIn(notices.state, dir).length}
-              busy={picking}
-              error={openError}
-              onPick={(picked) => void pickRecent(picked)}
-              onOpenFolder={() => void openFolder()}
-              onToggleFavorite={(target) => void toggleFavorite(target)}
-              onRemove={remove}
-              onRename={async (target, name) => setProjects(await window.litecode.renameProject(target.path, name))}
-              onClose={closeSwitcher}
-            />
-          )}
+          {!layout.hidden && popover}
         </div>
 
         <div className="sidebar__new">
@@ -793,14 +832,7 @@ export function App() {
             type="button"
             className="new-chat"
             disabled={!project}
-            onClick={() => {
-              if (!project) return
-              // 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace) — 이미 있으면 새로 만들지 않고 그리로 간다
-              const blank = sessions.find((session) => session.project === project.path && isBlank(session))
-              const session = blank ?? newSession(project.path)
-              if (!blank) setSessions((sessionsNow) => [session, ...sessionsNow])
-              setActiveIds((current) => ({ ...current, [project.path]: session.id }))
-            }}
+            onClick={startNewChat}
           >
             {t('sidebar.newChat')}
           </button>
@@ -902,7 +934,7 @@ export function App() {
           <button
             type="button"
             className="settings-trigger"
-            ref={settingsRef}
+            ref={layout.hidden ? undefined : settingsRef}
             onClick={() => setSettingsOpen(true)}
           >
             <GearIcon />
@@ -911,7 +943,7 @@ export function App() {
         </div>
       </aside>
 
-      <main className={`main${layout.hidden ? ' main--full' : ''}`}>
+      <main className={`main${layout.hidden ? ' main--railed' : ''}`}>
         {projects && !project && (
           <div className="open-guide">
             {openError && (
@@ -1128,19 +1160,6 @@ export function App() {
             )}
           </DelegationContext.Provider>
         )}
-        {/* 사이드바를 숨기면 로고 줄의 접기 버튼도 같이 사라지므로 그때만 여기서 다시 연다. 대화 머리(창 끌기 줄)보다 **문서 뒤**에 둔다 —
-            Electron 은 끌기 영역을 문서 순서로 합쳐서, 앞에 있으면 머리의 끌기가 이 버튼을 덮어 눌리지 않는다 (styles.css 창 끌기 주석) */}
-        {layout.hidden && (
-          <button
-            type="button"
-            className="sidebar-toggle sidebar-toggle--floating"
-            aria-label={t('sidebar.show')}
-            title={t('sidebar.show')}
-            onClick={() => setLayout((now) => ({ ...now, hidden: false }))}
-          >
-            <SidebarIcon />
-          </button>
-        )}
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
       <FilePreviewPanel directory={active?.project} />
@@ -1149,6 +1168,84 @@ export function App() {
       <RemotePairPrompt on={features.has('remote')} />
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
     </div>
+  )
+}
+
+interface RailProps {
+  project?: Project
+  /** 폴더를 고르거나 여는 중 — 배지를 막는다 */
+  picking: boolean
+  /** 다른 프로젝트에 확인할 대화가 있다 — 배지 모서리의 점 (펼친 사이드바 전환 카드의 점과 같은 값) */
+  notice?: ConversationStatus
+  /** 지금 프로젝트에서 도는 대화 수 — 0 이면 그 아이콘은 없다 */
+  running: number
+  switchRef: RefObject<HTMLButtonElement | null>
+  settingsRef: RefObject<HTMLButtonElement | null>
+  onExpand(): void
+  onNewChat(): void
+  onSwitch(): void
+  /** 사이드바를 펼치고 "진행 중" 만 보이게 */
+  onRunning(): void
+  onSettings(): void
+  /** 프로젝트 전환 팝오버 — 배지 옆에 뜬다 */
+  children?: ReactNode
+}
+
+/** 접힌 사이드바 — 56px 아이콘 줄 (이슈 #60 시안, dsh ui-sidebar 의 collapsed rail). 위에서부터 펼치기 · 새 대화 · 프로젝트 배지 ·
+ *  진행 중인 대화 수, 맨 아래 설정. 글자가 없으므로 아이콘마다 aria-label 과 옆 카드(HoverCard)로 이름을 보인다.
+ *  macOS 는 맨 위 52px 가 창 버튼 자리다 — 빈 끌기 줄(.rail__top)이 차지하고 아이콘은 그 아래부터 */
+function Rail({ project, picking, notice, running, switchRef, settingsRef, onExpand, onNewChat, onSwitch, onRunning, onSettings, children }: RailProps) {
+  const t = useT()
+  const hover = useHoverCard()
+  /** 이름 카드 — 누르면 바로 거둔다 (열린 팝오버·모달 위에 뜨지 않게) */
+  const tip = (title: string) => ({
+    'aria-label': title,
+    onMouseEnter: (event: ReactMouseEvent<HTMLElement>) => hover.enter(event.currentTarget, { title }, true),
+    onMouseLeave: (event: ReactMouseEvent<HTMLElement>) => hover.leave(event.currentTarget),
+    onMouseDown: (event: ReactMouseEvent<HTMLElement>) => hover.leave(event.currentTarget),
+  })
+  return (
+    <aside className="rail" aria-label={t('rail.label')}>
+      <div className="rail__top" />
+      <button type="button" className="rail__button" {...tip(t('sidebar.show'))} onClick={onExpand}>
+        <SidebarIcon size={18} />
+      </button>
+      <button type="button" className="rail__button rail__button--raised" {...tip(t('rail.newChat'))} disabled={!project} onClick={onNewChat}>
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8 2.5H4A1.5 1.5 0 0 0 2.5 4v8A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V8" />
+          <path d="M12 2.2l1.8 1.8-5 5H7V7.2z" />
+        </svg>
+      </button>
+      <div className="rail__project">
+        <button
+          type="button"
+          className="rail__button"
+          ref={switchRef}
+          disabled={picking}
+          {...tip(project ? t('rail.project', { name: project.name }) : t('rail.openProject'))}
+          onClick={onSwitch}
+        >
+          {project ? <Badge project={project} /> : <span className="project-switch__badge" />}
+          {notice && <StatusDot status={notice} className="rail__notice" />}
+        </button>
+        {children}
+      </div>
+      {running > 0 && (
+        <button type="button" className="rail__button" {...tip(t('rail.running', { count: running }))} onClick={onRunning}>
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M2.5 3.5h11v7.5h-6l-3 2.5v-2.5h-2z" />
+          </svg>
+          <span className="rail__count" aria-hidden="true">
+            {running}
+          </span>
+        </button>
+      )}
+      <span className="rail__spacer" />
+      <button type="button" className="rail__button" ref={settingsRef} {...tip(t('sidebar.settings'))} onClick={onSettings}>
+        <GearIcon size={18} />
+      </button>
+      <HoverCard card={hover.card} />
+    </aside>
   )
 }
 

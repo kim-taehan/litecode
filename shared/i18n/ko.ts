@@ -21,6 +21,11 @@ export const ko = {
   'sidebar.runningAll': '모든 대화 보기',
   'sidebar.runningElsewhere': '다른 프로젝트에서 진행 중 {count}',
   'sidebar.stopChat': '답변 중지',
+  'rail.label': '사이드바 (접힘)',
+  'rail.newChat': '새 대화',
+  'rail.project': '프로젝트 바꾸기 — {name}',
+  'rail.openProject': '프로젝트 열기',
+  'rail.running': '진행 중인 대화 {count}개',
   // 프로젝트 전환
   'project.cannotOpen': '폴더를 열 수 없습니다: {dir}',
   'project.cannotOpenPicked': '폴더를 열 수 없습니다',
