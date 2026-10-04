@@ -35,9 +35,9 @@ describe('ToolCalls', () => {
     const calls = new ToolCalls()
     calls.observe(part('call_1', 'running', ARGS), false)
     calls.approve('call_1')
-    expect(calls.claim('call_1')).toBe(true)
+    expect(calls.claim('call_1')).toEqual({ approved: true })
     expect(calls.matching(TOOL, ARGS)).toEqual([]) // 소진
-    expect(calls.claim('call_1')).toBe(false)
+    expect(calls.claim('call_1')).toEqual({ approved: false })
     // running 이 다시 와도(같은 파트의 갱신) 되살아나지 않는다
     calls.observe(part('call_1', 'running', ARGS), false)
     expect(calls.matching(TOOL, ARGS)).toEqual([])
@@ -48,7 +48,20 @@ describe('ToolCalls', () => {
     calls.observe(part('call_1', 'running', ARGS), false)
     calls.approve('call_1')
     calls.revoke('call_1')
-    expect(calls.claim('call_1')).toBe(false)
+    expect(calls.claim('call_1')).toEqual({ approved: false })
+  })
+
+  // 이슈 #67 — 승인 카드에서 사용자가 고른 받을 대화가 허용 기록에 함께 적힌다
+  it('허용하며 고른 받을 대화는 기록에 실려 한 번만 나온다 — 소진된 뒤·되돌린 뒤에는 없다', () => {
+    const calls = new ToolCalls()
+    calls.observe(part('call_1', 'running', ARGS), false)
+    calls.approve('call_1', { kind: 'conversation', conversationId: 'c9' })
+    expect(calls.claim('call_1')).toEqual({ approved: true, target: { kind: 'conversation', conversationId: 'c9' } })
+    expect(calls.claim('call_1')).toEqual({ approved: false })
+    calls.observe(part('call_2', 'running', ARGS), false)
+    calls.approve('call_2', { kind: 'new' })
+    calls.revoke('call_2')
+    expect(calls.claim('call_2')).toEqual({ approved: false })
   })
 })
 
@@ -58,6 +71,13 @@ describe('findCaller', () => {
     a.calls.observe(part('call_1', 'running', ARGS), false)
     a.calls.approve('call_1')
     expect(findCaller([a], '/p', TOOL, ARGS)).toEqual({ sessionId: 'ses_a', callId: 'call_1', child: false, approved: true })
+  })
+
+  it('사용자가 고른 받을 대화가 부른 대화와 함께 온다 (이슈 #67)', () => {
+    const a = live('ses_a')
+    a.calls.observe(part('call_1', 'running', ARGS), false)
+    a.calls.approve('call_1', { kind: 'new' })
+    expect(findCaller([a], '/p', TOOL, ARGS)).toEqual({ sessionId: 'ses_a', callId: 'call_1', child: false, approved: true, target: { kind: 'new' } })
   })
 
   it('허용 기록이 없는 호출(엔진 API 로 스스로 허용)은 approved 가 false 다', () => {

@@ -146,7 +146,7 @@ const bridge: LitecodeBridge = {
     return () => void ipcRenderer.removeListener(Channel.TURN_PROGRESS, handler)
   },
   onTurnAttention: (listener) => listen(Channel.TURN_ATTENTION, listener),
-  replyAttention: (sessionId, requestId, answer) => ipcRenderer.invoke(Channel.REPLY_ATTENTION, sessionId, requestId, answer),
+  replyAttention: (sessionId, requestId, answer, target) => ipcRenderer.invoke(Channel.REPLY_ATTENTION, sessionId, requestId, answer, target),
   stopTurn: (conversationId) => ipcRenderer.invoke(Channel.STOP_TURN, conversationId),
   stopSubtask: (subtaskId) => ipcRenderer.invoke(Channel.STOP_SUBTASK, subtaskId),
   resolveFiles: (directory, tokens) => ipcRenderer.invoke(Channel.RESOLVE_FILES, directory, tokens),

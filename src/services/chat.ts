@@ -10,7 +10,7 @@ import { isMode } from '../../shared/modes.ts'
 import { addTurn, type ChatUsage } from '../../shared/usage.ts'
 import { upsertItem } from '../../shared/chatReducer.ts'
 import { chipsOf, queueLabel, titleFrom, TITLE_MAX, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult } from '../../shared/chat.ts'
-import type { Attention, AttentionAnswer, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
+import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
 // 대화별 "턴 소유" (ctx.chat, 이슈 #52) — 보내기·대기열·턴 끝 처리(제목·저장·통계 합산·대기열의 다음 것 보내기)·중지를 메인이 쥔다.
 // 원래 화면(App.tsx 의 send·useSendQueue)이 하던 일이다. 화면은 손님이다: 보내기를 부탁하고(send) 이벤트를 받아 그린다 —
@@ -149,9 +149,10 @@ export class ChatService extends Service {
     return !!turn
   }
 
-  /** 승인·질문 카드의 답을 엔진에 전한다 (ctx.llm.reply 그대로 — 이미 풀린 요청·빈 답이면 던진다) */
-  reply(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void> {
-    return this.ctx.llm.reply(sessionId, requestId, answer)
+  /** 승인·질문 카드의 답을 엔진에 전한다 (ctx.llm.reply 그대로 — 이미 풀린 요청·빈 답이면 던진다).
+   *  target: 다른 대화에 지시를 보내는 도구를 허용하며 사용자가 고른 받을 대화 (이슈 #67, 데스크탑 화면만 — 폰은 안 준다) */
+  reply(sessionId: string, requestId: string, answer: AttentionAnswer, target?: AttentionTarget): Promise<void> {
+    return target ? this.ctx.llm.reply(sessionId, requestId, answer, target) : this.ctx.llm.reply(sessionId, requestId, answer)
   }
 
   /** 도는 턴의 하위 작업 하나만 멈춘다 (ctx.llm.stopSubtask 그대로) */

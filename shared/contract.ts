@@ -129,6 +129,10 @@ export interface AttentionQuestion {
 /** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'. "항상 허용" 은 없다(사용자 결정) */
 export type AttentionAnswer = 'once' | 'reject' | string[][]
 
+/** 승인 카드에서 사용자가 고른 "받을 대화" (이슈 #67) — 다른 대화에 지시를 보내는 도구의 허용(once)에 함께 싣는다. 기존 대화 하나 또는 새 대화.
+ *  엔진은 모른다(엔진에 가는 답은 once 뿐) — 앱이 허용 기록에 적어 두고 앱 MCP 서버의 도구가 실행할 때 쓴다 */
+export type AttentionTarget = { kind: 'conversation'; conversationId: string } | { kind: 'new' }
+
 /** 첨부 종류 (이슈 #44) — file: 글 파일(본문에 `@경로` 나 글로 풀려 간다), image: png·jpeg (엔진에 이미지로 간다) */
 export type AttachmentKind = 'file' | 'image'
 
