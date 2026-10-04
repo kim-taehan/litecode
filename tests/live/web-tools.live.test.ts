@@ -78,10 +78,20 @@ const requests = async (): Promise<Requests> => (await (await fetch(`${inject('f
 async function toolsIn(mode: Mode): Promise<string[]> {
   const text = `web tools ${mode} ${Date.now()}`
   const result = await page.evaluate(
-    ([dir, prompt, chosen]) => window.litecode.sendMessage(`web-probe-${chosen}`, 'gateway-local', 'qwen3.8-27b', dir, prompt, undefined, undefined, chosen as Mode),
+    ([dir, prompt, chosen]) => new Promise<{ text: string; error?: string }>((resolve) => {
+        // 보내기는 바로 돌아온다(ctx.chat, 이슈 #52) — 답은 그 대화의 턴 끝 이벤트로 온다
+        const id = `web-probe-${chosen}-${Date.now()}`
+        const off = window.litecode.onTurnEnded((ended) => {
+          if (ended.cid !== id) return
+          off()
+          resolve(ended.message)
+        })
+        void window.litecode.sendMessage(id, { project: dir, text: prompt, mode: chosen as Mode, model: { providerId: 'gateway-local', modelId: 'qwen3.8-27b' } })
+      }),
     [project, text, mode] as const,
   )
-  expect(result, mode).toMatchObject({ ok: true, text: `echo: ${text}` })
+  expect(result, mode).toMatchObject({ text: `echo: ${text}` })
+  expect(result.error, mode).toBeUndefined()
   const { lastChat } = await requests()
   // 이 턴의 요청이다 — 레거시는 계획 모드 턴의 user 글 뒤에 <system-reminder> 를 붙인다
   expect(lastChat.messages.at(-1)!.text.startsWith(text), mode).toBe(true)
