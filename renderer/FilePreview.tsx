@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { DirectoryListing, FilePreview, HtmlAsset } from '../shared/ipc.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
-import { OpenInButton } from './OpenInButton.tsx'
 import {
   closeFilePreview,
   closeTab,
@@ -15,7 +14,6 @@ import {
 } from './filePreviewStore.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
 import { lineJump } from './lineJump.ts'
-import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
 import './filePreview.css'
 
@@ -363,7 +361,6 @@ function TreeLevel({
 /** jump — 그 줄로 가서 강조한다 (AI 의 open_file). 줄은 원문의 줄이라 마크다운·HTML 도 원문 보기로 바꾼다 */
 function FileView({ directory, token, jump }: { directory: string; token: string; jump?: { line: number; seq: number } }) {
   const t = useT()
-  const features = useFeatures()
   const [preview, setPreview] = useState<FilePreview | 'loading'>('loading')
   const [revision, setRevision] = useState(0)
   const [source, setSource] = useState(!!jump)
@@ -407,7 +404,6 @@ function FileView({ directory, token, jump }: { directory: string; token: string
               {source ? (html ? t('filePreview.showRenderedHtml') : t('filePreview.showRendered')) : t('filePreview.showSource')}
             </button>
           )}
-          {file && features.has('openIn') && <OpenInButton directory={directory} file={token} />}
           <ReloadButton onClick={() => setRevision((now) => now + 1)} />
           {file && (
             <button
