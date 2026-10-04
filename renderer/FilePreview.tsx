@@ -12,6 +12,8 @@ import {
   usePanelState,
   type PanelState,
 } from './filePreviewStore.ts'
+import { Tokens, useHighlight } from './Highlighted.tsx'
+import { languageOfPath } from './highlight.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
 import { lineJump } from './lineJump.ts'
 import { useT } from './settingsStore.ts'
@@ -458,7 +460,7 @@ function FileView({ directory, token, jump }: { directory: string; token: string
             <Markdown text={preview.text} directory={directory} />
           </div>
         ) : (
-          <CodeLines text={preview.text} jump={jump} />
+          <CodeLines text={preview.text} path={preview.path} jump={jump} />
         )}
       </div>
     </div>
@@ -533,9 +535,12 @@ export function kindOf(file: string, text: string): string {
 }
 
 /** 줄 번호 + 글 — 두 열을 줄 단위 요소로 쪼개지 않는다(1MB 파일도 요소 두 개). 줄바꿈 없이(white-space: pre) 같은 줄 높이라 줄이 맞는다.
+ *  글자의 문법 색은 확장자로 고른 언어로(highlight.ts — 5,000줄·30만 자를 넘으면 색 없이). 색은 글자색만 바꿔 줄 높이는 그대로다.
  *  jump 가 있으면 그 줄로 스크롤하고 그 줄에 띠를 깐다 — 줄 높이가 같아 자리는 곱셈이다(lineJump.ts). 줄 높이는 줄 번호 열을 재서 안다 */
-function CodeLines({ text, jump }: { text: string; jump?: { line: number; seq: number } }) {
+function CodeLines({ text, path, jump }: { text: string; path: string; jump?: { line: number; seq: number } }) {
   const lines = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n')
+  const code = lines.join('\n')
+  const tokens = useHighlight(code, languageOfPath(path))
   const numbers = lines.map((_, index) => index + 1).join('\n')
   const gutter = useRef<HTMLPreElement>(null)
   const [mark, setMark] = useState<{ line: number; top: number; height: number }>()
@@ -555,7 +560,7 @@ function CodeLines({ text, jump }: { text: string; jump?: { line: number; seq: n
         {numbers}
       </pre>
       <pre className="file-preview__text">
-        <code>{lines.join('\n')}</code>
+        <code>{tokens ? <Tokens tokens={tokens} /> : code}</code>
       </pre>
     </div>
   )

@@ -6,6 +6,8 @@ import { gfm } from 'micromark-extension-gfm'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { cjkStrong } from './cjkStrong.ts'
 import { openFilePreview } from './filePreviewStore.ts'
+import { Tokens, useHighlight } from './Highlighted.tsx'
+import { languageOf } from './highlight.ts'
 import { useT } from './settingsStore.ts'
 import { looksLikePath } from './turnView.ts'
 import './markdown.css'
@@ -14,7 +16,7 @@ import './markdown.css'
 // 원문 → mdast(GFM: 표·체크박스·취소선·자동 링크 + 한글 굵게 보정) → React 요소. HTML 문자열을 DOM 에 끼우지 않는다:
 // 원문 HTML(<script>·<img onerror> 등)은 글자로 보이고, 링크는 http(s) 만 앱 밖 브라우저로, 이미지는 불러오지 않는다
 // (폐쇄망에서 원격 이미지는 어차피 안 오고, 열려 있으면 답을 본 순간 밖으로 요청이 나간다 — 추적·유출 통로).
-// 문법 색은 없다 — dsh 의 shiki 는 문법 파일만 수 MB 라 동봉 크기에 비해 얻는 게 적다.
+// 코드 블록의 문법 색은 highlight.ts(번들에 실은 highlight.js 문법만, 이슈 #81) — 토큰도 React 요소로 그린다.
 
 /** 파일 언급 칩 — 그 답의 프로젝트와, 그 안의 실제 파일로 확인된 인라인 코드 */
 const FileMentions = createContext<{ directory: string; files: ReadonlySet<string> } | undefined>(undefined)
@@ -215,8 +217,9 @@ function BlockedImage({ alt, url }: { alt: string; url: string }) {
 const COPIED_MS = 1_500
 
 /** 코드 블록 — 머리(언어, 없으면 "코드 블록") + 오른쪽 아이콘 버튼 둘(줄바꿈 토글·복사) + 고정폭 본문 (dsh CodeBlock·CodeToolbar).
- *  줄바꿈은 dsh 처럼 켠 채로 시작한다 */
+ *  줄바꿈은 dsh 처럼 켠 채로 시작한다. 아는 언어면 글자에 문법 색 — 모르는 언어·언어 표시 없음·너무 큰 블록은 색 없이 */
 function CodeBlock({ lang, code }: { lang?: string; code: string }) {
+  const tokens = useHighlight(code, languageOf(lang))
   const [copied, setCopied] = useState(false)
   const [wrap, setWrap] = useState(true)
   const t = useT()
@@ -261,7 +264,7 @@ function CodeBlock({ lang, code }: { lang?: string; code: string }) {
           </button>
         </span>
       </div>
-      <pre><code>{code}</code></pre>
+      <pre><code>{tokens ? <Tokens tokens={tokens} /> : code}</code></pre>
     </div>
   )
 }

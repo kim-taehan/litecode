@@ -83,6 +83,11 @@
   box-shadow: inset 3px 0 0 var(--diff-del);
 }
 
+/* 문법 색을 입힌 줄 — 접두(+/-)·바탕·띠는 줄 색 그대로, 글자는 기본 글자색 위에 토큰 색 (highlight.css) */
+.diff-line__code {
+  color: var(--text);
+}
+
 .diff-line[data-kind='file'] {
   font-weight: 500;
 }
