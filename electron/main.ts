@@ -39,6 +39,7 @@ import { AppMcpService } from '../src/services/appMcp.ts'
 import { OpenFileTool } from '../src/services/appMcp/tools/openFile.ts'
 import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
+import { RemoteHttp } from '../src/services/remote/http.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 
@@ -481,6 +482,8 @@ const features: FeatureDefinition[] = [
     id: 'remote',
     plugin: (ctx) => {
       ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
+      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 지금은 HTTP(127.0.0.1:47600) 하나. 블루투스 운반이 이 옆에 올라온다
+      ctx.plugin(RemoteHttp)
       ctx.plugin(remoteBridge)
     },
   },

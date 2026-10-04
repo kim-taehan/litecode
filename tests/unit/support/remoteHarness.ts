@@ -6,6 +6,9 @@ import path from 'node:path'
 import { ChatService } from '../../../src/services/chat.ts'
 import { ProjectsService } from '../../../src/services/projects.ts'
 import { RemoteService, type RemoteServiceOptions } from '../../../src/services/remote.ts'
+import { RemoteHttp, type RemoteHttpOptions } from '../../../src/services/remote/http.ts'
+import { serveFramed, type FramedServer } from '../../../src/services/remote/framed.ts'
+import type { ByteLink } from '../../../shared/remoteFraming.ts'
 import { SessionsService } from '../../../src/services/sessions.ts'
 import { SettingsService } from '../../../src/services/settings.ts'
 import type { ChatResult } from '../../../src/services/llm.ts'
@@ -38,6 +41,10 @@ export class FakeLlm extends Service {
   }
   newMessageId(): string {
     return `msg_${++this.ids}`
+  }
+  /** 엔진 세션 하나의 기록을 심는다 (큰 스냅샷 시험) */
+  seed(sessionId: string, messages: HistoryMessage[]): void {
+    this.transcript.set(sessionId, messages)
   }
   async chat(
     _providerId: string,
@@ -129,8 +136,10 @@ export interface Answer<T = any> {
   headers: http.IncomingHttpHeaders
 }
 
-export async function start(options: Partial<RemoteServiceOptions> = {}, enabled = true) {
+/** http: false 면 HTTP 운반을 올리지 않는다 (운반 없는 ctx.remote — 테스트가 자기 운반을 올린다). listeners·port 는 HTTP 운반의 것 */
+export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpOptions & { http?: boolean } = {}, enabled = true) {
   const { root, project, cleanups } = box
+  const { http: withHttp = true, listeners, port = 0, ...service } = options
   const ctx = new Context()
   const fibers = [
     ctx.plugin(FakeLlm),
@@ -139,13 +148,26 @@ export async function start(options: Partial<RemoteServiceOptions> = {}, enabled
     ctx.plugin(ProjectsService, { file: path.join(root, 'projects.json') }),
     ctx.plugin(SessionsService, { file: path.join(root, 'sessions.json') }),
     ctx.plugin(ChatService),
-    ctx.plugin(RemoteService, { file: path.join(root, 'remote-devices.json'), port: 0, name: 'test-pc', appVersion: '1.2.3', now: () => Date.now() + box.offset, ...options }),
+    ctx.plugin(RemoteService, { file: path.join(root, 'remote-devices.json'), name: 'test-pc', appVersion: '1.2.3', now: () => Date.now() + box.offset, ...service }),
   ]
+  // 운반은 ctx.remote 밑의 플러그인이다 — 올라와 자신을 올릴(carrier) 때까지 기다린 뒤 켠다
+  let mounted: Promise<void> = Promise.resolve()
+  if (withHttp) {
+    mounted = new Promise((resolve) => {
+      const carrier = (inner: Context): void => {
+        RemoteHttp(inner, { listeners, port })
+        resolve()
+      }
+      carrier.inject = RemoteHttp.inject
+      fibers.push(ctx.plugin(carrier))
+    })
+  }
   cleanups.push(async () => {
     for (const fiber of fibers.reverse()) await fiber.dispose()
   })
   const ready = await new Promise<Context>((resolve) => ctx.inject(['remote', 'chat', 'sessions', 'projects', 'llm', 'settings'], resolve))
   const remote = ready.remote
+  await mounted
   await remote.ready()
   await ready.projects.open(project)
   if (enabled) await remote.setEnabled(true)
@@ -222,7 +244,24 @@ export async function start(options: Partial<RemoteServiceOptions> = {}, enabled
     await until(() => llm.calls.length >= n, `턴 ${n}`)
     return llm.calls[n - 1]!
   }
-  return { ctx: ready, remote, llm, api, requestPair, pair, events, save, turn, chatEvents, base }
+  /** 링크(메모리 파이프의 한쪽 끝)를 프레임 운반으로 ctx.remote 에 잇는다 — 블루투스 운반이 연결마다 하는 일 */
+  const attach = (link: ByteLink, key = 'link'): FramedServer => {
+    const server = serveFramed(link, remote, { carrier: 'pipe', key })
+    cleanups.push(() => server.close())
+    return server
+  }
+  /** 주소 없이 늘 떠 있는 운반을 올린다 (HTTP 없이 ctx.remote 를 살린다 — attach 로 링크를 잇는다) */
+  const pipeCarrier = async (): Promise<void> => {
+    let up = false
+    remote.carrier({ id: 'pipe', start: async () => void (up = true), stop: async () => void (up = false), status: () => ({ up, addresses: [] }) })
+    await remote.ready()
+  }
+  /** 엔진 기록이 있는 저장된 대화 하나 */
+  const seed = async (id: string, messages: HistoryMessage[]) => {
+    llm.seed(`ses_${id}`, messages)
+    await save(id, { engineSessionId: `ses_${id}` })
+  }
+  return { ctx: ready, remote, llm, api, requestPair, pair, events, save, turn, chatEvents, base, attach, pipeCarrier, seed }
 }
 
 /** 받은 글에서 완성된 프레임만 (`: ping` 주석은 프레임이 아니다) */
