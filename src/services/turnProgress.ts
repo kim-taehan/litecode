@@ -107,7 +107,7 @@ export interface EngineMessageInfo {
   /** assistant 의 summary:true 는 자동 요약 답이다 (user 는 {diffs} 객체) */
   summary?: unknown
   time?: { created?: number; completed?: number }
-  error?: { name?: string; data?: { message?: string } }
+  error?: { name?: string; data?: { message?: string; statusCode?: number } }
   /** user: 그 프롬프트에 실은 system (앱이 넣는 프로젝트 지시문 — instructions.ts) */
   system?: string
   /** assistant: 그 스텝의 토큰 (step-finish 와 같은 값) */

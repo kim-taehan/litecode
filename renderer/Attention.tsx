@@ -1,9 +1,10 @@
-import { useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Attention, AttentionAnswer, AttentionQuestion, AttentionTarget } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
 import { reason } from './Settings.tsx'
 import { TargetPickerBody, useDelegation } from './Delegation.tsx'
 import { NEW_TARGET, targetPicker } from './delegationView.ts'
+import { QuestionDrafts } from './questionDrafts.ts'
 import './attention.css'
 
 // 턴이 사람을 기다릴 때 대화 안에 뜨는 카드 (라운드 A). 승인 카드는 dsh ui-approval(주황 띠 "승인 대기" + 제목 + 명령 + [거절][한 번 허용],
@@ -122,6 +123,9 @@ interface Draft {
   custom: string
 }
 
+/** 질문 카드에 쓰던 답 — 대화·탭을 바꿔 카드가 내려가도 요청 id 로 남는다. 요청이 풀리면 App 이 버린다 (keepOnly) */
+export const questionDrafts = new QuestionDrafts<Draft[]>()
+
 /** 질문마다 고른 보기 + 직접 쓴 글. 하나만 고르는 질문에서 직접 쓰면 그것이 답이다 */
 function answerOf(question: AttentionQuestion, draft: Draft): string[] {
   const custom = draft.custom.trim()
@@ -132,7 +136,11 @@ function answerOf(question: AttentionQuestion, draft: Draft): string[] {
 function QuestionCard({ request, onAnswer }: CardProps<Extract<Attention, { kind: 'question' }>>) {
   const t = useT()
   const { busy, error, answer } = useAnswer(onAnswer)
-  const [drafts, setDrafts] = useState<Draft[]>(() => request.questions.map(() => ({ selected: [], custom: '' })))
+  const [drafts, setDrafts] = useState<Draft[]>(() => {
+    const saved = questionDrafts.load(request.id)
+    return saved?.length === request.questions.length ? saved : request.questions.map(() => ({ selected: [], custom: '' }))
+  })
+  useEffect(() => questionDrafts.save(request.id, drafts), [request.id, drafts])
   const answers = request.questions.map((question, index) => answerOf(question, drafts[index]!))
   const ready = answers.every((entry) => entry.length > 0) // 빈 답은 막는다 — opencode 는 빈 답도 받는다 (01i 2-b)
   const update = (index: number, change: (draft: Draft) => Draft) => setDrafts((now) => now.map((draft, at) => (at === index ? change(draft) : draft)))

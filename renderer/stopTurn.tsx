@@ -28,12 +28,12 @@ export class EscapeTwice {
 /**
  * 멈추기 함수를 준다 — 메인(ctx.chat)에 멈춤을 보낸다. 메인이 그 대화의 대기열을 붙잡고(턴 끝에 보내지 않는다) 턴을 "중단됨" 으로 끝낸다.
  * 붙잡힌 대기열(held)은 그 대화가 화면에 있으면 곧장, 아니면 그 대화를 열 때 입력창으로 되돌린다 (입력창은 하나라 보이는 대화의 것만 넣는다).
- * restore 는 되돌릴 것(합친 글·첨부)을 입력창에 넣는 함수 — 대기열의 "되돌리기" 와 같은 것을 쓴다
+ * restore 는 되돌릴 것(합친 글·첨부)을 그 대화의 초안에 넣는 함수 — 대기열의 "되돌리기" 와 같은 것을 쓴다
  */
-export function useStopTurn(active: string | undefined, held: boolean, restore: (taken: QueuedSend) => void): (id: string) => void {
+export function useStopTurn(active: string | undefined, held: boolean, restore: (id: string, taken: QueuedSend) => void): (id: string) => void {
   useEffect(() => {
     // 두 번 불려도(StrictMode) 대기열은 한 번만 온다 — 메인이 주면서 비운다
-    if (active && held) void window.litecode.takeQueue(active).then((taken) => taken && restore(taken))
+    if (active && held) void window.litecode.takeQueue(active).then((taken) => taken && restore(active, taken))
   }, [active, held])
   return (id) => void window.litecode.stopTurn(id)
 }

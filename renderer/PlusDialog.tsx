@@ -1,8 +1,9 @@
-import { useEffect, useId, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Project } from '../shared/ipc.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { useT } from './settingsStore.ts'
+import { useFocusTrap } from './focusTrap.ts'
 import './plus.css'
 
 // 입력창 `+` 메뉴가 여는 팝업의 틀 (이슈 #43, 시안 _workspace/mock-plus/Mcp.dc.html·Skills.dc.html): 720 폭·24 모서리 판, 머리(프로젝트 배지 + 제목 +
@@ -34,6 +35,8 @@ export function PlusGroup({ label, hint, action, children }: { label: string; hi
 export function PlusDialog({ project, title, subtitle, onClose, children }: PlusDialogProps) {
   const t = useT()
   const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(dialogRef)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key !== 'Escape') return
@@ -47,7 +50,7 @@ export function PlusDialog({ project, title, subtitle, onClose, children }: Plus
   return createPortal(
     <div className="settings-overlay" role="presentation">
       <div className="settings-mask" aria-hidden="true" onClick={onClose} />
-      <div className="plus-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div className="plus-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="plus-dialog__head">
           <span className="plus-dialog__badge" style={{ background: badgeColor(project.path) }} aria-hidden="true">
             {badgeLetters(project.name)}

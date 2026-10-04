@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
-import type { AttachmentKind, ChatEvent, Conversation, ConversationStatus, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
+import type { Attention, AttentionAnswer, AttentionTarget, AttachmentKind, ChatEvent, Conversation, ConversationStatus, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend, TurnItem } from '../shared/ipc.ts'
 import { titleFrom, TITLE_MAX } from '../shared/chat.ts'
 import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from './chatState.ts'
 import { ago } from './ago.ts'
@@ -36,6 +36,10 @@ import { peerOf, sidebarMark } from './delegationView.ts'
 import { RunningCount, RunningFilter } from './Background.tsx'
 import { runningIn, runningOutside } from './backgroundView.ts'
 import { StopIcon, useEscapeTwice, useStopTurn } from './stopTurn.tsx'
+import { changeDraft, draftOf, restoreInto, withoutDrafts, type Draft, type Drafts } from './drafts.ts'
+import { browseHistory, sentTexts } from './inputHistory.ts'
+import { questionDrafts } from './Attention.tsx'
+import { ErrorBoundary } from './ErrorBoundary.tsx'
 
 /** 말풍선·도는 턴(pending·progress·sentAt·attention)·대기열·제목·시각·통계는 메인(ctx.chat)이 정한다 — 이벤트로 받아 입힌다 (chatState.ts).
  *  답이 실패·중단이면 message.error 에 사유 (`⚠️ 사유` 로 그린다) */
@@ -88,6 +92,12 @@ function withBlankFor(project: string) {
   return (current: Session[]) =>
     current.some((session) => session.project === project && isBlank(session)) ? current : [newSession(project), ...current]
 }
+
+// 답·내 말(ChatTurn.tsx)은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도 props 가 같으면 턴을 다시 그리지 않는다.
+// 그래서 턴에 넘기는 "없음" 배열과 답 보내기 함수는 매번 새로 만들지 않는다
+const NO_ITEMS: readonly TurnItem[] = []
+const answerAttention = (request: Attention, answer: AttentionAnswer, target?: AttentionTarget) =>
+  window.litecode.replyAttention(request.sessionId, request.id, answer, target)
 
 /** 16px 외곽선 톱니 — dsh 사이드바 설정 줄의 아이콘 자리 */
 function GearIcon({ size = 16 }: { size?: number }) {
@@ -294,9 +304,8 @@ export function App() {
   /** 못 연 프로젝트 경로 — 안내 화면이 그 폴더의 저장된 대화를 "폴더가 없습니다" 로 보이고 지우게만 한다 (열지 않는다 — opencode 요청 0) */
   const [failedProject, setFailedProject] = useState<string>()
   const switchRef = useRef<HTMLButtonElement>(null)
-  const [draft, setDraft] = useState('')
-  /** 입력 카드에 붙여 둔 파일·이미지 (이슈 #44) — 글(draft)처럼 입력창 하나의 것이다. 경로만 든다(읽기는 보낼 때 메인) */
-  const [attached, setAttached] = useState<PickedAttachment[]>([])
+  /** 입력창의 글과 붙여 둔 파일·이미지 칩 (이슈 #44) — 대화마다 따로 둔다 (drafts.ts). 대화를 바꾸면 그 대화의 초안이 돌아온다 */
+  const [drafts, setDrafts] = useState<Drafts>({})
   /** 본문 탭 — 대화(Chat) 또는 스텝·도구 기록(Trajectory) */
   const [view, setView] = useState<'chat' | 'trajectory'>('chat')
   const sessionHover = useHoverCard()
@@ -371,6 +380,7 @@ export function App() {
   function forgetPruned(ids: string[]): void {
     if (ids.length === 0) return
     setSessions((sessionsNow) => sessionsNow.filter((session) => !ids.includes(session.id)))
+    setDrafts((now) => withoutDrafts(now, ids))
   }
 
   // 대화의 턴·대기열은 메인(ctx.chat)이 쥔다 — 내 말·진행 줄·승인 카드·답·대기열을 이벤트로 받아 그 대화에 입힌다 (대화 id 로 온다).
@@ -415,6 +425,21 @@ export function App() {
   const project = projects?.find((candidate) => candidate.path === current)
   const visible = sessions.filter((session) => session.project === project?.path)
   const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
+  /** 지금 대화의 초안 — 아래 함수들은 이 그리기의 대화에 묶인다 (기다린 뒤에 불려도 그때 보던 대화의 초안을 고친다) */
+  const { text: draft, attached } = draftOf(drafts, active?.id)
+  function changeDraftOf(id: string, change: (draft: Draft) => Draft): void {
+    setDrafts((now) => changeDraft(now, id, change))
+  }
+  const setDraft = (text: string): void => {
+    if (active) changeDraftOf(active.id, (now) => (now.text === text ? now : { ...now, text }))
+  }
+  const setAttached = (change: (now: PickedAttachment[]) => PickedAttachment[]): void => {
+    if (active) changeDraftOf(active.id, (now) => ({ ...now, attached: change(now.attached) }))
+  }
+  /** 입력 기록(↑/↓)으로 불러와 있는 글의 자리 — 그 대화의 것만 (inputHistory.ts) */
+  const browsing = useRef<{ id: string; index: number }>(undefined)
+  // 질문 카드에 쓰던 답은 요청이 기다리는 동안만 쥔다 — 풀린 요청(답함·거절·턴 끝)의 것은 버린다
+  useEffect(() => questionDrafts.keepOnly(sessions.flatMap((session) => (session.attention ?? []).map((request) => request.id))), [sessions])
   // 맨 아래에 있으면 내용이 늘 때 따라 내려간다 — 위로 올려 읽는 중(미니맵 이동 포함)이면 그대로 둔다
   const following = useFollowBottom(listRef, `${active?.id}:${view}`)
   /** 이 대화의 모델 — 설정에서 지워졌으면 chosen 이 없고 보내기가 막힌다 */
@@ -461,14 +486,19 @@ export function App() {
   useEffect(() => {
     if (active && fresh.has(active.id)) setFresh((now) => new Set([...now].filter((id) => id !== active.id)))
   }, [active?.id, fresh])
-  /** 다른 대화에 지시 보내기 (이슈 #55) 의 화면 조각이 쓰는 것 — 같은 프로젝트의 저장된 대화(제목·상태·모드), 지금 대화의 모드·모델, 대화 열기 */
-  const delegation = {
-    peers: visible
-      .filter((session) => !isBlank(session))
-      .map((session) => peerOf(session, notices.state[session.id]?.status, session.history !== 'missing' && !!findModel(providers, session.model))),
-    self: { id: active?.id, mode },
-    open: (id: string) => project && setActiveIds((now) => ({ ...now, [project.path]: id })),
-  }
+  /** 다른 대화에 지시 보내기 (이슈 #55) 의 화면 조각이 쓰는 것 — 같은 프로젝트의 저장된 대화(제목·상태·모드), 지금 대화의 모드·모델, 대화 열기.
+   *  값이 같으면 같은 객체다 — 컨텍스트를 읽는 작업 줄이 타자마다 다시 그려지지 않게 */
+  const projectPath = project?.path
+  const delegation = useMemo(
+    () => ({
+      peers: sessions
+        .filter((session) => session.project === projectPath && !isBlank(session))
+        .map((session) => peerOf(session, notices.state[session.id]?.status, session.history !== 'missing' && !!findModel(providers, session.model))),
+      self: { id: active?.id, mode },
+      open: (id: string) => projectPath && setActiveIds((now) => ({ ...now, [projectPath]: id })),
+    }),
+    [sessions, projectPath, notices.state, providers, active?.id, mode],
+  )
   /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
   const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
   /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
@@ -611,6 +641,7 @@ export function App() {
   async function removeConversation(target: Session): Promise<void> {
     setConfirming(undefined)
     await window.litecode.removeConversation(target.id)
+    setDrafts((now) => withoutDrafts(now, [target.id]))
     const rest = (sessionsNow: Session[]) => sessionsNow.filter((session) => session.id !== target.id)
     // 안내 화면(못 연 프로젝트)에서 지운 것이면 새 대화를 두지 않는다 — 열린 프로젝트에만
     setSessions((sessionsNow) => (target.project === current ? withSessionFor(target.project)(rest(sessionsNow)) : rest(sessionsNow)))
@@ -639,11 +670,9 @@ export function App() {
     setLastModel(next)
   }
 
-  /** 대기열에서 꺼낸 것(되돌리기·멈춘 턴)을 입력창으로 — 글은 입력 앞에, 첨부 칩도 함께 */
-  function restoreQueued(taken: QueuedSend): void {
-    setDraft((now) => [taken.display ?? taken.text, now.trim()].filter(Boolean).join('\n'))
-    const files = taken.attachments
-    if (files) setAttached((now) => [...files, ...now.filter((item) => !files.some((file) => file.path === item.path && file.kind === item.kind))])
+  /** 대기열에서 꺼낸 것(되돌리기·멈춘 턴)을 그 대화의 초안으로 — 글은 입력 앞에, 첨부 칩도 함께 */
+  function restoreQueued(id: string, taken: QueuedSend): void {
+    changeDraftOf(id, (now) => restoreInto(now, taken))
   }
 
   /** `+` 메뉴의 파일 추가·이미지 추가 — 메인이 OS 파일 고르기를 띄우고 거른다. 고른 것은 칩으로 쌓고, 못 붙인 사유는 짧은 안내로.
@@ -666,8 +695,8 @@ export function App() {
     const files = command?.attachments ?? attached
     const selected = target?.model ?? initialModel(providers, lastModel)
     if ((!prompt && files.length === 0) || !selected || !findModel(providers, selected) || !target || !canWrite(target)) return
-    setDraft('')
-    if (fromCard) setAttached([])
+    // 보낸 대화의 초안만 비운다
+    changeDraftOf(target.id, (now) => ({ text: '', attached: fromCard ? [] : now.attached }))
     void window.litecode.sendMessage(target.id, {
       project: target.project,
       text: prompt,
@@ -1039,6 +1068,8 @@ export function App() {
               </div>
             )}
 
+            {/* 대화 본문의 그리기 오류가 사이드바·입력창까지 내리지 않게 — 다른 대화·탭으로 가면 풀린다 (ErrorBoundary.tsx) */}
+            <ErrorBoundary scope="section" className="crash--fill" resetKey={`${active.id}:${view}`}>
             {trajectoryOn && view === 'trajectory' ? (
               <Trajectory key={active.id} directory={active.project} sessionId={active.engineSessionId} pending={!!active.pending} />
             ) : (
@@ -1067,7 +1098,7 @@ export function App() {
                     <UserMessage text={message.text} at={message.at} attachments={message.attachments} origin={message.origin} />
                   ) : (
                     <AssistantTurn
-                      items={message.items ?? []}
+                      items={message.items ?? NO_ITEMS}
                       text={message.error ? `⚠️ ${message.error}` : message.text}
                       failed={!!message.error}
                       interrupted={message.interrupted}
@@ -1098,12 +1129,12 @@ export function App() {
                 <AssistantTurn
                   key="running"
                   running
-                  items={active.progress ?? []}
+                  items={active.progress ?? NO_ITEMS}
                   text=""
                   startedAt={active.sentAt}
                   directory={active.project}
                   attention={active.attention}
-                  onAnswer={(request, answer, target) => window.litecode.replyAttention(request.sessionId, request.id, answer, target)}
+                  onAnswer={answerAttention}
                 />
               )}
               {shellCards(active, (position) => position > active.messages.length)}
@@ -1113,6 +1144,7 @@ export function App() {
             <ScrollToBottom scroller={listRef} following={following} />
             </div>
             )}
+            </ErrorBoundary>
 
             <div className="composer">
               <QueueDock
@@ -1120,7 +1152,7 @@ export function App() {
                 sources={active.queueSources}
                 onDrop={(index) => void window.litecode.dropQueued(active.id, index)}
                 onRestore={() => {
-                  void window.litecode.takeQueue(active.id).then((taken) => taken && restoreQueued(taken))
+                  void window.litecode.takeQueue(active.id).then((taken) => taken && restoreQueued(active.id, taken))
                   trigger.inputRef.current?.focus()
                 }}
               />
@@ -1150,6 +1182,22 @@ export function App() {
                       event.preventDefault()
                       if (!active.pending) chooseMode(nextMode(mode))
                       return
+                    }
+                    // ↑/↓ — 빈 입력창에서 이 대화에 보낸 이전 글을 불러온다 (셸의 기록처럼). 쓰던 글·여러 줄 안의 커서 이동은 그대로 (inputHistory.ts).
+                    // 후보 팝업이 떠 있으면 위에서 이미 팝업이 썼다
+                    if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+                      const recalled = browseHistory(
+                        sentTexts(active.messages),
+                        browsing.current?.id === active.id ? browsing.current.index : undefined,
+                        event.key === 'ArrowUp' ? 'up' : 'down',
+                        { text: draft, start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd },
+                      )
+                      if (recalled) {
+                        event.preventDefault()
+                        browsing.current = recalled.index === undefined ? undefined : { id: active.id, index: recalled.index }
+                        setDraft(recalled.text)
+                        return
+                      }
                     }
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
@@ -1218,7 +1266,9 @@ export function App() {
         )}
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
-      <FilePreviewPanel directory={active?.project} />
+      <ErrorBoundary scope="section" className="crash--side" resetKey={active?.project}>
+        <FilePreviewPanel directory={active?.project} />
+      </ErrorBoundary>
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
       <RemotePairPrompt on={features.has('remote')} />

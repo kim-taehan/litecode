@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../shared/ipc.ts'
 import { providerIdFor } from '../shared/providerId.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
@@ -8,6 +8,8 @@ import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
 import { ContextLengthNotes } from './ContextLengthNotes.tsx'
 import { defaultOutputLimit } from '../shared/outputLimit.ts'
+import { ErrorBoundary } from './ErrorBoundary.tsx'
+import { useFocusTrap } from './focusTrap.ts'
 import './settings.css'
 
 // 설정 모달 — 틀은 dsh ui-settings-general SettingsRoot(왼쪽 메뉴·오른쪽 머리줄[설정 파일 열기][×]·내용, 가림막 클릭·Esc 로 닫기),
@@ -84,6 +86,9 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
   const t = useT()
   const [page, setPage] = useState<Page>('general') // 첫 페이지는 일반 (dsh)
   const mobileOn = useFeatures().has('remote')
+  // aria-modal 인 판 — Tab 이 뒤 화면으로 나가지 않게 가둔다 (focusTrap.ts)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') onClose()
@@ -104,7 +109,7 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
   return (
     <div className="settings-overlay" role="presentation">
       <div className="settings-mask" aria-hidden="true" onClick={onClose} />
-      <div className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div className="settings-panel" ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <nav className="settings-nav">
           <div className="settings-nav__title" id="settings-title">
             {t('settings.title')}
@@ -132,15 +137,18 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
             </button>
           </div>
           <div className="settings-body">
-            {shown === 'general' ? (
-              <GeneralPage />
-            ) : shown === 'features' ? (
-              <FeaturesPage />
-            ) : shown === 'mobile' ? (
-              <MobilePage />
-            ) : (
-              <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />
-            )}
+            {/* 페이지 하나의 그리기 오류가 앱을 내리지 않게 — 메뉴·닫기는 남고, 다른 페이지로 가면 풀린다 */}
+            <ErrorBoundary scope="section" resetKey={shown}>
+              {shown === 'general' ? (
+                <GeneralPage />
+              ) : shown === 'features' ? (
+                <FeaturesPage />
+              ) : shown === 'mobile' ? (
+                <MobilePage />
+              ) : (
+                <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />
+              )}
+            </ErrorBoundary>
           </div>
         </div>
       </div>

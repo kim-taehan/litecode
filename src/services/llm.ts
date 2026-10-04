@@ -1151,9 +1151,11 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
 
 /** 엔진 실패 → 화면 사유. 한도 초과(게이트웨이 오류가 자동 요약으로도 안 줄었다 — opencode 가 ContextOverflowError 로 분류)는 "새 대화로" 안내 */
 export function failureText(error: EngineMessageInfo['error']): string {
-  if (error?.name === 'ContextOverflowError') return tr('error.contextOverflow')
   const message = error?.data?.message
-  return message ? turnError(message) : tr('error.unknown')
+  // 레거시 APIError 는 상태 코드를 따로 싣는다 (01w: session.error{APIError, statusCode}) — 사람이 읽는 문구는 turnError 가 붙인다
+  const status = typeof error?.data?.statusCode === 'number' ? error.data.statusCode : undefined
+  if (error?.name === 'ContextOverflowError' && status !== 413) return tr('error.contextOverflow')
+  return message ? turnError(message, status) : tr('error.unknown')
 }
 
 /** 답 메시지의 마지막 파트가 오류로 끝난 도구인가 — 턴의 마지막 메시지가 이러면 승인·질문 거절이다: 거절하면 그 도구가 error 로 끝나고 다음 스텝

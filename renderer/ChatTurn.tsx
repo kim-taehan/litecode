@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
 import type { Attachment, Attention, AttentionAnswer, AttentionTarget, Subtask, TurnItem } from '../shared/ipc.ts'
 import { AttachmentChips } from './Attachments.tsx'
 import { AttentionCard } from './Attention.tsx'
@@ -20,8 +20,11 @@ import './chat.css'
 // - 진행 중: 작업 줄이 실시간으로 쌓이고(답 글도 그 사이에 끼어 나온다) 맨 아래 파란 "작업 중 · N초 ···". 끝나면 머리 아래로 접힌다
 // 접기 규칙(dsh TurnProcessNodeView): 잘 끝난 턴만 접는다. 실패한 턴은 작업을 펼친 채로 두고 접기 버튼이 없다
 
+// 내 말·답은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도(초안이 App 의 state) 바뀌지 않은 턴은 다시 그리지 않는다
+// (dsh "바뀌지 않은 형제는 다시 그리지 않는다"). App 은 이 둘에 매번 새로 만든 배열·함수를 넘기지 않는다
+
 /** 내 말 — 말풍선 아래에 보낸 시각과 복사. origin: 사람이 친 글이 아니라 다른 대화가 보낸 지시 (이슈 #55) — 위에 딱지, 말풍선 테두리가 다르다 */
-export function UserMessage({ text, at, attachments, origin }: { text: string; at?: number; attachments?: readonly Attachment[]; origin?: MessageOrigin }) {
+export const UserMessage = memo(function UserMessage({ text, at, attachments, origin }: { text: string; at?: number; attachments?: readonly Attachment[]; origin?: MessageOrigin }) {
   const t = useT()
   const [copied, setCopied] = useCopied()
   return (
@@ -44,7 +47,7 @@ export function UserMessage({ text, at, attachments, origin }: { text: string; a
       </div>
     </div>
   )
-}
+})
 
 function useCopied(): [boolean, (value: boolean) => void] {
   const [copied, setCopied] = useState(false)
@@ -78,7 +81,9 @@ interface AssistantTurnProps {
   onAnswer?(request: Attention, answer: AttentionAnswer, target?: AttentionTarget): Promise<void>
 }
 
-export function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = [], onAnswer }: AssistantTurnProps) {
+const NO_ATTENTION: readonly Attention[] = []
+
+export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
   // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다
   const { compactions, rest } = takeCompactions(running ? items : items.filter((item) => item.kind !== 'retry'))
   const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(rest)
@@ -86,6 +91,9 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
   const [open, setOpen] = useState(false)
   const t = useT()
   const showWork = running || failed || open
+  /** 답의 마크다운 원문 — 그리는 글이자 "답 복사" 가 복사하는 글 */
+  const source = failed ? text : answerText(answer, text).trim()
+  const [copied, setCopied] = useCopied()
 
   return (
     <div className="turn" data-state={running ? 'running' : interrupted ? 'interrupted' : failed ? 'failed' : 'done'}>
@@ -117,7 +125,21 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
       {/* 답 — 기존 셀렉터(.bubble--assistant)를 그대로 쓴다. 모양은 말풍선이 아니다. 모델이 빈 줄로 답을 시작하기도 해서 앞뒤 공백은 뗀다 */}
       {!running && (
         <div className="bubble bubble--assistant">
-          {failed ? text : <Markdown text={answerText(answer, text).trim()} directory={directory} />}
+          {failed ? text : <Markdown text={source} directory={directory} />}
+        </div>
+      )}
+      {/* 답 행동 줄 (dsh ui-chat MessageIconActions) — 답 전체 복사. 마우스를 올리거나 포커스가 들어올 때만 보인다 (chat.css) */}
+      {!running && source.trim() && (
+        <div className="turn__meta">
+          <button
+            type="button"
+            className="turn__copy"
+            aria-label={copied ? t('chat.messageCopied') : t('chat.copyAnswer')}
+            title={copied ? t('chat.messageCopied') : t('chat.copyAnswer')}
+            onClick={() => void navigator.clipboard.writeText(source).then(() => setCopied(true), () => {})}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </button>
         </div>
       )}
       {running &&
@@ -125,7 +147,7 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
       {running && <RunningStatus startedAt={startedAt} />}
     </div>
   )
-}
+})
 
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다) */
 function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {

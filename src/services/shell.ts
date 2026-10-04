@@ -4,6 +4,7 @@ import { realDirectory } from './llm.ts'
 import { keepEnds, streamText } from './outputBuffer.ts'
 import { tr } from '../i18n.ts'
 import type { ShellResult } from '../../shared/contract.ts'
+import { stripAnsi } from '../../shared/ansi.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { ShellResult } from '../../shared/contract.ts'
@@ -122,7 +123,8 @@ export class ShellService extends Service {
 /** 카드를 AI 에게 넣을 때의 본문 — 모델은 이 명령을 본 적이 없으니 무엇을 어디서 돌렸는지부터 (closed-code ChatPane 형식).
  *  출력은 마크다운으로 해석되지 않게 코드 블록으로 감싼다 (출력에 ``` 가 있으면 더 긴 울타리) */
 export function shellContext(result: Pick<ShellResult, 'command' | 'output' | 'exitCode' | 'status' | 'truncated'>, directory: string): string {
-  const fence = '`'.repeat(Math.max(3, ...[...result.output.matchAll(/`{3,}/g)].map((match) => match[0].length + 1)))
+  const output = stripAnsi(result.output) // 색 코드는 모델에게도 잡음이다 — 카드에 보이는 글과 같게
+  const fence = '`'.repeat(Math.max(3, ...[...output.matchAll(/`{3,}/g)].map((match) => match[0].length + 1)))
   const ending =
     result.status === 'stopped' ? '사용자가 중단함'
     : result.status === 'timeout' ? `${TIMEOUT_MS / 1000}초를 넘겨 중단됨`
@@ -135,7 +137,7 @@ export function shellContext(result: Pick<ShellResult, 'command' | 'output' | 'e
     `(${ending})`,
     '',
     fence,
-    result.output.trimEnd(),
+    output.trimEnd(),
     fence,
     ...(result.truncated ? ['', `(출력이 ${OUTPUT_LIMIT / 1024}KB 를 넘어 가운데가 생략됐습니다 — 앞과 끝만 실었습니다)`] : []),
   ].join('\n')

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { ScrollMemory } from './scrollMemory.ts'
 import { useT } from './settingsStore.ts'
 
 // 대화 오른쪽 가장자리 미니맵 (dsh ui-chat TurnNavigator 참조) — 내 말(턴)마다 가로줄 하나. 대화 칸 위 1/3 선을 지난 마지막 턴이
@@ -66,13 +67,24 @@ export function nearBottom(element: HTMLElement): boolean {
 }
 
 /** 대화 칸이 맨 아래에 붙어 있으면 내용이 늘 때 따라 내려간다. 사용자가 위로 올리면(미니맵 이동 포함) 따라가지 않는다.
- *  key 가 바뀌면(다른 대화·탭) 다시 따라간다. 돌려주는 ref 를 true 로 두면 다음 그리기에서 맨 아래로 (보낼 때) */
-export function useFollowBottom(scroller: RefObject<HTMLElement | null>, key: unknown): RefObject<boolean> {
+ *  key 가 바뀌면(다른 대화·탭) 그 대화에서 읽던 자리로 되돌린다 — 맨 아래에 있었거나 처음 여는 대화면 다시 따라간다 (scrollMemory.ts).
+ *  돌려주는 ref 를 true 로 두면 다음 그리기에서 맨 아래로 (보낼 때) */
+export function useFollowBottom(scroller: RefObject<HTMLElement | null>, key: string): RefObject<boolean> {
   const following = useRef(true)
   /** 마지막으로 따라 내려가며 둔 scrollTop — scroll 이벤트가 사용자 움직임인지 가린다 */
   const landed = useRef(-1)
-  useEffect(() => {
-    following.current = true
+  const [memory] = useState(() => new ScrollMemory())
+  /** scroll 이벤트가 자리를 적을 대화 — 그리기와 같은 때(layout)에 바꿔, 내용이 바뀌며 난 scroll 이 앞 대화의 자리를 덮지 않게 한다 */
+  const current = useRef(key)
+  useLayoutEffect(() => {
+    current.current = key
+    const saved = memory.recall(key)
+    following.current = saved === undefined
+    const element = scroller.current
+    if (!element) return
+    // 바로 옮긴다 — 아래 effect 를 기다리면 그 사이의 scroll 이벤트가 "사용자가 움직였다" 로 읽힌다
+    element.scrollTop = saved ?? element.scrollHeight
+    if (saved === undefined) landed.current = element.scrollTop
   }, [key])
   useEffect(() => {
     const element = scroller.current
@@ -86,10 +98,12 @@ export function useFollowBottom(scroller: RefObject<HTMLElement | null>, key: un
       // (dsh movedByReader). 거리만 보면 답이 길게 붙는 순간 "위로 올렸다" 로 읽혀 답 끝을 못 따라갔다 (실측 2026-10-02, 남은 거리 436px)
       if (following.current && Math.abs(element.scrollTop - landed.current) <= 1) {
         if (!nearBottom(element)) toBottom()
+        memory.remember(current.current, true, element.scrollTop) // 보내기·맨 아래로 버튼으로 다시 따라가게 됐다 — 읽던 자리는 잊는다
         return
       }
       following.current = nearBottom(element)
       element.toggleAttribute('data-following', following.current)
+      memory.remember(current.current, following.current, element.scrollTop)
     }
     // App 이 다시 그리지 않는 크기 변화(자식 컴포넌트 안의 변화·창 크기)에도 따라 내려간다 (dsh ChatViewport 의 ResizeObserver)
     const observer = new ResizeObserver(() => {
