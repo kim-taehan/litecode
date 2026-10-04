@@ -600,6 +600,8 @@ export const en = {
   'mcp.error.exited': 'The server exited (code {code}) {detail}',
   'mcp.error.noReply': 'The server did not answer',
   'settings.nav.mobile': 'Mobile',
+  'feature.appMcp': 'Desktop MCP',
+  'feature.appMcp.description': 'Built-in tools that let the AI work the app — open files, fill the terminal, present deliverables, read and message other chats',
   'feature.remote': 'Mobile connection',
   'feature.remote.description': 'Lets the litecode phone app attach to the chats on this PC (turn it on and pair devices in Settings > Mobile)',
   'remote.enable': 'Mobile connection',

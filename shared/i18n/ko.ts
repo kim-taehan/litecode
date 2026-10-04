@@ -624,6 +624,8 @@ export const ko = {
   'mcp.error.exited': '서버가 끝났습니다 (코드 {code}) {detail}',
   'mcp.error.noReply': '서버가 답하지 않았습니다',
   'settings.nav.mobile': '모바일',
+  'feature.appMcp': '데스크탑 MCP',
+  'feature.appMcp.description': 'AI 가 앱을 다루는 내장 도구 — 파일 열기, 터미널 채우기, 결과물 선언, 다른 대화 보기·지시 보내기',
   'feature.remote': '모바일 연결',
   'feature.remote.description': '폰의 litecode 앱이 이 PC 의 대화에 붙게 합니다 (설정 > 모바일에서 켜고 기기를 짝짓습니다)',
   'remote.enable': '모바일 연결',

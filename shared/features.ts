@@ -4,7 +4,7 @@
 // 바탕(대화·엔진·설정·provider·프로젝트·대화 저장)은 여기에 없다 — 끌 수 없다.
 
 // skills(이슈 #7)는 묶음(ctx.skills — 설정 > 스킬 목록·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
-export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote'] as const
+export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'appMcp'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 카드가 없다.
@@ -16,7 +16,8 @@ export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = { at: true, sl
 export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
 
 /** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다).
- *  나머지(터미널 칸·추론 과정·다른 앱에서 열기)는 기본 켜짐 */
+ *  나머지(터미널 칸·추론 과정·다른 앱에서 열기·데스크탑 MCP)는 기본 켜짐.
+ *  데스크탑 MCP(appMcp, 이슈 #99)는 앱 내장 MCP 서버(ctx.appMcp)와 그 도구 — 끄면 서버가 내려가고 다음 턴부터 엔진에서 `litecode_*` 도구가 빠진다 */
 export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote']
 
 /** 저장된 값이 없을 때의 켜짐 */
@@ -25,7 +26,7 @@ export function featureDefault(feature: FeatureId): boolean {
 }
 
 /** 그 기능이 쓰려면 같이 켜져 있어야 하는 기능 — `!` 입력은 `!명령` 실행(ctx.shell)이 돌린다 */
-export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'] }
+export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'] }
 
 /** 기능별 켜기 값 — 없는 키는 기본값(featureDefault) */
 export type FeatureSwitches = Partial<Record<FeatureId, boolean>>

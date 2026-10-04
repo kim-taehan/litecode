@@ -524,7 +524,7 @@ export function App() {
   const [shellFocus, setShellFocus] = useState(0)
   /** AI 가 칸을 폈을 때의 shellFocus (앱 MCP open_terminal, 이슈 #51) — 그렇게 편 칸은 키를 가져가지 않는다. ⌘↓ 를 누르면 값이 달라져 풀린다 */
   const [shellQuietAt, setShellQuietAt] = useState<number>()
-  useAppMcp(active?.project, (directory) => {
+  useAppMcp(features.has('appMcp'), active?.project, (directory) => {
     setShellQuietAt(shellFocus)
     setShellOpen((open) => ({ ...open, [directory]: true }))
   })
