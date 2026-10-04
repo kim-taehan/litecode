@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
+import { mergePath } from './loginPath.ts'
 import { findOpencodeBinary, notFoundMessage } from './opencodeBinary.ts'
 import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
@@ -65,6 +66,8 @@ export interface EngineOptions {
   bundled?: { opencode: string; rgDir: string }
   /** 프로젝트 opencode 설정을 막는다 (OPENCODE_DISABLE_PROJECT_CONFIG, engineEnv 참고). 기본 꺼짐 — L1(레거시 보내기 + AGENTS.md 주입)과 같이 켠다 */
   blockProjectConfig?: boolean
+  /** 로그인 셸의 PATH 를 읽는 함수(loginPath.ts) — 앱 실행마다 한 번 읽어 자식 PATH 앞에 합친다 (#84). 테스트는 안 준다 */
+  loginPath?: () => Promise<string | undefined>
 }
 
 interface RunningServer extends EngineConnection {
@@ -520,8 +523,20 @@ export class EngineService extends Service {
     if (this.current === server) this.current = undefined
   }
 
-  private async launch(onExit: () => void): Promise<RunningServer> {
+  private loginPath?: Promise<string | undefined>
+
+  /** 자식 env 의 바탕 — Finder 로 띄운 앱의 짧은 PATH 에 로그인 셸의 PATH 를 합친다 (#84). 한 번만 읽고, 못 읽으면 물려받은 PATH 그대로 */
+  private async baseEnv(): Promise<NodeJS.ProcessEnv> {
     const base = this.opts.env ?? process.env
+    if (!this.opts.loginPath) return base
+    const login = await (this.loginPath ??= this.opts.loginPath().catch(() => undefined))
+    if (!login) return base
+    const key = Object.keys(base).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH'
+    return { ...base, [key]: mergePath(login, base[key]) }
+  }
+
+  private async launch(onExit: () => void): Promise<RunningServer> {
+    const base = await this.baseEnv()
     const lookup = findOpencodeBinary(base, undefined, this.opts.bundled?.opencode)
     if (!lookup.path) throw new Error(notFoundMessage(lookup))
     const bin = lookup.path

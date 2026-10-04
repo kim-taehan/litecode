@@ -9,6 +9,7 @@ import { pickAttachments } from '../src/services/attachments.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
 import { EngineService, killEngineProcesses } from '../src/services/engine.ts'
+import { readLoginPath } from '../src/services/loginPath.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { SessionsService, type Conversation } from '../src/services/sessions.ts'
@@ -131,6 +132,7 @@ mounted.push(ctx.plugin(EngineService, {
   // 프로젝트 opencode 설정(opencode.json·.opencode/ 의 MCP·플러그인·에이전트 덮어쓰기·npm 설치)을 막는다 — 사용자 결정 (00_next_legacy 2).
   // 그 대가로 꺼지는 프로젝트 AGENTS.md/CLAUDE.md 는 ctx.llm 이 매 턴 system 으로 넣는다 (instructions.ts, 이슈 #13 L1)
   blockProjectConfig: true,
+  loginPath: () => readLoginPath(),
 }))
 mounted.push(ctx.plugin(LlmService))
 mounted.push(ctx.plugin(ProjectsService, { file: path.join(userData, 'projects.json') }))
