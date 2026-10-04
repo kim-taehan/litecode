@@ -1,0 +1,152 @@
+/* 턴 끝 "AI 가 고친 파일" 카드 (ChangedFiles.tsx, 이슈 #82) — 답 아래, 행동 줄 위. 색은 styles.css 토큰만 (라이트·다크 공통) */
+
+.changed-files {
+  margin-top: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 20px;
+  overflow: hidden;
+}
+
+.changed-files__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 0.5px solid var(--border-light);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* `+a −d` — 도구 줄의 .diff-stat 과 같은 글자 */
+.changed-files__stat {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-caption);
+  white-space: nowrap;
+}
+
+.changed-files__list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.changed-files__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+
+.changed-files__toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.changed-files__toggle:hover { background: var(--fill-hover); }
+
+.changed-files__chevron {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform 0.12s;
+}
+
+.changed-files__toggle[aria-expanded='true'] .changed-files__chevron { transform: rotate(90deg); }
+
+.changed-files__name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.changed-files__item[data-status='deleted'] .changed-files__name {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+.changed-files__folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-caption);
+}
+
+.changed-files__status,
+.changed-files__edits {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.changed-files__item[data-status='added'] .changed-files__status { color: var(--ok); }
+.changed-files__item[data-status='deleted'] .changed-files__status { color: var(--danger); }
+
+.changed-files__spacer { flex: 1; }
+
+.changed-files__open {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.changed-files__open:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.changed-files__diff { padding: 0 12px 4px 32px; }
+
+.changed-files__more {
+  display: block;
+  width: 100%;
+  padding: 4px 12px 8px 32px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.changed-files__more:hover { color: var(--text); }
+
+.changed-files__note {
+  margin: 0;
+  padding: 6px 12px 8px;
+  border-top: 0.5px solid var(--border-light);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-caption);
+}
