@@ -183,10 +183,10 @@ export class McpService extends Service {
     private opts: McpServiceOptions = {},
   ) {
     super(ctx, 'mcp')
-    this.servers = (opts.file && (readJsonFileSync(opts.file, 'array') as McpServerRecord[] | undefined)) || []
+    this.servers = ((opts.file && (readJsonFileSync(opts.file, 'array') as McpServerRecord[] | undefined)) || []).filter((server) => typeof server?.name === 'string')
     this.secrets = (opts.secretsFile && (readJsonFileSync(opts.secretsFile, 'object') as Record<string, Record<string, string>> | undefined)) || {}
     const projects = (opts.projectsFile && (readJsonFileSync(opts.projectsFile, 'object') as Record<string, Partial<McpProjectRecord>> | undefined)) || {}
-    this.projects = Object.fromEntries(Object.entries(projects).map(([dir, entry]) => [dir, { servers: entry.servers ?? [], enabled: entry.enabled ?? {} }]))
+    this.projects = Object.fromEntries(Object.entries(projects).map(([dir, entry]) => [dir, { servers: entry?.servers ?? [], enabled: entry?.enabled ?? {} }]))
     ctx.on('llm/before-turn', (directory) => this.prepare(directory))
     // 기능을 끄면(묶음이 내려가면) 붙인 앱·프로젝트 서버를 끊는다 — 개인 설정 서버는 opencode 것이라 그대로다
     // 내려가는 중엔 ctx.llm 을 못 꺼낸다 (inactive context) — 올라올 때 쥔다
