@@ -124,6 +124,18 @@ export function turnStartedAt(view: ConversationView): number | undefined {
   return [...view.messages].reverse().find((message) => message.role === 'user')?.at
 }
 
+/** 입력 카드 아래 여백(dp) */
+const COMPOSER_GAP = 12
+
+/**
+ * 대화 입력 카드의 아래 여백. 평소에는 시스템 내비게이션 바 높이(insetBottom)만큼 띄운다(edge-to-edge 라 화면이 바 밑까지 그려진다).
+ * 키보드가 떠 있으면 더하지 않는다 — 키보드가 그 바 자리까지 덮고 KeyboardAvoidingView 가 키보드 높이만큼 이미 밀어 올렸는데,
+ * safe-area 의 아래 값은 키보드가 떠도 그대로라 더하면 그만큼 빈 띠가 생긴다 (실측: Pixel 7 · Android 15 · 3버튼 — 띠 158px = 48dp + 12dp).
+ */
+export function composerBottomMargin(insetBottom: number, keyboardVisible: boolean): number {
+  return keyboardVisible ? COMPOSER_GAP : insetBottom + COMPOSER_GAP
+}
+
 /** 목록 위 띠의 글. 붙어 있으면 띠가 없다 */
 export function statusBanner(status: ConnectionStatus, now: number): string | undefined {
   switch (status.kind) {

@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import { Keyboard } from 'react-native'
 import type { ConnectionStatus, RemoteState } from '../core/index.ts'
 import type { AppSession } from './session.ts'
 
@@ -21,4 +22,18 @@ export function useNow(active = true): number {
     return () => clearInterval(timer)
   }, [active])
   return now
+}
+
+/** 키보드가 떠 있는가 */
+export function useKeyboardVisible(): boolean {
+  const [visible, setVisible] = useState(() => Keyboard.isVisible())
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => setVisible(true))
+    const hidden = Keyboard.addListener('keyboardDidHide', () => setVisible(false))
+    return () => {
+      shown.remove()
+      hidden.remove()
+    }
+  }, [])
+  return visible
 }
