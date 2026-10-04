@@ -15,7 +15,7 @@ import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
-import type { Attachment, Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
+import type { Attachment, Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, AttentionTarget, HistoryMessage, History } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
@@ -969,8 +969,9 @@ export class LlmService extends Service {
    *  권한: once|reject. 질문: 질문마다 고른 답(빈 답은 막는다 — opencode 는 검증하지 않는다) 또는 reject. 거절은 그 도구 호출을 적어 둔다 —
    *  그 도구가 error 로 끝나고 오는 idle 이 거절로 끝난 턴이다. 이미 풀렸거나 모르는 요청이면 던진다.
    *  **`always` 는 보내지 않는다** — 그 폴더의 모든 세션에서 더는 묻지 않게 된다 (01z 1-3).
-   *  허용(once)한 도구 호출은 그 턴의 장부에 적는다 — 앱 MCP 서버가 "사용자가 앱에서 누른 허용" 만 받게 (callerOf 의 approved, 01z 1-4) */
-  async reply(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void> {
+   *  허용(once)한 도구 호출은 그 턴의 장부에 적는다 — 앱 MCP 서버가 "사용자가 앱에서 누른 허용" 만 받게 (callerOf 의 approved, 01z 1-4).
+   *  target 은 허용하며 사용자가 고른 받을 대화 (이슈 #67) — 장부에만 적는다. **엔진에는 보내지 않는다**(엔진에 가는 답은 once 그대로) */
+  async reply(sessionId: string, requestId: string, answer: AttentionAnswer, target?: AttentionTarget): Promise<void> {
     const request = this.requests.get(requestId)
     if (!request || request.sessionId !== sessionId) throw new Error(tr('error.attentionGone'))
     const valid =
@@ -984,7 +985,7 @@ export class LlmService extends Service {
     const declined = answer === 'reject' && request.callID && request.sessionId === request.turn ? this.declined.get(sessionId) : undefined
     declined?.add(request.callID!) // 보내기 전에 — 도구 error 가 응답보다 먼저 올 수 있다
     const approving = answer === 'once' && request.kind === 'permission' && request.callID ? [...this.running].find((live) => live.sessionId === request.turn)?.calls : undefined
-    approving?.approve(request.callID!) // 보내기 전에 — 허용된 도구의 MCP 호출이 응답보다 먼저 올 수 있다
+    approving?.approve(request.callID!, target) // 보내기 전에 — 허용된 도구의 MCP 호출이 응답보다 먼저 올 수 있다
     const base = `${conn.url}/${request.kind}/${requestId}`
     const query = at(request.directory)
     const json = { ...conn.headers, 'content-type': 'application/json' }

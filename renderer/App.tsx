@@ -463,8 +463,10 @@ export function App() {
   }, [active?.id, fresh])
   /** 다른 대화에 지시 보내기 (이슈 #55) 의 화면 조각이 쓰는 것 — 같은 프로젝트의 저장된 대화(제목·상태·모드), 지금 대화의 모드·모델, 대화 열기 */
   const delegation = {
-    peers: visible.filter((session) => !isBlank(session)).map((session) => peerOf(session, notices.state[session.id]?.status)),
-    self: { mode, model: chosen?.model.displayName },
+    peers: visible
+      .filter((session) => !isBlank(session))
+      .map((session) => peerOf(session, notices.state[session.id]?.status, session.history !== 'missing' && !!findModel(providers, session.model))),
+    self: { id: active?.id, mode },
     open: (id: string) => project && setActiveIds((now) => ({ ...now, [project.path]: id })),
   }
   /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
@@ -1101,7 +1103,7 @@ export function App() {
                   startedAt={active.sentAt}
                   directory={active.project}
                   attention={active.attention}
-                  onAnswer={(request, answer) => window.litecode.replyAttention(request.sessionId, request.id, answer)}
+                  onAnswer={(request, answer, target) => window.litecode.replyAttention(request.sessionId, request.id, answer, target)}
                 />
               )}
               {shellCards(active, (position) => position > active.messages.length)}

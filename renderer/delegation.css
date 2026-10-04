@@ -78,38 +78,105 @@
   background: var(--module);
 }
 
-/* 승인 카드의 내용 — 받는 대화·모드 표와 보낼 글 전문 */
-.delegation-card__facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 6px 12px;
-  margin: 2px 0 4px;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.delegation-card__facts dt {
+/* 승인 카드의 내용 (이슈 #67 시안) — 받을 대화 목록(라디오)과 보낼 글 전문 */
+.target-picker__label {
+  margin-top: 4px;
   color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
 }
 
-.delegation-card__facts dd {
-  min-width: 0;
-  margin: 0;
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-
-.delegation-card__title {
-  font-weight: 500;
-}
-
-.delegation-card__note {
-  color: var(--text-secondary);
-}
-
-.delegation-card__warn,
-.delegation-card__facts dd[data-wider] {
+.target-picker__missing {
   color: var(--warn);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* 대화가 많으면 목록 안에서 스크롤한다 — 카드가 보낼 글·버튼을 밀어내지 않게 */
+.target-picker {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 184px;
+  overflow-y: auto;
+  border: 1px solid var(--border-ring);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.target-picker__row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.target-picker__row + .target-picker__row {
+  box-shadow: inset 0 1px 0 var(--border-light);
+}
+
+.target-picker__row:disabled {
+  cursor: default;
+}
+
+.target-picker__row:not(:disabled):hover {
+  background: var(--fill-hover);
+}
+
+.target-picker__row[aria-checked='true'] {
+  background: var(--accent-soft);
+}
+
+.target-picker__dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--text-tertiary);
+  border-radius: 50%;
+}
+
+.target-picker__row[aria-checked='true'] .target-picker__dot {
+  border: 5px solid var(--accent);
+  background: var(--surface);
+}
+
+.target-picker__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-picker__row[aria-checked='true'] .target-picker__title {
+  font-weight: 600;
+}
+
+.target-picker__ai {
+  flex: none;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.target-picker__meta {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.target-picker__meta[data-wider] {
+  color: var(--warn);
+  font-weight: 500;
 }
 
 .delegation-card__message {

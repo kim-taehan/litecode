@@ -525,6 +525,22 @@ describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)
     expect(calls).toContain('/permission/per_1/reply {"reply":"once"}') // always 는 보내지 않는다
   })
 
+  it('허용하며 고른 받을 대화(이슈 #67)는 장부에만 적힌다 — 엔진에 가는 답은 once 그대로, callerOf 가 그 대상을 준다', async () => {
+    const url = await fakeOpencode('mcpask')
+    const { llm } = await start(url)
+    const target = { kind: 'conversation' as const, conversationId: 'conv-b' }
+    let caller: Awaited<ReturnType<LlmService['callerOf']>>
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      if (!requests[0]) return
+      void llm.reply('ses_1', requests[0].id, 'once', target).then(async () => {
+        caller = await llm.callerOf(directory, SEND, MCP_ARGS)
+      })
+    })
+    expect(result.ok).toBe(true)
+    expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: true, target })
+    expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_1/reply {"reply":"once"}'])
+  })
+
   it('엔진 API 로 스스로 허용한 호출(앱의 reply 를 안 거침)은 찾아도 approved 가 아니다. 인자가 다르면 못 찾는다', async () => {
     const url = await fakeOpencode('mcpask')
     const { llm } = await start(url)

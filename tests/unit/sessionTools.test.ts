@@ -11,7 +11,7 @@ import { agoText, clip, lastTurns, sessionLine, SessionTools } from '../../src/s
 import type { ChatResult } from '../../src/services/llm.ts'
 import type { ToolCaller } from '../../src/services/toolCalls.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
-import { DELEGATION_SERVER, MAX_SENDS_PER_TURN, QUEUE_LIMIT, resolveShortId, shortIds, widerMode, wrapInstruction } from '../../shared/delegation.ts'
+import { attentionTarget, DELEGATION_SERVER, MAX_SENDS_PER_TURN, QUEUE_LIMIT, resolveShortId, shortIds, widerMode, wrapInstruction } from '../../shared/delegation.ts'
 import type { Attention, Conversation, History, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
@@ -481,6 +481,143 @@ describe('start_session', () => {
     calledBy('start_session', sender, { approved: false })
     await expect(call('start_session', { title: '제목', message: 'x' })).rejects.toThrow(/not approved/)
     expect(await sessions.list()).toHaveLength(1)
+  })
+})
+
+// 이슈 #67 — 받을 대화는 사용자가 고른다: 승인 카드에서 고른 대상이 허용 기록(caller.target)에 실려 온다. 도구는 인자 대신 그것으로 보내고
+// 자격을 다시 본다. 결과 글이 실제 대상을 말한다
+describe('받을 대화 고르기 (이슈 #67)', () => {
+  const pick = (conversationId: string) => ({ target: { kind: 'conversation' as const, conversationId } })
+  const NEW = { target: { kind: 'new' as const } }
+
+  it('모양만 거른다 — 아는 모양이 아니면 덮어쓰기 없음(도구 인자대로)', () => {
+    expect(attentionTarget({ kind: 'new', extra: 1 })).toEqual({ kind: 'new' })
+    expect(attentionTarget({ kind: 'conversation', conversationId: B, title: 'x' })).toEqual({ kind: 'conversation', conversationId: B })
+    for (const bad of [undefined, null, 'new', {}, { kind: 'conversation' }, { kind: 'conversation', conversationId: 7 }, { kind: 'conversation', conversationId: '' }, { kind: 'other' }]) {
+      expect(attentionTarget(bad), JSON.stringify(bad)).toBeUndefined()
+    }
+  })
+
+  it('AI 가 고른 대화를 그대로 고르면 기존 결과 글 그대로다 (바뀐 것이 아니다)', async () => {
+    const { call, say, idle, calledBy } = await start()
+    await idle(B, '테스트 실패 고치기')
+    const sender = await say(A, '릴리스 준비')
+    calledBy('send_to_session', sender, pick(B))
+    expect(await call('send_to_session', { session: 'c-bbbbbbbb', message: '지시' })).toBe('Accepted. "테스트 실패 고치기" (c-bbbbbbbb) started working on it.')
+  })
+
+  it('기존 → 다른 기존: 고른 대화로 가고, AI 가 고른 대화에는 아무것도 안 간다. 결과 글이 실제 대상과 그 id 를 말한다', async () => {
+    const { call, say, idle, calledBy, llm, chat, started, sessions } = await start()
+    await idle(B, '테스트 실패 고치기')
+    await idle(C, '문서 정리', { mode: 'full' })
+    const sender = await say(A, '릴리스 준비')
+    calledBy('send_to_session', sender, pick(C))
+    const before = llm.turns.length
+    expect(await call('send_to_session', { session: 'c-bbbbbbbb', message: '깨진 테스트를 고쳐 줘' })).toBe(
+      'Accepted. The user chose a different conversation: "문서 정리" (id c-cccccccc). Use this id with read_session.',
+    )
+    await until(() => llm.turns.length > before)
+    expect(llm.turns.at(-1)).toMatchObject({ sessionId: 'ses_2', mode: 'full' }) // C 의 세션·C 자기 모드
+    expect(llm.turns.at(-1)!.prompt).toContain('깨진 테스트를 고쳐 줘')
+    expect(started.at(-1)).toMatchObject({ cid: C, origin: `session:${A}`, message: { origin: { conversationId: A, title: '릴리스 준비' } } })
+    expect(chat.turnOf(B)).toBeUndefined()
+    expect(chat.queued(B)).toBe(0)
+    expect((await sessions.history(C)).messages.at(-1)).toMatchObject({ text: '깨진 테스트를 고쳐 줘', origin: { conversationId: A } })
+  })
+
+  it('고른 대화가 돌고 있으면 대기열에 — 결과 글이 그렇다고 말한다. AI 가 준 id 가 틀렸어도 사용자가 고른 대화로 간다', async () => {
+    const { call, say, calledBy, chat } = await start()
+    await say(C, '문서 정리')
+    const sender = await say(A, '릴리스 준비')
+    calledBy('send_to_session', sender, pick(C))
+    expect(await call('send_to_session', { session: 'c-zzzzzzzz', message: '지시' })).toBe(
+      'Accepted. The user chose a different conversation: "문서 정리" (id c-cccccccc). It is busy, so the instruction is queued (1 ahead). Use this id with read_session.',
+    )
+    expect(chat.queued(C)).toBe(1)
+  })
+
+  it('기존 → 새 대화: 보낸 대화의 모드·모델로 새 대화가 생기고 제목은 보낼 글의 첫 줄. 결과 글에 새 id', async () => {
+    const { call, say, idle, calledBy, llm, chat, sessions, started } = await start()
+    await idle(B, '테스트 실패 고치기')
+    const sender = await say(A, '릴리스 준비', { mode: 'ask', model: { providerId: 'gw', modelId: 'm2' } })
+    calledBy('send_to_session', sender, NEW)
+    const result = await call('send_to_session', { session: 'c-bbbbbbbb', message: 'README 를 고쳐 줘\n설치 절차부터' })
+    const created = (await sessions.list()).find((entry) => entry.title === 'README 를 고쳐 줘')!
+    expect(created).toMatchObject({ project, mode: 'ask', model: { providerId: 'gw', modelId: 'm2' } })
+    expect(result).toBe(`Accepted. The user chose to start a new conversation instead: "README 를 고쳐 줘" (id c-${created.id.replaceAll('-', '').slice(0, 8)}). Use this id with read_session.`)
+    await until(() => llm.turns.at(-1)!.prompt.includes('설치 절차부터'))
+    expect(started.at(-1)).toMatchObject({ cid: created.id, origin: `session:${A}` })
+    expect(chat.turnOf(B)).toBeUndefined()
+  })
+
+  it('새 대화 → 기존: 고른 대화로 가고 새 대화는 안 생긴다. title 인자는 버린다(없어도 된다)', async () => {
+    const { call, say, idle, calledBy, llm, sessions, stored } = await start()
+    await idle(B, '테스트 실패 고치기')
+    const sender = await say(A, '릴리스 준비')
+    calledBy('start_session', sender, pick(B))
+    const before = llm.turns.length
+    expect(await call('start_session', { title: 'README 정리', message: '지시' })).toBe('Accepted. The user chose a different conversation: "테스트 실패 고치기" (id c-bbbbbbbb). Use this id with read_session.')
+    await until(() => llm.turns.length > before)
+    expect(llm.turns.at(-1)!.sessionId).toBe('ses_1')
+    expect(await sessions.list()).toHaveLength(2)
+    expect((await stored(B))!.title).toBe('테스트 실패 고치기')
+    calledBy('start_session', await say(C, '또 다른 대화'), pick(B))
+    expect(await call('start_session', { message: '제목 없이' })).toMatch(/^Accepted\. The user chose a different conversation: "테스트 실패 고치기"/)
+  })
+
+  it('새 대화를 그대로 고르면(start_session + 새 대화) 기존 결과 글 그대로', async () => {
+    const { call, say, calledBy } = await start()
+    const sender = await say(A, '릴리스 준비')
+    calledBy('start_session', sender, NEW)
+    expect(await call('start_session', { title: 'README 정리', message: '지시' })).toMatch(/^Started "README 정리" \(c-[0-9a-f]{8}\)\. Use read_session/)
+  })
+
+  it('고른 대상에도 자격을 다시 본다 — 자기 자신·다른 프로젝트·지워진 대화·없는 id·모델 없음·대기열 상한. 거절되면 아무것도 안 가고 횟수도 안 센다', async () => {
+    const { call, say, idle, calledBy, llm, chat, sessions } = await start()
+    const other = path.join(root, 'other')
+    await fs.mkdir(other)
+    const OTHER = 'dddddddd-0000-4000-8000-000000000004'
+    await sessions.save({ id: OTHER, project: other, title: '다른 프로젝트', updatedAt: Date.now(), model: MODEL })
+    await idle(B, '테스트 실패 고치기')
+    const busy = await say(C, '문서 정리')
+    const sender = await say(A, '릴리스 준비')
+    const args = { session: 'c-bbbbbbbb', message: '지시' }
+    const turns = llm.turns.length
+    const rejected = async (target: string, reason: RegExp | string) => {
+      calledBy('send_to_session', sender, pick(target))
+      await expect(call('send_to_session', args)).rejects.toThrow(reason)
+    }
+    await rejected(A, 'Cannot send to this conversation itself.')
+    await rejected(OTHER, /The conversation the user chose is not available/)
+    await rejected('no-such-conversation', /The conversation the user chose is not available/) // 화면이 조작된 값을 보냈다
+    for (let n = 0; n < QUEUE_LIMIT; n++) await chat.send(C, { text: `사람 ${n}`, project, model: MODEL })
+    await rejected(C, /^Target queue is full/)
+    await sessions.patch(B, () => ({ model: { providerId: 'gone', modelId: 'm1' } }))
+    await rejected(B, 'Target conversation has no usable model.')
+    await sessions.remove(B)
+    await rejected(B, /The conversation the user chose is not available/)
+    // start_session 에서 기존 대화로 바꿨을 때도 같다
+    calledBy('start_session', sender, pick(A))
+    await expect(call('start_session', { title: '제목', message: '지시' })).rejects.toThrow('Cannot send to this conversation itself.')
+    expect(llm.turns.length).toBe(turns)
+    expect(await sessions.list()).toHaveLength(3) // A·C·다른 프로젝트 — 새 대화가 생기지 않았다
+    expect(chat.queued(C)).toBe(QUEUE_LIMIT)
+    expect(chat.countSend(A, 1)).toBe(true) // 하나도 안 셌다
+    busy.finish()
+  })
+
+  it('고른 대상이 있어도 허용 기록·깊이 1·턴당 횟수는 그대로 본다', async () => {
+    const { call, say, idle, calledBy, llm } = await start()
+    await idle(B, '테스트 실패 고치기')
+    await idle(C, '문서 정리')
+    const sender = await say(A, '릴리스 준비')
+    calledBy('send_to_session', sender, { approved: false, ...pick(C) })
+    await expect(call('send_to_session', { session: 'c-bbbbbbbb', message: '지시' })).rejects.toThrow(/not approved by the user/)
+    calledBy('send_to_session', sender, pick(B))
+    await call('send_to_session', { session: 'c-bbbbbbbb', message: '지시' })
+    await until(() => llm.turns.at(-1)!.prompt.includes('지시'))
+    calledBy('send_to_session', llm.turns.at(-1)!, pick(C))
+    await expect(call('send_to_session', { session: 'c-aaaaaaaa', message: '더' })).rejects.toThrow('cannot delegate further')
   })
 })
 

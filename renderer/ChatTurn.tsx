@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { Attachment, Attention, AttentionAnswer, Subtask, TurnItem } from '../shared/ipc.ts'
+import type { Attachment, Attention, AttentionAnswer, AttentionTarget, Subtask, TurnItem } from '../shared/ipc.ts'
 import { AttachmentChips } from './Attachments.tsx'
 import { AttentionCard } from './Attention.tsx'
 import { DiffCard, DiffStat } from './DiffCard.tsx'
@@ -75,7 +75,7 @@ interface AssistantTurnProps {
   directory: string
   /** 진행 중 턴이 기다리는 승인·질문 — 작업 줄 아래 카드로 */
   attention?: readonly Attention[]
-  onAnswer?(request: Attention, answer: AttentionAnswer): Promise<void>
+  onAnswer?(request: Attention, answer: AttentionAnswer, target?: AttentionTarget): Promise<void>
 }
 
 export function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = [], onAnswer }: AssistantTurnProps) {
@@ -121,7 +121,7 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
         </div>
       )}
       {running &&
-        attention.map((request) => <AttentionCard key={request.id} request={request} onAnswer={(answer) => onAnswer?.(request, answer) ?? Promise.resolve()} />)}
+        attention.map((request) => <AttentionCard key={request.id} request={request} onAnswer={(answer, target) => onAnswer?.(request, answer, target) ?? Promise.resolve()} />)}
       {running && <RunningStatus startedAt={startedAt} />}
     </div>
   )

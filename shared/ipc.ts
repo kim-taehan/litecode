@@ -24,7 +24,8 @@ import type { RemoteStatus } from '../src/services/remote.ts'
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
 export type { Mode } from './modes.ts'
-export type { Attachment, AttachmentKind, AttachmentPick, PickedAttachment } from './contract.ts'
+export type { Attachment, AttachmentKind, AttachmentPick, AttentionTarget, PickedAttachment } from './contract.ts'
+import type { AttentionTarget } from './contract.ts'
 export type { ChatEvent, ChatEventMap, ChatLive, ChatModel, ChatSnapshot, QueuedSend, SendResult } from './chat.ts'
 export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { Subtask, TurnItem } from '../src/services/turnProgress.ts'
@@ -227,7 +228,7 @@ export interface LitecodeBridge {
   /** 답을 기다리는 턴이 기다리는 승인·질문 목록이 바뀔 때마다 (빈 목록 = 없음) — 대화 안 카드 */
   onTurnAttention(listener: (conversationId: string, requests: Attention[]) => void): () => void
   /** 카드의 답 — 권한 'once'|'reject', 질문은 질문 순서대로 고른 답 또는 'reject'. 이미 풀린 요청·빈 답이면 거절 */
-  replyAttention(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void>
+  replyAttention(sessionId: string, requestId: string, answer: AttentionAnswer, target?: AttentionTarget): Promise<void>
   /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴은 "중단됨"(interrupted) 으로 끝난다 (onTurnEnded). 쌓인 대기열은 보내지 않고
    *  붙잡힌다(onQueueChanged 의 held) — takeQueue 로 입력창에 되돌린다. 도는 턴이 없으면 false */
   stopTurn(conversationId: string): Promise<boolean>

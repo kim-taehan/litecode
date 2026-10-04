@@ -3,6 +3,7 @@
 
 import type { ChatOrigin } from './chat.ts'
 import type { Mode } from './modes.ts'
+import type { AttentionTarget } from './contract.ts'
 
 /** 앱 MCP 서버 이름 (src/services/mcp.ts 의 APP_MCP_NAME 과 같다 — 화면은 서비스 파일을 import 못 한다) */
 export const DELEGATION_SERVER = 'litecode'
@@ -68,4 +69,12 @@ const MODE_RANK: Record<Mode, number> = { plan: 0, ask: 1, build: 2, full: 3 }
 /** 받는 대화의 모드가 보낸 쪽보다 권한이 넓은가 — 승인 카드가 경고색으로 보인다 (모드 건너뛰기, 01z 3-2) */
 export function widerMode(target: Mode, sender: Mode): boolean {
   return MODE_RANK[target] > MODE_RANK[sender]
+}
+
+/** 화면(IPC)이 보낸 "받을 대화" 에서 아는 모양만 — 그 밖은 undefined (도구 인자대로 간다). 값이 가리키는 대화가 쓸 수 있는지는 도구가 본다 (이슈 #67) */
+export function attentionTarget(value: unknown): AttentionTarget | undefined {
+  const target = value as { kind?: unknown; conversationId?: unknown } | null | undefined
+  if (target?.kind === 'new') return { kind: 'new' }
+  if (target?.kind === 'conversation' && typeof target.conversationId === 'string' && target.conversationId) return { kind: 'conversation', conversationId: target.conversationId }
+  return undefined
 }

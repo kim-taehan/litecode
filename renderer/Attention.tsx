@@ -1,9 +1,9 @@
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Attention, AttentionAnswer, AttentionQuestion } from '../shared/ipc.ts'
+import type { Attention, AttentionAnswer, AttentionQuestion, AttentionTarget } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
 import { reason } from './Settings.tsx'
-import { DelegationCardBody, useDelegation } from './Delegation.tsx'
-import { delegationCard } from './delegationView.ts'
+import { TargetPickerBody, useDelegation } from './Delegation.tsx'
+import { NEW_TARGET, targetPicker } from './delegationView.ts'
 import './attention.css'
 
 // 턴이 사람을 기다릴 때 대화 안에 뜨는 카드 (라운드 A). 승인 카드는 dsh ui-approval(주황 띠 "승인 대기" + 제목 + 명령 + [거절][한 번 허용],
@@ -12,7 +12,8 @@ import './attention.css'
 
 interface CardProps<T extends Attention> {
   request: T
-  onAnswer(answer: AttentionAnswer): Promise<void>
+  /** target: 지시 보내기를 허용하며 고른 받을 대화 (이슈 #67) */
+  onAnswer(answer: AttentionAnswer, target?: AttentionTarget): Promise<void>
 }
 
 export function AttentionCard({ request, onAnswer }: CardProps<Attention>) {
@@ -24,11 +25,11 @@ function useAnswer(onAnswer: CardProps<Attention>['onAnswer']) {
   const t = useT()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
-  const answer = (value: AttentionAnswer): void => {
+  const answer = (value: AttentionAnswer, target?: AttentionTarget): void => {
     if (busy) return
     setBusy(true)
     setError(undefined)
-    onAnswer(value).catch((cause: unknown) => {
+    onAnswer(value, target).catch((cause: unknown) => {
       setBusy(false)
       setError(t('approval.sendError', { reason: reason(cause) }))
     })
@@ -50,16 +51,25 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   const t = useT()
   const { busy, error, answer } = useAnswer(onAnswer)
   const known = (ACTIONS as readonly string[]).includes(request.action) ? (request.action as (typeof ACTIONS)[number]) : undefined
-  // 다른 대화에 지시 보내기 (이슈 #55) — 보낼 때마다 누구에게(모드)·무엇을(전문) 보인다. "항상 허용" 은 이 도구에 특히 없어야 한다:
-  // 엔진의 always 는 그 폴더의 모든 대화에 걸린다 (01z 1-3)
+  // 다른 대화에 지시 보내기 (이슈 #55·#67) — 보낼 때마다 받을 대화를 사용자가 고르고(AI 가 고른 대화가 먼저 선택돼 있다) 보낼 글 전문을 본다.
+  // 고른 대상은 허용과 함께 메인으로 간다 — 엔진에는 once 만 간다. "항상 허용" 은 이 도구에 특히 없어야 한다: 엔진의 always 는 그 폴더의
+  // 모든 대화에 걸린다 (01z 1-3)
   const { peers, self } = useDelegation()
-  const delegation = delegationCard(request, peers, self)
+  const delegation = targetPicker(request, peers, self)
+  const [picked, setPicked] = useState(delegation?.initial)
+  /** 지금 고른 줄 — 고른 대화가 그사이 목록에서 빠졌으면(지워짐) 없다. 없으면 보낼 수 없다 */
+  const chosen = delegation?.choices.find((choice) => choice.key === picked)
+  const allow = (): void => {
+    if (!delegation) return answer('once')
+    if (chosen) answer('once', chosen.target)
+  }
   const keydown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== 'Enter' && event.key !== 'Escape') return
     if (event.key === 'Enter' && (event.target as Element).closest('button')) return // 포커스된 버튼은 자기 동작
     if (event.nativeEvent.isComposing || event.keyCode === 229) return
     event.preventDefault()
-    answer(event.key === 'Enter' ? 'once' : 'reject')
+    if (event.key === 'Enter') allow()
+    else answer('reject')
   }
   return (
     <div className="attention-card" data-kind="permission" data-delegation={delegation?.kind} aria-busy={busy} onKeyDown={keydown}>
@@ -70,7 +80,7 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
       </div>
       <div className="attention-card__body" tabIndex={0} role="group" aria-label={t('approval.waiting')}>
         {delegation ? (
-          <DelegationCardBody card={delegation} />
+          <TargetPickerBody picker={delegation} selected={chosen?.key} disabled={busy} onSelect={setPicked} />
         ) : (
           <div className="attention-card__headline">
             {request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
@@ -99,8 +109,8 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
         <button type="button" className="attention-card__button attention-card__button--reject" disabled={busy} onClick={() => answer('reject')}>
           {t('approval.reject')}
         </button>
-        <button type="button" className="attention-card__button attention-card__button--primary" disabled={busy} onClick={() => answer('once')}>
-          {t('approval.allowOnce')}
+        <button type="button" className="attention-card__button attention-card__button--primary" disabled={busy || (!!delegation && !chosen)} onClick={allow}>
+          {!delegation ? t('approval.allowOnce') : chosen?.key === NEW_TARGET ? t('delegate.pick.sendNew') : t('delegate.pick.send')}
         </button>
       </div>
     </div>

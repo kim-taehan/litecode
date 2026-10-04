@@ -552,6 +552,13 @@ describe('ChatService — 스냅샷과 전달', () => {
     const answer: AttentionAnswer = 'once'
     await chat.reply('ses_1', 'per_1', answer)
     expect(llm.replies).toEqual([['ses_1', 'per_1', 'once']])
+    // 지시 보내기를 허용하며 고른 받을 대화 (이슈 #67) 도 그대로 전한다
+    await chat.reply('ses_1', 'per_2', answer, { kind: 'conversation', conversationId: 'c9' })
+    await chat.reply('ses_1', 'per_3', answer, { kind: 'new' })
+    expect(llm.replies.slice(1)).toEqual([
+      ['ses_1', 'per_2', 'once', { kind: 'conversation', conversationId: 'c9' }],
+      ['ses_1', 'per_3', 'once', { kind: 'new' }],
+    ])
     expect(await chat.stopSubtask('sub_1')).toBe(true)
     expect(await chat.stopSubtask('nope')).toBe(false)
   })

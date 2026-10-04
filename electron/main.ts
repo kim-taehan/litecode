@@ -40,6 +40,7 @@ import { OpenFileTool } from '../src/services/appMcp/tools/openFile.ts'
 import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
+import { attentionTarget } from '../shared/delegation.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -242,7 +243,8 @@ function chatBridge(ctx: Context): void {
   handle(ctx, Channel.CHAT_SNAPSHOT, async () => ctx.chat.snapshot())
   handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => ctx.chat.stop(String(conversationId)))
   handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.chat.stopSubtask(String(subtaskId)))
-  handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer) => ctx.chat.reply(sessionId, requestId, answer))
+  // target: 지시 보내기 승인 카드에서 고른 받을 대화 (이슈 #67) — 모양만 거른다. 그 대화로 보낼 수 있는지는 도구가 실행할 때 다시 본다
+  handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer, target?: unknown) => ctx.chat.reply(sessionId, requestId, answer, attentionTarget(target)))
   ctx.on('chat/turn-started', (data) => broadcast(Channel.TURN_STARTED, data))
   ctx.on('chat/turn-progress', ({ cid, item }) => broadcast(Channel.TURN_PROGRESS, cid, item))
   ctx.on('chat/turn-attention', ({ cid, requests }) => broadcast(Channel.TURN_ATTENTION, cid, requests))
