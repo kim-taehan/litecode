@@ -10,3 +10,8 @@ release/
 .claude/worktrees/
 .claude/
 shots/
+# 모바일 앱(mobile/) 생성물 — prebuild 한 네이티브 프로젝트는 커밋하지 않는다
+mobile/dist/
+mobile/.expo/
+mobile/android/
+mobile/ios/

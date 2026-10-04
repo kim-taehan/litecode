@@ -1,0 +1,220 @@
+// 연결 — 클라이언트 하나와 상태(state.ts) 하나를 쥐고, 이벤트 스트림을 붙여 두며 끊기면 다시 붙인다. 화면·React 를 모른다.
+//
+// 상태 (01t 4·8절 상단 상태줄):
+//   idle → connecting → connected
+//   스트림이 끝남·연결 실패 → reconnecting(attempt, retryAt) — 1초·2초·4초…30초 지수 백오프, 붙으면 connected
+//   30초 동안 아무 바이트도 안 옴(ping 도) → unresponsive ("데스크탑 응답 없음(잠자기?)") — 뒤에서 같은 백오프로 계속 붙어 본다
+//   `device.revoked` 이벤트 또는 401 → revoked — 다시 붙지 않는다 (다시 짝지어야 한다)
+// 다시 붙을 때: hello(runId 대조) → events?run=&after=<적용한 마지막 seq>. 이을 수 없으면 리듀서가 resync 를 올리고, 여기서 목록과
+// 열린 대화의 스냅샷을 다시 받는다.
+
+import { REMOTE_SILENCE_TIMEOUT_MS } from '../../../shared/remote.ts'
+import { RemoteError, type RemoteClient } from './client.ts'
+import { initialState, reduce, type RemoteAction, type RemoteState } from './state.ts'
+
+export type ConnectionStatus =
+  | { kind: 'idle' }
+  | { kind: 'connecting' }
+  | { kind: 'connected' }
+  /** attempt 번째 재시도를 retryAt(ms, Date.now 기준)에 한다 — 화면이 남은 초를 센다 */
+  | { kind: 'reconnecting'; attempt: number; retryAt: number }
+  | { kind: 'unresponsive'; attempt: number; retryAt: number }
+  | { kind: 'revoked' }
+
+const BACKOFF_BASE_MS = 1_000
+const BACKOFF_MAX_MS = 30_000
+
+/** attempt(1부터) 번째 재시도 전에 기다릴 시간 — 1초, 2초, 4초 … 최대 30초 */
+export function backoffMs(attempt: number): number {
+  return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1))
+}
+
+export class Connection {
+  readonly client: RemoteClient
+  private current: RemoteState = initialState
+  private currentStatus: ConnectionStatus = { kind: 'idle' }
+  private readonly listeners = new Set<() => void>()
+  /** 연결 시도마다 오른다 — 늦게 돌아온 옛 시도의 콜백을 버린다 */
+  private generation = 0
+  private attempt = 0
+  private silent = false
+  private closeStream: (() => void) | undefined
+  private retryTimer: ReturnType<typeof setTimeout> | undefined
+  private silenceTimer: ReturnType<typeof setTimeout> | undefined
+  private syncing = false
+  /** 스냅샷을 다 받아 둔 resync 번호 */
+  private synced = 0
+
+  constructor(client: RemoteClient) {
+    this.client = client
+  }
+
+  get state(): RemoteState {
+    return this.current
+  }
+
+  get status(): ConnectionStatus {
+    return this.currentStatus
+  }
+
+  /** 상태(state·status)가 바뀔 때마다 부른다. 돌려준 함수로 그만 듣는다 */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  start(): void {
+    if (this.currentStatus.kind !== 'idle') return
+    this.setStatus({ kind: 'connecting' })
+    void this.connect()
+  }
+
+  /** 스트림·타이머를 다 거둔다 (받아 둔 상태는 남는다) */
+  stop(): void {
+    this.teardown()
+    this.attempt = 0
+    this.silent = false
+    this.setStatus({ kind: 'idle' })
+  }
+
+  /** 앱이 앞으로 돌아왔다 — 기다리던 재시도를 지금 한다 */
+  wake(): void {
+    if (this.currentStatus.kind !== 'reconnecting' && this.currentStatus.kind !== 'unresponsive') return
+    void this.connect()
+  }
+
+  async loadProjects(): Promise<void> {
+    this.dispatch({ type: 'projects.loaded', projects: await this.client.projects() })
+  }
+
+  async loadConversations(project: string): Promise<void> {
+    this.dispatch({ type: 'conversations.loaded', project, conversations: await this.client.conversations(project) })
+  }
+
+  /** 대화를 연다(또는 다시 받는다) — 받는 동안 온 이벤트는 리듀서가 스냅샷 위에 다시 얹는다 */
+  async openConversation(cid: string): Promise<void> {
+    this.dispatch({ type: 'conversation.loading', cid })
+    try {
+      this.dispatch({ type: 'conversation.loaded', cid, snapshot: await this.client.conversation(cid) })
+    } catch (error) {
+      this.dispatch({ type: 'conversation.failed', cid })
+      throw error
+    }
+  }
+
+  closeConversation(cid: string): void {
+    this.dispatch({ type: 'conversation.closed', cid })
+  }
+
+  private async connect(): Promise<void> {
+    this.teardown()
+    const generation = this.generation
+    const stale = (): boolean => generation !== this.generation
+    let hello
+    try {
+      hello = await this.client.hello()
+    } catch (error) {
+      if (!stale()) this.failed(error)
+      return
+    }
+    if (stale()) return
+    this.dispatch({ type: 'hello', hello })
+    this.armSilence()
+    this.closeStream = this.client.events(
+      { run: this.current.runId, after: this.current.seq },
+      {
+        onOpen: () => {
+          if (stale()) return
+          this.attempt = 0
+          this.silent = false
+          this.setStatus({ kind: 'connected' })
+          void this.sync()
+        },
+        onActivity: () => {
+          if (!stale()) this.armSilence()
+        },
+        onEvent: (event) => {
+          if (stale()) return
+          if (event.event === 'device.revoked') return this.revoked()
+          this.dispatch({ type: 'event', event })
+          void this.sync()
+        },
+        onEnd: (error) => {
+          if (!stale()) this.failed(error)
+        },
+      },
+    )
+  }
+
+  /** 붙지 못했거나 끊겼다 — 백오프 뒤 다시 */
+  private failed(error?: unknown): void {
+    if (error instanceof RemoteError && error.status === 401) return this.revoked()
+    this.teardown()
+    this.attempt += 1
+    const delay = backoffMs(this.attempt)
+    this.setStatus({ kind: this.silent ? 'unresponsive' : 'reconnecting', attempt: this.attempt, retryAt: Date.now() + delay })
+    this.retryTimer = setTimeout(() => void this.connect(), delay)
+  }
+
+  private revoked(): void {
+    this.teardown()
+    this.setStatus({ kind: 'revoked' })
+  }
+
+  private armSilence(): void {
+    clearTimeout(this.silenceTimer)
+    this.silenceTimer = setTimeout(() => {
+      this.silent = true
+      this.failed()
+    }, REMOTE_SILENCE_TIMEOUT_MS)
+  }
+
+  private teardown(): void {
+    this.generation += 1
+    this.closeStream?.()
+    this.closeStream = undefined
+    clearTimeout(this.retryTimer)
+    clearTimeout(this.silenceTimer)
+  }
+
+  /** 리듀서가 "다시 받아라" 고 적어 둔 것을 받는다. 실패하면 그대로 두고, 다음 이벤트·다시 붙을 때 또 한다 */
+  private async sync(): Promise<void> {
+    if (this.syncing) return
+    this.syncing = true
+    try {
+      while (this.current.resync !== this.synced || this.current.staleProjects.length > 0) {
+        if (this.current.resync !== this.synced) {
+          const target = this.current.resync
+          await Promise.all([
+            this.loadProjects(),
+            ...Object.keys(this.current.conversations).map((project) => this.loadConversations(project)),
+            ...Object.keys(this.current.views).map((cid) => this.openConversation(cid)),
+          ])
+          this.synced = target
+        } else {
+          await this.loadConversations(this.current.staleProjects[0]!)
+        }
+      }
+    } catch {
+      // 끊긴 것이다 — 연결이 다시 붙으면(onOpen) 이어서 한다
+    } finally {
+      this.syncing = false
+    }
+  }
+
+  private dispatch(action: RemoteAction): void {
+    const next = reduce(this.current, action)
+    if (next === this.current) return
+    this.current = next
+    this.notify()
+  }
+
+  private setStatus(status: ConnectionStatus): void {
+    this.currentStatus = status
+    this.notify()
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener()
+  }
+}

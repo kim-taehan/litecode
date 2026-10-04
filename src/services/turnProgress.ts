@@ -24,56 +24,14 @@
 //   → TurnTracker.child 가 자식마다 따로 진행 줄을 쌓아 그 task 의 subtask 줄 안에 넣는다. 부모 턴 끝은 부모 sessionID 의 idle 만 본다(llm.ts)
 // - 자식 토큰은 부모 턴 합계에 넣지 않는다 (dsh ui-subagent 처럼 자식 줄에 따로 — 부모 컨텍스트 % 가 자식 대화로 부풀지 않게)
 
-import { toolDiffs, type FileDiff } from './toolDiffs.ts'
-import { skillSource, type SkillSource } from '../../shared/skills.ts'
+import { toolDiffs } from './toolDiffs.ts'
+import { skillSource } from '../../shared/skills.ts'
+import type { TurnItem, Subtask, ToolSkill, McpToolRef } from '../../shared/contract.ts'
 
-/** 진행 줄 하나. 같은 id 의 새 값이 오면 통째로 바꾼다 (누적 전체를 싣는다 — 조각을 놓쳐도 화면이 틀어지지 않는다) */
-export type TurnItem =
-  | { kind: 'think'; id: string; text: string; done: boolean }
-  | { kind: 'text'; id: string; text: string; done: boolean }
-  /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글 */
-  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef }
-  /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
-  | { kind: 'context'; id: string; text: string }
-  /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
-   *  이어졌다)는 그리지 않는다 (01o) */
-  | { kind: 'compaction'; id: string; status: 'running' | 'done' | 'failed' }
-  /** LLM 요청이 재시도할 수 있는 오류(500 등)로 실패해 엔진이 다시 보내려고 기다린다 — waiting 동안 "재시도 중 (n번째)", 다시 보내면 done
-   *  (그리지 않는다). 레거시는 5번까지 재시도한다(합계 ~71초, 01w) */
-  | { kind: 'retry'; id: string; attempt: number; message: string; status: 'waiting' | 'done' }
-  /** 하위 작업 (task 도구 — 엔진이 자식 세션에서 따로 돌린다). items 는 그 자식의 진행 줄(생각·도구·글), tokens 는 자식 스텝 토큰 합(입력+출력+생각+캐시).
-   *  startedAt·endedAt 은 엔진 시각(ms) — 진행 중이면 화면이 startedAt 부터 초를 센다 */
-  | Subtask
-
-export interface Subtask {
-  kind: 'subtask'
-  id: string
-  /** 하위 에이전트 이름 (general·explore·general-ask …) — 준비 중엔 빈 글 */
-  agent: string
-  /** AI 가 붙인 짧은 설명 */
-  description: string
-  /** stopped: 부모 턴을 멈춰 엔진이 취소했다 (실패가 아니다) */
-  status: 'preparing' | 'running' | 'done' | 'error' | 'stopped'
-  startedAt?: number
-  endedAt?: number
-  error?: string
-  tokens?: number
-  items: TurnItem[]
-}
-
-/** skill 도구 줄 (이슈 #7) — 부른 스킬 이름과 출처(배지). 출처는 끝난 결과의 metadata.dir 로 안다 — 그 전엔 없다 */
-export interface ToolSkill {
-  name: string
-  source?: SkillSource
-}
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { TurnItem, Subtask, ToolSkill, McpToolRef } from '../../shared/contract.ts'
 
 type Props = Record<string, unknown>
-
-/** MCP 도구 호출의 서버·도구 (이슈 #28) — 화면이 "MCP · 서버 · 도구" 로 그린다 */
-export interface McpToolRef {
-  server: string
-  tool: string
-}
 
 /** 엔진 도구 이름 → MCP 서버·도구 (MCP 가 아니면 undefined) */
 export type McpToolResolver = (name: string) => McpToolRef | undefined

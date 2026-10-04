@@ -1,0 +1,26 @@
+{
+  "name": "litecode-mobile",
+  "version": "0.0.1",
+  "private": true,
+  "description": "litecode 안드로이드 앱 — 같은 사내망의 데스크탑 litecode 에 직접 붙는다. 루트와 의존성을 합치지 않는다",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "export:android": "expo export --platform android",
+    "fake-desktop": "node dev/fake-desktop.mts"
+  },
+  "dependencies": {
+    "expo": "~57.0.26",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "~19.2.4",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.3"
+  }
+}

@@ -3,6 +3,10 @@ import path from 'node:path'
 import type { Conversation } from './sessions.ts'
 import './llm.ts' // 'llm/turn-*'·'llm/attention*' 이벤트 선언
 import { tr } from '../i18n.ts'
+import type { ConversationStatus, NoticeEntry, NoticeState } from '../../shared/contract.ts'
+
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { ConversationStatus, NoticeEntry, NoticeState } from '../../shared/contract.ts'
 
 // 알림 (ctx.notifications) — ctx.llm 이 내는 턴 이벤트를 받아 앱 알림(토스트·점)이나 PC 알림(OS 알림)으로 바꾼다.
 // ctx.llm 은 알림을 모른다: 이 플러그인을 빼면 알림만 사라진다 (사용자 승인 2026-10-02, _workspace/00_next_notifications.md).
@@ -19,17 +23,6 @@ import { tr } from '../i18n.ts'
 
 /** PC 알림 · 토스트의 사건 */
 export type NoticeKind = 'done' | 'failed' | 'interrupted' | 'question' | 'permission'
-/** 대화 행 점 — 답 필요(attention) > 실행 중 > 안 본 끝남(done·failed·interrupted) */
-export type ConversationStatus = 'running' | 'attention' | 'done' | 'failed' | 'interrupted'
-
-export interface NoticeEntry {
-  /** 그 대화의 프로젝트(작업 폴더) — 프로젝트 전환 버튼·팝오버 점에 쓴다 */
-  project: string
-  status: ConversationStatus
-}
-
-/** 대화 id → 상태. 아무 표시도 없는 대화는 빠진다 */
-export type NoticeState = Record<string, NoticeEntry>
 
 /** 앞일 때 화면에 띄울 토스트 */
 export interface Toast {

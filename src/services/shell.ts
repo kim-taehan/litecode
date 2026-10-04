@@ -1,6 +1,10 @@
 import { Context, Service } from 'cordis'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { realDirectory } from './llm.ts'
+import type { ShellResult } from '../../shared/contract.ts'
+
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { ShellResult } from '../../shared/contract.ts'
 
 // `!명령` 실행 (ctx.shell) — 사용자가 입력창에 친 명령을 프로젝트 폴더에서 한 번 돌려 결과를 대화 카드로 남긴다 (closed-code
 // electron/session/shellRunner.ts 의 규칙, 01h 권고). **LLM 을 거치지 않고 opencode 와도 무관하다** — 맥락에는 사용자가 카드의
@@ -23,19 +27,6 @@ declare module 'cordis' {
 export const OUTPUT_LIMIT = 100 * 1024
 export const TIMEOUT_MS = 60_000
 const KILL_GRACE_MS = 2_000
-
-/** 끝난 명령 하나 */
-export interface ShellResult {
-  command: string
-  output: string
-  /** 종료 코드 — 시그널로 끝났거나 실행이 안 됐으면 null */
-  exitCode: number | null
-  /** done: 스스로 끝남, stopped: ■ 로 멈춤, timeout: 기한 초과, error: 실행 자체가 안 됨(셸 없음·폴더 없음) */
-  status: 'done' | 'stopped' | 'timeout' | 'error'
-  /** 출력이 OUTPUT_LIMIT 에서 잘렸다 */
-  truncated: boolean
-  error?: string
-}
 
 /** 띄울 셸과 인자 — 로그인 셸에 명령 하나. Windows 는 cmd */
 export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.env, platform = process.platform): [string, string[]] {

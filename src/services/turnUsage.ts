@@ -1,4 +1,8 @@
 import type { EngineMessageInfo, EnginePart } from './turnProgress.ts'
+import type { TurnUsage } from '../../shared/contract.ts'
+
+// 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
+export type { TurnUsage } from '../../shared/contract.ts'
 
 // 턴 하나의 사용량·시간을 opencode 레거시 이벤트에서 모은다 — 결과는 opencode 를 모르는 중립 모양(TurnUsage)이다.
 // 실측 근거 (opencode 1.18.18 — 토큰 매핑은 _workspace/01_probe.md 2026-10-01, 레거시 모양은 01w 2026-10-02):
@@ -8,24 +12,6 @@ import type { EngineMessageInfo, EnginePart } from './turnProgress.ts'
 //   time.created 로 잰다. 첫 토큰까지(TTFT)는 첫 스텝이면 user 메시지 생성(= 보낸 때)부터, 이후 스텝이면 직전 스텝 끝부터. 스텝의 첫 출력은
 //   글·생각 파트의 time.start, 도구 스텝은 도구 파트가 처음 나타난 때(pending)
 // - 실패한 스텝은 step-finish 없이 assistant info.error 만 남는다 — 그것도 스텝으로 센다
-
-export interface TurnUsage {
-  /** step.ended + step.failed 수 */
-  steps: number
-  /** 스텝 합. input 은 캐시 안 된 입력 */
-  tokens: { input: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number }
-  /** 스텝마다 첫 출력 → 스텝 끝의 합 */
-  llmMs: number
-  /** 도구 호출 → 결과의 합 */
-  toolMs: number
-  /** 첫 토큰까지 걸린 시간의 합과 그 표본 수 — 평균은 위층이 대화 단위로 낸다 */
-  ttftMs: number
-  ttftSteps: number
-  /** 마지막 스텝의 컨텍스트 크기 (프롬프트 + 출력) */
-  lastContextTokens: number
-  /** 그중 대화 메시지 몫 — 추정치 (messageTokens). 못 구하면 없다 */
-  messageTokens?: number
-}
 
 type Props = Record<string, unknown>
 
