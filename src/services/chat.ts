@@ -9,7 +9,7 @@ import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
 import { addTurn, type ChatUsage } from '../../shared/usage.ts'
 import { upsertItem } from '../../shared/chatReducer.ts'
-import { chipsOf, queueLabel, titleFrom, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult } from '../../shared/chat.ts'
+import { chipsOf, queueLabel, titleFrom, TITLE_MAX, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult } from '../../shared/chat.ts'
 import type { Attention, AttentionAnswer, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
 // 대화별 "턴 소유" (ctx.chat, 이슈 #52) — 보내기·대기열·턴 끝 처리(제목·저장·통계 합산·대기열의 다음 것 보내기)·중지를 메인이 쥔다.
@@ -21,6 +21,9 @@ import type { Attention, AttentionAnswer, Conversation, HistoryMessage, TurnItem
 //   사용자가 멈춘 턴(stop)은 대기열을 붙잡는다 — 보내지 않고 화면이 입력창으로 되돌린다(takeQueue)
 // - 이벤트는 shared/chat.ts 의 ChatEventMap (shared/remote.ts 와 같은 모양) — Cordis 이름은 `chat/<이름>`
 // - 알림(ctx.notifications)은 그대로 ctx.llm 의 'llm/turn-*' 를 듣는다
+// - 다른 대화가 보낸 지시 (이슈 #55, 세션 도구 appMcp/tools/sessions.ts 가 send 로 넣는다): origin 이 `session:<보낸 대화>` 이고 from 에 보낸 대화의
+//   id·제목이 있다. 사람 글과 합치지 않고(sendQueue), 그 말풍선에 출처를 적어 둔다(ctx.sessions.noteOrigin). 도는 턴은 자기 출처와 그 턴에서
+//   보낸 지시 수를 쥔다 — 지시를 받아 도는 턴은 다시 지시하지 못하고(깊이 1), 한 턴에 보낼 수 있는 수에 상한이 있다
 
 declare module 'cordis' {
   interface Context {
@@ -44,6 +47,10 @@ interface LiveTurn {
   message?: HistoryMessage
   progress: TurnItem[]
   attention: Attention[]
+  /** 이 턴을 시작한 쪽 — 사람 또는 다른 대화 */
+  origin: ChatOrigin
+  /** 이 턴에서 다른 대화에 보낸 지시 수 */
+  sends: number
 }
 
 export class ChatService extends Service {
@@ -58,6 +65,8 @@ export class ChatService extends Service {
   constructor(ctx: Context) {
     super(ctx, 'chat')
     ctx.effect(() => this.queues.subscribe((cid) => void ctx.emit('chat/queue-changed', this.queueOf(cid))))
+    // 지워진 대화의 대기열은 같이 사라진다 (다른 대화가 보내 둔 지시 포함)
+    ctx.on('sessions/removed', (ids) => ids.forEach((id) => this.queues.clear(id)))
   }
 
   /** 파일 고르기가 준 경로를 적어 둔다 — send 의 첨부는 이 안의 것만 받는다 */
@@ -71,7 +80,7 @@ export class ChatService extends Service {
   async send(cid: string, input: QueuedSend): Promise<SendResult> {
     const item = clean(input)
     if (this.queues.submit(cid, item, this.turns.has(cid))) return { state: 'queued' }
-    const turn = this.open(cid)
+    const turn = this.open(cid, item.origin ?? 'user')
     const ready = await this.begin(cid, item, turn, false)
     if (ready) void this.run(cid, item, turn, ready)
     return { state: 'sent' }
@@ -79,7 +88,48 @@ export class ChatService extends Service {
 
   /** 대기열 되돌리기 — 그 출처가 쌓은 것을 합쳐 주고 뺀다 (부른 쪽 입력창으로). 붙잡힌 대기열도 풀린다. 없으면 undefined */
   takeQueue(cid: string, origin: ChatOrigin = 'user'): QueuedSend | undefined {
-    return this.queues.take(cid, origin)
+    const taken = this.queues.take(cid, origin)
+    this.advance(cid) // 붙잡혀 있던 대기열에 다른 출처의 것(다른 대화의 지시)이 남았으면 이어 간다
+    return taken
+  }
+
+  /** 대기열에서 다른 대화가 보낸 줄 하나를 뺀다 (index 는 'chat/queue-changed' 의 items 자리). 사람이 친 줄은 못 뺀다 — 뺐으면 true */
+  dropQueued(cid: string, index: number): boolean {
+    return this.queues.drop(cid, index)
+  }
+
+  /** 그 대화의 도는 턴 — 누가 시작했나(origin)·사람의 답을 기다리나(waiting). 안 돌면 undefined */
+  turnOf(cid: string): { origin: ChatOrigin; waiting: boolean } | undefined {
+    const turn = this.turns.get(cid)
+    return turn && { origin: turn.origin, waiting: turn.attention.length > 0 }
+  }
+
+  /** 그 대화의 대기열에 쌓인 수 */
+  queued(cid: string): number {
+    return this.queues.items(cid).length
+  }
+
+  /** 그 대화의 도는 턴이 다른 대화에 지시를 하나 보낸다고 센다 — 한 턴의 상한(max)을 넘으면 세지 않고 false */
+  countSend(cid: string, max: number): boolean {
+    const turn = this.turns.get(cid)
+    if (!turn || turn.sends >= max) return false
+    turn.sends++
+    return true
+  }
+
+  /** 그 대화가 쉴 때까지(도는 턴이 없을 때까지) 기다린다 — 기한 안에 쉬면 true. 턴이 끝나며 대기열의 다음 것이 바로 돌면 계속 기다린다 */
+  waitIdle(cid: string, ms: number): Promise<boolean> {
+    if (!this.turns.has(cid)) return Promise.resolve(true)
+    return new Promise((resolve) => {
+      const done = (idle: boolean): void => {
+        clearTimeout(timer)
+        off()
+        resolve(idle)
+      }
+      const timer = setTimeout(() => done(false), ms)
+      // 턴 끝 이벤트 바로 뒤에 다음 턴이 열린다(advance) — 그 뒤에 본다
+      const off = this.ctx.on('chat/turn-ended', (data) => void (data.cid === cid && queueMicrotask(() => !this.turns.has(cid) && done(true))))
+    })
   }
 
   /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴은 "중단됨" 으로 끝난다. 쌓인 대기열은 보내지 않고 붙잡는다
@@ -116,11 +166,17 @@ export class ChatService extends Service {
 
   private queueOf(cid: string): ChatEventMap['queue.changed'] {
     const items = this.queues.items(cid)
-    return { cid, items: items.map(queueLabel), held: this.queues.held(cid), attachments: items.flatMap((item) => chipsOf(item.attachments ?? [])) }
+    return {
+      cid,
+      items: items.map(queueLabel),
+      held: this.queues.held(cid),
+      attachments: items.flatMap((item) => chipsOf(item.attachments ?? [])),
+      sources: items.map((item) => item.from ?? null),
+    }
   }
 
-  private open(cid: string): LiveTurn {
-    const turn: LiveTurn = { stop: new AbortController(), startedAt: Date.now(), progress: [], attention: [] }
+  private open(cid: string, origin: ChatOrigin): LiveTurn {
+    const turn: LiveTurn = { stop: new AbortController(), startedAt: Date.now(), progress: [], attention: [], origin, sends: 0 }
     this.turns.set(cid, turn)
     return turn
   }
@@ -130,7 +186,7 @@ export class ChatService extends Service {
     if (this.turns.has(cid)) return
     const next = this.queues.next(cid)
     if (!next) return
-    const following = this.open(cid)
+    const following = this.open(cid, next.origin ?? 'user')
     void this.begin(cid, next, following, true)
       .then((ready) => ready && this.run(cid, next, following, ready))
       .catch((error: unknown) => console.error('[chat] 대기열 보내기 실패', (error as Error).message))
@@ -153,7 +209,7 @@ export class ChatService extends Service {
         id: cid,
         project,
         engineSessionId: existing?.engineSessionId,
-        title: existing ? existing.title : titleFrom(shown || (files[0]?.name ?? '')), // 글 없이 첨부만 보냈으면 첫 파일 이름
+        title: existing ? existing.title : item.title || titleFrom(shown || (files[0]?.name ?? '')), // 글 없이 첨부만 보냈으면 첫 파일 이름
         updatedAt: Date.now(),
         model, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
         mode, // 모드도 — 설정의 기본 모드가 나중에 바뀌어도 이 대화는 그대로
@@ -168,6 +224,7 @@ export class ChatService extends Service {
         at: turn.startedAt,
         ...(mode && { mode }),
         ...(files.length > 0 && { attachments: chipsOf(files) }),
+        ...(item.from && { origin: item.from }),
       }
       this.ctx.emit('chat/conversations-changed', { project, removed })
       this.ctx.emit('chat/turn-started', { cid, message: turn.message, origin: item.origin ?? 'user', conversation })
@@ -244,6 +301,7 @@ export class ChatService extends Service {
     const messageId = turn.message!.id!
     if (shown !== undefined) await this.ctx.sessions.label(cid, messageId, shown)
     if (files.length > 0) await this.ctx.sessions.noteAttachments(cid, messageId, files)
+    if (item.from) await this.ctx.sessions.noteOrigin(cid, messageId, item.from) // 다시 열어도 "다른 대화에서 온 지시" 로 보이게
     return this.ctx.llm.chat(
       model!.providerId,
       model!.modelId,
@@ -280,5 +338,10 @@ function clean(input: QueuedSend): QueuedSend {
     ...(input.model && typeof input.model.providerId === 'string' && typeof input.model.modelId === 'string' && { model: { providerId: input.model.providerId, modelId: input.model.modelId } }),
     ...(typeof input.project === 'string' && input.project && { project: input.project }),
     ...(typeof input.origin === 'string' && { origin: input.origin }),
+    // 보낸 대화는 출처가 다른 대화일 때만 — 사람이 보낸 것에 딱지가 붙지 않게
+    ...(typeof input.origin === 'string' && input.origin !== 'user' && typeof input.from?.conversationId === 'string' && typeof input.from.title === 'string' && {
+      from: { conversationId: input.from.conversationId, title: input.from.title },
+    }),
+    ...(typeof input.title === 'string' && input.title.trim() && { title: input.title.trim().slice(0, TITLE_MAX) }),
   }
 }

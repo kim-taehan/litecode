@@ -39,6 +39,7 @@ import { AppMcpService } from '../src/services/appMcp.ts'
 import { OpenFileTool } from '../src/services/appMcp/tools/openFile.ts'
 import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
+import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -235,6 +236,7 @@ function chatBridge(ctx: Context): void {
   })
   handle(ctx, Channel.SEND_MESSAGE, async (_event, conversationId: string, input: QueuedSend) => ctx.chat.send(String(conversationId), { ...input, origin: 'user' }))
   handle(ctx, Channel.TAKE_QUEUE, async (_event, conversationId: string) => ctx.chat.takeQueue(String(conversationId)))
+  handle(ctx, Channel.DROP_QUEUED, async (_event, conversationId: string, index: number) => ctx.chat.dropQueued(String(conversationId), Number(index)))
   handle(ctx, Channel.CHAT_SNAPSHOT, async () => ctx.chat.snapshot())
   handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => ctx.chat.stop(String(conversationId)))
   handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.chat.stopSubtask(String(subtaskId)))
@@ -466,6 +468,7 @@ const features: FeatureDefinition[] = [
       // 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰) — ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다. 끄는 스위치는 없다
       ctx.plugin(AppMcpService)
       ctx.plugin(OpenFileTool)
+      ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 넷 — 다른 대화 보기·지시 보내기 (이슈 #55)
       ctx.plugin(appMcpBridge)
     },
   },

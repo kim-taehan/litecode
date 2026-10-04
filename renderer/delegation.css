@@ -1,0 +1,211 @@
+/* 다른 대화에 지시 보내기 (이슈 #55 — 시안 _workspace/mock-delegate). 색은 :root 토큰만 */
+
+.delegation-icon {
+  flex: none;
+}
+
+/* 보낸 대화의 진행 줄 — "지시 보냄 → 제목 · 상태" / "결과 읽기 · 제목 · 상태" */
+.delegation-row__target {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delegation-row__target--link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.delegation-row__target--link:hover,
+.delegation-row__target--link:focus-visible {
+  text-decoration: underline;
+}
+
+.delegation-row__state {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.delegation-row[data-kind='delegation-sent'][data-state='running'] .delegation-row__state,
+.delegation-row[data-kind='delegation-sent'][data-state='asking'] .delegation-row__state {
+  color: var(--accent);
+}
+
+.delegation-row[data-state='failed'] .delegation-row__state,
+.delegation-row[data-state='notSent'] .delegation-row__state {
+  color: var(--danger);
+}
+
+.delegation-row[data-kind='delegation-read'] .delegation-row__target {
+  color: inherit;
+  font-weight: 400;
+}
+
+/* 받는 대화 — 내 말 자리 위의 딱지와 테두리가 다른 말풍선 */
+.origin-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.origin-tag:disabled {
+  cursor: default;
+}
+
+.origin-tag:not(:disabled):hover,
+.origin-tag:focus-visible {
+  text-decoration: underline;
+}
+
+.bubble.bubble--delegated {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--module);
+}
+
+/* 승인 카드의 내용 — 받는 대화·모드 표와 보낼 글 전문 */
+.delegation-card__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 2px 0 4px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.delegation-card__facts dt {
+  color: var(--text-secondary);
+}
+
+.delegation-card__facts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.delegation-card__title {
+  font-weight: 500;
+}
+
+.delegation-card__note {
+  color: var(--text-secondary);
+}
+
+.delegation-card__warn,
+.delegation-card__facts dd[data-wider] {
+  color: var(--warn);
+}
+
+.delegation-card__message {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 21px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.attention-card__actions-note {
+  flex: 1 1 auto;
+  align-self: center;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* 대기열 — 다른 대화가 보낸 줄 (딱지·보낸 대화 이름·글·빼기) */
+.queue-dock__item--from {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.queue-dock__from {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-dock__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-dock__drop {
+  flex: none;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--danger);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.queue-dock__drop:hover,
+.queue-dock__drop:focus-visible {
+  background: var(--fill-hover);
+}
+
+/* 사이드바 대화 행 — 다른 대화가 시킨 일을 하는 중(아이콘) · 지시로 새로 생긴 대화(딱지). 시각 자리에 선다 */
+.session-item__mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+.session-item__fresh {
+  flex: none;
+  padding: 1px 5px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.session-item:hover .session-item__mark,
+.session-item:hover .session-item__fresh,
+.session-item:focus-within .session-item__mark,
+.session-item:focus-within .session-item__fresh,
+.session-item--confirming .session-item__mark,
+.session-item--confirming .session-item__fresh {
+  display: none;
+}

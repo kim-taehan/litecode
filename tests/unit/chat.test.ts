@@ -287,7 +287,7 @@ describe('ChatService — 대기열', () => {
     const first = await turn(1)
     expect(await chat.send('c1', input('둘째'))).toEqual({ state: 'queued' })
     expect(await chat.send('c1', input('풀어 쓴 셋째', { display: '/셋째' }))).toEqual({ state: 'queued' })
-    expect(of('queue.changed').at(-1)).toEqual({ cid: 'c1', items: ['둘째', '/셋째'], held: false, attachments: [] })
+    expect(of('queue.changed').at(-1)).toEqual({ cid: 'c1', items: ['둘째', '/셋째'], held: false, attachments: [], sources: [null, null] })
     expect(llm.calls).toHaveLength(1)
 
     first.finish()
@@ -365,6 +365,53 @@ describe('ChatService — 대기열', () => {
     expect(of('turn.started').map((event) => event.origin)).toEqual(['user', 'user', 'session:c9'])
   })
 
+  // 이슈 #55 — 다른 대화가 보낸 지시 (세션 도구가 send 로 넣는다)
+  it('다른 대화의 지시: LLM 엔 본문(감싼 글), 말풍선엔 보일 글과 출처 — 적어 둔 출처는 다시 열 때 쓴다. 도는 턴은 자기 출처를 안다', async () => {
+    const { chat, turn, of, stored } = await start()
+    const from = { conversationId: 'c9', title: '릴리스 준비' }
+    await chat.send('c1', input('<wrapped>지시</wrapped>', { display: '지시', origin: 'session:c9', from }))
+    await turn(1)
+    expect(of('turn.started')[0]).toMatchObject({ origin: 'session:c9', message: { text: '지시', origin: from } })
+    expect(chat.turnOf('c1')).toEqual({ origin: 'session:c9', waiting: false })
+    expect(chat.snapshot()['c1']!.turn!.message.origin).toEqual(from)
+    const saved = (await stored('c1'))!
+    const messageId = of('turn.started')[0]!.message.id!
+    expect(saved.labels).toEqual({ [messageId]: '지시' })
+    expect(saved.origins).toEqual({ [messageId]: from })
+    expect(chat.turnOf('nope')).toBeUndefined()
+  })
+
+  it('화면(IPC)이 보낸 것에 출처 정보(from)가 실려 와도 사람이 보낸 것에는 딱지가 붙지 않는다', async () => {
+    const { chat, turn, of, stored } = await start()
+    await chat.send('c1', input('사람 글', { origin: 'user', from: { conversationId: 'c9', title: '속임' } }))
+    await turn(1)
+    expect(of('turn.started')[0]!.message.origin).toBeUndefined()
+    expect((await stored('c1'))!.origins).toBeUndefined()
+  })
+
+  it('새 대화에 제목을 주면 그 제목으로 만든다 (start_session) — 있는 대화의 제목은 안 바꾼다', async () => {
+    const { chat, turn, stored } = await start()
+    await chat.send('c1', input('첫 지시', { title: 'README 정리' }))
+    const first = await turn(1)
+    expect((await stored('c1'))!.title).toBe('README 정리')
+    first.finish()
+    await chat.send('c1', input('둘째', { title: '다른 제목' }))
+    await turn(2)
+    expect((await stored('c1'))!.title).toBe('README 정리')
+  })
+
+  it('한 턴에 보낸 지시 수를 센다 — 상한을 넘으면 세지 않는다. 도는 턴이 없으면 못 센다', async () => {
+    const { chat, turn } = await start()
+    expect(chat.countSend('c1', 2)).toBe(false)
+    await chat.send('c1', input('처음'))
+    const first = await turn(1)
+    expect([chat.countSend('c1', 2), chat.countSend('c1', 2), chat.countSend('c1', 2)]).toEqual([true, true, false])
+    first.finish()
+    await chat.send('c1', input('다음 턴'))
+    await turn(2)
+    expect(chat.countSend('c1', 2)).toBe(true) // 턴마다 새로 센다
+  })
+
   it('대기열의 다음 턴은 그 대화에 저장된 모델로 간다 — 쌓은 뒤 턴 중에 바꾼 모델을 따른다', async () => {
     const { chat, sessions, turn } = await start()
     await chat.send('c1', input('처음'))
@@ -398,7 +445,7 @@ describe('ChatService — 답변 중지 (이슈 #3)', () => {
     await chat.send('c1', input('a'))
     await chat.send('c1', input('b'))
     expect(chat.stop('c1')).toBe(true)
-    expect(of('queue.changed').at(-1)).toEqual({ cid: 'c1', items: ['a', 'b'], held: true, attachments: [] })
+    expect(of('queue.changed').at(-1)).toEqual({ cid: 'c1', items: ['a', 'b'], held: true, attachments: [], sources: [null, null] })
     const end = await ended(1)
     expect(end).toMatchObject({ outcome: 'interrupted', message: { error: tr('error.stopped'), interrupted: true } })
     await new Promise((resolve) => setTimeout(resolve, 30))
@@ -492,7 +539,7 @@ describe('ChatService — 스냅샷과 전달', () => {
     call.progress(item)
     const { message } = of('turn.started')[0]!
     expect(chat.snapshot()).toEqual({
-      c1: { turn: { message, startedAt: message.at, progress: [item], attention: [] }, queue: { cid: 'c1', items: ['다음'], held: false, attachments: [] } },
+      c1: { turn: { message, startedAt: message.at, progress: [item], attention: [] }, queue: { cid: 'c1', items: ['다음'], held: false, attachments: [], sources: [null] } },
     })
     chat.takeQueue('c1')
     call.finish()

@@ -31,6 +31,8 @@ import { OpenInButton } from './OpenInButton.tsx'
 import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { QueueDock } from './QueueDock.tsx'
+import { DelegationContext, FromIcon } from './Delegation.tsx'
+import { peerOf, sidebarMark } from './delegationView.ts'
 import { RunningCount, RunningFilter } from './Background.tsx'
 import { runningIn, runningOutside } from './backgroundView.ts'
 import { StopIcon, useEscapeTwice, useStopTurn } from './stopTurn.tsx'
@@ -328,6 +330,8 @@ export function App() {
   /** 비동기 이동(알림 열기)이 지금 대화 목록을 보게 */
   const sessionsRef = useRef<Session[]>([])
   sessionsRef.current = sessions
+  /** 다른 대화의 지시로 새로 생긴 대화 — 사이드바에 "새로 생김" 으로 보이고 한 번 열면 빠진다 (이슈 #55). 화면이 떠 있는 동안만 기억한다 */
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     void window.litecode.listProviders().then(setProviders)
@@ -368,6 +372,13 @@ export function App() {
     const offs = [
       window.litecode.onTurnStarted((data) => {
         following.current = true
+        // 화면이 모르는 대화의 턴 — 다른 대화가 지시로 새로 만든 대화다 (start_session, 이슈 #55). 메인이 저장한 목록 정보로 목록에 넣는다.
+        // 내용은 이 턴이 전부라 엔진에서 다시 부르지 않는다 (history 없음 = 이번 실행에 만든 대화)
+        if (!sessionsRef.current.some((session) => session.id === data.cid)) {
+          const created: Session = { ...fromConversation(data.conversation), history: undefined }
+          setSessions((sessionsNow) => (sessionsNow.some((session) => session.id === data.cid) ? sessionsNow : [created, ...sessionsNow]))
+          if (data.origin !== 'user') setFresh((now) => new Set(now).add(data.cid))
+        }
         apply({ event: 'turn.started', data })
       }),
       window.litecode.onTurnProgress((cid, item) => apply({ event: 'turn.progress', data: { cid, item } })),
@@ -434,6 +445,16 @@ export function App() {
 
   /** 휴지통을 눌러 "삭제 확인" 을 기다리는 대화 */
   const [confirming, setConfirming] = useState<string>()
+  // 한 번 연 대화는 "새로 생김" 이 아니다
+  useEffect(() => {
+    if (active && fresh.has(active.id)) setFresh((now) => new Set([...now].filter((id) => id !== active.id)))
+  }, [active?.id, fresh])
+  /** 다른 대화에 지시 보내기 (이슈 #55) 의 화면 조각이 쓰는 것 — 같은 프로젝트의 저장된 대화(제목·상태·모드), 지금 대화의 모드·모델, 대화 열기 */
+  const delegation = {
+    peers: visible.filter((session) => !isBlank(session)).map((session) => peerOf(session, notices.state[session.id]?.status)),
+    self: { mode, model: chosen?.model.displayName },
+    open: (id: string) => project && setActiveIds((now) => ({ ...now, [project.path]: id })),
+  }
   /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
   const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
   /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
@@ -820,7 +841,16 @@ export function App() {
                   {notices.state[session.id] && <StatusDot status={notices.state[session.id]!.status} className="session-item__notice" />}
                 </span>
                 <span className="session-item__title marquee">{titleOf(session)}</span>
-                {!isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>}
+                {/* 시각 자리 — 지시로 새로 생긴 대화는 "새로 생김", 다른 대화가 시킨 일을 하는 중이면 그 아이콘 (이슈 #55 시안) */}
+                {sidebarMark(session, fresh) === 'fresh' ? (
+                  <span className="session-item__fresh">{t('delegate.sidebar.fresh')}</span>
+                ) : sidebarMark(session, fresh) === 'delegated' ? (
+                  <span className="session-item__mark">
+                    <FromIcon size={14} label={t('delegate.sidebar.running')} />
+                  </span>
+                ) : (
+                  !isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>
+                )}
               </button>
               {/* 도는 대화는 휴지통 자리에 ■ — 답변 중지 (01l A4) */}
               {session.pending && (
@@ -902,7 +932,7 @@ export function App() {
           </div>
         )}
         {active && (
-          <>
+          <DelegationContext.Provider value={delegation}>
             <div className="main__header">
               {titleOf(active)}
               {/* 도는 작업 목록 (#32) — 하위 작업이 있는 턴이 도는 동안만, 열기 버튼 왼쪽 */}
@@ -946,7 +976,7 @@ export function App() {
                     </div>
                   )}
                   {message.role === 'user' ? (
-                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} />
+                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} origin={message.origin} />
                   ) : (
                     <AssistantTurn
                       items={message.items ?? []}
@@ -999,6 +1029,8 @@ export function App() {
             <div className="composer">
               <QueueDock
                 items={active.queue ?? []}
+                sources={active.queueSources}
+                onDrop={(index) => void window.litecode.dropQueued(active.id, index)}
                 onRestore={() => {
                   void window.litecode.takeQueue(active.id).then((taken) => taken && restoreQueued(taken))
                   trigger.inputRef.current?.focus()
@@ -1094,7 +1126,7 @@ export function App() {
                 }}
               />
             )}
-          </>
+          </DelegationContext.Provider>
         )}
         {/* 사이드바를 숨기면 로고 줄의 접기 버튼도 같이 사라지므로 그때만 여기서 다시 연다. 대화 머리(창 끌기 줄)보다 **문서 뒤**에 둔다 —
             Electron 은 끌기 영역을 문서 순서로 합쳐서, 앞에 있으면 머리의 끌기가 이 버튼을 덮어 눌리지 않는다 (styles.css 창 끌기 주석) */}

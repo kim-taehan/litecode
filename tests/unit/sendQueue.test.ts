@@ -174,3 +174,62 @@ describe('SendQueues — 출처가 같은 것끼리만 합친다', () => {
     expect(queues.items('c1')).toEqual([{ text: 's1', origin: 'session:c9' }])
   })
 })
+
+// 다른 대화가 보낸 지시 (이슈 #55) — 출처가 다르면 합치지 않고, 줄 하나를 뺄 수 있고(빼기), 붙잡기는 사람 글이 있을 때만
+describe('SendQueues — 다른 대화가 보낸 지시 (이슈 #55)', () => {
+  const fromA = { text: '<wrapped a>', display: '지시 a', origin: 'session:a' as const, from: { conversationId: 'a', title: 'A' } }
+  const fromB = { text: '<wrapped b>', display: '지시 b', origin: 'session:b' as const, from: { conversationId: 'b', title: 'B' } }
+
+  it('출처가 다른 것끼리는 합치지 않는다 — 쌓인 순서대로 한 턴씩, 같은 대화가 잇달아 보낸 것만 합친다', () => {
+    const queues = new SendQueues()
+    for (const item of [{ text: '사람 1' }, { text: '사람 2' }, fromA, fromA, fromB, { text: '사람 3' }]) queues.submit('c1', item, true)
+    expect(queues.next('c1')).toEqual({ text: '사람 1\n사람 2' })
+    expect(queues.next('c1')).toMatchObject({ text: '<wrapped a>\n<wrapped a>', display: '지시 a\n지시 a', origin: 'session:a', from: { conversationId: 'a' } })
+    expect(queues.next('c1')).toMatchObject({ display: '지시 b', origin: 'session:b' })
+    expect(queues.next('c1')).toEqual({ text: '사람 3' })
+    expect(queues.next('c1')).toBeUndefined()
+  })
+
+  it('빼기(drop) — 다른 대화의 줄 하나만 뺀다. 사람이 친 줄·없는 자리는 못 뺀다', () => {
+    const queues = new SendQueues()
+    for (const item of [{ text: '사람' }, fromA, fromB]) queues.submit('c1', item, true)
+    expect(queues.drop('c1', 0)).toBe(false)
+    expect(queues.drop('c1', 9)).toBe(false)
+    expect(queues.drop('c1', 1)).toBe(true)
+    expect(queues.items('c1').map((item) => item.display ?? item.text)).toEqual(['사람', '지시 b'])
+  })
+
+  it('되돌리기(take)는 사람 글만 가져간다 — 다른 대화의 지시는 남는다', () => {
+    const queues = new SendQueues()
+    for (const item of [{ text: '사람 1' }, fromA, { text: '사람 2' }]) queues.submit('c1', item, true)
+    expect(queues.take('c1')).toEqual({ text: '사람 1\n사람 2' })
+    expect(queues.items('c1')).toEqual([fromA])
+  })
+
+  it('붙잡기(hold)는 사람 글이 쌓여 있을 때만 — 다른 대화의 지시만 있으면 멈춘 턴 뒤에 그대로 간다', () => {
+    const queues = new SendQueues()
+    queues.submit('c1', fromA, true)
+    queues.hold('c1')
+    expect(queues.held('c1')).toBe(false)
+    expect(queues.next('c1')).toMatchObject({ origin: 'session:a' })
+    queues.submit('c2', { text: '사람' }, true)
+    queues.submit('c2', fromA, true)
+    queues.hold('c2')
+    expect(queues.held('c2')).toBe(true)
+    expect(queues.next('c2')).toBeUndefined()
+  })
+
+  it('대화가 지워지면(clear) 쌓인 것도 붙잡기도 사라지고 구독자에게 알린다', () => {
+    const queues = new SendQueues()
+    const calls: string[] = []
+    queues.submit('c1', { text: '사람' }, true)
+    queues.submit('c1', fromA, true)
+    queues.hold('c1')
+    queues.subscribe((id) => calls.push(id))
+    queues.clear('c1')
+    queues.clear('nope')
+    expect(queues.items('c1')).toEqual([])
+    expect(queues.held('c1')).toBe(false)
+    expect(calls).toEqual(['c1'])
+  })
+})

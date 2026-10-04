@@ -8,12 +8,16 @@ import type { ChatOrigin, QueuedSend } from '../../shared/chat.ts'
 // - 앱을 끄면 사라진다(메모리)
 // - 실패·중단으로 끝나도 보낸다 (closed-code 와 같다 — "턴이 더는 안 돈다" 가 기준). 단 사용자가 멈춘 턴(■·Esc 두 번)은 보내지 않고
 //   입력창으로 되돌린다 (hold — 이슈 #3, 사용자가 멈췄으니)
-// - **출처(origin)가 같은 것끼리만 합친다** — 다른 대화가 보낸 지시(라운드 ③)와 사람이 친 글을 한 메시지로 이으면 출처가 사라진다.
+// - **출처(origin)가 같은 것끼리만 합친다** — 다른 대화가 보낸 지시(이슈 #55)와 사람이 친 글을 한 메시지로 이으면 출처가 사라진다.
 //   출처가 다르면 쌓인 순서대로 한 턴씩 간다
+// - 붙잡기(hold)는 **사람이 친 글이 쌓여 있을 때만** 건다 — 되돌릴 입력창이 있는 것은 사람 글뿐이다. 다른 대화의 지시만 쌓여 있으면
+//   멈춘 턴 뒤에 차례대로 간다 (그 지시는 대기열 줄의 "빼기" 로 뺀다 — drop)
 
 export type { QueuedSend } from '../../shared/chat.ts'
 
 const originOf = (item: QueuedSend): ChatOrigin => item.origin ?? 'user'
+/** 사람이 친 글인가 — 데스크탑 화면('user')과 짝지은 폰(`device:…`)은 사람, 다른 대화가 보낸 지시(`session:…`)만 아니다 */
+const fromPerson = (item: QueuedSend): boolean => !originOf(item).startsWith('session:')
 
 /**
  * 쌓인 것을 하나로 — 본문(과 보일 글)을 줄바꿈으로 잇고(첨부만 보낸 빈 본문은 건너뛴다) 첨부를 순서대로 모은다.
@@ -57,14 +61,31 @@ export class SendQueues {
     const current = this.items(id)
     const mine = current.filter((item) => originOf(item) === origin)
     if (mine.length === 0) return undefined
-    this.holds.delete(id)
-    this.set(id, current.filter((item) => originOf(item) !== origin))
+    const rest = current.filter((item) => originOf(item) !== origin)
+    // 다른 사람(데스크탑 화면·짝지은 폰)의 글이 남아 있으면 계속 붙잡는다 — 그 사람이 자기 입력창으로 되돌릴 것이다
+    if (!rest.some(fromPerson)) this.holds.delete(id)
+    this.set(id, rest)
     return mergeQueued(mine)
   }
 
-  /** 사용자가 멈췄다 — 쌓인 것이 있으면 턴 끝에 보내지 않고 붙잡아 둔다 (화면이 입력창으로 되돌린다) */
+  /** 다른 대화가 보낸 줄 하나를 뺀다 (index 는 items 의 자리). 사람이 친 줄은 여기서 못 뺀다(되돌리기 = take) — 뺐으면 true */
+  drop(id: string, index: number): boolean {
+    const current = this.items(id)
+    const item = current[index]
+    if (!item || fromPerson(item)) return false
+    this.set(id, current.filter((_, at) => at !== index))
+    return true
+  }
+
+  /** 그 대화가 지워졌다 — 쌓인 것을 다 버린다 */
+  clear(id: string): void {
+    this.holds.delete(id)
+    if (this.queues.has(id)) this.set(id, [])
+  }
+
+  /** 사용자가 멈췄다 — 사람이 친 글이 쌓여 있으면 턴 끝에 보내지 않고 붙잡아 둔다 (화면이 입력창으로 되돌린다) */
   hold(id: string): void {
-    if (this.items(id).length === 0) return
+    if (!this.items(id).some(fromPerson)) return
     this.holds.add(id)
     for (const listener of this.listeners) listener(id)
   }

@@ -128,6 +128,9 @@ type Permission = Record<string, string | Record<string, string>>
 // 웹 도구(webfetch·websearch)는 켰을 때 이 규칙을 따른다 — 계획 deny, 매번 묻기 ask, 기본·전체 허용 (이슈 #14)
 export const ENGINE_AGENTS: Record<string, { mode?: string; prompt?: string; description?: string; permission: Permission }> = {
   plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny' } },
+  // 기본 모드는 opencode 기본 그대로다 — 여기 적는 것은 권한 규칙을 얹을 자리뿐이다 (MCP_TOOL_RULES 의 보내기 도구 ask, 이슈 #55).
+  // 권한만 적은 build 는 다른 동작이 그대로였다 (도구 목록 동일, 01z 1-3)
+  [MODE_AGENT.build]: { permission: {} },
   [MODE_AGENT.ask]: {
     mode: 'primary',
     prompt: BUILD_PROMPT,
@@ -209,11 +212,22 @@ export function engineMcpConfig(def: EngineMcp, hidden: readonly string[]): Reco
 // 다르게 된다**(뒤가 이긴다, 12조합 3/3). 화면만 여는 도구는 묻지 않는다 — 계획은 open_file 만(터미널에 명령을 채우는 것은 계획 모드의 일이 아니다),
 // 매번 묻기는 open_file·open_terminal 둘 다(터미널은 실행이 사용자 손에 있다). 매번 묻기의 하위 작업(general-ask)은 와일드카드대로 묻는다.
 // 그 이름은 ctx.mcp 가 예약한다 — 사용자·폴더 서버는 `litecode` 라는 이름으로 못 붙는다
+//
+// 세션 도구 (이슈 #55, 01z 1-3·1-6·3-5 — 실측한 모양 그대로): 읽기 둘(list_sessions·read_session)은 묻지 않는다. **보내기 둘은 전역 deny +
+// 기본 모드 에이전트에만 ask** — 그래야 하위 작업(general·explore)과 모르는 에이전트의 도구 목록에서 빠진다(9/9. 규칙이 없으면 general 이 보고
+// 부른다, 6/6). 전체 권한은 `"*":"allow"` 뒤의 개별 ask 가 묻게 하고(3/3), 매번 묻기는 `*_*: ask` 가 전역 deny 뒤에 와 묻는다. 계획은 `*_*: deny`
+// 그대로라 보내기 도구가 없다(사용자 결정). general-ask 는 자기 `*_*: ask` 가 전역 deny 를 되살리므로 **그 뒤에 개별 deny 가 따로** 있어야 한다
+// (웹 도구 deny 와 같은 함정). ⚠️ 승인에 `always` 로 답하면 그 폴더의 모든 세션에서 더는 묻지 않는다 — ctx.llm.reply 는 once·reject 만 보낸다
+const SEND_TOOLS_ASK = { litecode_send_to_session: 'ask', litecode_start_session: 'ask' }
+const SEND_TOOLS_DENY = { litecode_send_to_session: 'deny', litecode_start_session: 'deny' }
+const READ_TOOLS_ALLOW = { litecode_list_sessions: 'allow', litecode_read_session: 'allow' }
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
-  plan: { '*_*': 'deny', litecode_open_file: 'allow', external_directory: 'ask', doom_loop: 'ask' },
-  [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open_file: 'allow', litecode_open_terminal: 'allow', plan_enter: 'deny', plan_exit: 'deny' },
+  plan: { '*_*': 'deny', litecode_open_file: 'allow', ...READ_TOOLS_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
+  [MODE_AGENT.build]: SEND_TOOLS_ASK,
+  [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open_file: 'allow', litecode_open_terminal: 'allow', ...READ_TOOLS_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
+  [MODE_AGENT.full]: SEND_TOOLS_ASK,
   // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
-  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' },
+  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...SEND_TOOLS_DENY },
 }
 
 /** 생성할 opencode.json — 모든 provider 가 키 프록시를 거친다. 진짜 키·저장된 baseURL 은 없다 */
@@ -252,7 +266,7 @@ export function engineConfig(
     : Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
   // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
   const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
-  const permission = { ...SUBAGENT_ASK_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
+  const permission = { ...SUBAGENT_ASK_DENY, ...SEND_TOOLS_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
   return {
     $schema: 'https://opencode.ai/config.json',
     provider,

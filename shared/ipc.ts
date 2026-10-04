@@ -53,6 +53,8 @@ export const Channel = {
   FETCH_PROVIDER_MODELS: 'providers:fetch-models',
   SEND_MESSAGE: 'chat:send',
   TAKE_QUEUE: 'chat:take-queue',
+  /** 대기열에서 다른 대화가 보낸 줄 하나를 뺀다 (이슈 #55) */
+  DROP_QUEUED: 'chat:drop-queued',
   CHAT_SNAPSHOT: 'chat:snapshot',
   /** 메인 → 화면 (ChatEventMap['turn.started']) — 턴이 시작됐다: 그 턴의 내 말과 저장된 목록 정보 */
   TURN_STARTED: 'chat:turn-started',
@@ -164,6 +166,9 @@ export interface LitecodeBridge {
   sendMessage(conversationId: string, input: QueuedSend): Promise<SendResult>
   /** 대기열 되돌리기 — 그 대화에 쌓인 것을 합쳐 받고 비운다 (입력창으로). 멈춰서 붙잡힌 대기열도 이것으로 푼다. 없으면 undefined */
   takeQueue(conversationId: string): Promise<QueuedSend | undefined>
+  /** 대기열의 "빼기" (이슈 #55) — 다른 대화가 보낸 줄 하나를 뺀다 (index 는 onQueueChanged 의 items 자리). 사람이 친 줄은 못 뺀다(되돌리기는
+   *  takeQueue). 뺐으면 true */
+  dropQueued(conversationId: string, index: number): Promise<boolean>
   /** 메인이 쥔 지금 모습 — 대화마다 도는 턴(내 말·진행 줄·승인 카드)과 대기열. 화면이 (다시) 뜰 때 한 번 받고 그 뒤는 이벤트로 */
   chatSnapshot(): Promise<ChatSnapshot>
   onTurnStarted(listener: (event: ChatEventMap['turn.started']) => void): () => void
