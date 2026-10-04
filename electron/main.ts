@@ -34,6 +34,9 @@ import { FeaturesService, type FeatureDefinition } from '../src/services/feature
 import { SkillsService, type SkillScope } from '../src/services/skills.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 import { McpService, type McpServerInput } from '../src/services/mcp.ts'
+import { AppMcpService } from '../src/services/appMcp.ts'
+import { OpenFileTool } from '../src/services/appMcp/tools/openFile.ts'
+import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -417,6 +420,20 @@ function mcpBridge(ctx: Context): void {
 }
 mcpBridge.inject = ['mcp']
 
+// 앱 MCP 서버 (이슈 #51) — AI 의 open_file·open_terminal 을 화면에 잇는다. 화면 도구는 사용자가 보고 있는 프로젝트에만 닿는다:
+// 화면이 지금 프로젝트를 알리고(APP_MCP_VIEW), 도구의 요청은 모든 창에 흘린다(화면이 프로젝트로 거른다). 창이 다 닫히면 보고 있는 것이 없다
+function appMcpBridge(ctx: Context): void {
+  handle(ctx, Channel.APP_MCP_VIEW, async (_event, directory?: string) => ctx.appMcp.view(typeof directory === 'string' ? directory : undefined))
+  ctx.on('appMcp/open-file', (directory, file, line) => broadcast(Channel.APP_MCP_OPEN_FILE, directory, file, line))
+  ctx.on('appMcp/open-terminal', (directory) => broadcast(Channel.APP_MCP_OPEN_TERMINAL, directory))
+  ctx.effect(() => {
+    const onAllClosed = () => ctx.appMcp.view(undefined)
+    app.on('window-all-closed', onAllClosed)
+    return () => void app.off('window-all-closed', onAllClosed)
+  })
+}
+appMcpBridge.inject = ['appMcp']
+
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게 */
 const features: FeatureDefinition[] = [
   { id: 'at', plugin: AtTrigger },
@@ -434,6 +451,7 @@ const features: FeatureDefinition[] = [
     plugin: (ctx) => {
       ctx.plugin(TerminalsService)
       ctx.plugin(terminalsBridge)
+      ctx.plugin(OpenTerminalTool) // 앱 MCP 의 open_terminal — 터미널 칸을 끄면 도구도 목록에서 빠진다
     },
   },
   {
@@ -478,6 +496,10 @@ const features: FeatureDefinition[] = [
         fallbackCwd: userData,
       })
       ctx.plugin(mcpBridge)
+      // 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰) — ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다. 끄는 스위치는 없다
+      ctx.plugin(AppMcpService)
+      ctx.plugin(OpenFileTool)
+      ctx.plugin(appMcpBridge)
     },
   },
 ]

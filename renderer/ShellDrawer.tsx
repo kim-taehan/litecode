@@ -19,16 +19,21 @@ function terminalTheme() {
   return { background: token('--bg'), foreground: token('--text'), cursor: token('--accent'), selectionBackground: token('--accent-soft') }
 }
 
-/** focusSignal 이 바뀌면(⌘↓) 키를 칸으로 가져온다 */
-export function ShellDrawer({ directory, focusSignal, onClose }: { directory: string; focusSignal: number; onClose(): void }) {
+/** focusSignal 이 바뀌면(⌘↓) 키를 칸으로 가져온다. quiet 로 펴면(AI 의 open_terminal, 이슈 #51) 펼 때 키를 가져오지 않는다 —
+ *  입력창에 치던 글과 Enter 가 AI 가 채워 둔 명령으로 가면 안 된다 */
+export function ShellDrawer({ directory, focusSignal, quiet, onClose }: { directory: string; focusSignal: number; quiet?: boolean; onClose(): void }) {
   const t = useT()
   /** 셸 안 문구는 이미 그린 출력이라 다시 그리지 않는다 — 효과는 폴더가 바뀔 때만 다시 돈다 */
   const tRef = useRef(t)
   tRef.current = t
   const host = useRef<HTMLDivElement>(null)
   const screen = useRef<Terminal>(undefined)
+  /** 처음 펼 때의 값만 본다 — 그 뒤 ⌘↓(focusSignal 이 바뀐다)는 늘 키를 가져온다 */
+  const quietOpen = useRef(!!quiet)
+  const openedAt = useRef(focusSignal)
 
   useEffect(() => {
+    if (quietOpen.current && openedAt.current === focusSignal) return
     screen.current?.focus()
   }, [focusSignal])
 
@@ -48,7 +53,7 @@ export function ShellDrawer({ directory, focusSignal, onClose }: { directory: st
     terminal.loadAddon(fit)
     terminal.open(host.current!)
     screen.current = terminal
-    terminal.focus()
+    if (!quietOpen.current) terminal.focus()
 
     /** 화면에 그린 출력의 끝 — 붙기 전에는 모른다 (그동안 온 조각은 모아 둔다) */
     let drawn: number | undefined

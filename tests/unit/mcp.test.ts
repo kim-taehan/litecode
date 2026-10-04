@@ -321,6 +321,46 @@ describe('McpService — 프로젝트 기준 (#43)', () => {
     expect(llm.added['wiki']).toMatchObject({ command: ['/bin/cat'] })
   })
 
+  // 이슈 #51 — `litecode` 는 앱 자신의 MCP 서버(ctx.appMcp) 이름이다. 엔진 설정이 `litecode_*` 도구에 따로 권한을 주므로(계획 모드 허용 등)
+  // 남의 서버가 그 이름으로 붙으면 안 된다 — 내장 서버가 올라와 있지 않아도
+  it('이름 `litecode` 는 예약 — 저장을 거절하고, 폴더 정의·예전에 저장된 앱 서버는 붙이지 않는다(가려짐)', async () => {
+    await fs.writeFile(path.join(tmp, 'mcp.json'), JSON.stringify([{ name: 'litecode', type: 'local', command: ['/bin/cat'], vars: [], enabled: true }]))
+    const { mcp, llm } = await start()
+    expect(() => mcp.save(local('litecode'))).toThrow(/앱이 쓰는 이름/)
+    expect(() => mcp.save({ ...local('litecode'), scope: 'project' }, project)).toThrow(/앱이 쓰는 이름/)
+    mcp.save(local('wiki'))
+    expect(() => mcp.save({ ...local('litecode'), originalName: 'wiki' })).toThrow(/앱이 쓰는 이름/)
+    mcp.save(local('Litecode')) // 엔진의 도구 이름은 대소문자를 가린다 — 다른 이름이다
+
+    await fs.writeFile(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { litecode: { command: '/bin/false' } } }))
+    const listed = await mcp.list(project)
+    expect(listed.filter((entry) => entry.name === 'litecode').map((entry) => [entry.source, entry.shadowed])).toEqual([
+      ['project', true],
+      ['app', true],
+    ])
+    expect(adds(llm).sort()).toEqual(['add proj Litecode', 'add proj wiki'])
+    expect(llm.added['litecode']).toBeUndefined()
+  })
+
+  it('내장 서버 — registerBuiltin 한 정의를 매 턴 붙이고, 정의가 없으면(서버가 안 떴다) 건너뛰고, reattach 하면 다시 붙이고, 내리면 끊는다', async () => {
+    const { mcp, llm } = await start()
+    let url: string | undefined
+    const off = mcp.registerBuiltin('litecode', (workdir) => (url ? { type: 'remote', url: `${url}/${path.basename(workdir)}` } : undefined))
+    await mcp.prepare(project)
+    expect(llm.calls).toEqual([]) // 붙일 것이 없다 — opencode 에 묻지 않는다
+    url = 'http://127.0.0.1:1/mcp'
+    await mcp.prepare(project)
+    await mcp.prepare(project)
+    expect(adds(llm)).toEqual(['add proj litecode'])
+    expect(llm.added['litecode']).toEqual({ type: 'remote', url: 'http://127.0.0.1:1/mcp/proj' }) // timeout 없음
+    mcp.reattach('litecode')
+    await mcp.prepare(project)
+    expect(adds(llm)).toEqual(['add proj litecode', 'add proj litecode'])
+    off()
+    await mcp.prepare(project)
+    expect(llm.calls.at(-1)).toBe('disconnect proj litecode')
+  })
+
   it('고치기·지우기는 그 프로젝트의 전용 서버를 먼저 찾고, 지우면 켜기 값도 같이 지운다', async () => {
     const { mcp } = await start()
     mcp.save({ ...local('db'), scope: 'project' }, project)

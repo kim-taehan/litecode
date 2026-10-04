@@ -14,6 +14,7 @@ import {
   type PanelState,
 } from './filePreviewStore.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
+import { lineJump } from './lineJump.ts'
 import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
 import './filePreview.css'
@@ -80,7 +81,7 @@ function Panel({ state }: { state: PanelState }) {
   const root = useRef<HTMLElement>(null)
   const returnFocus = useRef<Element | null>(null)
   const drag = useRef<{ x: number; width: number; max: number }>(undefined)
-  const { directory, tabs, active, fullscreen } = state
+  const { directory, tabs, active, fullscreen, jump } = state
   // 파일 탭은 한 번 본 뒤부터 계속 마운트 — 다른 탭에 갔다 와도 펼친 폴더·스크롤이 그대로 (dsh keepMounted, 안 본 탭은 미리 안 그린다)
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
@@ -222,7 +223,7 @@ function Panel({ state }: { state: PanelState }) {
         </span>
       </div>
       {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} />}
-      {active !== undefined && <FileView key={active} directory={directory} token={active} />}
+      {active !== undefined && <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />}
     </aside>
   )
 }
@@ -359,12 +360,16 @@ function TreeLevel({
 
 // ── 파일 탭 하나 — 경로 줄 + 본문 ──
 
-function FileView({ directory, token }: { directory: string; token: string }) {
+/** jump — 그 줄로 가서 강조한다 (AI 의 open_file). 줄은 원문의 줄이라 마크다운·HTML 도 원문 보기로 바꾼다 */
+function FileView({ directory, token, jump }: { directory: string; token: string; jump?: { line: number; seq: number } }) {
   const t = useT()
   const features = useFeatures()
   const [preview, setPreview] = useState<FilePreview | 'loading'>('loading')
   const [revision, setRevision] = useState(0)
-  const [source, setSource] = useState(false)
+  const [source, setSource] = useState(!!jump)
+  useEffect(() => {
+    if (jump) setSource(true)
+  }, [jump?.seq])
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -455,7 +460,7 @@ function FileView({ directory, token }: { directory: string; token: string }) {
             <Markdown text={preview.text} directory={directory} />
           </div>
         ) : (
-          <CodeLines text={preview.text} />
+          <CodeLines text={preview.text} jump={jump} />
         )}
       </div>
     </div>
@@ -529,13 +534,26 @@ export function kindOf(file: string, text: string): string {
   return known[ext] ?? ext.toUpperCase()
 }
 
-/** 줄 번호 + 글 — 두 열을 줄 단위 요소로 쪼개지 않는다(1MB 파일도 요소 두 개). 줄바꿈 없이(white-space: pre) 같은 줄 높이라 줄이 맞는다 */
-function CodeLines({ text }: { text: string }) {
+/** 줄 번호 + 글 — 두 열을 줄 단위 요소로 쪼개지 않는다(1MB 파일도 요소 두 개). 줄바꿈 없이(white-space: pre) 같은 줄 높이라 줄이 맞는다.
+ *  jump 가 있으면 그 줄로 스크롤하고 그 줄에 띠를 깐다 — 줄 높이가 같아 자리는 곱셈이다(lineJump.ts). 줄 높이는 줄 번호 열을 재서 안다 */
+function CodeLines({ text, jump }: { text: string; jump?: { line: number; seq: number } }) {
   const lines = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n')
   const numbers = lines.map((_, index) => index + 1).join('\n')
+  const gutter = useRef<HTMLPreElement>(null)
+  const [mark, setMark] = useState<{ line: number; top: number; height: number }>()
+  useLayoutEffect(() => {
+    const column = gutter.current
+    const scroller = column?.closest<HTMLElement>('.file-preview__body')
+    if (!jump || !column || !scroller) return setMark(undefined)
+    const height = column.offsetHeight / lines.length
+    const target = lineJump(jump.line, lines.length, height, scroller.clientHeight, column.offsetTop)
+    setMark({ line: target.line, top: column.offsetTop + target.top, height })
+    scroller.scrollTop = target.scrollTop
+  }, [jump?.seq, jump?.line, text])
   return (
     <div className="file-preview__code">
-      <pre className="file-preview__gutter" aria-hidden="true">
+      {mark && <div className="file-preview__mark" data-line={mark.line} style={{ top: mark.top, height: mark.height }} />}
+      <pre ref={gutter} className="file-preview__gutter" aria-hidden="true">
         {numbers}
       </pre>
       <pre className="file-preview__text">

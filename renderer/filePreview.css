@@ -328,6 +328,7 @@
 
 /* 줄 번호 + 글: 두 pre 가 같은 글꼴·줄 높이로 나란히. 줄 번호는 가로로 밀어도 왼쪽에 붙어 있다 */
 .file-preview__code {
+  position: relative;
   display: flex;
   min-width: 100%;
   width: max-content;
@@ -354,6 +355,16 @@
   color: var(--text-caption);
   background: var(--bg);
   user-select: none;
+}
+
+/* 줄 이동의 강조 띠 (AI 의 open_file, 이슈 #51) — 그 줄 전체 너비. 글 위에 옅게 덮는다(글은 그대로 읽히고 고를 수 있다) */
+.file-preview__mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--accent-soft);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .file-preview__text {

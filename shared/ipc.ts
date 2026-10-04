@@ -116,6 +116,12 @@ export const Channel = {
   REMOVE_MCP: 'mcp:remove',
   SET_MCP_ENABLED: 'mcp:set-enabled',
   TEST_MCP: 'mcp:test',
+  /** 화면 → 메인 (directory?) — 화면이 지금 보여 주는 프로젝트 (앱 MCP 서버의 화면 도구가 본다, 이슈 #51) */
+  APP_MCP_VIEW: 'appMcp:view',
+  /** 메인 → 화면 (directory, path, line?) — AI 가 open_file 을 불렀다 */
+  APP_MCP_OPEN_FILE: 'appMcp:open-file',
+  /** 메인 → 화면 (directory) — AI 가 open_terminal 을 불렀다 (명령은 메인이 이미 채웠다) */
+  APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
 } as const
 
 export interface LitecodeBridge {
@@ -254,6 +260,12 @@ export interface LitecodeBridge {
   setMcpEnabled(name: string, enabled: boolean, directory: string): Promise<void>
   /** 저장하지 않고 붙어 본다 — 도구 목록 또는 사유 */
   testMcp(input: McpServerInput, directory?: string): Promise<McpTestResult>
+  /** 화면이 지금 보여 주는 프로젝트를 알린다 (없으면 undefined) — 앱 MCP 서버의 화면 도구(open_file·open_terminal)는 보고 있는 프로젝트에만 닿는다 */
+  viewProject(directory?: string): Promise<void>
+  /** AI 가 그 프로젝트의 파일을 열라고 했다 — path 는 프로젝트 기준 상대 경로(메인이 프로젝트 안의 파일임을 확인했다), line 은 1부터 */
+  onAppMcpOpenFile(listener: (directory: string, path: string, line?: number) => void): () => void
+  /** AI 가 그 프로젝트의 터미널 칸을 열라고 했다 — 명령은 메인이 이미 채웠다(실행하지 않았다) */
+  onAppMcpOpenTerminal(listener: (directory: string) => void): () => void
 }
 
 declare global {

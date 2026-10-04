@@ -37,6 +37,11 @@ import './llm.ts'
 //   개인 설정 서버는 opencode 가 스스로 띄우므로 끈 프로젝트에서는 매 턴 끊고(disconnect), 다시 켜면 잇는다(connect)
 // - 이름: opencode 인스턴스에서 이름 하나 = 서버 하나다. 앱 서버끼리는 묶음이 달라도 저장할 때 거절하고(같은 프로젝트의 전용 서버·모든 프로젝트
 //   서버·어느 프로젝트든 전용 서버와 겹치는 모든 프로젝트 서버), 폴더 정의는 앱 서버(어느 묶음이든)와 이름이 같으면 붙이지 않는다(shadowed)
+//
+// 내장 서버 (이슈 #51, _workspace/01z_desktop_mcp.md 3-1): 앱 자신이 띄운 MCP 서버(ctx.appMcp)를 registerBuiltin 으로 받아 사용자 서버와 같은
+// 길(매 턴 붙이기·프로젝트별 켜기)로 붙인다. 이름 `litecode` 는 예약이다 — 사용자는 그 이름으로 저장할 수 없고, 폴더 정의·예전에 저장된 앱 서버는
+// 붙이지 않는다(shadowed). 엔진 설정이 `litecode_*` 도구에 따로 권한을 주므로(계획 모드에서도 허용 등) 남의 서버가 그 이름을 쓰면 안 된다.
+// 팝업에는 "모든 프로젝트" 묶음 맨 끝에 읽기 전용 한 줄(주소·토큰은 화면에 안 준다)
 
 declare module 'cordis' {
   interface Context {
@@ -44,7 +49,11 @@ declare module 'cordis' {
   }
 }
 
-export type McpSource = 'app' | 'personal' | 'project'
+export type McpSource = 'app' | 'personal' | 'project' | 'builtin'
+/** 앱 MCP 서버(ctx.appMcp)의 이름 — 모델이 보는 도구는 `litecode_<도구>`. 예약 */
+export const APP_MCP_NAME = 'litecode'
+/** 내장 서버의 그 폴더용 정의 — 아직 붙일 수 없으면(서버가 안 떴다) undefined */
+export type BuiltinMcp = (workdir: string) => EngineMcp | undefined
 /** 팝업의 묶음 — "이 프로젝트만"(앱이 그 프로젝트에 저장한 서버·폴더 정의) / "모든 프로젝트"(앱 서버·개인 설정) */
 export type McpScope = 'project' | 'all'
 
@@ -101,7 +110,7 @@ export interface McpServerSummary {
   /** 앱이 직접 물은 도구 목록 (연결됨일 때) */
   tools?: McpTool[]
   toolsError?: string
-  /** 프로젝트 서버가 앱 서버와 이름이 겹쳐 붙이지 않았다 */
+  /** 프로젝트 서버가 앱 서버와 이름이 겹쳐 붙이지 않았다 (예약 이름 `litecode` 를 쓴 서버도) */
   shadowed?: boolean
 }
 
@@ -165,6 +174,8 @@ export class McpService extends Service {
   private chains = new Map<string, Promise<void>>()
   /** 정의 지문 → 도구 목록 */
   private toolCache = new Map<string, Promise<{ tools?: McpTool[]; error?: string }>>()
+  /** 내장 서버 (이름 → 그 폴더용 정의) */
+  private builtins = new Map<string, BuiltinMcp>()
 
   constructor(
     ctx: Context,
@@ -197,11 +208,13 @@ export class McpService extends Service {
     const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
     const own = mine?.servers ?? []
     const ownNames = new Set(own.map((server) => server.name))
-    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames])
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, APP_MCP_NAME])
+    // 예약 이름으로 저장돼 있던 앱 서버(이 기능 전의 것)는 붙이지 않는다
+    const reserved = (server: McpServerRecord) => server.name === APP_MCP_NAME && { shadowed: true }
     const entries: { summary: McpServerSummary; def?: EngineMcp }[] = [
       ...own.map((server) => ({
-        summary: { ...appSummary(server, 'project', this.secrets[secretKey(server.name, workdir)] ?? {}), enabled: on(server.name, server.enabled) },
-        def: this.engineDef(server, workdir),
+        summary: { ...appSummary(server, 'project', this.secrets[secretKey(server.name, workdir)] ?? {}), enabled: on(server.name, server.enabled), ...reserved(server) },
+        def: reserved(server) ? undefined : this.engineDef(server, workdir),
       })),
       ...(workdir ? projectServers(workdir) : []).map(({ name, def, enabled, origin }) => ({
         summary: { ...readOnlySummary(name, 'project', def), origin, enabled: on(name, enabled), ...(appNames.has(name) && { shadowed: true }) },
@@ -209,11 +222,11 @@ export class McpService extends Service {
       })),
       // 같은 이름의 전용 서버가 있으면(파일을 손으로 고친 경우) 전용 서버가 이긴다 — 모든 프로젝트 것은 이 프로젝트에서 안 보인다
       ...this.servers.filter((server) => !ownNames.has(server.name)).map((server) => ({
-        summary: { ...appSummary(server, 'all', this.secrets[server.name] ?? {}), enabled: on(server.name, server.enabled) },
-        def: this.engineDef(server),
+        summary: { ...appSummary(server, 'all', this.secrets[server.name] ?? {}), enabled: on(server.name, server.enabled), ...reserved(server) },
+        def: reserved(server) ? undefined : this.engineDef(server),
       })),
     ]
-    const known = new Set(entries.map((entry) => entry.summary.name))
+    const known = new Set([...entries.map((entry) => entry.summary.name), APP_MCP_NAME, ...this.builtins.keys()])
     for (const { name, def, enabled } of personalServers(this.opts.env ?? process.env)) {
       if (known.has(name)) continue
       known.add(name)
@@ -222,6 +235,10 @@ export class McpService extends Service {
     const ours = (workdir && this.ever.get(workdir)) || new Set<string>()
     for (const name of Object.keys(status)) {
       if (!known.has(name) && !ours.has(name)) entries.push({ summary: { name, source: 'personal', scope: 'all', vars: [], enabled: on(name, true) } })
+    }
+    // 내장 서버 — 맨 끝에 한 줄. 주소·토큰은 화면에 주지 않는다 (def 는 도구 목록을 묻는 데만 쓴다)
+    if (workdir) {
+      for (const [name, define] of this.builtins) entries.push({ summary: { name, source: 'builtin', scope: 'all', vars: [], enabled: on(name, true) }, def: define(workdir) })
     }
 
     return Promise.all(
@@ -252,6 +269,7 @@ export class McpService extends Service {
     if (scope === 'project' && !workdir) throw new Error(tr('mcp.error.noProject'))
     const owner = scope === 'project' ? workdir : undefined
     const { record, secrets } = this.resolve(input, existing, owner)
+    if (record.name === APP_MCP_NAME) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
     // 이름 하나 = 서버 하나 — 이 프로젝트에서 보이는 앱 서버끼리, 그리고 모든 프로젝트 서버는 어느 프로젝트의 전용 서버와도 겹치지 않게
     if ([...this.servers, ...(scope === 'project' ? mine : [])].some((server) => server.name === record.name && server !== existing)) {
       throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
@@ -326,19 +344,39 @@ export class McpService extends Service {
     return next
   }
 
+  /** 내장 서버를 올린다 — 돌려준 함수가 내린다 (ctx.effect 로 건다). 매 턴 그 폴더용 정의를 물어 사용자 서버와 같은 길로 붙인다 */
+  registerBuiltin(name: string, define: BuiltinMcp): () => void {
+    this.builtins.set(name, define)
+    this.reattach(name)
+    return () => {
+      if (this.builtins.get(name) === define) this.builtins.delete(name) // 붙어 있던 폴더에서는 다음 붙이기가 끊는다
+    }
+  }
+
+  /** 그 서버를 다음 붙이기에서 다시 붙이게 한다 — 엔진은 붙일 때만 도구 목록을 읽는다 (내장 서버의 도구가 바뀌었을 때) */
+  reattach(name: string): void {
+    this.forget(name)
+    this.toolCache.clear()
+  }
+
   private async attach(workdir: string): Promise<void> {
     const mine = this.projects[workdir]
     const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
     const own = mine?.servers ?? []
     const ownNames = new Set(own.map((server) => server.name))
-    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames])
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, APP_MCP_NAME])
     const folder = projectServers(workdir)
     const wanted = new Map<string, EngineMcp>()
     for (const { name, def, enabled } of folder) if (on(name, enabled) && !appNames.has(name)) wanted.set(name, def)
     for (const server of this.servers) if (!ownNames.has(server.name) && on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server))
     for (const server of own) if (on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server, workdir))
+    wanted.delete(APP_MCP_NAME) // 예약 이름으로 저장돼 있던 앱 서버 — 내장 서버만 그 이름을 쓴다
+    for (const [name, define] of this.builtins) {
+      const def = on(name, true) ? define(workdir) : undefined
+      if (def) wanted.set(name, def)
+    }
     // 이 프로젝트에서 끈 이름 중 앱·폴더 정의가 아닌 것 = 개인 설정 서버 (opencode 가 스스로 띄운다)
-    const ours = new Set([...appNames, ...folder.map((server) => server.name)])
+    const ours = new Set([...appNames, ...folder.map((server) => server.name), ...this.builtins.keys()])
     const off = Object.keys(mine?.enabled ?? {}).filter((name) => !mine!.enabled[name] && !ours.has(name))
     const paused = this.paused.get(workdir) ?? new Set<string>()
     const record = this.attached.get(workdir) ?? new Map<string, string>()
@@ -350,7 +388,8 @@ export class McpService extends Service {
       [...wanted].map(async ([name, def]) => {
         const print = fingerprint(def)
         if (name in status && record.get(name) === print) return
-        await this.ctx.llm.mcpAdd(workdir, name, { ...def, timeout: def.timeout ?? CONNECT_TIMEOUT_MS })
+        // 내장 서버엔 timeout 을 주지 않는다 — 엔진에선 이 값이 도구 호출 기한도 된다 (01z 1-4)
+        await this.ctx.llm.mcpAdd(workdir, name, this.builtins.has(name) ? def : { ...def, timeout: def.timeout ?? CONNECT_TIMEOUT_MS })
         record.set(name, print)
         this.ever.set(workdir, (this.ever.get(workdir) ?? new Set()).add(name))
       }),
