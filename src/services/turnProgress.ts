@@ -26,7 +26,7 @@
 
 import { toolDiffs } from './toolDiffs.ts'
 import { skillSource } from '../../shared/skills.ts'
-import type { TurnItem, Subtask, ToolSkill, McpToolRef } from '../../shared/contract.ts'
+import type { TurnItem, Subtask, ToolSkill, McpToolRef, TodoItem } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { TurnItem, Subtask, ToolSkill, McpToolRef } from '../../shared/contract.ts'
@@ -392,6 +392,8 @@ function partItem(part: EnginePart, done: boolean, root: string, mcp: McpToolRes
     item.result = state.output ?? ''
     const diffs = toolDiffs(item.name, input, state.metadata, root)
     if (diffs) item.diffs = diffs
+    const todos = item.name === 'todowrite' ? todoItems(state.metadata?.['todos']) : undefined
+    if (todos) item.todos = todos
   }
   else if (status === 'running' && typeof state.metadata?.output === 'string' && state.metadata.output !== '') item.result = state.metadata.output // bash 실시간 출력
   if (status === 'error') item.error = state.error || '알 수 없는 오류'
@@ -403,6 +405,23 @@ function partItem(part: EnginePart, done: boolean, root: string, mcp: McpToolRes
     item.summary = skillName
   }
   return item
+}
+
+// 할 일 목록 (todowrite, 이슈 #83 실측 2026-10-05 opencode 1.18.18 — _workspace/01ae_todo.md):
+// - 인자 {todos:[{content, status, priority}]} — id 없음. 호출마다 목록 전체를 보내고 엔진이 통째로 갈아 끼운다 (일부만 보내면 나머지는 사라진다 — 앱이 합치지 않는다)
+// - 정본은 completed 파트의 state.metadata.todos (그 시점 목록 전체). ⚠️ running 의 input.todos 는 쓰지 않는다 — 틀린 인자도 running 에 실린 뒤
+//   error 가 되고 그때 엔진 목록은 안 바뀐다 (3/3)
+// - status·priority 는 엔진이 검사하지 않는 문자열이다("done"·"urgent" 가 그대로 저장된다) → 아는 넷(pending·in_progress·completed·cancelled) 밖은 pending
+// - 빈 목록([])도 성공이다
+const TODO_STATUS: Record<string, TodoItem['status']> = { in_progress: 'active', completed: 'done', cancelled: 'cancelled' }
+
+/** 끝난 todowrite 파트의 metadata.todos → 중립 목록 (배열이 아니면 undefined). priority 는 버린다 — 화면에 쓸 근거가 없다 */
+function todoItems(raw: unknown): TodoItem[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  return raw.map((entry: unknown) => {
+    const { content, status } = (entry && typeof entry === 'object' ? entry : {}) as { content?: unknown; status?: unknown }
+    return { text: typeof content === 'string' ? content : '', status: (typeof status === 'string' && TODO_STATUS[status]) || 'pending' }
+  })
 }
 
 /** 도구 줄의 한 줄 요약 — bash 는 description(필수 인자, 01g), 없으면 command. 그 밖의 도구는 흔한 인자 하나 */

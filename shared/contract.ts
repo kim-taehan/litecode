@@ -21,8 +21,9 @@ export interface FileDiff {
 export type TurnItem =
   | { kind: 'think'; id: string; text: string; done: boolean }
   | { kind: 'text'; id: string; text: string; done: boolean }
-  /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글 */
-  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef }
+  /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글.
+   *  todos: 성공한 할 일 목록 쓰기(todowrite)에만 — 그 시점의 목록 전체 (이슈 #83) */
+  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef; todos?: TodoItem[] }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
   | { kind: 'context'; id: string; text: string }
   /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
@@ -55,6 +56,13 @@ export interface Subtask {
 export interface ToolSkill {
   name: string
   source?: SkillSource
+}
+
+/** AI 의 할 일 목록 항목 하나 (이슈 #83). 항목에 id 가 없다 — 자리(index)가 키다 (같은 글 두 줄도 있을 수 있다).
+ *  AI 가 쓸 때마다 목록 전체가 통째로 바뀐다. 턴이 끝나도 active 는 그대로 남는다 — 화면이 턴 상태와 함께 "멈춤" 으로 그린다 */
+export interface TodoItem {
+  text: string
+  status: 'pending' | 'active' | 'done' | 'cancelled'
 }
 
 /** MCP 도구 호출의 서버·도구 (이슈 #28) — 화면이 "MCP · 서버 · 도구" 로 그린다 */

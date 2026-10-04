@@ -119,6 +119,17 @@ export const ko = {
   'chat.subtaskStopped': '중단됨',
   'chat.subtaskEmpty': '아직 기록이 없습니다',
   'chat.subtaskTokens': '토큰 {count}',
+  // AI 의 할 일 목록 (todowrite, 이슈 #83) — 대화 안 줄과 입력 카드 위 줄
+  'todo.title': '할 일',
+  'todo.progress': '완료 {done}/{total}',
+  'todo.empty': '목록 비움',
+  'todo.now': '지금: {text}',
+  'todo.stalled': '멈춤: {text}',
+  'todo.status.pending': '대기',
+  'todo.status.active': '진행 중',
+  'todo.status.stalled': '멈춤',
+  'todo.status.done': '완료',
+  'todo.status.cancelled': '취소',
   // 도는 작업 목록 — 대화 머리 버튼 (이슈 #32)
   'jobs.button': '작업 {count}',
   'jobs.buttonLabel': '도는 작업 {count}개',
