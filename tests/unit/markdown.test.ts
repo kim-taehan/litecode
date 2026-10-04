@@ -48,9 +48,21 @@ describe('Markdown', () => {
     expect(out).toContain('aria-label="복사"')
     expect(out).toMatch(/aria-pressed="true" aria-label="줄바꿈 끄기"/)
     expect(out).toContain('data-wrap="true"')
-    expect(out).toContain('<pre><code>const a = 1 &lt; 2</code></pre>')
+    // 아는 언어는 글자에 문법 색(이슈 #81) — 토큰은 요소로, 글자는 그대로
+    expect(out).toContain('<pre><code><span class="hljs-keyword">const</span> a = <span class="hljs-number">1</span> &lt; <span class="hljs-number">2</span></code></pre>')
     // 언어가 없으면 머리에 "코드 블록"
     expect(html('```\nplain\n```')).toContain('<span class="md-code__lang">코드 블록</span>')
+  })
+
+  it('언어 표시가 없거나 모르는 언어의 코드 블록은 색 없이 글자 그대로다', () => {
+    expect(html('```\nconst a = 1\n```')).toContain('<pre><code>const a = 1</code></pre>')
+    expect(html('```whatever\nconst a = 1\n```')).toContain('<pre><code>const a = 1</code></pre>')
+  })
+
+  it('코드 블록 안의 HTML 은 색을 입혀도 요소가 되지 않는다', () => {
+    const out = html('```html\n<img src=x onerror="window.__pwned=1">\n```')
+    expect(out).not.toMatch(/<img/)
+    expect(out).toContain('hljs-name')
   })
 
   it('원문 HTML 은 요소가 아니라 글자로 보인다', () => {

@@ -1,0 +1,86 @@
+/* 문법 색 (이슈 #81) — highlight.js 가 붙이는 클래스(hljs-*)에 색만 준다. 바탕은 건드리지 않는다(코드 블록·미리보기·diff 줄의 바탕 그대로).
+   색은 GitHub 의 라이트·다크 팔레트를 따랐다 — 시안 없이 구현자가 고른 값이다. 다크는 styles.css 와 같은 prefers-color-scheme 쿼리
+   (설정 > 일반의 테마가 nativeTheme 으로 이 쿼리를 움직인다). 겹친 범위는 가장 안쪽 클래스 하나만 온다(highlight.ts flatten) */
+:root {
+  --hl-keyword: #cf222e;
+  --hl-function: #8250df;
+  --hl-constant: #0550ae;
+  --hl-string: #0a3069;
+  --hl-builtin: #953800;
+  --hl-comment: #6e7781;
+  --hl-tag: #116329;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hl-keyword: #ff7b72;
+    --hl-function: #d2a8ff;
+    --hl-constant: #79c0ff;
+    --hl-string: #a5d6ff;
+    --hl-builtin: #ffa657;
+    --hl-comment: #8b949e;
+    --hl-tag: #7ee787;
+  }
+}
+
+.hljs-doctag,
+.hljs-keyword,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-variable.language_ {
+  color: var(--hl-keyword);
+}
+
+.hljs-title {
+  color: var(--hl-function);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-literal,
+.hljs-meta,
+.hljs-number,
+.hljs-operator,
+.hljs-variable,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--hl-constant);
+}
+
+.hljs-regexp,
+.hljs-string {
+  color: var(--hl-string);
+}
+
+.hljs-built_in,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--hl-builtin);
+}
+
+.hljs-comment,
+.hljs-code,
+.hljs-formula {
+  color: var(--hl-comment);
+}
+
+.hljs-name,
+.hljs-quote,
+.hljs-selector-tag,
+.hljs-selector-pseudo {
+  color: var(--hl-tag);
+}
+
+.hljs-section {
+  color: var(--hl-constant);
+  font-weight: 600;
+}
+
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* ```diff 블록 — 앱의 diff 색 */
+.hljs-addition { color: var(--diff-add); }
+.hljs-deletion { color: var(--diff-del); }
