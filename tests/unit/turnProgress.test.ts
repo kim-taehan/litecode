@@ -369,3 +369,38 @@ describe('할 일 목록 (todowrite, 이슈 #83)', () => {
     expect(tracker.observe(...updated({ type: 'tool', id: 'p1', tool: 'todowrite', state: { status: 'completed', input: { todos }, output: '[]', metadata: { todos } } }))).toMatchObject({ status: 'done', todos: mapped })
   })
 })
+
+// 이슈 #91 — 결과물 선언(앱 MCP 의 present, 엔진 이름 litecode_present). 엔진은 MCP 결과의 구조화된 내용을 파트에 남기지 않는다 →
+// 도구가 "전부 받아들였을 때만 성공" 이므로 completed 파트의 인자가 곧 받아들인 목록이다 (appMcp/tools/present.ts)
+describe('결과물 선언 (litecode_present, 이슈 #91)', () => {
+  const root = '/work/proj'
+  const files = [{ path: 'report.md', title: ' Report ' }, { path: '/work/proj/src/a.ts' }, { path: './out/../out/index.html', title: '' }]
+  const part = (state: Record<string, unknown>, tool = 'litecode_present') => ({ type: 'tool', id: 'p1', messageID: 'm', tool, state })
+
+  it('성공한 호출의 인자를 프로젝트 기준 상대 경로로 싣는다 — 절대·./.. 경로는 풀고, 제목은 다듬고 빈 제목은 뺀다', () => {
+    const [item] = messageItems([part({ status: 'completed', input: { files }, output: 'Presented 3 files…' })], root)
+    expect(item).toMatchObject({ kind: 'tool', status: 'done', mcp: { server: 'litecode', tool: 'present' } })
+    expect((item as { presented: object[] }).presented).toEqual([{ path: 'report.md', title: 'Report' }, { path: 'src/a.ts' }, { path: 'out/index.html' }])
+  })
+
+  it('running·error 파트엔 없다 — 거절된 호출의 인자는 결과물이 아니다', () => {
+    expect(messageItems([part({ status: 'running', input: { files }, time: { start: 1 } })], root)[0]).not.toHaveProperty('presented')
+    expect(messageItems([part({ status: 'error', input: { files }, error: 'Nothing was presented.' })], root)[0]).not.toHaveProperty('presented')
+  })
+
+  it('다른 도구의 files 인자는 보지 않고, 모양이 틀린 항목은 버린다', () => {
+    expect(messageItems([part({ status: 'completed', input: { files }, output: '' }, 'other_present')], root)[0]).not.toHaveProperty('presented')
+    const [item] = messageItems([part({ status: 'completed', input: { files: [{ path: 'a.md' }, { title: 'x' }, 'b.md', { path: 3 }] }, output: '' })], root)
+    expect((item as { presented: object[] }).presented).toEqual([{ path: 'a.md' }])
+    expect(messageItems([part({ status: 'completed', input: { files: 'a.md' }, output: '' })], root)[0]).not.toHaveProperty('presented')
+  })
+
+  it('실시간도 같은 길 — completed 가 오면 그 줄에 실린다', () => {
+    const tracker = new TurnTracker(root)
+    expect(tracker.observe(...updated({ type: 'tool', id: 'p1', tool: 'litecode_present', state: { status: 'running', input: { files } } }))).not.toHaveProperty('presented')
+    expect(tracker.observe(...updated({ type: 'tool', id: 'p1', tool: 'litecode_present', state: { status: 'completed', input: { files }, output: 'ok' } }))).toMatchObject({
+      status: 'done',
+      presented: [{ path: 'report.md', title: 'Report' }, { path: 'src/a.ts' }, { path: 'out/index.html' }],
+    })
+  })
+})

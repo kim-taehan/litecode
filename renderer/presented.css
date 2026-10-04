@@ -1,0 +1,66 @@
+/* 턴 끝 "결과물" 카드 (Presented.tsx, 이슈 #91) — 답 아래, "AI 가 고친 파일" 카드 위. 치수는 그 카드(changedFiles.css)와 같게,
+   색은 styles.css 토큰만 (라이트·다크 공통) */
+
+.presented {
+  margin-top: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 20px;
+  overflow: hidden;
+}
+
+.presented__head {
+  padding: 8px 12px;
+  border-bottom: 0.5px solid var(--border-light);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.presented__list {
+  margin: 0;
+  padding: 4px 6px;
+  list-style: none;
+}
+
+.presented__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.presented__row:hover { background: var(--fill-hover); }
+
+.presented__icon {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.presented__name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.presented__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-caption);
+}
