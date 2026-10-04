@@ -4,11 +4,11 @@
 // 이벤트 이름·data 는 shared/remote.ts 의 RemoteEventMap 과 같은 모양이다 — 나중에 ctx.remote 가 그대로 내보낸다.
 // 데스크탑 화면에만 필요한 것(목록 정보 conversation, 대기열의 held·attachments, 지운 대화 removed)은 **덧붙인 필드**로만 싣는다.
 
-import type { Attachment, Attention, Conversation, HistoryMessage, PickedAttachment, TurnItem, TurnUsage } from './contract.ts'
+import type { Attachment, Attention, Conversation, HistoryMessage, MessageOrigin, PickedAttachment, TurnItem, TurnUsage } from './contract.ts'
 import type { Mode } from './modes.ts'
 
-/** 누가 보냈나 — 지금은 사람('user')뿐이다. 다른 대화가 보낸 지시는 `session:<대화 id>` (데스크탑 MCP 라운드 ③),
- *  짝지은 폰이 보낸 것은 `device:<기기 id>` (ctx.remote, 이슈 #56) */
+/** 누가 보냈나 — 사람('user'), 다른 대화가 보낸 지시 `session:<보낸 대화 id>` (이슈 #55),
+ *  짝지은 폰이 보낸 것 `device:<기기 id>` (ctx.remote, 이슈 #56) */
 export type ChatOrigin = 'user' | `session:${string}` | `device:${string}`
 
 export interface ChatModel {
@@ -31,6 +31,10 @@ export interface QueuedSend {
   project?: string
   /** 없으면 'user' */
   origin?: ChatOrigin
+  /** origin 이 다른 대화일 때 — 보낸 대화 (말풍선 딱지·대기열 줄에 보인다). 화면(IPC)이 보낸 것에는 없다 */
+  from?: MessageOrigin
+  /** 새 대화의 제목 (start_session). 없으면 첫 메시지의 첫 줄 */
+  title?: string
 }
 
 export interface SendResult {
@@ -50,8 +54,9 @@ export interface ChatEventMap {
   'turn.attention': { cid: string; requests: Attention[] }
   /** 턴이 끝났다 — message 는 답(실패·중단이면 error). usage 는 이 턴 것, conversation 은 합산·저장한 뒤의 목록 정보(지워졌으면 없다) */
   'turn.ended': { cid: string; message: HistoryMessage; usage?: TurnUsage; outcome: TurnOutcome; conversation?: Conversation }
-  /** 대기열이 바뀌었다 — items 는 줄마다 보일 글. held: 사용자가 턴을 멈춰 붙잡힌 대기열(되돌리기를 기다린다). attachments: 쌓인 첨부 칩 */
-  'queue.changed': { cid: string; items: string[]; held: boolean; attachments: Attachment[] }
+  /** 대기열이 바뀌었다 — items 는 줄마다 보일 글. held: 사용자가 턴을 멈춰 붙잡힌 대기열(되돌리기를 기다린다). attachments: 쌓인 첨부 칩.
+   *  sources: items 와 같은 순서로 그 줄을 보낸 대화 (사람이 친 줄은 null) — 이슈 #55 */
+  'queue.changed': { cid: string; items: string[]; held: boolean; attachments: Attachment[]; sources?: (MessageOrigin | null)[] }
   /** 그 프로젝트의 대화 목록이 바뀌었다. removed: 보관 개수를 넘어 지워진 대화 */
   'conversations.changed': { project: string; removed: string[] }
 }

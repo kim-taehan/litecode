@@ -8,7 +8,8 @@ import { MODE_AGENT, type EngineConnection, type EngineMcp } from './engine.ts'
 import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
-import { mcpToolOf, messageItems, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
+import { mcpToolOf, messageItems, sanitizeMcpName, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolRef, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
+import { awaitCaller, findCaller, ToolCalls, type ToolCaller } from './toolCalls.ts'
 import { projectInstructions } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
@@ -153,6 +154,8 @@ export const AGENT_LIST_TIMEOUT_MS = 10_000
 /** 한 턴에 자동 요약이 이만큼 넘게 돌면 멈춘다 — 레거시는 요약 뒤 스스로 "Continue" 턴을 돌리고, 모델 한도가 작으면(한도 − 출력 한도가 프롬프트보다
  *  작으면 — renderer/compaction.ts) 요약 → 다시 넘침이 끝없이 돈다 (01w 자동 요약 행, 가짜 LLM 30초에 10회 이상). 출력 한도를 넣은 뒤(#27)로는 안전망. 요약 줄·이음 답은 TurnScope */
 export const MAX_COMPACTIONS_PER_TURN = 3
+/** MCP 호출 요청을 받고 그 running 도구 파트를 기다리는 한도 — 이벤트는 요청 1~3ms 뒤에 온다 (01z 1-2, 10/10) */
+export const CALLER_WAIT_MS = 2_000
 /** 구독을 걸고 server.connected 를 기다리는 한도 — 헤더와 함께 바로 온다(01w) */
 const CONNECT_TIMEOUT_MS = 10_000
 /** 엔진 재시작·크래시로 끊긴 턴의 사유 — 지금 언어로 (그래서 상수가 아니다. 중단 판정은 문구가 아니라 interrupted 로 한다) */
@@ -188,8 +191,9 @@ export class LlmService extends Service {
   private declined = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
   private watchers = new Map<string, { answered(requestId: string): void }>()
-  /** 도는 턴의 진행 줄과 폴더 — stopSubtask 가 하위 작업 줄 id 로 그 자식 세션을 찾는다. 턴이 끝나면 지운다 */
-  private running = new Set<{ tracker: TurnTracker; workdir: string }>()
+  /** 도는 턴의 진행 줄과 폴더 — stopSubtask 가 하위 작업 줄 id 로 그 자식 세션을 찾는다. calls 는 그 턴의 도구 호출 장부 (callerOf·승인 기록).
+   *  턴이 끝나면 지운다 */
+  private running = new Set<{ tracker: TurnTracker; workdir: string; sessionId: string; calls: ToolCalls }>()
   /** 폴더(realpath) → 마지막으로 본 그 인스턴스의 MCP 서버 이름 — 도구 이름 `<서버>_<도구>` 를 가른다 (mcpTool) */
   private mcpServers = new Map<string, string[]>()
 
@@ -409,10 +413,11 @@ export class LlmService extends Service {
       let admitted!: (sent: boolean) => void
       const scope = new TurnScope(id, userMessageId)
       const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
-      const live = { tracker, workdir }
+      const calls = new ToolCalls()
+      const live = { tracker, workdir, sessionId: id, calls }
       this.running.add(live)
-      const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention)
-      const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop)
+      const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention, calls)
+      const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop, calls)
       try {
         await events.connected
         if (stop?.aborted) {
@@ -685,6 +690,15 @@ export class LlmService extends Service {
     return false
   }
 
+  /** 앱 MCP 서버가 받은 도구 호출을 누가 불렀나 (이슈 #55 — 요청에는 없다, 01z 1-2). 그 폴더(realpath)의 도는 턴에서 같은 도구·같은 인자로 running 인
+   *  호출을 찾는다 — running 이벤트가 요청보다 1~3ms 늦을 수 있어 waitMs 까지 기다린다. 못 찾았거나(앱이 돌린 턴의 호출이 아니다) 둘 이상이라
+   *  가를 수 없으면 undefined. 찾은 호출은 소진한다(같은 호출이 두 번 짝이 되지 않는다). child: 하위 작업이 불렀다. approved: 사용자가 앱의
+   *  승인 카드에서 허용했다(reply) — 엔진 API 로 스스로 허용한 호출은 false 다. 도구 이름 규칙(`<서버>_<도구>`)은 엔진의 것이라 여기서 만든다 */
+  callerOf(directory: string, ref: McpToolRef, args: Record<string, unknown>, waitMs = CALLER_WAIT_MS): Promise<ToolCaller | undefined> {
+    const tool = `${sanitizeMcpName(ref.server)}_${sanitizeMcpName(ref.tool)}`
+    return awaitCaller(() => findCaller(this.running, directory, tool, args), waitMs)
+  }
+
   /** 그 폴더의 /event 를 구독해 이 턴(scope)의 이벤트로 진행 줄·사용량·결과를 모은다. connected 는 server.connected 를 받으면 풀린다 — 그 뒤에 보내야
    *  첫 이벤트를 놓치지 않는다(재생이 없다). result 는 턴이 끝나면(성공/실패/중단 모두) 풀린다.
    *  끝: 이 턴 user 메시지를 본 뒤의 session.idle. 이 user 메시지를 보기 전의 idle 은 앞 턴(중지 뒤 두 번째 idle 등)의 것이다.
@@ -699,6 +713,7 @@ export class LlmService extends Service {
     declined: ReadonlySet<string>,
     onAttentionSignal: () => void,
     userStop?: AbortSignal,
+    calls?: ToolCalls,
   ): { connected: Promise<void>; result: Promise<TurnOutcome>; stop: () => void } {
     const sessionId = scope.sessionId
     const controller = new AbortController()
@@ -772,6 +787,7 @@ export class LlmService extends Service {
             const item = tracker.observe(event.type, props)
             if (item) onProgress?.(item)
             const part = props['part'] as EnginePart | undefined
+            calls?.observe(part, false)
             if (part?.type === 'tool' && part.state?.status === 'error' && part.callID && declined.has(part.callID)) declinedEnd = true
           }
         }
@@ -782,6 +798,7 @@ export class LlmService extends Service {
       if (event.type === 'session.created' && seenUser && about?.parentID === sessionId) return tracker.adoptChild(about.id)
       if (tracker.isChild(props['sessionID'] ?? about?.sessionID)) {
         if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal()
+        if (event.type === 'message.part.updated') calls?.observe(props['part'] as EnginePart | undefined, true) // 하위 작업이 부른 도구
         const item = tracker.child(event.type, props)
         if (item) onProgress?.(item)
         return
@@ -873,6 +890,7 @@ export class LlmService extends Service {
     scope: TurnScope,
     tracker: TurnTracker,
     onAttention: ((requests: Attention[]) => void) | undefined,
+    calls?: ToolCalls,
   ): { refresh(): void; stop(): void } {
     let pending: Attention[] = []
     let stopped = false
@@ -915,7 +933,17 @@ export class LlmService extends Service {
       const next: Attention[] = [
         ...permissions.map((entry): Attention => {
           const ref = mcp(entry.permission)
-          return { kind: 'permission', id: entry.id, ...origin(entry), action: entry.permission, resources: entry.patterns ?? [], ...(ref && { mcp: ref }) }
+          // 묻는 이벤트에는 인자가 없다 — 그 순간 그 callID 의 파트가 running + input 이라 이어 붙인다 (01z 1-3, 3/3). 카드가 대상·보낼 글을 그린다
+          const input = ref && entry.tool?.callID ? calls?.inputOf(entry.tool.callID) : undefined
+          return {
+            kind: 'permission',
+            id: entry.id,
+            ...origin(entry),
+            action: entry.permission,
+            resources: entry.patterns ?? [],
+            ...(ref && { mcp: ref }),
+            ...(input !== undefined && { input: JSON.stringify(input) }),
+          }
         }),
         ...questions.map((entry): Attention => ({ kind: 'question', id: entry.id, ...origin(entry), questions: entry.questions })),
       ]
@@ -939,7 +967,9 @@ export class LlmService extends Service {
 
   /** 카드의 답을 엔진에 보낸다 — 레거시 POST /permission/{id}/reply·/question/{id}/reply|reject (?directory= 필수 — 빠지면 404 이고 턴이 멈춘다, 01w).
    *  권한: once|reject. 질문: 질문마다 고른 답(빈 답은 막는다 — opencode 는 검증하지 않는다) 또는 reject. 거절은 그 도구 호출을 적어 둔다 —
-   *  그 도구가 error 로 끝나고 오는 idle 이 거절로 끝난 턴이다. 이미 풀렸거나 모르는 요청이면 던진다 */
+   *  그 도구가 error 로 끝나고 오는 idle 이 거절로 끝난 턴이다. 이미 풀렸거나 모르는 요청이면 던진다.
+   *  **`always` 는 보내지 않는다** — 그 폴더의 모든 세션에서 더는 묻지 않게 된다 (01z 1-3).
+   *  허용(once)한 도구 호출은 그 턴의 장부에 적는다 — 앱 MCP 서버가 "사용자가 앱에서 누른 허용" 만 받게 (callerOf 의 approved, 01z 1-4) */
   async reply(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void> {
     const request = this.requests.get(requestId)
     if (!request || request.sessionId !== sessionId) throw new Error(tr('error.attentionGone'))
@@ -953,6 +983,8 @@ export class LlmService extends Service {
     // 하위 작업의 요청을 거절하면 그 자식만 그 도구 오류로 이어 가고 부모 턴은 계속 돈다 — 부모 턴의 "거절로 끝남" 이 아니다
     const declined = answer === 'reject' && request.callID && request.sessionId === request.turn ? this.declined.get(sessionId) : undefined
     declined?.add(request.callID!) // 보내기 전에 — 도구 error 가 응답보다 먼저 올 수 있다
+    const approving = answer === 'once' && request.kind === 'permission' && request.callID ? [...this.running].find((live) => live.sessionId === request.turn)?.calls : undefined
+    approving?.approve(request.callID!) // 보내기 전에 — 허용된 도구의 MCP 호출이 응답보다 먼저 올 수 있다
     const base = `${conn.url}/${request.kind}/${requestId}`
     const query = at(request.directory)
     const json = { ...conn.headers, 'content-type': 'application/json' }
@@ -964,6 +996,7 @@ export class LlmService extends Service {
           : await fetch(`${base}/reply?${query}`, { method: 'POST', headers: json, body: JSON.stringify({ answers: answer }) })
     if (!res.ok) {
       declined?.delete(request.callID!)
+      approving?.revoke(request.callID!)
       throw new Error(tr('error.attentionReply', { status: res.status }))
     }
     this.requests.delete(requestId)

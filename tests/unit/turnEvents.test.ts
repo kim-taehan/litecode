@@ -15,7 +15,12 @@ import { translate } from '../../shared/i18n/index.ts'
 // {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
 // (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask'
+
+/** 'mcpask' 턴이 묻는 앱 MCP 도구 호출의 인자 (이슈 #55) */
+const MCP_ARGS = { session: 'c-1a2b3c4d', message: 'fix the tests' }
+/** 'mcpask' 에서 허용 뒤 도구가 끝나기까지 — 그 사이에 MCP 호출이 앱 서버에 닿는다 */
+const MCP_CALL_MS = 250
 
 /** 'silent' 턴이 끝 이벤트까지 /event 에 아무것도 안 보내는 시간 */
 const SILENT_MS = 1_500
@@ -100,9 +105,13 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'error', input: {}, error: 'The user rejected permission to use this specific tool call.' } })
           return idle()
         }
-        part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'completed', input: {}, output: 'ok' } })
-        answer('done')
-        idle()
+        const finish = () => {
+          part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'completed', input: {}, output: 'ok' } })
+          answer('done')
+          idle()
+        }
+        if (ending === 'mcpask') setTimeout(finish, MCP_CALL_MS)
+        else finish()
       })
     }
     // 중지: 200 true → session.error(MessageAbortedError) → idle 두 번 (01w 8회)
@@ -188,6 +197,12 @@ async function fakeOpencode(ending: Ending): Promise<string> {
             if (ending === 'permission') pending.permission = [{ id: 'per_old', sessionID: 'ses_1', permission: 'bash', patterns: ['old'], tool: { messageID: 'msg_stopped', callID: 'c0' } }, { id: 'per_1', sessionID: 'ses_1', permission: 'bash', patterns: ['ls'], metadata: {}, always: ['ls *'], tool }]
             else pending.question = [{ id: 'que_1', sessionID: 'ses_1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'SQLite' }] }], tool }]
             emit(`${ending}.asked`, { id: ending === 'permission' ? 'per_1' : 'que_1' })
+          }
+          // 앱 MCP 도구의 승인 (01z 1-3): 묻는 이벤트에는 인자가 없고, 그 순간 그 callID 의 파트가 running + input 이다
+          if (ending === 'mcpask') {
+            part({ type: 'tool', id: 'prt_b', tool: 'litecode_send_to_session', callID: 'call_1', state: { status: 'running', input: MCP_ARGS } })
+            pending.permission = [{ id: 'per_1', sessionID: 'ses_1', permission: 'litecode_send_to_session', patterns: ['*'], metadata: {}, always: ['*'], tool: { messageID: A, callID: 'call_1' } }]
+            emit('permission.asked', { id: 'per_1' })
           }
           if (ending === 'cut') {
             closer.abort(new Error('engine exited')) // 엔진이 끝나면 closed 가 먼저 걸리고 소켓이 닫힌다
@@ -481,6 +496,56 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
     expect(await turn).toMatchObject({ ok: true, declined: true })
     expect(errors).toHaveLength(5)
     expect(calls.filter((call) => call.includes('/question/'))).toEqual(['/question/que_1/reject {}'])
+  })
+})
+
+describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)', () => {
+  const SEND = { server: 'litecode', tool: 'send_to_session' }
+
+  it('승인 카드에 그 도구 호출의 인자가 실린다(callID 로 running 파트에서). 앱에서 허용한 호출은 approved 이고 한 번 쓰면 소진된다', async () => {
+    const url = await fakeOpencode('mcpask')
+    const { llm } = await start(url)
+    const shown: Attention[][] = []
+    let caller: Awaited<ReturnType<LlmService['callerOf']>>
+    let again: Awaited<ReturnType<LlmService['callerOf']>>
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      shown.push(requests)
+      if (!requests[0]) return
+      void llm.reply('ses_1', requests[0].id, 'once').then(async () => {
+        caller = await llm.callerOf(directory, SEND, MCP_ARGS)
+        again = await llm.callerOf(directory, SEND, MCP_ARGS, 30)
+      })
+    })
+    expect(result.ok).toBe(true)
+    expect(shown[0]).toEqual([
+      { kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'litecode_send_to_session', resources: ['*'], mcp: SEND, input: JSON.stringify(MCP_ARGS) },
+    ])
+    expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: true })
+    expect(again).toBeUndefined()
+    expect(calls).toContain('/permission/per_1/reply {"reply":"once"}') // always 는 보내지 않는다
+  })
+
+  it('엔진 API 로 스스로 허용한 호출(앱의 reply 를 안 거침)은 찾아도 approved 가 아니다. 인자가 다르면 못 찾는다', async () => {
+    const url = await fakeOpencode('mcpask')
+    const { llm } = await start(url)
+    let caller: Awaited<ReturnType<LlmService['callerOf']>>
+    let other: Awaited<ReturnType<LlmService['callerOf']>>
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      if (!requests[0]) return
+      // 폴더 코드가 엔진 비밀번호로 직접 허용한 것처럼
+      void fetch(`${url}/permission/per_1/reply?directory=${encodeURIComponent(directory)}`, { method: 'POST', body: '{"reply":"once"}' }).then(async () => {
+        other = await llm.callerOf(directory, SEND, { ...MCP_ARGS, message: 'something else' }, 30)
+        caller = await llm.callerOf(directory, SEND, MCP_ARGS)
+      })
+    })
+    expect(result.ok).toBe(true)
+    expect(other).toBeUndefined()
+    expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: false })
+  })
+
+  it('도는 턴이 없으면(앱이 돌린 턴의 호출이 아니다) 못 찾는다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    expect(await llm.callerOf(directory, SEND, MCP_ARGS, 30)).toBeUndefined()
   })
 })
 

@@ -9,6 +9,9 @@ import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
 import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
+import type { MessageOrigin } from '../shared/contract.ts'
+import { DelegationRow, OriginTag, useDelegation } from './Delegation.tsx'
+import { delegationLine } from './delegationView.ts'
 import './chat.css'
 
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
@@ -17,15 +20,16 @@ import './chat.css'
 // - 진행 중: 작업 줄이 실시간으로 쌓이고(답 글도 그 사이에 끼어 나온다) 맨 아래 파란 "작업 중 · N초 ···". 끝나면 머리 아래로 접힌다
 // 접기 규칙(dsh TurnProcessNodeView): 잘 끝난 턴만 접는다. 실패한 턴은 작업을 펼친 채로 두고 접기 버튼이 없다
 
-/** 내 말 — 말풍선 아래에 보낸 시각과 복사 */
-export function UserMessage({ text, at, attachments }: { text: string; at?: number; attachments?: readonly Attachment[] }) {
+/** 내 말 — 말풍선 아래에 보낸 시각과 복사. origin: 사람이 친 글이 아니라 다른 대화가 보낸 지시 (이슈 #55) — 위에 딱지, 말풍선 테두리가 다르다 */
+export function UserMessage({ text, at, attachments, origin }: { text: string; at?: number; attachments?: readonly Attachment[]; origin?: MessageOrigin }) {
   const t = useT()
   const [copied, setCopied] = useCopied()
   return (
     <div className="user-turn">
       {/* 붙인 파일·이미지 칩 (이슈 #44) — 글 없이 첨부만 보냈으면 말풍선 없이 칩만 */}
       {attachments && <AttachmentChips items={attachments} />}
-      {text.trim() && <div className="bubble bubble--user">{text.trim()}</div>}
+      {origin && <OriginTag origin={origin} />}
+      {text.trim() && <div className={`bubble bubble--user${origin ? ' bubble--delegated' : ''}`}>{text.trim()}</div>}
       <div className="user-turn__meta">
         {at !== undefined && <time dateTime={new Date(at).toISOString()}>{clockTime(at)}</time>}
         <button
@@ -127,7 +131,11 @@ export function AssistantTurn({ items, text, failed = false, interrupted = false
 function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
   const t = useT()
+  const { peers } = useDelegation()
   if (item.kind === 'subtask') return <SubtaskRow item={item} directory={directory} turnRunning={turnRunning} />
+  // 다른 대화에 지시 보내기·결과 읽기 (앱 MCP 의 세션 도구, 이슈 #55) — "MCP · 서버 · 도구" 대신 받는 대화의 제목과 지금 상태
+  const delegation = delegationLine(item, peers)
+  if (delegation) return <DelegationRow line={delegation} />
   if (item.kind === 'text') {
     if (!item.text.trim()) return null
     return (

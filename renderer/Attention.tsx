@@ -2,6 +2,8 @@ import { useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Attention, AttentionAnswer, AttentionQuestion } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
 import { reason } from './Settings.tsx'
+import { DelegationCardBody, useDelegation } from './Delegation.tsx'
+import { delegationCard } from './delegationView.ts'
 import './attention.css'
 
 // 턴이 사람을 기다릴 때 대화 안에 뜨는 카드 (라운드 A). 승인 카드는 dsh ui-approval(주황 띠 "승인 대기" + 제목 + 명령 + [거절][한 번 허용],
@@ -48,6 +50,10 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   const t = useT()
   const { busy, error, answer } = useAnswer(onAnswer)
   const known = (ACTIONS as readonly string[]).includes(request.action) ? (request.action as (typeof ACTIONS)[number]) : undefined
+  // 다른 대화에 지시 보내기 (이슈 #55) — 보낼 때마다 누구에게(모드)·무엇을(전문) 보인다. "항상 허용" 은 이 도구에 특히 없어야 한다:
+  // 엔진의 always 는 그 폴더의 모든 대화에 걸린다 (01z 1-3)
+  const { peers, self } = useDelegation()
+  const delegation = delegationCard(request, peers, self)
   const keydown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== 'Enter' && event.key !== 'Escape') return
     if (event.key === 'Enter' && (event.target as Element).closest('button')) return // 포커스된 버튼은 자기 동작
@@ -56,18 +62,22 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
     answer(event.key === 'Enter' ? 'once' : 'reject')
   }
   return (
-    <div className="attention-card" data-kind="permission" aria-busy={busy} onKeyDown={keydown}>
+    <div className="attention-card" data-kind="permission" data-delegation={delegation?.kind} aria-busy={busy} onKeyDown={keydown}>
       <div className="attention-card__strip">
         <span className="attention-card__dot" aria-hidden="true" />
         {t('approval.waiting')}
         <SubtaskLabel request={request} />
       </div>
       <div className="attention-card__body" tabIndex={0} role="group" aria-label={t('approval.waiting')}>
-        <div className="attention-card__headline">
-          {request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
-        </div>
+        {delegation ? (
+          <DelegationCardBody card={delegation} />
+        ) : (
+          <div className="attention-card__headline">
+            {request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
+          </div>
+        )}
         {/* MCP 도구 요청의 patterns 는 늘 ["*"] 라 서버·도구 이름을 보인다 (이슈 #28) */}
-        {request.mcp ? (
+        {delegation ? null : request.mcp ? (
           <div className="attention-card__command" data-mcp={`${request.mcp.server}/${request.mcp.tool}`}>
             {`${t('mcp.chat')} · ${request.mcp.server} · ${request.mcp.tool}`}
           </div>
@@ -85,6 +95,7 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
         </p>
       )}
       <div className="attention-card__actions">
+        {delegation && <span className="attention-card__actions-note">{t('delegate.card.note')}</span>}
         <button type="button" className="attention-card__button attention-card__button--reject" disabled={busy} onClick={() => answer('reject')}>
           {t('approval.reject')}
         </button>

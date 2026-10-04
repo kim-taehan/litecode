@@ -98,6 +98,8 @@ export interface PermissionAttention {
   resources: string[]
   /** MCP 도구 실행 요청이면 그 서버·도구 (action 이 `<서버>_<도구>`, 이슈 #28) */
   mcp?: McpToolRef
+  /** MCP 도구 요청의 인자 (JSON) — 묻는 이벤트에는 없어 그 도구 호출(callID)의 진행 줄에서 이어 붙인다 (이슈 #55). 못 찾으면 없다 */
+  input?: string
 }
 
 export interface QuestionAttention {
@@ -152,6 +154,12 @@ export interface AttachmentPick {
   rejected: string[]
 }
 
+/** 다른 대화가 보낸 지시의 출처 (이슈 #55) — 보낸 대화의 앱 id 와 보낸 그때의 제목. 보낸 대화가 지워져도 제목은 남는다 */
+export interface MessageOrigin {
+  conversationId: string
+  title: string
+}
+
 /** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */
 export interface HistoryMessage {
   /** 엔진 메시지 id (user 만) — chat 에 messageId 로 넘긴 값이 그대로 온다 */
@@ -165,6 +173,8 @@ export interface HistoryMessage {
   mode?: Mode
   /** user: 이 메시지에 붙인 파일·이미지 칩 (이슈 #44) */
   attachments?: Attachment[]
+  /** user: 사람이 친 글이 아니라 다른 대화가 보낸 지시다 (이슈 #55) — 화면이 "다른 대화에서 온 지시" 딱지를 단다 */
+  origin?: MessageOrigin
   /** assistant: 그 턴의 진행 줄 (생각·도구·글·지시문) — 실시간 턴의 chat onProgress 와 같은 모양 */
   items?: TurnItem[]
   /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
@@ -217,6 +227,8 @@ export interface Conversation {
   labels?: Record<string, string>
   /** 엔진 메시지 id → 그 메시지에 붙인 글 파일 칩 (이슈 #44). 글 파일은 본문에 풀려 가서 엔진 기록에 첨부로 안 남는다 — 이미지 칩은 엔진 기록에서 온다 */
   attachments?: Record<string, Attachment[]>
+  /** 엔진 메시지 id → 그 지시를 보낸 대화 (이슈 #55). 엔진 기록엔 감싼 글만 있어 다시 열 때 이것으로 딱지를 단다 */
+  origins?: Record<string, MessageOrigin>
   /** `!명령` 결과 카드 — opencode 는 모르는 로컬 기록이다(AI 에게 보내기 전까지). 메인만 고친다(addShell·shareShell) */
   shells?: ShellCard[]
 }

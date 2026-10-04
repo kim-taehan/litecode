@@ -1,4 +1,5 @@
 import type { Attachment, Attention, ChatEvent, ChatLive, ChatModel, HistoryMessage, Mode, TurnItem } from '../shared/ipc.ts'
+import type { MessageOrigin } from '../shared/contract.ts'
 import { reduceChat, withHistory, withLive, type ChatView } from '../shared/chatReducer.ts'
 import type { ChatUsage } from './stats.ts'
 
@@ -26,6 +27,8 @@ export interface ChatFields {
   /** 멈춘 턴이 붙잡은 대기열 — 입력창으로 되돌린다 */
   held?: boolean
   queuedAttachments?: Attachment[]
+  /** queue 와 같은 순서로 그 줄을 보낸 대화 (사람이 친 줄은 null) — 이슈 #55 */
+  queueSources?: (MessageOrigin | null)[]
 }
 
 function viewOf(session: ChatFields): ChatView {
@@ -58,6 +61,7 @@ function withView<S extends ChatFields>(session: S, view: ChatView): S {
 /** 이벤트 하나를 그 대화에 입힌다. 턴 시작·끝에는 메인이 저장한 목록 정보도 맞춘다 — 고른 모델은 화면 것이 먼저다(턴 중에 바꾼 것) */
 export function applyChat<S extends ChatFields>(session: S, event: ChatEvent): S {
   const next = withView(session, reduceChat(viewOf(session), event))
+  if (event.event === 'queue.changed') return { ...next, queueSources: event.data.sources }
   if (event.event === 'turn.started') {
     const { title, updatedAt, model, mode } = event.data.conversation
     return { ...next, title, updatedAt, model: session.model ?? model, mode }
@@ -71,7 +75,7 @@ export function applyChat<S extends ChatFields>(session: S, event: ChatEvent): S
 
 /** 화면이 (다시) 뜰 때 — 메인이 쥔 도는 턴·대기열을 입힌다 */
 export function applyLive<S extends ChatFields>(session: S, live: ChatLive | undefined): S {
-  return live ? withView(session, withLive(viewOf(session), live)) : session
+  return live ? { ...withView(session, withLive(viewOf(session), live)), queueSources: live.queue.sources } : session
 }
 
 /** 엔진에서 불러온 기록을 입힌다 — 턴이 도는 중이면 그 턴의 내 말까지만 (그 뒤는 진행 줄) */

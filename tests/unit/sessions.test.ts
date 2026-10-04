@@ -184,6 +184,19 @@ describe('SessionsService', () => {
     expect((await (await start()).sessions.history('c1')).messages.map((message) => message.text)).toEqual(['/hi world', 'echo', '그냥 질문'])
   })
 
+  // 다른 대화가 보낸 지시(이슈 #55)는 엔진 기록에 감싼 글(`<message-from-conversation …>`)만 있다 — 본문은 label, 출처는 noteOrigin 으로 적어 둔다
+  it('noteOrigin 으로 적은 출처는 다시 열면 그 말풍선에 붙고, 화면이 다시 저장해도 남는다 — 보낸 대화가 지워져도 제목이 보인다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1', { engineSessionId: 'ses_1' }))
+    await sessions.label('c1', 'msg_a', '깨진 테스트를 고쳐 줘')
+    await sessions.noteOrigin('c1', 'msg_a', { conversationId: 'gone', title: '릴리스 준비' })
+    await sessions.save(conversation('c1', { engineSessionId: 'ses_1', title: '바뀐 제목' }))
+
+    const messages = (await (await start()).sessions.history('c1')).messages
+    expect(messages[0]).toMatchObject({ id: 'msg_a', text: '깨진 테스트를 고쳐 줘', origin: { conversationId: 'gone', title: '릴리스 준비' } })
+    expect(messages.slice(1).every((message) => message.origin === undefined)).toBe(true)
+  })
+
   // 글 파일 첨부(이슈 #44)는 엔진 기록에 file 파트가 없다(글로 풀어 보낸다) — 칩은 앱이 메시지 id 로 적어 둔다. 이미지 칩은 엔진 기록에서 온다
   it('noteAttachments 로 적은 파일 칩은 다시 열면 그 말풍선에 붙고(엔진 기록의 이미지 칩 앞), 화면이 다시 저장해도 남는다', async () => {
     const { sessions } = await start()
