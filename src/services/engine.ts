@@ -231,7 +231,8 @@ export function engineConfig(
       models: Object.fromEntries(
         config.models.map((model) => {
           const limit = engineLimit(model)
-          return [model.id, { name: model.displayName, ...(limit && { limit }) }]
+          // 이미지 입력을 켠 모델만 modalities 를 싣는다 — 이게 있어야 file 파트 이미지가 image_url 로 나간다(`attachment: true` 만으론 안 된다, 01y 함정 3)
+          return [model.id, { name: model.displayName, ...(limit && { limit }), ...(model.imageInput && { modalities: { input: ['text', 'image'], output: ['text'] } }) }]
         }),
       ),
     }

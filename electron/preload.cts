@@ -10,6 +10,7 @@ const Channel = {
   REMOVE_PROVIDER: 'providers:remove',
   FETCH_PROVIDER_MODELS: 'providers:fetch-models',
   SEND_MESSAGE: 'chat:send',
+  PICK_ATTACHMENTS: 'chat:pick-attachments',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
   PICK_PROJECT_FOLDER: 'projects:pick-folder',
@@ -81,8 +82,9 @@ const bridge: LitecodeBridge = {
   saveProvider: (input) => ipcRenderer.invoke(Channel.SAVE_PROVIDER, input),
   removeProvider: (id) => ipcRenderer.invoke(Channel.REMOVE_PROVIDER, id),
   fetchProviderModels: (draft) => ipcRenderer.invoke(Channel.FETCH_PROVIDER_MODELS, draft),
-  sendMessage: (conversationId, providerId, modelId, directory, prompt, sessionId, display, mode) =>
-    ipcRenderer.invoke(Channel.SEND_MESSAGE, conversationId, providerId, modelId, directory, prompt, sessionId, display, mode),
+  sendMessage: (conversationId, providerId, modelId, directory, prompt, sessionId, display, mode, attachments) =>
+    ipcRenderer.invoke(Channel.SEND_MESSAGE, conversationId, providerId, modelId, directory, prompt, sessionId, display, mode, attachments),
+  pickAttachments: (kind, directory, held) => ipcRenderer.invoke(Channel.PICK_ATTACHMENTS, kind, directory, held),
   listProjects: () => ipcRenderer.invoke(Channel.LIST_PROJECTS),
   openProject: (directory) => ipcRenderer.invoke(Channel.OPEN_PROJECT, directory),
   pickProjectFolder: () => ipcRenderer.invoke(Channel.PICK_PROJECT_FOLDER),

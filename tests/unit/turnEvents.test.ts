@@ -246,6 +246,41 @@ describe("ctx.llm 턴 수명 이벤트", () => {
     expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} done`])
   })
 
+  // 첨부 (이슈 #44, 01y 1절): 이미지는 text 파트 뒤에 {type:"file", mime, filename, url:"data:<mime>;base64,…"} — file:// 로 넘기지 않는다
+  it('이미지를 붙인 턴: parts 는 text 뒤 file(data: URI), 턴은 평소대로 끝난다', async () => {
+    const { llm, seen } = await start(await fakeOpencode('done'))
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const images = [
+      { mime: 'image/png' as const, filename: '오류 화면.png', data: png },
+      { mime: 'image/jpeg' as const, filename: 'b.jpg', data: Buffer.from([0xff, 0xd8, 0xff]) },
+    ]
+    expect(await llm.chat('p', 'm', directory, 'look', undefined, undefined, undefined, undefined, undefined, undefined, undefined, images)).toMatchObject({ ok: true, text: 'echo: hi' })
+    expect(prompts[0]!.parts).toEqual([
+      { type: 'text', text: 'look' },
+      { type: 'file', mime: 'image/png', filename: '오류 화면.png', url: `data:image/png;base64,${png.toString('base64')}` },
+      { type: 'file', mime: 'image/jpeg', filename: 'b.jpg', url: 'data:image/jpeg;base64,/9j/' },
+    ])
+    expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} done`])
+  })
+
+  it('글 없이 이미지만 보내면 text 파트를 싣지 않는다 (01y 2절 "글 없이 이미지만"), 첨부가 없으면 text 파트 하나 그대로', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    const images = [{ mime: 'image/png' as const, filename: 'a.png', data: Buffer.from([1, 2, 3]) }]
+    await llm.chat('p', 'm', directory, '', undefined, undefined, undefined, undefined, undefined, undefined, undefined, images)
+    await llm.chat('p', 'm', directory, 'hi', 'ses_1')
+    expect(prompts.map((body) => body.parts)).toEqual([
+      [{ type: 'file', mime: 'image/png', filename: 'a.png', url: 'data:image/png;base64,AQID' }],
+      [{ type: 'text', text: 'hi' }],
+    ])
+  })
+
+  // 01y 함정 2·착지 제안 6: 깨진 이미지 등은 user 메시지·idle 없이 session.error 하나만 온다 — file 파트 턴에서도 상태를 물어 실패로 끝낸다
+  it('file 파트 턴에 session.error 만 오고 idle 이 없어도 실패로 끝난다 (끝 신호 없는 거절)', async () => {
+    const { llm } = await start(await fakeOpencode('noidle'))
+    const images = [{ mime: 'image/png' as const, filename: 'broken.png', data: Buffer.from('x') }]
+    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, undefined, undefined, undefined, images)).toMatchObject({ ok: false })
+  })
+
   it('실패한 턴(assistant error·session.error 뒤 idle): ended failed 와 사유', async () => {
     const { llm, seen } = await start(await fakeOpencode('failed'))
     expect((await llm.chat('p', 'm', directory, 'hi')).interrupted).toBeUndefined()

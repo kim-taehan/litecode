@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef } from 'react'
+import type { PickedAttachment } from '../shared/ipc.ts'
 
 // 답하는 중에 보낸 메시지 — 화면 큐에 쌓고, 그 대화의 턴이 끝나는 순간 줄바꿈으로 이어 **한 번에** 보낸다 (closed-code
 // useSendQueue 방식, 사용자 2026-10-02). 엔진에는 늘 한 턴씩만 간다. opencode 의 delivery(queue) 는 쓰지 않는다 — ctx.llm 의
@@ -10,22 +11,24 @@ import { useEffect, useReducer, useRef } from 'react'
 //   입력창으로 되돌린다 (hold — 이슈 #3, 사용자가 멈췄으니)
 // - 보내기는 상태 업데이터 밖에서 한다 — StrictMode 는 업데이터를 두 번 불러 질문이 두 번 간다
 
-/** 쌓이는 한 건 — 보낼 본문과(`/` 명령이면) 말풍선에 보일 글. 필드가 늘어도 mergeQueued 는 고치지 않아도 된다 */
+/** 쌓이는 한 건 — 보낼 본문과(`/` 명령이면) 말풍선에 보일 글, 붙인 파일·이미지(이슈 #44). 이을 수 없는 필드가 늘어도 mergeQueued 는 고치지 않아도 된다 */
 export interface QueuedSend {
   text: string
   display?: string
+  attachments?: PickedAttachment[]
 }
 
 /**
- * 쌓인 것을 하나로 — 본문(과 보일 글)만 줄바꿈으로 잇는다.
+ * 쌓인 것을 하나로 — 본문(과 보일 글)을 줄바꿈으로 잇고(첨부만 보낸 빈 본문은 건너뛴다) 첨부를 순서대로 모은다.
  * **필드를 골라 다시 쌓지 않는다**: 마지막 것을 바탕에 깔고 이을 수 있는 것만 덮는다. 고른 필드만 옮기면 나중에 더한 필드
  * (모드·모델 등)가 두 건 이상 쌓였을 때만 조용히 사라진다 (closed-code DC-1322)
  */
 export function mergeQueued<T extends QueuedSend>(items: T[]): T {
   const last = items[items.length - 1]!
   if (items.length === 1) return last
-  const merged: T = { ...last, text: items.map((item) => item.text).join('\n') }
-  if (items.some((item) => item.display !== undefined)) merged.display = items.map((item) => item.display ?? item.text).join('\n')
+  const merged: T = { ...last, text: items.map((item) => item.text).filter(Boolean).join('\n') }
+  if (items.some((item) => item.display !== undefined)) merged.display = items.map((item) => item.display ?? item.text).filter(Boolean).join('\n')
+  if (items.some((item) => item.attachments?.length)) merged.attachments = items.flatMap((item) => item.attachments ?? [])
   return merged
 }
 

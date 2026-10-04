@@ -19,7 +19,8 @@ export function QueueDock({ items, onRestore }: { items: QueuedSend[]; onRestore
       </div>
       <ul className="queue-dock__list">
         {items.map((item, index) => {
-          const shown = item.display ?? item.text
+          // 글 없이 첨부만 쌓았으면 파일 이름 (이슈 #44)
+          const shown = (item.display ?? item.text) || (item.attachments ?? []).map((file) => file.name).join(', ')
           return (
             <li key={index} className="queue-dock__item" title={shown}>
               {shown.replace(/\s+/g, ' ')}

@@ -228,6 +228,30 @@ describe('engineConfig — 컨텍스트 길이', () => {
   })
 })
 
+// 01y 함정 3 (2026-10-04): 모델 정의에 modalities.input 의 image 가 있어야 file 파트 이미지가 image_url 로 나간다 — 없으면 ERROR 글로 바뀐다
+describe('engineConfig — 이미지 입력 (이슈 #44)', () => {
+  it('"이미지 입력" 을 켠 모델만 modalities 를 싣는다', () => {
+    const config = engineConfig(
+      [
+        {
+          ...provider('a'),
+          models: [
+            { id: 'plain', displayName: 'Plain' },
+            { id: 'vision', displayName: 'Vision', imageInput: true },
+            { id: 'off', displayName: 'Off', imageInput: false, contextLength: 32_768 },
+          ],
+        },
+      ],
+      { token: 't', baseURLFor: (id: string) => `http://127.0.0.1:9/${id}` },
+    )
+    expect((config.provider as Record<string, { models: unknown }>)['a']!.models).toEqual({
+      plain: { name: 'Plain' },
+      vision: { name: 'Vision', modalities: { input: ['text', 'image'], output: ['text'] } },
+      off: { name: 'Off', limit: { context: 32_768, output: 8_192 } },
+    })
+  })
+})
+
 describe('engineEnv — opencode 자식 프로세스 env', () => {
   it('설정 폴더·DB·비밀번호를 싣고, 카탈로그 받기를 끄며(폐쇄망), 사용자명 재정의는 뺀다', () => {
     const env = engineEnv({ PATH: '/bin', OPENCODE_SERVER_USERNAME: 'x' }, { configDir: '/c', db: '/d.db', password: 'pw' })

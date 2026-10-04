@@ -58,6 +58,36 @@
   min-width: 0;
 }
 
+/* 못 누르는 항목 (이미지를 안 받는 모델의 "이미지 추가") — 이름은 흐리게, 아래에 사유 한 줄 */
+.plus-menu__item[aria-disabled='true'] {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.plus-menu__item[aria-disabled='true']:hover {
+  background: none;
+}
+
+.plus-menu__item[aria-disabled='true'] svg {
+  color: var(--text-tertiary);
+}
+
+.plus-menu__note {
+  display: block;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+/* 시안: 1px 선, 위아래 4·좌우 6 */
+.plus-menu__divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
 .plus-menu__meta {
   flex: none;
   font-size: 12px;

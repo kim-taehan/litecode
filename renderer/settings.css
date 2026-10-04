@@ -544,8 +544,18 @@
 
 .model-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 112px 112px 28px;
+  grid-template-columns: 1fr 1fr 112px 112px auto 28px;
   gap: 6px;
+}
+
+/* 모델별 "이미지 입력" 체크 (이슈 #44) — 컨텍스트 길이·최대 출력 옆 */
+.model-row__check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .model-row .settings-input:first-child {

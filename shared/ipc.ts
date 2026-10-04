@@ -4,6 +4,7 @@
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
 import type { Attention, AttentionAnswer, ChatResult, History } from '../src/services/llm.ts'
 import type { Mode } from './modes.ts'
+import type { AttachmentKind, AttachmentPick, PickedAttachment } from './contract.ts'
 import type { Project } from '../src/services/projects.ts'
 import type { Conversation, ShellCard } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
@@ -21,6 +22,7 @@ import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/ser
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
 export type { Mode } from './modes.ts'
+export type { Attachment, AttachmentKind, AttachmentPick, PickedAttachment } from './contract.ts'
 export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { Subtask, TurnItem } from '../src/services/turnProgress.ts'
 export type { FileDiff } from '../src/services/toolDiffs.ts'
@@ -46,6 +48,7 @@ export const Channel = {
   REMOVE_PROVIDER: 'providers:remove',
   FETCH_PROVIDER_MODELS: 'providers:fetch-models',
   SEND_MESSAGE: 'chat:send',
+  PICK_ATTACHMENTS: 'chat:pick-attachments',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
   PICK_PROJECT_FOLDER: 'projects:pick-folder',
@@ -126,7 +129,9 @@ export interface LitecodeBridge {
   /** sessionId 를 안 주면 directory(작업 디렉터리)에서 세션을 새로 만든다 — 결과의 sessionId 를 다음 호출에 넘긴다.
    *  conversationId 는 저장된 대화(saveConversation) — 새 세션이 생기자마자 거기에 붙인다 (답 대기 중 앱이 꺼져도 다시 열리게).
    *  display 를 주면 다시 열었을 때 prompt 대신 그 글이 말풍선에 보인다 (`/` 명령: prompt 는 풀어 쓴 template).
-   *  mode 는 이 턴을 돌릴 모드 (입력창 칩) — 엔진 세션을 그 모드로 맞추고 보낸다 */
+   *  mode 는 이 턴을 돌릴 모드 (입력창 칩) — 엔진 세션을 그 모드로 맞추고 보낸다.
+   *  attachments 는 붙인 파일·이미지 (pickAttachments 가 준 것만 — 그 밖의 경로는 거절). 메인이 읽는다: 이미지는 엔진에 이미지로, 글 파일은
+   *  프로젝트 안이면 본문 끝 `@경로`, 밖이면 본문에 풀어서. 그 모델이 이미지를 안 받으면(설정 > 모델) 이미지가 붙은 메시지는 거절 */
   sendMessage(
     conversationId: string,
     providerId: string,
@@ -136,7 +141,12 @@ export interface LitecodeBridge {
     sessionId?: string,
     display?: string,
     mode?: Mode,
+    attachments?: PickedAttachment[],
   ): Promise<ChatResult>
+  /** `+` 메뉴의 파일 추가·이미지 추가 (이슈 #44) — OS 파일 고르기(여러 개)를 띄워 고른 것을 칩 정보로 준다. 화면은 경로만 들고 내용은 안 읽는다.
+   *  held 는 그 메시지에 이미 붙은 같은 종류의 수. 못 붙이는 것(이미지: png·jpeg 아님, 파일: 글자 아님·폴더, 크기·개수 상한)은 rejected 에 사유로.
+   *  취소하면 둘 다 빈 목록. directory 는 파일 고르기가 처음 여는 폴더(파일 추가만) */
+  pickAttachments(kind: AttachmentKind, directory: string, held: number): Promise<AttachmentPick>
   /** 최근 프로젝트 — 맨 앞이 마지막으로 연 프로젝트 */
   listProjects(): Promise<Project[]>
   /** 그 폴더를 열어 최근 목록 맨 앞에 올린다 */
