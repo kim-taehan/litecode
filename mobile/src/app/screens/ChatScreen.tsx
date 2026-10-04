@@ -2,17 +2,18 @@ import { useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Attention, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
-import { useNow, useRemoteState } from '../hooks.ts'
+import { useKeyboardVisible, useNow, useRemoteState } from '../hooks.ts'
 import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
 import type { AppSession } from '../session.ts'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
-import { attentionTitle, outcomeLabel, runningSubtasks, turnHead, turnLines, turnStartedAt, turnTexts } from '../view.ts'
+import { attentionTitle, composerBottomMargin, outcomeLabel, runningSubtasks, turnHead, turnLines, turnStartedAt, turnTexts } from '../view.ts'
 
 // 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
 // 답은 글자 그대로 그린다 — 마크다운은 다음 라운드. 모드 칩·"작업 N" 은 모양만.
 export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid: string; onBack(): void }) {
   const insets = useSafeAreaInsets()
+  const keyboardVisible = useKeyboardVisible()
   const state = useRemoteState(session)
   const view = state.views[cid]
   const conversation = Object.values(state.conversations)
@@ -83,7 +84,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
         </View>
       )}
 
-      <View style={[styles.composer, { marginBottom: insets.bottom + 12 }]}>
+      <View style={[styles.composer, { marginBottom: composerBottomMargin(insets.bottom, keyboardVisible) }]}>
         <TextInput
           accessibilityLabel={S.message}
           style={styles.input}

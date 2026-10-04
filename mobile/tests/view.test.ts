@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RemoteConversation } from '../../shared/remote.ts'
-import { ago, attentionTitle, initials, outcomeLabel, rowView, statusBanner, turnHead, turnLines } from '../src/app/view.ts'
+import { ago, attentionTitle, composerBottomMargin, initials, outcomeLabel, rowView, statusBanner, turnHead, turnLines } from '../src/app/view.ts'
 
 const NOW = 1_800_000_000_000
 const conversation: RemoteConversation = { id: 'c', project: '/p', title: '제목', updatedAt: NOW }
@@ -48,6 +48,12 @@ describe('view — 상태를 화면 글로', () => {
   it('outcomeLabel: 거절 · 중단 · 실패 · 완료', () => {
     const message = { role: 'assistant' as const, text: '' }
     expect([outcomeLabel({ ...message, declined: true }), outcomeLabel({ ...message, interrupted: true, error: '중단됨' }), outcomeLabel({ ...message, error: '500' }), outcomeLabel(message)]).toEqual(['거절됨', '중단됨', '실패', '완료'])
+  })
+
+  it('composerBottomMargin: 키보드가 떠 있으면 시스템 바 여백을 더하지 않는다 — 입력 카드가 키보드 바로 위에 붙는다', () => {
+    // 3버튼 내비게이션(48dp)·제스처 바(24dp)·없음
+    expect([composerBottomMargin(48, false), composerBottomMargin(24, false), composerBottomMargin(0, false)]).toEqual([60, 36, 12])
+    expect([composerBottomMargin(48, true), composerBottomMargin(24, true), composerBottomMargin(0, true)]).toEqual([12, 12, 12])
   })
 
   it('statusBanner: 붙어 있으면 없다. 남은 초는 올림', () => {
