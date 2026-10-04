@@ -348,7 +348,18 @@ describe('engineEnv — opencode 자식 프로세스 env', () => {
       OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
       OPENCODE_DISABLE_CLAUDE_CODE: '1',
       OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
+      NO_PROXY: '127.0.0.1,localhost',
+      no_proxy: '127.0.0.1,localhost',
     })
+  })
+
+  // #75 (실측 2026-10-05): 프록시 변수만 있으면 opencode 가 키 프록시(127.0.0.1)로 가는 요청을 사내 프록시로 보낸다
+  it('루프백을 프록시 예외에 덧붙인다 — 있던 예외는 남기고, 이름의 대소문자가 달라도 하나로 모은다', () => {
+    const env = engineEnv({ HTTP_PROXY: 'http://proxy:8080', No_Proxy: '.corp.example, localhost' }, { configDir: '/c', db: '/d.db', password: 'pw' })
+    expect(env['HTTP_PROXY']).toBe('http://proxy:8080')
+    expect(env['NO_PROXY']).toBe('.corp.example,localhost,127.0.0.1')
+    expect(env['no_proxy']).toBe(env['NO_PROXY'])
+    expect(env).not.toHaveProperty('No_Proxy')
   })
 
   // 01x 7·표 14·20 (이슈 #19): 물려받은 env 가 엔진을 바꾼다 — OPENCODE_EXPERIMENTAL 하나로 레거시에 exa 검색·lsp 도구가 생기고,
@@ -374,7 +385,7 @@ describe('engineEnv — opencode 자식 프로세스 env', () => {
       { configDir: '/c', db: '/d.db', password: 'pw' },
     )
     expect(Object.keys(env).filter((name) => !/^OPENCODE_(CONFIG_DIR|DB|SERVER_PASSWORD|DISABLE_)/.test(name)).sort()).toEqual(
-      ['HOME', 'HTTPS_PROXY', 'LITECODE_TEST_LANGUAGE', 'PATH'],
+      ['HOME', 'HTTPS_PROXY', 'LITECODE_TEST_LANGUAGE', 'NO_PROXY', 'PATH', 'no_proxy'],
     )
     expect(env['OPENCODE_DISABLE_SHARE']).toBe('1')
     expect(env).not.toHaveProperty('OPENCODE_DISABLE_PROJECT_CONFIG') // blockProjectConfig 를 안 켰다
