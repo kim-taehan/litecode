@@ -16,6 +16,8 @@ import { useFindFold } from './ChatFind.tsx'
 import { TodoRow } from './Todo.tsx'
 import { ChangedFilesCard } from './ChangedFiles.tsx'
 import { changedFiles } from './changedFiles.ts'
+import { PresentedCard } from './Presented.tsx'
+import { isPresentTool, presentedFiles } from './presented.ts'
 import './chat.css'
 
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
@@ -102,6 +104,8 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   const [copied, setCopied] = useCopied()
   // 끝난 턴(완료·실패·중단)이 고친 파일 — 도는 중에는 없다 (이슈 #82)
   const changes = useMemo(() => (running ? undefined : changedFiles(items)), [running, items])
+  // 끝난 턴에서 AI 가 결과물로 선언한 파일 — 도는 중에는 없다 (이슈 #91)
+  const presented = useMemo(() => (running ? undefined : presentedFiles(items)), [running, items])
 
   return (
     <div className="turn" data-state={running ? 'running' : interrupted ? 'interrupted' : failed ? 'failed' : 'done'}>
@@ -136,6 +140,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
           {failed ? text : <Markdown text={source} directory={directory} />}
         </div>
       )}
+      {presented && <PresentedCard files={presented} directory={directory} />}
       {changes && <ChangedFilesCard changes={changes} directory={directory} />}
       {/* 답 행동 줄 (dsh ui-chat MessageIconActions) — 답 전체 복사. 마우스를 올리거나 포커스가 들어올 때만 보인다 (chat.css) */}
       {!running && source.trim() && (
@@ -212,10 +217,14 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   const skill = item.kind === 'tool' ? item.skill : undefined
   // MCP 도구(`<서버>_<도구>`)는 "MCP · 서버 · 도구" (이슈 #28)
   const mcp = item.kind === 'tool' ? item.mcp : undefined
-  const title = think ? t('chat.think') : skill ? t('chat.skill') : mcp ? `${t('mcp.chat')} · ${mcp.server} · ${mcp.tool}` : item.name === 'todowrite' ? t('todo.title') : toolTitle(item.name)
+  // 결과물 선언(앱 MCP 의 present, 이슈 #91)은 "결과물 · 파일 N" — 받아들인 파일은 턴 끝 카드가 보인다
+  const present = isPresentTool(item)
+  const title = think ? t('chat.think') : skill ? t('chat.skill') : present ? t('present.title') : mcp ? `${t('mcp.chat')} · ${mcp.server} · ${mcp.tool}` : item.name === 'todowrite' ? t('todo.title') : toolTitle(item.name)
   const summary = think
     ? thinkSummary(item.text, item.done) || (item.done ? '' : t('chat.thinking'))
-    : (item.summary ?? (item.status === 'preparing' ? t('chat.toolPreparing') : ''))
+    : present && item.presented
+      ? t('present.count', { count: item.presented.length })
+      : (item.summary ?? (item.status === 'preparing' ? t('chat.toolPreparing') : ''))
   const live = think ? !item.done : item.status === 'preparing' || item.status === 'running'
   const body: ReactNode = think ? (
     item.text.trim() && <Markdown text={item.text.trim()} />

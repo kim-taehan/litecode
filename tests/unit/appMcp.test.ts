@@ -7,6 +7,7 @@ import { AppMcpService } from '../../src/services/appMcp.ts'
 import { handleRpc, type AppMcpTool } from '../../src/services/appMcp/rpc.ts'
 import { OpenFileTool, openFileTarget } from '../../src/services/appMcp/tools/openFile.ts'
 import { OpenTerminalTool, terminalCommand } from '../../src/services/appMcp/tools/openTerminal.ts'
+import { PresentTool, PRESENT_MAX_FILES } from '../../src/services/appMcp/tools/present.ts'
 import type { EngineMcp } from '../../src/services/engine.ts'
 import type { McpStatus } from '../../src/services/llm.ts'
 import { APP_MCP_NAME, McpService } from '../../src/services/mcp.ts'
@@ -282,6 +283,60 @@ describe('open_file', () => {
     expect(await openFileTarget(project, { path: 'src/a.ts', line: 3 })).toEqual({ path: 'src/a.ts', line: 3 })
     expect(await openFileTarget(project, { path: 'src/a.ts', line: '7' })).toEqual({ path: 'src/a.ts', line: 7 })
     for (const line of [0, -1, 1.5, 'x', null]) expect(await openFileTarget(project, { path: 'src/a.ts', line })).toEqual({ path: 'src/a.ts' })
+  })
+})
+
+// 이슈 #91 — 결과물 선언. 엔진은 MCP 결과의 structuredContent 를 파트에 남기지 않는다(동봉 1.18.18 바이너리에서 MCP SDK 의 스키마·검증 말고는 쓰는 곳이 없다)
+// → **전부 받아들였을 때만 성공**이다: 그래야 화면이 "성공한 호출의 인자" 만으로 받아들인 목록을 안다 (turnProgress.ts). 하나라도 못 쓰면 isError + 사유
+describe('present', () => {
+  const withPresent = async () => {
+    const started = await start()
+    started.ctx.plugin(PresentTool)
+    await expect.poll(started.toolNames).toEqual(['open_file', 'open_terminal', 'present'])
+    return started
+  }
+
+  it('프로젝트 안의 파일을 선언한다 — 상대·절대 경로, 화면을 건드리지 않고(보고 있지 않아도 된다) 결과 글은 프로젝트 기준 경로', async () => {
+    const { tool, events } = await withPresent()
+    await fs.writeFile(path.join(project, 'report.md'), '# r')
+    expect(await tool('present', { files: [{ path: 'report.md', title: 'Report' }, { path: path.join(project, 'src', 'a.ts') }] })).toEqual({
+      text: 'Presented 2 files to the user: report.md, src/a.ts. They are listed in a card under your answer.',
+      isError: false,
+    })
+    expect(await tool('present', { files: [{ path: './src/../src/a.ts' }] })).toEqual({
+      text: 'Presented 1 file to the user: src/a.ts. They are listed in a card under your answer.',
+      isError: false,
+    })
+    expect(events).toEqual([])
+  })
+
+  it('하나라도 못 쓰면 아무것도 선언하지 않는다 — 밖·링크로 밖·폴더·없는 파일은 사유와 함께, 쓸 수 있던 것도 알려 준다', async () => {
+    const { tool } = await withPresent()
+    await fs.symlink(path.join(other, 'secret.txt'), path.join(project, 'link.txt'))
+    const { text, isError } = await tool('present', { files: [{ path: 'src/a.ts' }, { path: '../other/secret.txt' }, { path: 'link.txt' }, { path: 'src' }, { path: 'nope.md' }, { title: 'no path' }] })
+    expect(isError).toBe(true)
+    expect(text).toBe(
+      [
+        'Nothing was presented. Fix or drop the rejected entries and call again with the full list.',
+        'Rejected:',
+        '- ../other/secret.txt: not a file inside this project (missing, a folder, or outside the project)',
+        '- link.txt: not a file inside this project (missing, a folder, or outside the project)',
+        '- src: not a file inside this project (missing, a folder, or outside the project)',
+        '- nope.md: not a file inside this project (missing, a folder, or outside the project)',
+        '- entry 6: path is required',
+        'Accepted:',
+        '- src/a.ts',
+      ].join('\n'),
+    )
+  })
+
+  it(`개수는 1~${PRESENT_MAX_FILES} — 비었거나 배열이 아니거나 넘치면 거절`, async () => {
+    const { tool } = await withPresent()
+    const many = Array.from({ length: PRESENT_MAX_FILES + 1 }, () => ({ path: 'src/a.ts' }))
+    for (const files of [[], undefined, 'src/a.ts', many]) {
+      expect(await tool('present', { files })).toEqual({ text: `files must be a list of 1 to ${PRESENT_MAX_FILES} entries.`, isError: true })
+    }
+    expect((await tool('present', { files: many.slice(1) })).isError).toBe(false)
   })
 })
 

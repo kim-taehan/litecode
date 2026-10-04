@@ -41,6 +41,7 @@ import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './
 import { McpService, type McpServerInput } from '../src/services/mcp.ts'
 import { AppMcpService } from '../src/services/appMcp.ts'
 import { OpenFileTool } from '../src/services/appMcp/tools/openFile.ts'
+import { PresentTool } from '../src/services/appMcp/tools/present.ts'
 import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
@@ -552,6 +553,7 @@ const features: FeatureDefinition[] = [
       // 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰) — ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다. 끄는 스위치는 없다
       ctx.plugin(AppMcpService)
       ctx.plugin(OpenFileTool)
+      ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 넷 — 다른 대화 보기·지시 보내기 (이슈 #55)
       ctx.plugin(appMcpBridge)
     },

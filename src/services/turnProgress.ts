@@ -24,9 +24,10 @@
 //   → TurnTracker.child 가 자식마다 따로 진행 줄을 쌓아 그 task 의 subtask 줄 안에 넣는다. 부모 턴 끝은 부모 sessionID 의 idle 만 본다(llm.ts)
 // - 자식 토큰은 부모 턴 합계에 넣지 않는다 (dsh ui-subagent 처럼 자식 줄에 따로 — 부모 컨텍스트 % 가 자식 대화로 부풀지 않게)
 
+import path from 'node:path'
 import { toolDiffs } from './toolDiffs.ts'
 import { skillSource } from '../../shared/skills.ts'
-import type { TurnItem, Subtask, ToolSkill, McpToolRef, TodoItem } from '../../shared/contract.ts'
+import type { TurnItem, Subtask, ToolSkill, McpToolRef, TodoItem, PresentedFile } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { TurnItem, Subtask, ToolSkill, McpToolRef } from '../../shared/contract.ts'
@@ -394,6 +395,8 @@ function partItem(part: EnginePart, done: boolean, root: string, mcp: McpToolRes
     if (diffs) item.diffs = diffs
     const todos = item.name === 'todowrite' ? todoItems(state.metadata?.['todos']) : undefined
     if (todos) item.todos = todos
+    const presented = item.name === PRESENT_TOOL ? presentedFiles(input, root) : undefined
+    if (presented) item.presented = presented
   }
   else if (status === 'running' && typeof state.metadata?.output === 'string' && state.metadata.output !== '') item.result = state.metadata.output // bash 실시간 출력
   if (status === 'error') item.error = state.error || '알 수 없는 오류'
@@ -422,6 +425,32 @@ function todoItems(raw: unknown): TodoItem[] | undefined {
     const { content, status } = (entry && typeof entry === 'object' ? entry : {}) as { content?: unknown; status?: unknown }
     return { text: typeof content === 'string' ? content : '', status: (typeof status === 'string' && TODO_STATUS[status]) || 'pending' }
   })
+}
+
+// 결과물 선언 (앱 MCP 의 present, 이슈 #91 — src/services/appMcp/tools/present.ts):
+// - 엔진은 MCP 결과의 structuredContent 를 파트에 남기지 않는다 (동봉 1.18.18 바이너리 확인 — MCP SDK 의 스키마·검증 말고는 쓰는 곳이 없다. 실측은 안 했다)
+//   → 받아들인 목록은 **completed 파트의 인자**에서 읽는다. 도구가 "전부 받아들였을 때만 성공" 이라(하나라도 못 쓰면 isError → 파트 error, 01z 1-5)
+//   둘이 어긋나지 않는다. 결과 글은 파싱하지 않는다
+// - 경로는 글자로만 푼다(세션 폴더 기준 상대) — 파일이 지금도 있는지·프로젝트 안인지는 여는 순간 메인이 다시 본다(파일 칩과 같은 길)
+const PRESENT_TOOL = 'litecode_present'
+
+/** 끝난 present 파트의 인자 → 선언한 파일 (files 가 배열이 아니면 undefined). 경로가 글이 아닌 항목은 버린다 */
+function presentedFiles(input: unknown, root: string): PresentedFile[] | undefined {
+  const files = input && typeof input === 'object' ? (input as { files?: unknown }).files : undefined
+  if (!Array.isArray(files)) return undefined
+  return files.flatMap((entry: unknown) => {
+    const { path: asked, title } = (entry && typeof entry === 'object' ? entry : {}) as { path?: unknown; title?: unknown }
+    if (typeof asked !== 'string' || !asked.trim()) return []
+    const label = typeof title === 'string' ? title.trim() : ''
+    return [{ path: projectRelative(root, asked.trim()), ...(label && { title: label }) }]
+  })
+}
+
+/** 세션 폴더 기준 상대 경로 (`/` 구분, `./`·`..` 를 푼다). 글자로는 폴더 밖이면(링크를 거친 절대 경로 등) 받은 그대로 */
+function projectRelative(root: string, file: string): string {
+  if (!root) return file
+  const rel = path.relative(root, path.resolve(root, file))
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : file
 }
 
 /** 도구 줄의 한 줄 요약 — bash 는 description(필수 인자, 01g), 없으면 command. 그 밖의 도구는 흔한 인자 하나 */

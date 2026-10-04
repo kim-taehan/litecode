@@ -214,6 +214,10 @@ export const ko = {
   'changes.edits': '{count}번',
   'changes.more': '{count}개 더',
   'changes.note': '편집 도구로 고친 파일만 셉니다. 명령으로 바꾼 파일은 빠져 있을 수 있고, 여러 번 고친 파일의 줄 수는 합계입니다.',
+  // 턴 끝 결과물 카드 — AI 가 결과물로 선언한 파일 (이슈 #91)
+  'present.title': '결과물',
+  'present.count': '파일 {count}',
+  'present.cardTitle': '결과물 {count}',
   // 입력창
   'composer.placeholder': '메시지를 입력하세요…',
   'plus.open': '파일·이미지 추가, 스킬·MCP 서버 열기',

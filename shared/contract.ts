@@ -22,8 +22,9 @@ export type TurnItem =
   | { kind: 'think'; id: string; text: string; done: boolean }
   | { kind: 'text'; id: string; text: string; done: boolean }
   /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글.
-   *  todos: 성공한 할 일 목록 쓰기(todowrite)에만 — 그 시점의 목록 전체 (이슈 #83) */
-  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef; todos?: TodoItem[] }
+   *  todos: 성공한 할 일 목록 쓰기(todowrite)에만 — 그 시점의 목록 전체 (이슈 #83).
+   *  presented: 성공한 결과물 선언에만 — 그 호출이 선언한 파일 (이슈 #91) */
+  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef; todos?: TodoItem[]; presented?: PresentedFile[] }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
   | { kind: 'context'; id: string; text: string }
   /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
@@ -63,6 +64,14 @@ export interface ToolSkill {
 export interface TodoItem {
   text: string
   status: 'pending' | 'active' | 'done' | 'cancelled'
+}
+
+/** AI 가 결과물로 선언한 파일 하나 (이슈 #91) — 내용은 없다. 화면이 턴 끝 "결과물" 카드로 그리고, 누르면 그때의 파일을 연다 */
+export interface PresentedFile {
+  /** 프로젝트 폴더 기준 상대 경로 (`/` 구분) */
+  path: string
+  /** 파일 이름 대신 보일 짧은 이름 */
+  title?: string
 }
 
 /** MCP 도구 호출의 서버·도구 (이슈 #28) — 화면이 "MCP · 서버 · 도구" 로 그린다 */
