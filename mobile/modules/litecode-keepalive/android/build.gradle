@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.litecode'
+version = '0.1.0'
+
+android {
+  namespace "com.litecode.keepalive"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // HeadlessJsTaskService — 버전은 앱의 React Native 가 정한다
+  implementation "com.facebook.react:react-android"
+}

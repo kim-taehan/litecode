@@ -1,19 +1,36 @@
-import { useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { expo } from '../../../app.json'
 import { useConnectionStatus } from '../hooks.ts'
 import { BackArrow } from '../icons.tsx'
+import type { NotificationPermission } from '../notifications.ts'
+import type { Prefs } from '../prefs.ts'
 import type { AppSession } from '../session.ts'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 
-// 4 설정 (시안 Settings). 언어·테마 줄은 모양만, 연결 유지 스위치는 값만 바뀐다(포그라운드 서비스는 다음 라운드).
+// 4 설정 (시안 Settings). 언어·테마 줄은 모양만. "알림"(시안에 없는 줄)과 "연결 유지" 스위치는 저장되는 설정이다 —
+// 연결 유지를 켜면 포그라운드 서비스(상시 알림)가 앱이 뒤로 가도 연결을 붙든다. 알림 권한이 꺼져 있으면 그 아래에 안내와 설정 열기.
 // "연결 해제" 는 저장된 짝(토큰)을 지우고 연결 화면으로 간다.
-export function SettingsScreen({ session, onBack, onDisconnect }: { session: AppSession; onBack(): void; onDisconnect(): void }) {
+export function SettingsScreen({
+  session,
+  prefs,
+  permission,
+  onPrefs,
+  onOpenSystemSettings,
+  onBack,
+  onDisconnect,
+}: {
+  session: AppSession
+  prefs: Prefs
+  permission: NotificationPermission
+  onPrefs(change: Partial<Prefs>): void
+  onOpenSystemSettings(): void
+  onBack(): void
+  onDisconnect(): void
+}) {
   const insets = useSafeAreaInsets()
   const status = useConnectionStatus(session)
-  const [keepAlive, setKeepAlive] = useState(true)
   const connected = status.kind === 'connected'
 
   return (
@@ -57,27 +74,42 @@ export function SettingsScreen({ session, onBack, onDisconnect }: { session: App
               <Text style={styles.rowLabel}>{S.theme}</Text>
               <Text style={styles.rowValue}>{S.system}</Text>
             </Pressable>
-            <View style={[styles.switchRow, styles.rowBorder]}>
-              <View style={styles.switchText}>
-                <Text style={styles.rowLabelPlain}>{S.keepAlive}</Text>
-                <Text style={styles.hint}>{S.keepAliveHint}</Text>
+            <SwitchRow label={S.notifications} hint={S.notificationsHint} value={prefs.notifications} onChange={(notifications) => onPrefs({ notifications })} />
+            {(prefs.notifications || prefs.keepAlive) && permission === 'denied' && (
+              <View style={[styles.permission, styles.rowBorder]}>
+                <Text style={styles.permissionText}>{S.permissionOff}</Text>
+                <Pressable accessibilityRole="button" style={styles.permissionButton} onPress={onOpenSystemSettings}>
+                  <Text style={styles.permissionButtonText}>{S.openSystemSettings}</Text>
+                </Pressable>
               </View>
-              <Pressable
-                accessibilityRole="switch"
-                accessibilityLabel={S.keepAlive}
-                accessibilityState={{ checked: keepAlive }}
-                hitSlop={10}
-                style={[styles.switch, { backgroundColor: keepAlive ? C.blue : C.faint, alignItems: keepAlive ? 'flex-end' : 'flex-start' }]}
-                onPress={() => setKeepAlive(!keepAlive)}
-              >
-                <View style={styles.knob} />
-              </Pressable>
-            </View>
+            )}
+            <SwitchRow label={S.keepAlive} hint={`${S.keepAliveHint}\n${S.keepAliveLimit}`} value={prefs.keepAlive} onChange={(keepAlive) => onPrefs({ keepAlive })} />
           </View>
         </View>
 
         <Text style={styles.about}>{S.about(expo.version)}</Text>
       </ScrollView>
+    </View>
+  )
+}
+
+function SwitchRow({ label, hint, value, onChange }: { label: string; hint: string; value: boolean; onChange(value: boolean): void }) {
+  return (
+    <View style={[styles.switchRow, styles.rowBorder]}>
+      <View style={styles.switchText}>
+        <Text style={styles.rowLabelPlain}>{label}</Text>
+        <Text style={styles.hint}>{hint}</Text>
+      </View>
+      <Pressable
+        accessibilityRole="switch"
+        accessibilityLabel={label}
+        accessibilityState={{ checked: value }}
+        hitSlop={10}
+        style={[styles.switch, { backgroundColor: value ? C.blue : C.faint, alignItems: value ? 'flex-end' : 'flex-start' }]}
+        onPress={() => onChange(!value)}
+      >
+        <View style={styles.knob} />
+      </Pressable>
     </View>
   )
 }
@@ -122,5 +154,9 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, lineHeight: 18, color: C.sub },
   switch: { width: 48, height: 28, borderRadius: 14, padding: 3, justifyContent: 'center' },
   knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: C.white },
+  permission: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 16, backgroundColor: C.amberBg },
+  permissionText: { flex: 1, fontSize: 12, lineHeight: 18, color: C.amberText },
+  permissionButton: { height: 36, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: C.borderStrong, backgroundColor: C.white, justifyContent: 'center' },
+  permissionButtonText: { fontSize: 13, fontWeight: '500', color: C.text },
   about: { fontSize: 12, lineHeight: 18, color: C.sub, paddingHorizontal: 4 },
 })

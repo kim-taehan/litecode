@@ -53,6 +53,7 @@ export function createDemoSession(): AppSession {
   const notices: NoticeState = {}
   const chats = new Map<string, Chat>()
 
+  const eventListeners = new Set<(event: RemoteEvent) => void>()
   const notify = (): void => {
     for (const listener of listeners) listener()
   }
@@ -63,7 +64,9 @@ export function createDemoSession(): AppSession {
   /** 데스크탑이 낸 이벤트 하나 */
   const emit = <K extends RemoteEventName>(event: K, data: RemoteEventMap[K]): void => {
     seq += 1
-    dispatch({ type: 'event', event: { event, data, seq } as RemoteEvent })
+    const sent = { event, data, seq } as RemoteEvent
+    dispatch({ type: 'event', event: sent })
+    for (const listener of eventListeners) listener(sent)
   }
   /** 목록·상태 점을 다시 보낸다 (진짜 연결에서는 conversations.changed → 목록 다시 받기) */
   const publishList = (): void => {
@@ -206,6 +209,10 @@ export function createDemoSession(): AppSession {
     getState: () => state,
     getStatus: () => status,
     getNotice: () => undefined,
+    onEvent(listener) {
+      eventListeners.add(listener)
+      return () => eventListeners.delete(listener)
+    },
     clearNotice: () => undefined,
     openConversation: () => undefined, // 견본은 전부 받아 둔 채로 시작한다
     closeConversation: () => undefined,

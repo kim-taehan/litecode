@@ -212,6 +212,24 @@ describe('연결 상태', () => {
     expect(connection.state.staleProjects).toEqual([])
   })
 
+  it('onEvent: 이벤트를 한 번씩 준다 — 열지 않은 대화의 것도 오고, 다시 붙어 재생된 이미 본 seq 는 오지 않는다 (알림이 두 번 울리지 않게)', async () => {
+    const { transport, connection, connect } = setup()
+    await connect()
+    const heard: string[] = []
+    connection.onEvent((event) => heard.push(`${event.event}#${event.seq ?? '-'}`))
+    // c9 는 열어 두지 않았다 (리듀서는 버리지만 알림은 들어야 한다)
+    transport.last.handlers.onData(sse('turn.attention', { cid: 'c9', requests: [] }, 6) + sse('turn.ended', { cid: 'c9', outcome: 'done', message: { role: 'assistant', text: '답' } }, 7))
+    expect(heard).toEqual(['turn.attention#6', 'turn.ended#7'])
+
+    transport.last.handlers.onEnd()
+    await vi.advanceTimersByTimeAsync(1_000)
+    transport.last.handlers.onOpen(200)
+    // 재생이 본 것(7)과 겹치고, 새 것(8)이 이어진다. ready 는 seq 가 없다
+    transport.last.handlers.onData(sse('ready', { runId: 'A', seq: 8 }) + sse('turn.ended', { cid: 'c9', outcome: 'done', message: { role: 'assistant', text: '답' } }, 7))
+    transport.last.handlers.onData(sse('turn.started', { cid: 'c9', origin: 'desktop', message: { role: 'user', text: '또' } }, 8))
+    expect(heard).toEqual(['turn.attention#6', 'turn.ended#7', 'ready#-', 'turn.started#8'])
+  })
+
   it('stop 하면 스트림·타이머를 거두고 idle 이다', async () => {
     const { transport, connection, connect } = setup()
     await connect()

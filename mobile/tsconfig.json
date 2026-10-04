@@ -5,5 +5,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "App.tsx", "src", "dev", "tests", "vitest.config.mts"]
+  "include": ["index.ts", "App.tsx", "src", "modules", "dev", "tests", "vitest.config.mts"]
 }

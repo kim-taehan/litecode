@@ -15,3 +15,4 @@ mobile/dist/
 mobile/.expo/
 mobile/android/
 mobile/ios/
+mobile/modules/*/android/build/

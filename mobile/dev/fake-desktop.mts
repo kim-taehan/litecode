@@ -14,7 +14,7 @@
 //   node mobile/dev/fake-desktop.mts --host 192.168.0.12    # 실제 폰에서 붙을 때 — 그 주소에도 연다 (127.0.0.1 은 늘 연다)
 //   옵션: --port <n>(기본 47600) · --step <ms>(진행 줄 간격, 기본 700) · --auto-allow(짝짓기를 묻지 않고 허용)
 // 짝짓기: 폰이 코드를 보내면 터미널에 기기 이름과 확인 코드가 찍힌다 — 폰 화면의 것과 같은지 보고 `allow`(또는 `deny`)를 친다. 60초 안에 안 치면 408
-// 뜬 뒤 터미널에 한 줄 치면: `allow`·`deny`(짝짓기 요청에 답) · `drop`(이벤트 스트림을 끊는다 — 다시 붙기 확인) · `restart`(데스크탑 재시작 흉내 — runId 가 바뀐다) ·
+// 뜬 뒤 터미널에 한 줄 치면: `allow`·`deny`(짝짓기 요청에 답) · `say c_login 안녕`(데스크탑에서 보낸 턴 — 폰 알림 시험) · `drop`(이벤트 스트림을 끊는다 — 다시 붙기 확인) · `restart`(데스크탑 재시작 흉내 — runId 가 바뀐다) ·
 //   `revoke`(모든 기기 해제)
 
 import { randomBytes } from 'node:crypto'
@@ -73,6 +73,8 @@ export interface FakeDesktop {
   dropStreams(): void
   /** 데스크탑 재시작 흉내 — runId 가 바뀌고 seq 가 0 부터 다시 간다. 돌던 턴은 "중단됨" 으로 남는다 */
   restart(): void
+  /** 데스크탑에서 보낸 것처럼 그 대화에 턴을 시작한다 (폰이 보지 않는 대화에서 일이 생기게 — 알림 시험). 없는 대화·도는 중이면 false */
+  say(cid: string, text: string): boolean
   /** 기다리는 짝짓기 요청 (manualPair) */
   pendingPair(): { deviceName: string; confirm: string } | undefined
   /** 기다리는 짝짓기 요청에 답한다. 기다리는 것이 없으면 false */
@@ -469,6 +471,12 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
       log = []
       dropStreams()
     },
+    say(cid, text) {
+      const chat = chats.get(cid)
+      if (!chat || chat.turn) return false
+      startTurn(chat, text, `msg_fake_${++counter}`, 'desktop')
+      return true
+    },
     pendingPair: () => pending && { deviceName: pending.deviceName, confirm: pending.confirm },
     answerPair(allow) {
       if (!pending) return false
@@ -506,12 +514,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   })
   console.log(`가짜 데스크탑 (개발용 · 평문 http) — ${['127.0.0.1', ...values('--host')].map((host) => `http://${host}:${desktop.port}`).join(' , ')}`)
   console.log(`페어링 코드: ${groupCode(FAKE_PAIR_CODE)}   (안드로이드 에뮬레이터에서는 10.0.2.2:${desktop.port})`)
-  console.log('명령: allow | deny (짝짓기 요청에 답) · drop | restart | revoke   (Ctrl+C 로 끝낸다)')
+  console.log('명령: allow | deny (짝짓기 요청에 답) · say <대화 id> <글> (데스크탑에서 보낸 턴 — [ask] 를 넣으면 승인 요청) · drop | restart | revoke   (Ctrl+C 로 끝낸다)')
   process.stdin.setEncoding('utf8')
   process.stdin.on('data', (chunk: string) => {
     for (const command of chunk.split('\n').map((line) => line.trim()).filter(Boolean)) {
       if (command === 'allow' || command === 'deny') console.log(desktop.answerPair(command === 'allow') ? `→ ${command}` : '기다리는 짝짓기 요청이 없다')
-      else if (command === 'drop') (desktop.dropStreams(), console.log('→ drop'))
+      else if (command.startsWith('say ')) {
+        const [, cid = '', ...words] = command.split(' ')
+        console.log(desktop.say(cid, words.join(' ') || '안녕') ? `→ say ${cid}` : `못 보냈다 (없는 대화거나 도는 중): ${cid}`)
+      } else if (command === 'drop') (desktop.dropStreams(), console.log('→ drop'))
       else if (command === 'restart') (desktop.restart(), console.log('→ restart'))
       else if (command === 'revoke') (desktop.revokeAll(), console.log('→ revoke'))
       else console.log('모르는 명령')
