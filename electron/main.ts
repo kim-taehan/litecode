@@ -5,7 +5,8 @@ import { Context } from 'cordis'
 import { ProviderRegistry, type KeyCipher, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService, type AttentionAnswer } from '../src/services/llm.ts'
 import { ChatService } from '../src/services/chat.ts'
-import { pickAttachments } from '../src/services/attachments.ts'
+import { attachDropped, attachPasted, pickAttachments } from '../src/services/attachments.ts'
+import { PastedImages } from '../src/services/pastedImages.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
 import { EngineService, killEngineProcesses } from '../src/services/engine.ts'
@@ -261,6 +262,31 @@ function chatBridge(ctx: Context): void {
     ctx.chat.allowAttachments(result.picked.map((item) => item.path))
     return result
   })
+  // 붙여넣기·끌어다 놓기 (이슈 #80). 본문은 preload 가 File 객체에서 만든 것이다 — paths: 사용자가 실제로 놓거나 붙여넣은 파일의 경로
+  // (webUtils.getPathForFile), blobs: 경로 없는 이미지의 바이트(스크린숏). 종류·상한·사유는 고르기와 같은 검사로 메인이 정하고,
+  // 칩이 된 경로만 보낼 수 있게 적어 둔다. 경로 없는 이미지는 userData/pasted-images 의 임시 파일이 된다 (pastedImages.ts — 지우는 때 포함)
+  const pasted = new PastedImages(path.join(userData, 'pasted-images'))
+  const cleared = pasted.reset().catch((error: unknown) => console.error('[attachments] 붙여넣은 이미지 폴더 비우기 실패', (error as Error).message))
+  ctx.effect(() => () => pasted.reset().catch(() => {}))
+  ctx.on('chat/attachments-read', (paths) => void pasted.discard(paths))
+  ctx.on('sessions/removed', (ids) => void pasted.discardOf(ids))
+  handle(ctx, Channel.ATTACH_DROPPED, async (_event, conversationId: string, input: { paths?: unknown; blobs?: unknown } | undefined, held: Partial<Record<AttachmentKind, number>> | undefined, model: ChatModel | undefined) => {
+    await cleared
+    const paths = Array.isArray(input?.paths) ? input.paths.filter((file): file is string => typeof file === 'string' && path.isAbsolute(file)) : []
+    const blobs = (Array.isArray(input?.blobs) ? (input.blobs as { name?: unknown; data?: unknown }[]) : []).map((blob) => ({
+      name: String(blob?.name ?? ''),
+      ...(blob?.data instanceof Uint8Array && { data: blob.data }),
+    }))
+    const imageInput = typeof model === 'object' && ctx.chat.acceptsImages(model)
+    const count = { file: Number(held?.file) || 0, image: Number(held?.image) || 0 }
+    const dropped = await attachDropped(paths, count, imageInput)
+    for (const item of dropped.picked) count[item.kind]++
+    const fromBytes = await attachPasted(pasted, String(conversationId), blobs, count, imageInput)
+    const picked = [...dropped.picked, ...fromBytes.picked]
+    ctx.chat.allowAttachments(picked.map((item) => item.path))
+    return { picked, rejected: [...new Set([...dropped.rejected, ...fromBytes.rejected])] }
+  })
+  handle(ctx, Channel.DISCARD_ATTACHMENTS, async (_event, paths: unknown) => pasted.discard(Array.isArray(paths) ? paths.filter((file): file is string => typeof file === 'string') : []))
   handle(ctx, Channel.SEND_MESSAGE, async (_event, conversationId: string, input: QueuedSend) => ctx.chat.send(String(conversationId), { ...input, origin: 'user' }))
   // 이름 바꾸기 — 제목은 ctx.chat 이 적는다 (빈 이름·모르는 대화면 undefined)
   handle(ctx, Channel.RENAME_CONVERSATION, async (_event, id: string, name: string) => ctx.chat.rename(String(id), String(name)))

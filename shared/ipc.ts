@@ -66,6 +66,9 @@ export const Channel = {
   /** 메인 → 화면 (ChatEventMap['conversations.changed']) */
   CONVERSATIONS_CHANGED: 'chat:conversations-changed',
   PICK_ATTACHMENTS: 'chat:pick-attachments',
+  /** 붙여넣거나 끌어다 놓은 파일 (이슈 #80) — 본문은 preload 가 File 객체에서 만든다 (화면이 경로 문자열을 실어 보낼 길이 없다) */
+  ATTACH_DROPPED: 'chat:attach-dropped',
+  DISCARD_ATTACHMENTS: 'chat:discard-attachments',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
   PICK_PROJECT_FOLDER: 'projects:pick-folder',
@@ -182,6 +185,13 @@ export interface LitecodeBridge {
    *  held 는 그 메시지에 이미 붙은 같은 종류의 수. 못 붙이는 것(이미지: png·jpeg 아님, 파일: 글자 아님·폴더, 크기·개수 상한)은 rejected 에 사유로.
    *  취소하면 둘 다 빈 목록. directory 는 파일 고르기가 처음 여는 폴더(파일 추가만) */
   pickAttachments(kind: AttachmentKind, directory: string, held: number): Promise<AttachmentPick>
+  /** 붙여넣거나 끌어다 놓은 파일을 칩으로 (이슈 #80). **File 객체만 받는다** — 경로는 preload 가 `webUtils.getPathForFile` 로 얻는다(사용자가
+   *  실제로 놓거나 붙여넣은 파일만 경로가 나온다. 화면이 지어낸 File 은 경로가 없다). 경로가 없는 것(스크린숏)은 png·jpeg 이미지일 때만 —
+   *  preload 가 바이트를 메인에 넘기고 메인이 임시 파일로 둔다. 종류는 메인이 파일을 보고 정한다. held 는 종류별로 이미 붙은 수,
+   *  model 은 그 대화의 모델(이미지를 안 받으면 이미지는 사유와 함께 거절). 폴더·바이너리·상한의 사유는 고르기와 같다 */
+  attachFiles(conversationId: string, files: File[], held: Record<AttachmentKind, number>, model: ChatModel | undefined): Promise<AttachmentPick>
+  /** 초안에서 뺀 칩을 알린다 — 붙여넣은 이미지의 임시 파일을 지운다 (메인이 만든 것만 지운다. 고른 파일은 건드리지 않는다) */
+  discardAttachments(paths: string[]): Promise<void>
   /** 최근 프로젝트 — 맨 앞이 마지막으로 연 프로젝트 */
   listProjects(): Promise<Project[]>
   /** 그 폴더를 열어 최근 목록 맨 앞에 올린다 */

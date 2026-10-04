@@ -143,7 +143,7 @@ async function start(limit?: number) {
     return of('turn.ended')[n - 1]!
   }
   const stored = async (id: string) => (await ready.sessions.list()).find((entry) => entry.id === id)
-  return { chat: ready.chat, sessions: ready.sessions, llm, events, names, of, turn, ended, stored }
+  return { ctx: ready, chat: ready.chat, sessions: ready.sessions, llm, events, names, of, turn, ended, stored }
 }
 
 async function until(done: () => boolean): Promise<void> {
@@ -506,6 +506,29 @@ describe('ChatService — 첨부 (이슈 #44)', () => {
     const saved = await stored('c1')
     expect(saved?.labels).toEqual({ [started.message.id!]: '' })
     expect(saved?.attachments).toEqual({ [started.message.id!]: [{ kind: 'file', name: 'notes.md', size: 6 }] })
+  })
+
+  it('첨부를 읽은 뒤(못 읽어 실패한 턴도) 그 경로들을 알린다 — 붙여넣은 이미지의 임시 파일을 지울 때 (이슈 #80)', async () => {
+    const { ctx, chat, turn, ended } = await start()
+    const read: string[][] = []
+    ctx.on('chat/attachments-read', (paths) => void read.push(paths))
+    const file = path.join(root, 'read.md')
+    await fs.writeFile(file, '# 메모')
+    chat.allowAttachments([file])
+    await chat.send('c1', input('봐 줘', { project: root, attachments: [{ kind: 'file', path: file, name: 'read.md', size: 6 }] }))
+    const first = await turn(1)
+    expect(read).toEqual([[file]])
+    first.finish()
+    await ended(1)
+    const gone = path.join(root, 'gone.md')
+    chat.allowAttachments([gone])
+    await chat.send('c1', input('이것도', { project: root, attachments: [{ kind: 'file', path: gone, name: 'gone.md', size: 1 }] }))
+    expect((await ended(2)).outcome).toBe('failed')
+    expect(read).toEqual([[file], [gone]])
+    await chat.send('c1', input('첨부 없이', { project: root }))
+    ;(await turn(2)).finish()
+    await ended(3)
+    expect(read).toHaveLength(2)
   })
 
   it('대기열에 쌓인 첨부는 순서대로 합쳐 나가고, 대기열 이벤트에 칩으로 실린다 (상한 세기)', async () => {

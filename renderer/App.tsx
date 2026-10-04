@@ -26,6 +26,8 @@ import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { PlusMenu } from './PlusMenu.tsx'
 import { AttachmentChips } from './Attachments.tsx'
+import { pasteIntent, useFileDrop } from './dropPaste.ts'
+import { DropVeil } from './DropVeil.tsx'
 import { countOf } from './attachmentsView.ts'
 import { OpenInButton } from './OpenInButton.tsx'
 import { JobsButton } from './Jobs.tsx'
@@ -467,6 +469,8 @@ export function App() {
   /** 답변 중지 — 입력창 ■·행 ■·Esc 두 번 (이슈 #3). 대기열은 보내지 않고 입력창으로 되돌린다 */
   const stopTurn = useStopTurn(active?.id, !!active?.held, restoreQueued)
   useEscapeTwice('.chat-pane, .composer', active?.pending ? active.id : undefined, stopTurn)
+  // 파일을 대화 영역 위로 끌면 놓을 자리 표시, 놓으면 칩 (이슈 #80). 쓸 수 없는 대화면 받지 않는다 — 어느 쪽이든 창 이동은 막는다
+  const dropping = useFileDrop('.main', active && canWrite(active) ? (files) => void attachFiles(files) : undefined)
 
   /** 알림(토스트·PC 알림)을 누르면 — 기존 프로젝트 열기 경로로 그 프로젝트를 열고(목록에서 빠졌으면 다시 넣는다) 그 대화를 고른다.
    *  대화가 지워졌으면 프로젝트만 열고 안내, 폴더가 없으면 팝오버에 "폴더를 열 수 없습니다" (결정 Q8) */
@@ -698,6 +702,17 @@ export function App() {
     if (!active) return
     const result = await window.litecode.pickAttachments(kind, active.project, countOf(kind, attached, active.queuedAttachments))
     setAttached((now) => [...now, ...result.picked.filter((item) => !now.some((held) => held.path === item.path && held.kind === item.kind))])
+    for (const reason of result.rejected) notices.say(reason)
+    trigger.inputRef.current?.focus()
+  }
+
+  /** 붙여넣거나 끌어다 놓은 파일 (이슈 #80) — File 객체를 그대로 넘긴다(경로는 preload, 종류·상한·사유는 메인). 그 뒤는 고른 것과 같은 칩 */
+  async function attachFiles(files: File[]): Promise<void> {
+    if (!active || files.length === 0) return
+    const id = active.id
+    const held = { file: countOf('file', attached, active.queuedAttachments), image: countOf('image', attached, active.queuedAttachments) }
+    const result = await window.litecode.attachFiles(id, files, held, selected)
+    changeDraftOf(id, (now) => ({ ...now, attached: [...now.attached, ...result.picked.filter((item) => !now.attached.some((had) => had.path === item.path && had.kind === item.kind))] }))
     for (const reason of result.rejected) notices.say(reason)
     trigger.inputRef.current?.focus()
   }
@@ -1190,7 +1205,13 @@ export function App() {
                 {/* 붙인 파일·이미지 칩 — 글 입력칸 위 (이슈 #44 시안). × 로 뺀다 */}
                 {attached.length > 0 && (
                   <div className="composer__attachments">
-                    <AttachmentChips items={attached} onRemove={(index) => setAttached((now) => now.filter((_, at) => at !== index))} />
+                    <AttachmentChips
+                      items={attached}
+                      onRemove={(index) => {
+                        void window.litecode.discardAttachments([attached[index]!.path]) // 붙여넣은 이미지면 임시 파일을 지운다 (이슈 #80)
+                        setAttached((now) => now.filter((_, at) => at !== index))
+                      }}
+                    />
                   </div>
                 )}
                 <textarea
@@ -1200,6 +1221,13 @@ export function App() {
                   placeholder={mode === 'plan' ? t('composer.planPlaceholder') : t('composer.placeholder')}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
+                  onPaste={(event) => {
+                    // 클립보드의 파일·이미지는 칩으로 (이슈 #80) — 글만 있으면 손대지 않는다 (dropPaste.ts)
+                    const files = [...event.clipboardData.files]
+                    if (pasteIntent(event.clipboardData.types, files.length) !== 'attach') return
+                    event.preventDefault()
+                    void attachFiles(files)
+                  }}
                   onKeyDown={(event) => {
                     // 한글 등 입력기가 조합 중인 Enter 는 조합을 확정하는 키다 — 여기서 보내면 "안녕" 이 "아ㄴ녕" 으로 가고
                     // 마지막 글자가 입력창에 남는다. keyCode 229 는 isComposing 을 안 채우는 환경용
@@ -1292,6 +1320,7 @@ export function App() {
             )}
           </DelegationContext.Provider>
         )}
+        {dropping && <DropVeil />}
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
       <ErrorBoundary scope="section" className="crash--side" resetKey={active?.project}>

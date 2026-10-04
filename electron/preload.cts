@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { LitecodeBridge } from '../shared/ipc.ts'
 
 // preload 는 Electron 이 항상 require() 로 읽어서(ESM 불가) .cts 로 따로 컴파일한다.
@@ -18,6 +18,8 @@ const Channel = {
   QUEUE_CHANGED: 'chat:queue',
   CONVERSATIONS_CHANGED: 'chat:conversations-changed',
   PICK_ATTACHMENTS: 'chat:pick-attachments',
+  ATTACH_DROPPED: 'chat:attach-dropped',
+  DISCARD_ATTACHMENTS: 'chat:discard-attachments',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
   PICK_PROJECT_FOLDER: 'projects:pick-folder',
@@ -90,6 +92,9 @@ const Channel = {
   REMOTE_CHANGED: 'remote:changed',
 } as const
 
+/** 경로 없는 이미지(붙여넣은 스크린숏)를 읽어 메인에 넘길 상한 — shared/attachments.ts 의 imageBytes 와 같아야 한다 (메인이 다시 본다) */
+const PASTED_IMAGE_BYTES = 20 * 1024 * 1024
+
 /** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
 function listen<T extends unknown[]>(channel: string, listener: (...args: T) => void): () => void {
   const handler = (_event: unknown, ...args: unknown[]) => listener(...(args as T))
@@ -111,6 +116,25 @@ const bridge: LitecodeBridge = {
   onQueueChanged: (listener) => listen(Channel.QUEUE_CHANGED, listener),
   onConversationsChanged: (listener) => listen(Channel.CONVERSATIONS_CHANGED, listener),
   pickAttachments: (kind, directory, held) => ipcRenderer.invoke(Channel.PICK_ATTACHMENTS, kind, directory, held),
+  // 붙여넣기·끌어다 놓기 (이슈 #80) — 화면은 File 객체만 넘긴다. 경로는 여기서 얻는다: 사용자가 실제로 놓거나 붙여넣은 파일만 경로가 나오고
+  // 화면이 `new File()` 로 지어낸 것은 빈 문자열이다. 화면(격리된 세계)은 ipcRenderer 를 못 쓰므로 이 채널에 경로 문자열을 실을 길이 없다.
+  // 경로 없는 것(스크린숏)은 바이트를 읽어 넘긴다 — 상한을 넘으면 읽지 않고 이름만 (메인이 "너무 큼" 으로 거절)
+  attachFiles: async (conversationId, files, held, model) => {
+    const paths: string[] = []
+    const blobs: { name: string; data?: Uint8Array }[] = []
+    for (const file of Array.from(files ?? [])) {
+      let filePath = ''
+      try {
+        filePath = webUtils.getPathForFile(file)
+      } catch {
+        continue // File 이 아니다
+      }
+      if (filePath) paths.push(filePath)
+      else blobs.push({ name: String(file.name), ...(file.size <= PASTED_IMAGE_BYTES && { data: new Uint8Array(await file.arrayBuffer()) }) })
+    }
+    return ipcRenderer.invoke(Channel.ATTACH_DROPPED, conversationId, { paths, blobs }, held, model)
+  },
+  discardAttachments: (paths) => ipcRenderer.invoke(Channel.DISCARD_ATTACHMENTS, paths),
   listProjects: () => ipcRenderer.invoke(Channel.LIST_PROJECTS),
   openProject: (directory) => ipcRenderer.invoke(Channel.OPEN_PROJECT, directory),
   pickProjectFolder: () => ipcRenderer.invoke(Channel.PICK_PROJECT_FOLDER),

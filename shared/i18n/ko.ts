@@ -222,7 +222,10 @@ export const ko = {
   'attach.fileTooLarge': '{name}: 파일은 한 개에 {max}KB 까지 붙일 수 있습니다',
   'attach.tooManyImages': '이미지는 한 메시지에 {max}장까지 붙일 수 있습니다',
   'attach.tooManyFiles': '파일은 한 메시지에 {max}개까지 붙일 수 있습니다',
-  'attach.notPicked': '파일 고르기로 고르지 않은 첨부는 보낼 수 없습니다 — 다시 붙여 주세요',
+  'attach.notPicked': '직접 고르거나 놓거나 붙여넣지 않은 첨부는 보낼 수 없습니다 — 다시 붙여 주세요',
+  // 끌어다 놓기 (이슈 #80) — 파일을 대화 영역 위로 끄는 동안의 놓을 자리 표시
+  'attach.drop.title': '여기에 놓아 붙이기',
+  'attach.drop.hint': '글자 파일, PNG·JPEG 이미지',
   'plus.scope.project': '이 프로젝트만',
   'plus.scope.all': '모든 프로젝트',
   'composer.send': '보내기',
