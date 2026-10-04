@@ -10,6 +10,7 @@ import { ScrollToBottom } from './ScrollToBottom.tsx'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { SettingsModal } from './Settings.tsx'
+import { RemotePairPrompt } from './MobileSettings.tsx'
 import { StatsBar } from './StatsBar.tsx'
 import { Trajectory } from './Trajectory.tsx'
 import { chatStats, type ChatUsage } from './stats.ts'
@@ -1112,6 +1113,8 @@ export function App() {
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
       <FilePreviewPanel directory={active?.project} />
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
+      {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
+      <RemotePairPrompt on={features.has('remote')} />
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
     </div>
   )

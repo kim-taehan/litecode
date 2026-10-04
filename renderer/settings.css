@@ -667,3 +667,49 @@
   opacity: 0.4;
   cursor: default;
 }
+
+/* 모바일 페이지 (이슈 #56) — 일반 페이지의 행을 그대로 쓴다. 더한 것: 주소·코드 표, 기기 줄 */
+.mobile-page__address {
+  color: var(--text-secondary);
+}
+
+.mobile-pairing {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.mobile-pairing dt {
+  color: var(--text-tertiary);
+}
+
+.mobile-pairing dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.mobile-pairing__code {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  user-select: all;
+}
+
+.mobile-pairing__note {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.mobile-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+}

@@ -7,8 +7,9 @@
 import type { Attachment, Attention, Conversation, HistoryMessage, PickedAttachment, TurnItem, TurnUsage } from './contract.ts'
 import type { Mode } from './modes.ts'
 
-/** 누가 보냈나 — 지금은 사람('user')뿐이다. 다른 대화가 보낸 지시는 `session:<대화 id>` (데스크탑 MCP 라운드 ③) */
-export type ChatOrigin = 'user' | `session:${string}`
+/** 누가 보냈나 — 지금은 사람('user')뿐이다. 다른 대화가 보낸 지시는 `session:<대화 id>` (데스크탑 MCP 라운드 ③),
+ *  짝지은 폰이 보낸 것은 `device:<기기 id>` (ctx.remote, 이슈 #56) */
+export type ChatOrigin = 'user' | `session:${string}` | `device:${string}`
 
 export interface ChatModel {
   providerId: string

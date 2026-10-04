@@ -38,6 +38,7 @@ import { McpService, type McpServerInput } from '../src/services/mcp.ts'
 import { AppMcpService } from '../src/services/appMcp.ts'
 import { OpenFileTool } from '../src/services/appMcp/tools/openFile.ts'
 import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
+import { RemoteService } from '../src/services/remote.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -388,6 +389,18 @@ function appMcpBridge(ctx: Context): void {
 }
 appMcpBridge.inject = ['appMcp']
 
+// 모바일 연결 (이슈 #56) — 설정 > 모바일과 짝짓기 [허용] 확인의 IPC. 상태가 바뀌면(요청이 왔다·기기가 붙었다) 모든 창에
+function remoteBridge(ctx: Context): void {
+  handle(ctx, Channel.REMOTE_STATUS, async () => ctx.remote.status())
+  handle(ctx, Channel.REMOTE_SET_ENABLED, async (_event, enabled: boolean) => ctx.remote.setEnabled(enabled === true))
+  handle(ctx, Channel.REMOTE_START_PAIRING, async () => ctx.remote.startPairing())
+  handle(ctx, Channel.REMOTE_CANCEL_PAIRING, async () => ctx.remote.cancelPairing())
+  handle(ctx, Channel.REMOTE_ANSWER_PAIR, async (_event, requestId: string, allow: boolean) => ctx.remote.answerPair(String(requestId), allow === true))
+  handle(ctx, Channel.REMOTE_REVOKE, async (_event, deviceId: string) => ctx.remote.revoke(String(deviceId)))
+  ctx.on('remote/changed', (status) => broadcast(Channel.REMOTE_CHANGED, status))
+}
+remoteBridge.inject = ['remote']
+
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게 */
 const features: FeatureDefinition[] = [
   { id: 'at', plugin: AtTrigger },
@@ -454,6 +467,14 @@ const features: FeatureDefinition[] = [
       ctx.plugin(AppMcpService)
       ctx.plugin(OpenFileTool)
       ctx.plugin(appMcpBridge)
+    },
+  },
+  {
+    // 모바일 연결 — 기본 꺼짐. 켜도 설정 > 모바일의 스위치를 켜기 전에는 포트를 열지 않는다. 끄면 서버·IPC·설정 메뉴가 함께 내려간다
+    id: 'remote',
+    plugin: (ctx) => {
+      ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
+      ctx.plugin(remoteBridge)
     },
   },
 ]
