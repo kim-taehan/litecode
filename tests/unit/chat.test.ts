@@ -658,3 +658,22 @@ describe('ChatService — 대화 이름 바꾸기 (이슈 #63)', () => {
     expect((await stored('c1'))!.title).toBe('처음')
   })
 })
+
+describe('ChatService — 도는 턴 수 (종료 확인이 묻는다, 이슈 #92)', () => {
+  it('대화마다 도는 턴 하나씩 센다 — 대기열에 쌓인 것은 세지 않고, 끝나면 준다', async () => {
+    const { chat, turn, ended } = await start()
+    expect(chat.running()).toBe(0)
+    await chat.send('c1', input('하나'))
+    await chat.send('c1', input('대기열'))
+    await chat.send('c2', input('둘'))
+    expect(chat.running()).toBe(2)
+
+    await turn(2)
+    chat.stop('c1') // 멈춘 턴은 대기열을 붙잡는다 — 다음 턴이 돌지 않는다
+    await ended(1)
+    expect(chat.running()).toBe(1)
+    ;(await turn(2)).finish()
+    await ended(2)
+    expect(chat.running()).toBe(0)
+  })
+})

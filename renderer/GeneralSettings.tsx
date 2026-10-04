@@ -192,6 +192,26 @@ export function GeneralPage() {
         </button>
       </div>
 
+      {/* 창 닫기 = 숨기기 (ctx.quit, 이슈 #92) — Windows·Linux 만. macOS 는 창을 닫아도 원래 앱이 남는다 (플랫폼 표시는 preload 가 html 에 적는다) */}
+      {document.documentElement.dataset.platform !== 'darwin' && (
+        <div className="settings-row">
+          <div className="settings-row__text">
+            <div className="settings-row__title">{t('settings.keepRunning')}</div>
+            <div className="settings-row__description">{t('settings.keepRunning.description')}</div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            className="settings-switch"
+            aria-checked={settings.keepRunning !== false}
+            aria-label={t('settings.keepRunning')}
+            onClick={() => save({ keepRunning: settings.keepRunning === false })}
+          >
+            <span className="settings-switch__thumb" />
+          </button>
+        </div>
+      )}
+
       {/* 맨 아래 한 줄 — dsh CurrentVersionRow. 못 받으면 줄째 없다 */}
       {version && <div className="settings-version">{t('settings.currentVersion', { version })}</div>}
     </div>
