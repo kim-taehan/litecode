@@ -204,9 +204,14 @@ export function engineMcpConfig(def: EngineMcp, hidden: readonly string[]): Reco
 // `*_*` 는 밑줄이 있는 내장 권한(external_directory·doom_loop·plan_enter·plan_exit)에도 걸린다 → 계획은 기본값을 다시 적는다(opencode 기본은
 // external_directory·doom_loop 모두 ask. 대가: 기본의 "임시 폴더 허용" 하나가 ask 가 된다 — tool-output 허용은 opencode 가 맨 뒤에 다시 붙인다).
 // 기본·전체 권한은 opencode 기본(허용)이다. 웹 도구 deny(#14)는 이 뒤에 붙고 겹치지 않는다
+//
+// 앱 MCP 서버의 도구(`litecode_*`, 이슈 #51 — 실측 2026-10-04 _workspace/01z_desktop_mcp.md 1-3·3-5): **`*_*` 뒤에 개별 이름을 적으면 그 도구만
+// 다르게 된다**(뒤가 이긴다, 12조합 3/3). 화면만 여는 도구는 묻지 않는다 — 계획은 open_file 만(터미널에 명령을 채우는 것은 계획 모드의 일이 아니다),
+// 매번 묻기는 open_file·open_terminal 둘 다(터미널은 실행이 사용자 손에 있다). 매번 묻기의 하위 작업(general-ask)은 와일드카드대로 묻는다.
+// 그 이름은 ctx.mcp 가 예약한다 — 사용자·폴더 서버는 `litecode` 라는 이름으로 못 붙는다
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
-  plan: { '*_*': 'deny', external_directory: 'ask', doom_loop: 'ask' },
-  [MODE_AGENT.ask]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' },
+  plan: { '*_*': 'deny', litecode_open_file: 'allow', external_directory: 'ask', doom_loop: 'ask' },
+  [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open_file: 'allow', litecode_open_terminal: 'allow', plan_enter: 'deny', plan_exit: 'deny' },
   // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
   [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' },
 }

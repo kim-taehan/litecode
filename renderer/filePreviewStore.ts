@@ -17,6 +17,9 @@ export interface PanelState {
   fullscreen: boolean
   /** 열 때마다 오른다 — 같은 칩을 다시 눌러도 패널이 포커스를 잡는다(Esc 로 닫히게) */
   focus: number
+  /** 줄 이동 (이슈 #51 — AI 의 open_file 이 줄을 줬다): 그 탭을 그 줄로 스크롤하고 강조한다. seq 는 그때의 focus — 같은 줄을 다시 열어도 다시 간다.
+   *  줄 없이 그 탭을 다시 열면 지워진다 */
+  jump?: { key: string; line: number; seq: number }
 }
 
 let current: PanelState | undefined
@@ -50,11 +53,13 @@ export function tabKey(directory: string, token: string): string {
   return parts.length > 0 ? parts.join('/') : token
 }
 
-/** 파일 탭을 열고(이미 있으면 그 탭을) 고른다 */
-export function openFilePreview(directory: string, token: string): void {
+/** 파일 탭을 열고(이미 있으면 그 탭을) 고른다. line(1부터)을 주면 그 줄로 간다 */
+export function openFilePreview(directory: string, token: string, line?: number): void {
   const state = base(directory)
   const key = tabKey(directory, token)
-  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus: state.focus + 1 })
+  const focus = state.focus + 1
+  const jump = line !== undefined ? { key, line, seq: focus } : state.jump?.key === key ? undefined : state.jump
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, jump })
 }
 
 /** Files 탭으로 연다 ("+"·대화 머리 버튼) */

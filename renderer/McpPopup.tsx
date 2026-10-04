@@ -120,7 +120,9 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
   const target = server.type === 'remote' ? server.url : server.command?.join(' ')
   const state = mcpState(server)
   // 출처 배지 — 폴더 정의는 그 파일 이름(시안의 ".mcp.json"), 개인 설정은 "개인 설정". 앱에서 만든 서버는 배지 없음
-  const badge = server.source === 'project' ? server.origin : server.source === 'personal' ? t('mcp.source.personal') : undefined
+  // 내장 = 앱 자신의 MCP 서버(이슈 #51) — 읽기 전용, 주소 없음
+  const badge =
+    server.source === 'project' ? server.origin : server.source === 'personal' ? t('mcp.source.personal') : server.source === 'builtin' ? t('mcp.source.builtin') : undefined
   const stateText =
     state === 'shadowed'
       ? t('mcp.shadowed')

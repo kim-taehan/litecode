@@ -68,6 +68,9 @@ const Channel = {
   REMOVE_MCP: 'mcp:remove',
   SET_MCP_ENABLED: 'mcp:set-enabled',
   TEST_MCP: 'mcp:test',
+  APP_MCP_VIEW: 'appMcp:view',
+  APP_MCP_OPEN_FILE: 'appMcp:open-file',
+  APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
 } as const
 
 /** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
@@ -158,6 +161,9 @@ const bridge: LitecodeBridge = {
   removeMcp: (name, directory) => ipcRenderer.invoke(Channel.REMOVE_MCP, name, directory),
   setMcpEnabled: (name, enabled, directory) => ipcRenderer.invoke(Channel.SET_MCP_ENABLED, name, enabled, directory),
   testMcp: (input, directory) => ipcRenderer.invoke(Channel.TEST_MCP, input, directory),
+  viewProject: (directory) => ipcRenderer.invoke(Channel.APP_MCP_VIEW, directory),
+  onAppMcpOpenFile: (listener) => listen(Channel.APP_MCP_OPEN_FILE, listener),
+  onAppMcpOpenTerminal: (listener) => listen(Channel.APP_MCP_OPEN_TERMINAL, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

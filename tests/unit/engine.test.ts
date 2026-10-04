@@ -125,7 +125,7 @@ describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
 
   it('계획은 opencode plan 을 덮어써 편집·명령·웹을 막고 계획 프롬프트를 준다', () => {
     expect(MODE_AGENT.plan).toBe('plan')
-    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', external_directory: 'ask', doom_loop: 'ask' })
+    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', litecode_open_file: 'allow', external_directory: 'ask', doom_loop: 'ask' })
     expect(agent['plan']!.prompt).toMatch(/plan mode/)
   })
 
@@ -199,6 +199,36 @@ describe('engineConfig — MCP 도구 권한 (#28)', () => {
 })
 
 // 01_probe (2026-10-01): custom 모델의 한도는 opencode 가 모른다(limit.context 0). 모델에 limit 을 적으면 /api/model 에 그대로 보인다
+// 이슈 #51 실측 (2026-10-04, _workspace/01z_desktop_mcp.md 1-3): `*_*` 뒤에 개별 이름을 적으면 그 도구만 다르게 된다 — 규칙은 뒤가 이긴다.
+// 그래서 순서가 계약이다: 앱 MCP 도구의 규칙이 와일드카드보다 앞에 오면 와일드카드에 진다
+describe('engineConfig — 앱 MCP 도구(litecode_*)의 모드별 권한 (#51)', () => {
+  for (const webTools of [false, true]) {
+    const config = engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools, skills: { enabled: true, claude: false } })
+    const agent = config.agent as Record<string, { permission: Record<string, unknown> }>
+    const order = (name: string) => Object.keys(agent[name]!.permission)
+
+    it(`계획: open_file 만 허용(와일드카드 deny 뒤), open_terminal 은 없다 — 웹 도구 ${webTools ? '켬' : '끔'}`, () => {
+      expect(agent['plan']!.permission).toMatchObject({ '*_*': 'deny', litecode_open_file: 'allow' })
+      expect(order('plan').indexOf('litecode_open_file')).toBeGreaterThan(order('plan').indexOf('*_*'))
+      expect(agent['plan']!.permission).not.toHaveProperty('litecode_open_terminal')
+    })
+
+    it(`매번 묻기: open_file·open_terminal 은 묻지 않는다(와일드카드 ask 뒤), 그 하위 작업은 와일드카드대로 묻는다 — 웹 도구 ${webTools ? '켬' : '끔'}`, () => {
+      const ask = MODE_AGENT.ask
+      expect(agent[ask]!.permission).toMatchObject({ '*_*': 'ask', litecode_open_file: 'allow', litecode_open_terminal: 'allow' })
+      expect(order(ask).indexOf('litecode_open_file')).toBeGreaterThan(order(ask).indexOf('*_*'))
+      expect(order(ask).indexOf('litecode_open_terminal')).toBeGreaterThan(order(ask).indexOf('*_*'))
+      expect(JSON.stringify(agent[SUBAGENT_ASK]!.permission)).not.toContain('litecode_')
+    })
+
+    it(`기본(build)·전체 권한엔 규칙이 없다 — opencode 기본(허용), 전역 규칙에도 없다 — 웹 도구 ${webTools ? '켬' : '끔'}`, () => {
+      expect(agent['build']).toBeUndefined()
+      expect(JSON.stringify(agent[MODE_AGENT.full]!.permission)).not.toContain('litecode_')
+      expect(JSON.stringify(config.permission)).not.toContain('litecode_')
+    })
+  }
+})
+
 describe('engineConfig — 컨텍스트 길이', () => {
   // 이슈 #27 실측: limit.output 은 요청의 max_tokens 이자 요약 문턱의 출력 몫 — 0 이면 둘 다 32000 이라 작은 모델에서 요약이 끝없이 돈다
   it('컨텍스트 길이·최대 출력 중 하나라도 준 모델만 limit 을 싣는다 — 최대 출력을 비우면 컨텍스트의 1/4(최대 32000)', () => {

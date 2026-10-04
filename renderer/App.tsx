@@ -15,6 +15,7 @@ import { addTurn, chatStats, type ChatUsage } from './stats.ts'
 import { useTriggers } from './useTriggers.ts'
 import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
+import { useAppMcp } from './useAppMcp.ts'
 import { ShellCard, type ShellCardView } from './ShellCard.tsx'
 import { useSettings, useT } from './settingsStore.ts'
 import { useFeatures } from './featuresStore.ts'
@@ -495,6 +496,12 @@ export function App() {
   const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
   /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
   const [shellFocus, setShellFocus] = useState(0)
+  /** AI 가 칸을 폈을 때의 shellFocus (앱 MCP open_terminal, 이슈 #51) — 그렇게 편 칸은 키를 가져가지 않는다. ⌘↓ 를 누르면 값이 달라져 풀린다 */
+  const [shellQuietAt, setShellQuietAt] = useState<number>()
+  useAppMcp(active?.project, (directory) => {
+    setShellQuietAt(shellFocus)
+    setShellOpen((open) => ({ ...open, [directory]: true }))
+  })
   const trigger = useTriggers({
     directory: active?.project,
     draft,
@@ -1185,6 +1192,7 @@ export function App() {
                 key={active.project}
                 directory={active.project}
                 focusSignal={shellFocus}
+                quiet={shellQuietAt === shellFocus}
                 onClose={() => {
                   setShellOpen((open) => ({ ...open, [active.project]: false }))
                   trigger.inputRef.current?.focus()

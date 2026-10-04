@@ -47,7 +47,8 @@ export function PlusMenu({ project, imageInput, onAttach }: { project?: Project;
     setMcp(undefined)
     // 못 읽으면(서비스가 못 떴다 등) 오른쪽 글자 없이 — 팝업을 열면 사유가 보인다
     window.litecode.listSkills(directory).then((list) => current && setSkillCount(list.length), () => {})
-    window.litecode.listMcp(directory).then((list) => current && setMcp(mcpCounts(list)), () => {})
+    // 내장 서버(앱 자신의 것, 이슈 #51)는 세지 않는다 — 사용자가 붙인 서버의 수다
+    window.litecode.listMcp(directory).then((list) => current && setMcp(mcpCounts(list.filter((server) => server.source !== 'builtin'))), () => {})
     return () => {
       current = false
     }
