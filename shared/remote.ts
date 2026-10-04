@@ -144,6 +144,8 @@ export interface RemoteErrorBody {
 // ── SSE (GET /v1/events?run=&after=) ──────────────────────────────────────────────────────────────
 // `event:` = 이름, `data:` = JSON. 기록되는 이벤트는 `id:` = seq 가 붙고 `after` 로 이어 받는다.
 // ready·reset·device.revoked 는 그 연결에만 하는 말이라 id 가 없다 (기록되지 않는다).
+// **seq 는 건너뛸 수 있다** (이슈 #68): 운반이 밀리면 데스크탑이 아직 못 보낸 `turn.progress` 중 같은 진행 줄(cid·item.id)은 최신 하나만
+// 보낸다 — 누적 전체를 싣는 이벤트라 옛 모습은 필요 없다. seq 는 늘 커지기만 한다. 받는 쪽은 "이미 본 seq 이하" 만 버리면 된다.
 
 export type TurnOutcome = 'done' | 'failed' | 'interrupted'
 

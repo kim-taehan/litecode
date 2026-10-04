@@ -1,7 +1,5 @@
 import { Context, Service } from 'cordis'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import http from 'node:http'
-import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import './chat.ts'
 import './sessions.ts'
@@ -10,8 +8,10 @@ import './providers.ts'
 import './settings.ts'
 import './notifications.ts'
 import { tr } from '../i18n.ts'
+import type { RemoteCarrier, RemoteExchange, RemoteOutcome, RemotePeer, RemoteReply, RemoteRequest, RemoteStreamSink } from './remote/carrier.ts'
 import { DeviceStore, FailureLimiter, type DevicePlatform, type StoredDevice } from './remote/devices.ts'
 import { EventLog } from './remote/eventLog.ts'
+import { StreamQueue } from './remote/streamQueue.ts'
 import { confirmCode, groupCode, newPairCode, normalizePairCode } from './remote/pairing.ts'
 import { emptyChatView, withHistory } from '../../shared/chatReducer.ts'
 import type { ChatOrigin } from '../../shared/chat.ts'
@@ -41,17 +41,19 @@ import {
 // **엔진(opencode)을 모른다**: 쓰기는 전부 ctx.chat, 읽기는 ctx.sessions·ctx.projects·ctx.providers 로만 한다.
 // 계약은 shared/remote.ts — 모바일 클라이언트(mobile/src/core)와 가짜 데스크탑(mobile/dev/fake-desktop.mts)이 같은 것을 본다.
 //
-// 이번 라운드의 전송 (리더 결정): **루프백(127.0.0.1) 평문 http 만.** Android 에뮬레이터(10.0.2.2)와 이 PC 안의 클라이언트만 닿는다.
-// 사내망 주소·자체 서명 TLS·지문 고정은 다음 라운드 — 리스너를 주소 목록으로 받으므로 그때 TLS 리스너를 더하기만 하면 된다.
-// 평문 리스너는 루프백 주소가 아니면 열지 않는다 (LAN 에 평문으로 여는 길이 없다). 0.0.0.0 은 어느 쪽으로도 안 연다.
+// **운반을 모른다** (이슈 #68, 설계 _workspace/01ab_mobile_bluetooth.md 5절): 이 서비스는 계약·인증·기기·짝짓기·이벤트 링을 쥐고,
+// 요청은 운반 중립 모양(`handle(RemoteRequest, peer, exchange)` — remote/carrier.ts)으로만 받는다. HTTP·블루투스는 이 밑의
+// **운반 플러그인**이다(`inject: ['remote']`, 자기 ctx 키 없음 — remote/http.ts): `ctx.remote.carrier(…)` 로 자신을 올리고 받은 요청을
+// handle 에 넘긴다. 모바일 연결이 켜져 있는 동안만 올라온 운반을 띄운다(start) — 끄면 전부 닫는다(stop).
+// 리스너·`Origin` 거절·본문 상한처럼 HTTP 에만 있는 것은 HTTP 운반에 있다. 인증 실패 제한의 열쇠는 운반이 준 peer 다.
 //
 // 경계 (01t 3절):
-// - `Origin` 헤더가 있는 요청은 전부 거절 (브라우저·DNS rebinding — 우리 클라이언트는 브라우저가 아니다), 본문 상한
 // - 짝짓기: 코드 12자(2분·1회용, 틀리면 5회째 폐기) + 데스크탑 [허용] 확인(최대 60초 롱폴) → 256bit 토큰(해시만 저장)
-// - 그 밖의 모든 요청은 `Authorization: Bearer`. IP 당 인증 실패 10회/분 → 5분 차단. 해제하면 그 토큰은 401, 열린 스트림은 `device.revoked` 뒤 끊김
+// - 그 밖의 모든 요청은 `Authorization: Bearer`. peer(HTTP 면 IP) 당 인증 실패 10회/분 → 5분 차단. 해제하면 그 토큰은 401, 열린 스트림은 `device.revoked` 뒤 끊김
 // - 폰에 열지 않는 것: pty·fs·`!`·`@`·설정·키·MCP·스킬 관리·**전체 권한 모드**(full 모드 대화엔 못 보낸다 — 403).
 //   보낸 글은 그대로 프롬프트다(입력 트리거를 풀지 않는다). 프로젝트는 등록된 것만
-// - 꺼져 있으면(기본) 포트를 열지 않는다. 서비스가 내려가면(기능 끄기·앱 종료) 닫는다
+// - 꺼져 있으면(기본) 운반을 띄우지 않는다(포트를 열지 않는다). 서비스가 내려가면(기능 끄기·앱 종료) 닫는다
+// - 느린 운반에서 이벤트가 밀리면 같은 진행 줄(`turn.progress` 의 cid·item.id)은 최신 하나로 합친다 (remote/streamQueue.ts)
 
 declare module 'cordis' {
   interface Context {
@@ -63,10 +65,8 @@ declare module 'cordis' {
   }
 }
 
-/** 가짜 데스크탑과 같은 기본 포트 — 폰에 저장된 주소·방화벽 규칙이 오래 맞게 고정한다 */
+/** 가짜 데스크탑과 같은 기본 포트 — 폰에 저장된 주소·방화벽 규칙이 오래 맞게 고정한다 (HTTP 운반이 듣는다) */
 export const REMOTE_DEFAULT_PORT = 47600
-/** 본문 상한 — 프롬프트 글 하나다 */
-const MAX_BODY_BYTES = 256 * 1024
 const PAIR_CODE_TTL_MS = 2 * 60_000
 const PAIR_WAIT_MS = 60_000
 const PAIR_MAX_FAILURES = 5
@@ -76,18 +76,9 @@ const SENT_MEMORY = 1000
 const DRAFT_LIMIT = 20
 const DEVICE_NAME_MAX = 64
 
-/** 리스너 하나 — 지금은 평문 http(루프백만). 다음 라운드가 TLS 리스너를 더한다 */
-export interface RemoteListener {
-  host: string
-}
-
 export interface RemoteServiceOptions {
   /** 기기 목록 JSON 파일 (앱에서는 userData/remote-devices.json) */
   file: string
-  /** 기본 127.0.0.1 하나 */
-  listeners?: RemoteListener[]
-  /** 기본 47600. 0 이면 빈 포트 (테스트) */
-  port?: number
   /** hello.name — 기본은 PC 이름 */
   name?: string
   appVersion?: string
@@ -141,7 +132,7 @@ interface PendingPair extends RemotePairRequest {
 }
 
 interface Stream {
-  response: http.ServerResponse
+  queue: StreamQueue
   deviceId: string
 }
 
@@ -161,9 +152,10 @@ export class RemoteService extends Service {
   private limiter: FailureLimiter
   private now: () => number
   private log: EventLog
-  private servers: http.Server[] = []
-  private addresses: string[] = []
-  private error?: RemoteStatus['error']
+  /** 올라온 운반 (플러그인이 carrier() 로 올린다) */
+  private carriers = new Set<RemoteCarrier>()
+  /** 그중 연결을 켜면서 띄운 것 */
+  private started = new Set<RemoteCarrier>()
   private code?: ActiveCode
   private pending = new Map<string, PendingPair>()
   private streams = new Set<Stream>()
@@ -214,18 +206,36 @@ export class RemoteService extends Service {
   status(): RemoteStatus {
     const code = this.activeCode()
     const connected = new Set([...this.streams].map((stream) => stream.deviceId))
+    const carriers = [...this.carriers].map((carrier) => carrier.status())
+    const error = carriers.find((carrier) => carrier.error)?.error
     return {
       enabled: this.store.enabled,
-      port: this.port(),
-      addresses: this.addresses,
-      ...(this.error && { error: this.error }),
+      port: carriers.find((carrier) => carrier.port !== undefined)?.port ?? REMOTE_DEFAULT_PORT,
+      addresses: this.listening(),
+      ...(error && { error }),
       ...(code && { pairing: { code: groupCode(code.code), expiresAt: code.expiresAt, uri: this.pairUri(code) } }),
       requests: [...this.pending.values()].map(({ id, deviceName, platform, confirm }) => ({ id, deviceName, platform, confirm })),
       devices: this.store.list().map(({ id, name, platform, pairedAt, lastSeenAt }) => ({ id, name, platform, pairedAt, lastSeenAt, connected: connected.has(id) })),
     }
   }
 
-  /** 모바일 연결 켜기·끄기 — 켜면 듣기 시작하고(못 뜨면 status().error), 끄면 포트를 닫고 붙어 있던 폰을 끊는다 */
+  /** 운반을 올린다 (운반 플러그인이 ctx.effect 로 건다) — 돌려준 함수가 내린다. 모바일 연결이 켜져 있으면 곧바로 띄우고,
+   *  내리면 닫는다. 설정 화면은 status() 로 운반의 주소·사유를 본다 */
+  carrier(carrier: RemoteCarrier): () => void {
+    this.carriers.add(carrier)
+    void this.sync()
+    return () => {
+      if (!this.carriers.delete(carrier)) return
+      this.queue = this.queue
+        .then(async () => {
+          if (this.started.delete(carrier)) await carrier.stop()
+          if (!this.disposed) this.changed()
+        })
+        .catch((error: unknown) => console.error('[remote] 운반 내리기 실패', (error as Error).message))
+    }
+  }
+
+  /** 모바일 연결 켜기·끄기 — 켜면 올라온 운반을 띄우고(못 뜨면 status().error), 끄면 닫고 붙어 있던 폰을 끊는다 */
   async setEnabled(enabled: boolean): Promise<RemoteStatus> {
     await this.queue
     await this.store.setEnabled(enabled === true)
@@ -235,7 +245,7 @@ export class RemoteService extends Service {
 
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용). 앞 코드는 버린다 */
   startPairing(): RemoteStatus {
-    if (this.servers.length === 0) throw new Error(tr('remote.error.notListening'))
+    if (!this.live()) throw new Error(tr('remote.error.notListening'))
     this.code = { code: newPairCode(), expiresAt: this.now() + PAIR_CODE_TTL_MS, failures: 0 }
     return this.changed()
   }
@@ -257,7 +267,7 @@ export class RemoteService extends Service {
     for (const stream of [...this.streams]) {
       if (stream.deviceId !== deviceId) continue
       this.streams.delete(stream)
-      stream.response.end(frame('device.revoked', {}))
+      stream.queue.end(frame('device.revoked', {}))
     }
     return this.changed()
   }
@@ -267,70 +277,44 @@ export class RemoteService extends Service {
   private sync(): Promise<void> {
     this.queue = this.queue
       .then(async () => {
-        const wanted = this.store.enabled && !this.disposed
-        if (wanted && this.servers.length === 0) await this.open()
-        else if (!wanted && (this.servers.length > 0 || this.error)) await this.close()
+        if (!this.store.enabled || this.disposed) {
+          if (this.started.size > 0) await this.close()
+          return
+        }
+        let started = false
+        for (const carrier of this.carriers) {
+          if (carrier.status().up) continue
+          if (!this.live()) this.log = new EventLog(this.now) // 새 실행 — 폰이 쥔 seq 는 무효다
+          this.started.add(carrier)
+          await carrier.start()
+          started = true
+        }
+        if (started && !this.disposed) this.changed()
       })
       .catch((error: unknown) => console.error('[remote] 켜고 끄기 실패', (error as Error).message))
     return this.queue
   }
 
-  private port(): number {
-    const first = this.servers[0]?.address() as AddressInfo | null | undefined
-    return first?.port ?? this.opts.port ?? REMOTE_DEFAULT_PORT
+  /** 운반들이 듣고 있는 주소 (`ip:port`) */
+  private listening(): string[] {
+    return [...this.carriers].flatMap((carrier) => carrier.status().addresses)
   }
 
-  private async open(): Promise<void> {
-    this.error = undefined
-    this.log = new EventLog(this.now) // 새 실행 — 폰이 쥔 seq 는 무효다
-    const servers: http.Server[] = []
-    const addresses: string[] = []
-    let port = this.opts.port ?? REMOTE_DEFAULT_PORT
-    try {
-      for (const { host } of this.opts.listeners ?? [{ host: '127.0.0.1' }]) {
-        // 평문은 루프백만 — 사내망 주소는 TLS 리스너(다음 라운드)로만 연다
-        if (!isLoopback(host)) throw Object.assign(new Error(`plain http is loopback-only: ${host}`), { code: 'ENOTLOOPBACK' })
-        const server = http.createServer((request, response) => {
-          this.handle(request, response).catch((error: unknown) => {
-            console.error('[remote] 요청 처리 실패', (error as Error).message)
-            if (!response.headersSent) send(response, 500, { error: 'internal error' })
-            else response.destroy()
-          })
-        })
-        servers.push(server)
-        await new Promise<void>((resolve, reject) => {
-          server.once('error', reject)
-          server.listen(port, host, () => {
-            server.off('error', reject)
-            server.on('error', (error) => console.error('[remote] 서버 오류', error.message))
-            resolve()
-          })
-        })
-        port = (server.address() as AddressInfo).port
-        addresses.push(`${host.includes(':') ? `[${host}]` : host}:${port}`)
-      }
-    } catch (error) {
-      await Promise.all(servers.map(closeServer))
-      const { code, message } = error as NodeJS.ErrnoException
-      this.error = { ...(code && { code }), message }
-      return
-    }
-    this.servers = servers
-    this.addresses = addresses
+  /** 떠 있는 운반이 하나라도 있나 — 폰이 붙을 수 있다 */
+  private live(): boolean {
+    return [...this.carriers].some((carrier) => carrier.status().up)
   }
 
   private async close(): Promise<void> {
-    this.error = undefined
     this.code = undefined
     for (const request of [...this.pending.values()]) request.settle('gone')
-    for (const stream of this.streams) stream.response.destroy()
+    for (const stream of this.streams) stream.queue.destroy()
     this.streams.clear()
     this.drafts.clear()
     this.sent.clear()
-    const servers = this.servers
-    this.servers = []
-    this.addresses = []
-    await Promise.all(servers.map(closeServer))
+    const started = [...this.started]
+    this.started.clear()
+    await Promise.all(started.map((carrier) => carrier.stop()))
   }
 
   private changed(): RemoteStatus {
@@ -342,29 +326,30 @@ export class RemoteService extends Service {
   // ── 이벤트 ──────────────────────────────────────────────────────────────────────────────────
 
   private emitEvent<K extends RemoteEventName>(event: K, data: RemoteEventMap[K]): void {
-    if (this.servers.length === 0) return // 꺼져 있으면 쌓지 않는다 — 다시 켜면 새 실행(runId)이다
+    if (!this.live()) return // 꺼져 있으면 쌓지 않는다 — 다시 켜면 새 실행(runId)이다
     const entry = this.log.append(event, data)
-    for (const stream of this.streams) stream.response.write(frame(event, data, entry.seq))
+    const text = frame(event, data, entry.seq)
+    for (const stream of this.streams) stream.queue.push(text, coalesceKey(event, data))
   }
 
-  private openEvents(device: StoredDevice, query: URLSearchParams, response: http.ServerResponse): void {
-    response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
+  private openEvents(device: StoredDevice, query: URLSearchParams, sink: RemoteStreamSink): void {
+    const queue = new StreamQueue(sink)
     const run = query.get('run')
     const after = Number(query.get('after') ?? Number.NaN)
     const here = { runId: this.log.runId, seq: this.log.seq }
     if (run === null) {
-      response.write(frame('ready', here))
+      queue.push(frame('ready', here))
     } else if (this.log.canResume(run, after)) {
-      response.write(frame('ready', here))
-      for (const entry of this.log.after(after)) response.write(frame(entry.event, entry.data, entry.seq))
+      queue.push(frame('ready', here))
+      for (const entry of this.log.after(after)) queue.push(frame(entry.event, entry.data, entry.seq), coalesceKey(entry.event, entry.data))
     } else {
-      response.write(frame('reset', here))
+      queue.push(frame('reset', here))
     }
-    const stream: Stream = { response, deviceId: device.id }
+    const stream: Stream = { queue, deviceId: device.id }
     this.streams.add(stream)
-    const ping = setInterval(() => response.write(': ping\n\n'), this.opts.pingMs ?? REMOTE_PING_INTERVAL_MS)
+    const ping = setInterval(() => queue.ping(': ping\n\n'), this.opts.pingMs ?? REMOTE_PING_INTERVAL_MS)
     // 폰이 끊었거나(또는 해제·끄기로 우리가 끊었다)
-    response.on('close', () => {
+    sink.onClose(() => {
       clearInterval(ping)
       if (this.streams.delete(stream) && !this.disposed) this.changed()
     })
@@ -373,101 +358,104 @@ export class RemoteService extends Service {
 
   // ── 요청 ───────────────────────────────────────────────────────────────────────────────────
 
-  private async handle(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
-    const ip = request.socket.remoteAddress ?? ''
-    if (request.headers.origin !== undefined) return send(response, 403, { error: 'requests with an Origin header are refused' })
-    const blockedMs = this.limiter.blocked(ip)
-    if (blockedMs !== undefined) return send(response, 429, { error: 'too many failed attempts' }, { 'retry-after': String(Math.ceil(blockedMs / 1000)) })
-    if (request.method !== 'GET' && request.method !== 'POST') return send(response, 405, { error: 'method not allowed' }, { allow: 'GET, POST' })
+  /** 요청 하나를 다룬다 — 어느 운반으로 왔는지 모른다. 응답 하나를 돌려주거나, 이벤트 스트림이면 exchange.openStream() 으로 연다.
+   *  운반은 본문을 글로 읽어 넘기고(상한은 운반의 몫), 돌려받은 응답을 자기 방식으로 싣는다 */
+  async handle(request: RemoteRequest, peer: RemotePeer, exchange: RemoteExchange): Promise<RemoteOutcome> {
+    const from = `${peer.carrier}\n${peer.key}`
+    const blockedMs = this.limiter.blocked(from)
+    if (blockedMs !== undefined) return { status: 429, body: { error: 'too many failed attempts' }, headers: { 'retry-after': String(Math.ceil(blockedMs / 1000)) } }
+    if (request.method !== 'GET' && request.method !== 'POST') return { status: 405, body: { error: 'method not allowed' }, headers: { allow: 'GET, POST' } }
 
-    const raw = await readBody(request)
-    if (raw === undefined) return send(response, 413, { error: 'body too large' })
     let body: unknown
     let parts: string[]
-    const url = new URL(request.url ?? '/', 'http://remote')
     try {
-      body = raw ? JSON.parse(raw) : undefined
-      parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+      body = request.body ? JSON.parse(request.body) : undefined
+      parts = request.path.split('/').filter(Boolean).map(decodeURIComponent)
     } catch {
-      return send(response, 400, { error: 'malformed request' })
+      return { status: 400, body: { error: 'malformed request' } }
     }
 
-    if (request.method === 'POST' && url.pathname === remotePath.pair) return this.pair(body, response)
+    if (request.method === 'POST' && request.path === remotePath.pair) return this.pair(body, exchange.signal)
 
     const device = this.store.authenticate(request.headers.authorization)
     if (!device) {
-      this.limiter.fail(ip)
-      return send(response, 401, { error: 'not a paired device' })
+      this.limiter.fail(from)
+      return { status: 401, body: { error: 'not a paired device' } }
     }
     this.store.seen(device.id)
-    if (request.method === 'GET' && url.pathname === remotePath.events) return this.openEvents(device, url.searchParams, response)
+    if (request.method === 'GET' && request.path === remotePath.events) {
+      this.openEvents(device, request.query, exchange.openStream())
+      return { stream: true }
+    }
 
     for (const [key, route] of Object.entries(this.routes)) {
       const [method, pattern] = key.split(' ') as [string, string]
       const wanted = pattern.split('/').filter(Boolean)
       if (method !== request.method || wanted.length !== parts.length || !wanted.every((part, index) => part === '*' || part === parts[index])) continue
-      const [status, answer] = await route({ params: parts.filter((_, index) => wanted[index] === '*'), query: url.searchParams, body, device })
-      return send(response, status, answer)
+      const [status, answer] = await route({ params: parts.filter((_, index) => wanted[index] === '*'), query: request.query, body, device })
+      return { status, body: answer }
     }
-    send(response, 404, { error: 'no such path' })
+    return { status: 404, body: { error: 'no such path' } }
   }
 
-  /** POST /v1/pair — 코드가 맞으면 그 코드를 쓰고(1회용) 데스크탑 [허용] 을 기다린다. 응답은 사용자가 답하거나 시간이 다 됐을 때 */
-  private pair(body: unknown, response: http.ServerResponse): void {
+  /** POST /v1/pair — 코드가 맞으면 그 코드를 쓰고(1회용) 데스크탑 [허용] 을 기다린다. 응답은 사용자가 답하거나 시간이 다 됐을 때.
+   *  gone: 폰이 기다리다 떠났다 */
+  private pair(body: unknown, gone: AbortSignal): RemoteReply | Promise<RemoteReply> {
     const input = body as { code?: unknown; deviceName?: unknown; platform?: unknown } | undefined
     // 이름은 데스크탑 확인 창·기기 목록에 그대로 보인다 — 제어 문자는 빼고 길이를 자른다
     const deviceName = typeof input?.deviceName === 'string' ? input.deviceName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, DEVICE_NAME_MAX) : ''
     const platform = input?.platform
     if (typeof input?.code !== 'string' || !deviceName || (platform !== 'android' && platform !== 'ios')) {
-      return send(response, 400, { error: 'code, deviceName and platform are required' })
+      return { status: 400, body: { error: 'code, deviceName and platform are required' } }
     }
     const active = this.activeCode()
-    if (!active) return send(response, 403, { error: 'no pairing in progress' })
+    if (!active) return { status: 403, body: { error: 'no pairing in progress' } }
     if (!sameText(normalizePairCode(input.code), active.code)) {
       if (++active.failures >= PAIR_MAX_FAILURES) this.code = undefined // 5회째 — 코드를 버린다. 새로 [기기 연결] 을 눌러야 한다
       this.changed()
-      return send(response, 403, { error: 'wrong pairing code' })
+      return { status: 403, body: { error: 'wrong pairing code' } }
     }
     this.code = undefined // 1회용
 
-    const id = randomBytes(8).toString('hex')
-    let settled = false
-    const timer = setTimeout(() => entry.settle('timeout'), this.opts.pairWaitMs ?? PAIR_WAIT_MS)
-    const entry: PendingPair = {
-      id,
-      deviceName,
-      platform,
-      confirm: confirmCode(active.code, deviceName, platform),
-      settle: (result) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        this.pending.delete(id)
-        if (result === 'deny') send(response, 403, { error: 'denied on the desktop' })
-        else if (result === 'timeout') send(response, 408, { error: 'nobody answered on the desktop' })
-        else if (result === 'gone') response.destroy()
-        if (result !== 'allow') {
-          if (!this.disposed) this.changed()
-          return
-        }
-        void this.store.add(deviceName, platform).then(
-          ({ device, token }) => {
-            send(response, 200, { deviceId: device.id, token } satisfies PairResponse)
-            this.changed()
-          },
-          (error: unknown) => {
-            send(response, 500, { error: (error as Error).message })
-            this.changed()
-          },
-        )
-      },
-    }
-    this.pending.set(id, entry)
-    // 폰이 기다리다 끊었다 — 확인 창을 거둔다
-    response.on('close', () => {
-      if (!response.writableEnded) entry.settle('gone')
+    return new Promise<RemoteReply>((resolve) => {
+      const id = randomBytes(8).toString('hex')
+      let settled = false
+      const timer = setTimeout(() => entry.settle('timeout'), this.opts.pairWaitMs ?? PAIR_WAIT_MS)
+      const entry: PendingPair = {
+        id,
+        deviceName,
+        platform,
+        confirm: confirmCode(active.code, deviceName, platform),
+        settle: (result) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          this.pending.delete(id)
+          if (result === 'deny') resolve({ status: 403, body: { error: 'denied on the desktop' } })
+          else if (result === 'timeout') resolve({ status: 408, body: { error: 'nobody answered on the desktop' } })
+          // 받을 상대가 없다 (폰이 떠났거나, 연결을 꺼서 운반이 곧 닫힌다)
+          else if (result === 'gone') resolve({ status: 503, body: { error: 'pairing was abandoned' } })
+          if (result !== 'allow') {
+            if (!this.disposed) this.changed()
+            return
+          }
+          void this.store.add(deviceName, platform).then(
+            ({ device, token }) => {
+              resolve({ status: 200, body: { deviceId: device.id, token } satisfies PairResponse })
+              this.changed()
+            },
+            (error: unknown) => {
+              resolve({ status: 500, body: { error: (error as Error).message } })
+              this.changed()
+            },
+          )
+        },
+      }
+      this.pending.set(id, entry)
+      // 폰이 기다리다 끊었다 — 확인 창을 거둔다
+      gone.addEventListener('abort', () => entry.settle('gone'), { once: true })
+      this.changed()
     })
-    this.changed()
   }
 
   private routes: Record<string, (input: RouteInput) => Promise<Reply> | Reply> = {
@@ -480,7 +468,7 @@ export class RemoteService extends Service {
         apiVersion: REMOTE_API_VERSION,
         runId: this.log.runId,
         seq: this.log.seq,
-        addresses: this.addresses,
+        addresses: this.listening(),
       } satisfies Hello,
     ],
 
@@ -649,7 +637,7 @@ export class RemoteService extends Service {
       v: String(REMOTE_API_VERSION),
       d: this.store.desktopId,
       n: this.opts.name ?? os.hostname(),
-      a: this.addresses.join(','),
+      a: this.listening().join(','),
       fp: '',
       c: code.code,
       x: String(Math.floor(code.expiresAt / 1000)),
@@ -672,10 +660,6 @@ function isAnswer(value: unknown): value is AttentionAnswer {
   return value === 'once' || value === 'reject' || (Array.isArray(value) && value.every((entry) => Array.isArray(entry) && entry.every((label) => typeof label === 'string')))
 }
 
-function isLoopback(host: string): boolean {
-  return host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
-}
-
 function sameText(given: string, expected: string): boolean {
   const a = Buffer.from(given)
   const b = Buffer.from(expected)
@@ -686,28 +670,9 @@ function frame(event: string, data: unknown, id?: number): string {
   return `${id === undefined ? '' : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 }
 
-function send(response: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
-  if (response.headersSent || response.destroyed) return
-  const text = JSON.stringify(body)
-  response.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text), ...headers })
-  response.end(text)
-}
-
-/** 본문 — 상한을 넘으면 undefined. 넘친 뒤에는 쌓지 않고 흘려보내기만 한다(끝까지 받아야 응답을 곱게 보낸다) */
-async function readBody(request: http.IncomingMessage): Promise<string | undefined> {
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const chunk of request) {
-    size += (chunk as Buffer).length
-    if (size <= MAX_BODY_BYTES) chunks.push(chunk as Buffer)
-  }
-  return size > MAX_BODY_BYTES ? undefined : Buffer.concat(chunks).toString('utf8')
-}
-
-function closeServer(server: http.Server): Promise<void> {
-  return new Promise((resolve) => {
-    if (!server.listening) return resolve()
-    server.close(() => resolve())
-    server.closeAllConnections()
-  })
+/** 밀릴 때 합칠 열쇠 — `turn.progress` 는 같은 진행 줄(cid·item.id)을 누적 전체로 다시 보낸다. 그 밖의 이벤트는 합치지 않는다 */
+function coalesceKey(event: string, data: unknown): string | undefined {
+  if (event !== 'turn.progress') return undefined
+  const { cid, item } = data as RemoteEventMap['turn.progress']
+  return `${cid}\n${item.id}`
 }
