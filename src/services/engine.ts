@@ -361,6 +361,8 @@ function prepareInstallMarkers(configDir: string, env: NodeJS.ProcessEnv): void 
 /** 자식에 물려주지 않는 env 이름 — 앱이 정한 OPENCODE_* 는 engineEnv 가 다시 넣는다 (01x 2-8 "망·외부 켜기"·"설정 주입") */
 const INHERITED_ENGINE_ENV = /^(OPENCODE_|OTEL_|EXA_API_KEY$|PARALLEL_API_KEY$)/i
 
+const LOOPBACK_NO_PROXY = ['127.0.0.1', 'localhost']
+
 /** opencode 자식 프로세스 env — 진짜 키는 없다 (키 프록시) */
 export function engineEnv(
   base: NodeJS.ProcessEnv,
@@ -393,6 +395,13 @@ export function engineEnv(
     // AGENTS.md 줄이 깨진다, 2026-10-02). 그래서 ctx.llm 이 AGENTS.md 를 prompt system 으로 넣는 L1 과 같이 켠다
     env['OPENCODE_DISABLE_PROJECT_CONFIG'] = '1'
   }
+  // 프록시 변수(HTTP_PROXY·http_proxy)가 있으면 opencode 는 앱의 키 프록시·내장 MCP 서버(127.0.0.1)로 가는 요청도 그 프록시로 보낸다
+  // (실측 2026-10-05, 1.18.18 — NO_PROXY·no_proxy 어느 쪽이든 루프백이 있으면 직접 간다, #75). 있던 값 뒤에 루프백을 덧붙인다.
+  // Windows 는 이름의 대소문자가 다를 수 있다 — 있던 키를 지우고 둘로 다시 넣는다
+  const noProxyKeys = Object.keys(env).filter((name) => name.toUpperCase() === 'NO_PROXY')
+  const noProxy = noProxyKeys.flatMap((name) => (env[name] ?? '').split(',')).map((host) => host.trim())
+  for (const name of noProxyKeys) delete env[name]
+  env['NO_PROXY'] = env['no_proxy'] = [...new Set([...noProxy, ...LOOPBACK_NO_PROXY])].filter(Boolean).join(',')
   if (opts.rgDir) {
     // grep·glob 도구는 rg 를 PATH 에서 찾고, 없으면 github 에서 받으려 한다 — 폐쇄망에선 실패하거나 ~300초 멈춘다 (01b_offline 실측).
     // 동봉 rg 를 맨 앞에 둔다. Windows 는 이름이 Path 일 수 있다 — 있는 키에 붙여야 PATH 가 둘이 되지 않는다
