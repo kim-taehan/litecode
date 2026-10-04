@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, screen, session, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -8,7 +8,7 @@ import { ChatService } from '../src/services/chat.ts'
 import { pickAttachments } from '../src/services/attachments.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
-import { EngineService } from '../src/services/engine.ts'
+import { EngineService, killEngineProcesses } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
 import { SessionsService, type Conversation } from '../src/services/sessions.ts'
@@ -42,6 +42,10 @@ import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { attentionTarget } from '../shared/delegation.ts'
+import { captureConsole, createLogFile } from '../src/services/logFile.ts'
+import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
+import { allowPermission, missingServices, reloadGuard, withDeadline } from './resilience.ts'
+import { restorableBounds } from './windowBounds.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -61,6 +65,25 @@ const ctx = new Context()
 const mounted: { dispose(): Promise<void> }[] = []
 // userData 는 --user-data-dir 스위치를 따른다 (실물 테스트가 이걸로 격리한다).
 const userData = app.getPath('userData')
+
+// 로그 파일 (참고 레포 검토 02x) — 설치본엔 터미널이 없어 console.error/warn 이 어디에도 안 남았다. 서비스보다 먼저 건다:
+// 지금부터의 console.error·warn 은 userData/logs/main.log 에도 남는다 (1MB × 3개로 돈다, 비밀은 가린다 — logFile.ts).
+const mainLog = createLogFile(path.join(userData, 'logs'))
+captureConsole(mainLog)
+// 메인의 잡히지 않은 오류 — 기록하고 계속 돈다. (리스너를 걸면 Electron 기본 오류 대화상자는 더 안 뜬다 — 스택을 사용자에게 보이는 대신 파일에 남긴다)
+process.on('uncaughtException', (error) => console.error('[fatal] uncaughtException', error))
+process.on('unhandledRejection', (reason) => console.error('[fatal] unhandledRejection', reason))
+// 렌더러·보조 프로세스(GPU·유틸리티)가 죽었다. 앱 창의 렌더러면 화면을 다시 불러온다 — 턴·대기열은 메인(ctx.chat)이 쥐고 있어
+// 새 화면이 CHAT_SNAPSHOT 으로 이어 그린다. 죽고 불러오기가 되풀이되면(1분에 3번) 멈추고 기록만 한다
+const RENDERER_RELOADS = { max: 3, withinMs: 60_000 }
+const rendererReloads = reloadGuard(RENDERER_RELOADS)
+app.on('render-process-gone', (_event, contents, details) => {
+  console.error('[fatal] render-process-gone', details.reason, details.exitCode)
+  if (details.reason === 'clean-exit' || contents !== mainWindow?.webContents) return
+  if (rendererReloads.allow()) contents.reload()
+  else console.error(`[fatal] 렌더러가 ${RENDERER_RELOADS.withinMs / 1000}초 안에 ${RENDERER_RELOADS.max}번 넘게 죽었다 — 다시 불러오기를 멈춘다`)
+})
+app.on('child-process-gone', (_event, details) => console.error('[fatal] child-process-gone', details.type, details.reason, details.exitCode, details.name ?? ''))
 // 설정 > 일반 — 맨 먼저 올린다: 언어(메인 오류 문구)·테마(첫 창 배경)가 다른 서비스·창보다 먼저 정해지게.
 // 실물 테스트는 LITECODE_TEST_LANGUAGE=ko 로 첫 실행 언어를 한국어로 고정한다(셀렉터가 한국어). 제품은 이 변수를 안 쓴다
 const settingsFiber = ctx.plugin(SettingsService, {
@@ -316,14 +339,23 @@ notificationsBridge.inject = ['notifications']
 // 앱 종료를 한 번 붙잡아 서비스를 거꾸로 내린다 — 내리는 동안 각 서비스의 effect 가 돈다(ctx.engine: opencode·키 프록시 끄기).
 // GUI 앱에는 자식을 데려가 줄 터미널이 없어 흘려보내면 opencode 가 남는다 (closed-code app/quitGuard.ts). Cordis 의 dispose 는
 // 비동기 정리가 끝날 때까지 기다린다(실측). quit 은 이 핸들러로 되돌아오므로 exit 로 끝내고, 빗장으로 재진입을 막는다
+// 정리에는 전체 기한을 둔다 (참고 레포 검토 02x D) — 서비스 하나의 dispose 가 안 끝나도 앱은 꺼져야 한다. 엔진의 stop 은
+// SIGTERM → 5초(KILL_GRACE_MS) → SIGKILL 이라 기한은 그보다 길다. 기한이 지났든 아니든 끝내기 직전에 살아 있는 opencode 자식을
+// 죽인다(다 내려갔으면 아무 일도 없다) — 앱만 꺼지고 opencode 가 남는 길을 없앤다
+const QUIT_DEADLINE_MS = 8_000
 let quitting = false
 app.on('before-quit', (event) => {
   if (quitting) return
   quitting = true
   event.preventDefault()
-  void (async () => {
+  const disposing = (async () => {
     for (const fiber of mounted.reverse()) await fiber.dispose().catch((error: unknown) => console.error('[quit] 서비스 정리 실패', error))
-  })().finally(() => app.exit(0))
+  })()
+  void withDeadline(disposing, QUIT_DEADLINE_MS).then((outcome) => {
+    if (outcome === 'timeout') console.error(`[quit] 서비스 정리가 ${QUIT_DEADLINE_MS / 1000}초 안에 끝나지 않았다 — 남은 opencode 를 죽이고 끝낸다`)
+    killEngineProcesses()
+    app.exit(0)
+  })
 })
 
 // 실물 테스트는 창을 화면에 띄우지 않는다 — 사용자 화면·포커스를 가로채지 않게. 그려지기는 하고(paintWhenInitiallyHidden),
@@ -502,10 +534,13 @@ function sendFullScreen(win: BrowserWindow): void {
   if (!win.isDestroyed()) win.webContents.send(Channel.WINDOW_FULLSCREEN, win.isFullScreen())
 }
 
+/** 창 크기·위치 기억 — 닫을 때 적고 다음 창이 되돌린다. 저장한 자리가 지금 화면 밖이면 기본 크기로 가운데 (windowBounds.ts) */
+const windowFile = path.join(userData, 'window.json')
+
 function createWindow(): BrowserWindow {
+  const saved = restorableBounds(readJsonFileSync(windowFile, 'object'), screen.getAllDisplays().map((display) => display.workArea))
   const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    ...(saved ?? { width: 1280, height: 800 }),
     // 제목 표시줄 없이 화면이 창 맨 위까지 (이슈 #25). macOS 는 창 버튼을 사이드바 맨 위 줄(52px) 안 왼쪽에 — dsh 데스크톱과 같은
     // {16, 18}(버튼 세로 가운데 = 25, 사이드바 맨 위 줄·사이드바 숨김 때 본문 왼쪽 위 버튼과 같은 줄). Windows·Linux 는 창 버튼을
     // 오른쪽 위 덮개로 그린다(실행 미검증). 창 끌기는 화면 CSS(-webkit-app-region)가 정한다
@@ -561,6 +596,14 @@ function createWindow(): BrowserWindow {
   }
   if (process.platform !== 'darwin') nativeTheme.on('updated', recolor)
 
+  win.on('close', () => {
+    try {
+      writeJsonFileSync(windowFile, win.getNormalBounds()) // 최대화·전체 화면이면 그 전의 크기
+    } catch (error) {
+      console.warn('[window] 창 자리를 못 적었다', (error as Error).message)
+    }
+  })
+
   mainWindow = win
   win.on('closed', () => {
     nativeTheme.off('updated', recolor)
@@ -569,7 +612,25 @@ function createWindow(): BrowserWindow {
   return win
 }
 
+// 부팅 진단 (참고 레포 검토 02x A) — 바탕 서비스 하나라도 안 뜨면 그것을 inject 한 bootstrap·chatBridge 가 말없이 기다리기만 하고
+// 창은 IPC 핸들러 없이 뜬다. 기한 뒤에도 안 뜬 서비스의 이름을 로그에 남기고 사용자에게 한 줄로 알린다
+const BOOT_DEADLINE_MS = 15_000
+function checkBoot(): void {
+  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject], (name) => ctx.get(name))
+  if (!missing.length) return
+  console.error(`[boot] ${BOOT_DEADLINE_MS / 1000}초 안에 안 뜬 서비스: ${missing.join(', ')}`)
+  if (hiddenForTests) return // 실물 테스트는 대화상자를 띄우지 않는다 — 기록만
+  const message = tr('error.bootStalled', { seconds: BOOT_DEADLINE_MS / 1000, names: missing.join(', '), log: mainLog.path })
+  if (mainWindow) void dialog.showMessageBox(mainWindow, { type: 'error', message })
+  else dialog.showErrorBox(app.getName(), message)
+}
+
 void app.whenReady().then(async () => {
+  // 화면(웹 내용)의 권한 요청은 기본 거부 (참고 레포 검토 02x D) — 답·미리보기 iframe 의 글은 모델·프로젝트 파일에서 온다.
+  // 앱 화면이 쓰는 것은 "복사" 의 클립보드 쓰기뿐이다 (resilience.ts allowPermission)
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(allowPermission(permission, details.isMainFrame)))
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, _origin, details) => allowPermission(permission, details.isMainFrame))
+  setTimeout(checkBoot, BOOT_DEADLINE_MS).unref()
   await settingsFiber // 설정 서비스가 올라온 뒤 — 테마를 창보다 먼저 정한다
   nativeTheme.themeSource = ctx.settings.get().appearance
   createWindow()

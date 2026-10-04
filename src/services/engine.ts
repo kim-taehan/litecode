@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis'
-import { execFile, execFileSync, spawn } from 'node:child_process'
+import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { findOpencodeBinary, notFoundMessage } from './opencodeBinary.ts'
 import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
+import { keepTail, streamText } from './outputBuffer.ts'
 import type { ProviderConfig } from './providers.ts'
 import type { Mode } from '../../shared/modes.ts'
 import { engineLimit } from '../../shared/outputLimit.ts'
@@ -181,6 +182,21 @@ function withLast(permission: Record<string, unknown>, name: string, rule: unkno
 const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 초 무응답인 때가 있다 (live-test 스킬 기록)
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
+
+/** 이 프로세스가 띄워 아직 살아 있는 opencode 자식 — 앱 종료 기한이 지나면 서비스 상태와 무관하게 죽일 수 있게 쥔다 */
+const liveChildren = new Set<ChildProcess>()
+
+/** 살아 있는 opencode 자식을 바로 죽인다(SIGKILL). 앱 종료의 마지막 수단 — 서비스 정리(stop: SIGTERM → KILL_GRACE_MS → SIGKILL)가
+ *  기한 안에 못 끝났을 때 메인이 부른다. GUI 앱에는 자식을 데려갈 터미널이 없어 남기면 유령이 된다 */
+export function killEngineProcesses(): void {
+  for (const child of liveChildren) {
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      // 그 사이 끝났다
+    }
+  }
+}
 
 /** 앱이 붙이는 MCP 서버 (opencode McpLocalConfig·McpRemoteConfig 모양, 이슈 #28). timeout 은 연결·도구 목록 기한(ms) */
 export type EngineMcp =
@@ -540,16 +556,20 @@ export class EngineService extends Service {
       cwd: path.dirname(this.opts.configDir),
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     })
-    let output = ''
-    const collect = (part: Buffer): void => {
-      if (output.length < MAX_OUTPUT) output += part.toString()
+    liveChildren.add(child)
+    // 끝 MAX_OUTPUT 자를 쥔다 — 기동 실패 사유는 출력의 끝에 있다 (앞만 쥐면 시작 로그에 밀려 잘린다, 참고 레포 검토 02x D).
+    // 읽는 곳은 아래 기동 실패 문구 하나뿐이다. 조각 경계의 한글이 깨지지 않게 스트림마다 디코더
+    const output = keepTail(MAX_OUTPUT)
+    for (const stream of [child.stdout, child.stderr]) {
+      const decoded = streamText()
+      stream?.on('data', (part: Buffer) => output.push(decoded.push(part)))
     }
-    child.stdout?.on('data', collect)
-    child.stderr?.on('data', collect)
     const closer = new AbortController()
     const exited = new Promise<void>((resolve) =>
       child.once('exit', (code, signal) => {
+        liveChildren.delete(child)
         closer.abort(new Error(tr('error.opencodeExited', { code: String(code), signal: String(signal) })))
         forgetRecord(this.opts.pidFile, child.pid)
         onExit()
@@ -558,7 +578,10 @@ export class EngineService extends Service {
     )
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve)
-      child.once('error', (error) => reject(new Error(tr('error.opencodeSpawn', { bin, message: error.message }))))
+      child.once('error', (error) => {
+        liveChildren.delete(child) // 못 띄웠다 — exit 은 오지 않는다
+        reject(new Error(tr('error.opencodeSpawn', { bin, message: error.message })))
+      })
     })
 
     const url = `http://127.0.0.1:${port}`
@@ -576,7 +599,7 @@ export class EngineService extends Service {
       await waitUntilReady(url, headers, closer.signal)
     } catch (error) {
       await stop()
-      throw new Error(`${(error as Error).message}\n${output.trim()}`.trimEnd())
+      throw new Error(`${(error as Error).message}\n${output.text().trim()}`.trimEnd())
     }
     const hidden = hiddenEnvNames(env)
     return { url, headers, closed: closer.signal, providerBaseURL: (id) => proxy.baseURLFor(id), mcpConfig: (def) => engineMcpConfig(def, hidden), pid: child.pid!, stop }
@@ -587,7 +610,7 @@ async function purgeDb(bin: string, db: string, base: NodeJS.ProcessEnv): Promis
   if (!fs.existsSync(db)) return // 열면 빈 DB 를 만든다
   try {
     const stdout = await new Promise<string>((resolve, reject) =>
-      execFile(bin, ['-e', PURGE_SCRIPT], { env: { ...base, BUN_BE_BUN: '1', LITECODE_PURGE_DB: db }, timeout: PURGE_TIMEOUT_MS }, (error, out) =>
+      execFile(bin, ['-e', PURGE_SCRIPT], { env: { ...base, BUN_BE_BUN: '1', LITECODE_PURGE_DB: db }, timeout: PURGE_TIMEOUT_MS, windowsHide: true }, (error, out) =>
         error ? reject(error) : resolve(out),
       ),
     )

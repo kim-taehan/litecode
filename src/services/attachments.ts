@@ -25,6 +25,34 @@ export function imageMime(data: Uint8Array): ChatImage['mime'] | undefined {
   return undefined
 }
 
+/** 머리에서 읽은 가로·세로 (전체를 풀지 않는다) — png 는 IHDR, jpeg 는 첫 SOF 조각. 못 읽으면 undefined */
+export function imageSize(data: Uint8Array): { width: number; height: number } | undefined {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  const mime = imageMime(data)
+  if (mime === 'image/png') {
+    // [서명 8][길이 4]['IHDR' 4][가로 4][세로 4]
+    if (data.length < 24 || String.fromCharCode(...data.subarray(12, 16)) !== 'IHDR') return undefined
+    return { width: view.getUint32(16), height: view.getUint32(20) }
+  }
+  if (mime !== 'image/jpeg') return undefined
+  // 조각: ff <표식> [길이 2 — 자신 포함] … SOF(c0~cf 중 c4·c8·cc 제외)는 [길이 2][정밀도 1][세로 2][가로 2]
+  let at = 2
+  while (at + 4 <= data.length) {
+    if (data[at] !== 0xff) return undefined
+    const marker = data[at + 1]!
+    if (marker === 0xff) {
+      at++ // 채움 바이트
+      continue
+    }
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return at + 9 <= data.length ? { width: view.getUint16(at + 7), height: view.getUint16(at + 5) } : undefined
+    }
+    if (marker === 0xd9 || marker === 0xda) return undefined // 끝·압축 본문 — SOF 없이 여기까지 왔다
+    at += 2 + (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7) ? 0 : view.getUint16(at + 2)) // 길이 없는 표식
+  }
+  return undefined
+}
+
 /** 글자 파일인가 — NUL 바이트가 없고 UTF-8 로 읽힌다 */
 export function isText(data: Uint8Array): boolean {
   if (data.includes(0)) return false
@@ -47,6 +75,11 @@ async function inspect(kind: AttachmentKind, file: string): Promise<{ item: Pick
     if (!image && stat.size > ATTACHMENT_LIMITS.fileBytes) return { error: tr('attach.fileTooLarge', { name, max: ATTACHMENT_LIMITS.fileBytes / 1024 }) }
     const data = await fs.readFile(file)
     if (image ? !imageMime(data) : !isText(data)) return { error: tr(image ? 'attach.notImage' : 'attach.notText', { name }) }
+    // 가로·세로를 못 읽은 이미지는 전처럼 둔다 — 여기서 거르는 것은 "읽어 보니 너무 큰" 것뿐이다
+    const size = image ? imageSize(data) : undefined
+    if (size && (Math.max(size.width, size.height) > ATTACHMENT_LIMITS.imageSide || size.width * size.height > ATTACHMENT_LIMITS.imagePixels)) {
+      return { error: tr('attach.imageTooManyPixels', { name, width: size.width, height: size.height, side: ATTACHMENT_LIMITS.imageSide }) }
+    }
     return { item: { kind, path: file, name, size: data.length }, data }
   } catch {
     return { error: tr('attach.unreadable', { name }) }

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import type { EngineMcp } from './engine.ts'
 import { hiddenEnvNames } from './engine.ts'
 import { tr } from '../i18n.ts'
+import { keepTail, streamText } from './outputBuffer.ts'
 
 // 앱이 MCP 서버에 직접 붙어 도구 목록만 묻는 최소 클라이언트 (이슈 #28). opencode 에는 MCP 도구 목록 API 가 없다 — /experimental/tool 에도
 // MCP 도구는 안 나온다(#28 실측, 1.18.18). 그래서 설정 > MCP 의 "도구 N"·도구 이름·설명과 "연결 테스트"(저장 없이)는 앱이 잠깐 붙어 본다:
@@ -53,8 +54,11 @@ function listLocal(def: Extract<EngineMcp, { type: 'local' }>, cwd: string, base
   return new Promise<McpTool[]>((resolve, reject) => {
     const [command, ...args] = def.command
     if (!command) return reject(new Error(tr('mcp.error.noCommand')))
-    const child = spawn(command, args, { cwd, env: mcpChildEnv(base, def.environment), stdio: ['pipe', 'pipe', 'pipe'] })
-    let stderr = ''
+    const child = spawn(command, args, { cwd, env: mcpChildEnv(base, def.environment), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    // 조각 경계에 걸린 여러 바이트 글자가 깨지지 않게 스트림마다 디코더를 둔다. stderr 는 끝을 남긴다 — 사유는 마지막 줄이다
+    const stderr = keepTail(4_000)
+    const stderrText = streamText()
+    const stdoutText = streamText()
     let buffer = ''
     let nextId = 1
     const tools: McpTool[] = []
@@ -72,13 +76,11 @@ function listLocal(def: Extract<EngineMcp, { type: 'local' }>, cwd: string, base
     const timer = setTimeout(() => finish(new Error(tr('mcp.error.timeout', { seconds: timeout / 1000 }))), timeout)
     const send = (message: unknown): void => void child.stdin?.write(`${JSON.stringify(message)}\n`)
     child.on('error', (error) => finish(new Error(error.message)))
-    child.on('exit', (code) => finish(new Error(tr('mcp.error.exited', { code: String(code), detail: stderr.trim().split('\n').at(-1) ?? '' }).trim())))
-    child.stderr?.on('data', (part: Buffer) => {
-      if (stderr.length < 4_000) stderr += part.toString()
-    })
+    child.on('exit', (code) => finish(new Error(tr('mcp.error.exited', { code: String(code), detail: stderr.text().trim().split('\n').at(-1) ?? '' }).trim())))
+    child.stderr?.on('data', (part: Buffer) => stderr.push(stderrText.push(part)))
     child.stdin?.on('error', () => {}) // 서버가 먼저 끝나면 EPIPE — exit 이 사유를 준다
     child.stdout?.on('data', (part: Buffer) => {
-      buffer += part.toString()
+      buffer += stdoutText.push(part)
       let end: number
       while ((end = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, end).trim()
@@ -120,9 +122,14 @@ async function listRemote(def: Extract<EngineMcp, { type: 'remote' }>, timeout: 
       },
       body: JSON.stringify(message),
       signal,
+      redirect: 'manual', // 헤더에 비밀이 실린다 — 서버가 다른 주소로 넘겨도 따라가지 않는다
     }).catch((error: unknown) => {
       throw new Error(signal.aborted ? tr('mcp.error.timeout', { seconds: timeout / 1000 }) : String((error as Error).cause ?? (error as Error).message))
     })
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel()
+      throw new Error(tr('error.redirected', { status: res.status }))
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     session = res.headers.get('mcp-session-id') ?? session
     if (message.id === undefined) {
@@ -151,7 +158,7 @@ async function listRemote(def: Extract<EngineMcp, { type: 'remote' }>, timeout: 
     return tools
   } finally {
     // 세션을 닫는다 — 못 닫아도 그만이다
-    if (session) void fetch(def.url, { method: 'DELETE', headers: { ...def.headers, 'mcp-session-id': session }, signal: AbortSignal.timeout(3_000) }).catch(() => {})
+    if (session) void fetch(def.url, { method: 'DELETE', headers: { ...def.headers, 'mcp-session-id': session }, signal: AbortSignal.timeout(3_000), redirect: 'manual' }).catch(() => {})
   }
 }
 

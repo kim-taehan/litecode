@@ -169,6 +169,21 @@ describe('ProviderRegistry', () => {
     expect((await registry(files)).list()).toEqual([])
   })
 
+  // 참고 레포 검토(02x A): 깨진 파일을 다음 저장이 덮지 않게 옆에 옮겨 둔다
+  it('손상된 목록·키 파일은 덮어쓰지 않고 옆에 .corrupt-<시각> 으로 옮겨 두고 기본값으로 뜬다 (맨 위가 배열이 아닌 것도)', async () => {
+    await fs.writeFile(files.file!, '{"id":"gw"}')
+    await fs.writeFile(files.keysFile!, '{"gw": "abc')
+    const providers = await registry(files)
+    expect(providers.list().map((provider) => provider.id)).toEqual(['gw'])
+    providers.save({ ...config, apiKey: 'sk-new' })
+
+    const names = await fs.readdir(tmp)
+    const listBackup = names.find((name) => name.startsWith('providers.json.corrupt-'))
+    const keysBackup = names.find((name) => name.startsWith('provider-keys.json.corrupt-'))
+    expect(await fs.readFile(path.join(tmp, listBackup ?? 'missing'), 'utf8')).toBe('{"id":"gw"}')
+    expect(await fs.readFile(path.join(tmp, keysBackup ?? 'missing'), 'utf8')).toBe('{"gw": "abc')
+  })
+
   describe('fetchAvailableModels', () => {
     let server: http.Server
     let baseURL: string
@@ -216,6 +231,28 @@ describe('ProviderRegistry', () => {
 
       await expect(providers.fetchAvailableModels({ id: 'gw', baseURL, apiKey: '' })).rejects.toThrow('키를 다시 입력하세요')
       expect(requests).toBe(0)
+    })
+
+    // 참고 레포 검토(02x B): 키를 실은 요청이 리다이렉트를 따라가면 키가 다른 곳으로 간다
+    it('리다이렉트는 따라가지 않는다 — 옮겨 간 주소로 요청이 나가지 않고 사유로 거절', async () => {
+      let followed = 0
+      const other = http.createServer((_req, res) => {
+        followed++
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'elsewhere' }] }))
+      })
+      await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve))
+      const elsewhere = `http://127.0.0.1:${(other.address() as AddressInfo).port}/v1/models`
+      const redirecting = http.createServer((_req, res) => void res.writeHead(307, { location: elsewhere }).end())
+      await new Promise<void>((resolve) => redirecting.listen(0, '127.0.0.1', resolve))
+      try {
+        const providers = await registry(files)
+        const from = `http://127.0.0.1:${(redirecting.address() as AddressInfo).port}/v1`
+        await expect(providers.fetchAvailableModels({ baseURL: from, apiKey: 'sk-typed' })).rejects.toThrow('다른 주소로 넘기려')
+        expect(followed).toBe(0)
+      } finally {
+        await new Promise<void>((resolve) => other.close(() => resolve()))
+        await new Promise<void>((resolve) => redirecting.close(() => resolve()))
+      }
     })
 
     it('응답이 실패면 상태 코드로 알린다', async () => {

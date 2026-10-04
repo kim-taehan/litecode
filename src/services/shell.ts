@@ -1,6 +1,8 @@
 import { Context, Service } from 'cordis'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { realDirectory } from './llm.ts'
+import { keepEnds, streamText } from './outputBuffer.ts'
+import { tr } from '../i18n.ts'
 import type { ShellResult } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
@@ -11,7 +13,10 @@ export type { ShellResult } from '../../shared/contract.ts'
 // "AI 에게 보내기" 를 누를 때만 들어간다(ctx.llm.addContext). opencode 권한 규칙을 안 거치는 것은 사용자가 손으로 친 명령이라서다.
 // - 로그인 셸(`$SHELL -lc`)로 띄운다 — Finder 로 띄운 앱은 PATH 가 짧아 npm·node 를 못 찾는다 (01h §6a)
 // - stdin 은 닫는다(입력이 필요한 명령은 곧 실패한다 — 그런 건 터미널 칸에서). stdout·stderr 는 터미널처럼 합친다
-// - 출력은 앞에서 OUTPUT_LIMIT 까지만 (화면·IPC·디스크를 통째로 막지 않게), 기한 TIMEOUT_MS 를 넘기거나 ■ 로 멈추면 프로세스 그룹을 끈다
+// - 출력은 OUTPUT_LIMIT 까지만 (화면·IPC·디스크를 통째로 막지 않게) — 넘으면 **앞 절반과 끝 절반**을 남기고 가운데에 생략 표시 한 줄
+//   (앞만 남기면 빌드 오류가 적힌 끝이 잘린다). 돌고 있는 동안의 조각('shell/data')은 앞에서 OUTPUT_LIMIT 까지만 흘리고, 끝난 결과가 카드를 바꾼다.
+//   카드에 보이는 글과 "AI 에게 보내기"(shellContext)는 같은 output 이다. 조각은 스트림마다 UTF-8 디코더로 푼다(조각 경계의 한글)
+// - 기한 TIMEOUT_MS 를 넘기거나 ■ 로 멈추면 프로세스 그룹을 끈다
 // - 앱을 끄면(서비스가 내려가면) 돌던 명령도 끈다
 
 declare module 'cordis' {
@@ -19,7 +24,7 @@ declare module 'cordis' {
     shell: ShellService
   }
   interface Events {
-    /** 돌고 있는 명령의 출력 조각 (상한 안쪽만) */
+    /** 돌고 있는 명령의 출력 조각 (앞에서 상한까지만) */
     'shell/data'(runId: string, chunk: string): void
   }
 }
@@ -57,9 +62,9 @@ export class ShellService extends Service {
       // 그룹으로 띄워 ■·기한에 자식(파이프·백그라운드)까지 끈다. 서버 비밀번호는 메인 env 에 원래 없지만 혹시 몰라 지운다
       const env = { ...process.env }
       delete env['OPENCODE_SERVER_PASSWORD']
-      const child = spawn(file, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
-      let output = ''
-      let truncated = false
+      const child = spawn(file, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      const kept = keepEnds(OUTPUT_LIMIT / 2, OUTPUT_LIMIT / 2)
+      let emitted = 0
       let reason: 'stopped' | 'timeout' | undefined
       let settled = false
 
@@ -76,18 +81,22 @@ export class ShellService extends Service {
         settled = true
         clearTimeout(timer)
         this.running.delete(runId)
-        resolve({ command, output, truncated, ...result })
+        for (const stream of streams) collect(stream.end()) // 끊긴 채 끝난 바이트
+        const omitted = kept.omitted()
+        const output = omitted ? `${kept.head()}\n${tr('shellCard.omitted', { count: omitted })}\n${kept.tail()}` : kept.head() + kept.tail()
+        resolve({ command, output, truncated: omitted > 0, ...result })
       }
-      const collect = (data: Buffer): void => {
-        if (truncated) return
-        let chunk = data.toString()
-        if (output.length + chunk.length > OUTPUT_LIMIT) {
-          chunk = chunk.slice(0, OUTPUT_LIMIT - output.length)
-          truncated = true
-        }
-        output += chunk
+      const collect = (text: string): void => {
+        kept.push(text)
+        const chunk = text.slice(0, OUTPUT_LIMIT - emitted)
+        emitted += chunk.length
         if (chunk) this.ctx.emit('shell/data', runId, chunk)
       }
+      const streams = [child.stdout!, child.stderr!].map((stream) => {
+        const decoded = streamText()
+        stream.on('data', (data: Buffer) => collect(decoded.push(data)))
+        return decoded
+      })
       const stop = (why: 'stopped' | 'timeout'): void => {
         if (settled || reason) return
         reason = why
@@ -96,8 +105,6 @@ export class ShellService extends Service {
       }
       const timer = setTimeout(() => stop('timeout'), this.opts.timeoutMs ?? TIMEOUT_MS)
 
-      child.stdout!.on('data', collect)
-      child.stderr!.on('data', collect)
       child.on('error', (error) => finish({ exitCode: null, status: 'error', error: error.message }))
       child.on('close', (code) => finish({ exitCode: code, status: reason ?? 'done' }))
       this.running.set(runId, { child, stop })
@@ -130,6 +137,6 @@ export function shellContext(result: Pick<ShellResult, 'command' | 'output' | 'e
     fence,
     result.output.trimEnd(),
     fence,
-    ...(result.truncated ? ['', `(출력이 ${OUTPUT_LIMIT / 1024}KB 에서 잘렸습니다)`] : []),
+    ...(result.truncated ? ['', `(출력이 ${OUTPUT_LIMIT / 1024}KB 를 넘어 가운데가 생략됐습니다 — 앞과 끝만 실었습니다)`] : []),
   ].join('\n')
 }

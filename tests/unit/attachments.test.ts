@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { ATTACHMENT_LIMITS } from '../../shared/attachments.ts'
-import { imageMime, isText, outgoing, pickAttachments } from '../../src/services/attachments.ts'
+import { imageMime, imageSize, isText, outgoing, pickAttachments } from '../../src/services/attachments.ts'
 import { tr } from '../../src/i18n.ts'
 import { chipsOf, sizeLabel } from '../../renderer/attachmentsView.ts'
 
@@ -53,7 +53,59 @@ describe('isText', () => {
   })
 })
 
+/** IHDR 까지만 있는 png — 가로·세로는 머리의 16~23 바이트(빅 엔디언) */
+function pngOf(width: number, height: number): Buffer {
+  const head = Buffer.alloc(24)
+  PNG.copy(head)
+  head.write('IHDR', 12, 'latin1')
+  head.writeUInt32BE(width, 16)
+  head.writeUInt32BE(height, 20)
+  return head
+}
+
+/** APP0 조각 뒤에 SOF 조각이 오는 jpeg 머리 — SOF 는 [길이 2][정밀도 1][세로 2][가로 2] */
+function jpegOf(width: number, height: number, sof = 0xc0): Buffer {
+  const app0 = Buffer.from([0xff, 0xe0, 0, 4, 0x4a, 0x46])
+  const frame = Buffer.from([0xff, sof, 0, 8, 8, 0, 0, 0, 0, 3])
+  frame.writeUInt16BE(height, 5)
+  frame.writeUInt16BE(width, 7)
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, frame])
+}
+
+// 참고 레포 검토(02x B): 바이트는 작아도 풀면 수 GB 인 이미지가 있다 — 머리만 읽어 가로·세로로 거른다 (전체 디코딩 없이)
+describe('imageSize — 머리에서 읽는 가로·세로', () => {
+  it('png 는 IHDR, jpeg 는 SOF 조각에서 (점진식 SOF2 포함, 앞의 다른 조각은 건너뛴다)', () => {
+    expect(imageSize(pngOf(640, 480))).toEqual({ width: 640, height: 480 })
+    expect(imageSize(jpegOf(1920, 1080))).toEqual({ width: 1920, height: 1080 })
+    expect(imageSize(jpegOf(300, 200, 0xc2))).toEqual({ width: 300, height: 200 })
+  })
+
+  it('머리가 잘렸거나 이미지가 아니면 undefined', () => {
+    expect(imageSize(PNG)).toBeUndefined()
+    expect(imageSize(JPEG)).toBeUndefined()
+    expect(imageSize(Buffer.from('GIF89a'))).toBeUndefined()
+    expect(imageSize(Buffer.from([0xff, 0xd8, 0xff, 0xc4, 0, 4, 0, 0]))).toBeUndefined() // DHT(c4)는 SOF 가 아니다
+  })
+})
+
 describe('pickAttachments — 칩을 만들 때 거른다', () => {
+  it('픽셀 상한: 한 변 8192 · 전체 6400만 픽셀을 넘는 이미지는 거절, 꼭 맞는 것은 받는다', async () => {
+    expect(ATTACHMENT_LIMITS.imageSide).toBe(8192)
+    expect(ATTACHMENT_LIMITS.imagePixels).toBe(64_000_000)
+    const edge = write(outside, 'edge.png', pngOf(8192, 7812)) // 63,995,904 픽셀
+    const wide = write(outside, 'wide.png', pngOf(8193, 10))
+    const tall = write(outside, 'tall.jpg', jpegOf(10, 9000))
+    const dense = write(outside, 'dense.png', pngOf(8100, 8100)) // 변은 안쪽, 전체 65,610,000 픽셀
+    const result = await pickAttachments('image', [edge, wide, tall, dense], 0)
+    expect(result.picked.map((item) => item.name)).toEqual(['edge.png'])
+    expect(result.rejected).toEqual([
+      tr('attach.imageTooManyPixels', { name: 'wide.png', width: 8193, height: 10, side: 8192 }),
+      tr('attach.imageTooManyPixels', { name: 'tall.jpg', width: 10, height: 9000, side: 8192 }),
+      tr('attach.imageTooManyPixels', { name: 'dense.png', width: 8100, height: 8100, side: 8192 }),
+    ])
+    await expect(outgoing(project, '', [{ kind: 'image', path: wide, name: 'wide.png', size: 24 }])).rejects.toThrow('wide.png')
+  })
+
   it('이미지: png·jpeg 는 칩(이름·크기·경로), 확장자만 png 인 글자는 거절', async () => {
     const good = write(outside, 'shot.png', PNG)
     const jpg = write(outside, 'photo.jpg', JPEG)
@@ -79,7 +131,7 @@ describe('pickAttachments — 칩을 만들 때 거른다', () => {
   })
 
   it('크기 상한: 글 파일 한 개 200KB, 이미지 한 장 20MB', async () => {
-    expect(ATTACHMENT_LIMITS).toEqual({ images: 5, imageBytes: 20 * 1024 * 1024, files: 5, fileBytes: 200 * 1024 })
+    expect(ATTACHMENT_LIMITS).toEqual({ images: 5, imageBytes: 20 * 1024 * 1024, imageSide: 8192, imagePixels: 64_000_000, files: 5, fileBytes: 200 * 1024 })
     const edge = write(outside, 'edge.txt', 'a'.repeat(ATTACHMENT_LIMITS.fileBytes))
     const big = write(outside, 'big.txt', 'a'.repeat(ATTACHMENT_LIMITS.fileBytes + 1))
     const result = await pickAttachments('file', [edge, big], 0)
