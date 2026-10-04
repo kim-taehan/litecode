@@ -1,28 +1,104 @@
-/* 설정 > MCP (이슈 #28) — 카드·버튼·입력은 모델 페이지(settings.css) 것을 쓰고, 여기엔 MCP 줄에만 있는 것 */
+/* MCP 서버 팝업의 줄 (이슈 #43, 시안 _workspace/mock-plus/Mcp.dc.html — 줄 카드는 plus.css 의 .plus-card). 버튼·입력·편집 폼은 모델 페이지(settings.css) 것 */
 
-.mcp-card__head {
+.mcp-row {
+  padding: 12px 14px;
+}
+
+/* 이름·명령 | 상태 | 스위치 */
+.mcp-row__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.mcp-row__toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mcp-row__name {
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.mcp-row__badge {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.mcp-row__target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.mcp-row__state {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.mcp-row__state[data-state='connected'] {
+  color: var(--ok);
+}
+
+.mcp-row__state[data-state='failed'],
+.mcp-row__state[data-state='needs_auth'],
+.mcp-row__state[data-state='needs_client_registration'] {
+  color: var(--danger);
+}
+
+.mcp-row__detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--border);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.mcp-row__line {
+  display: flex;
   gap: 8px;
+  overflow-wrap: anywhere;
 }
 
-.mcp-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-  background: var(--text-tertiary);
-  opacity: 0.5;
+.mcp-row__full-target {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.mcp-dot--connected {
-  background: #2f9e44;
-  opacity: 1;
+.mcp-row__line--error {
+  color: var(--danger);
 }
 
-.mcp-dot--failed,
-.mcp-dot--needs_auth,
-.mcp-dot--needs_client_registration {
-  background: #e03131;
-  opacity: 1;
+.mcp-row__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mcp-row__new {
+  font-weight: 500;
+  line-height: 22px;
 }
 
 .mcp-card__readonly {
@@ -31,49 +107,8 @@
   color: var(--text-tertiary);
 }
 
-.mcp-card__meta,
-.mcp-card__state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin-left: 16px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--text-secondary);
-}
-
-.mcp-card__target {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-tertiary);
-}
-
-.mcp-card__error {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #e03131;
-}
-
-.mcp-card__tools-toggle {
-  padding: 0 6px;
-  border: 0.5px solid var(--border-ring);
-  border-radius: 6px;
-  background: transparent;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--text-secondary);
-}
-
-.mcp-card__tools-toggle:hover {
-  background: var(--fill-hover);
-}
-
 .mcp-tools {
-  margin: 8px 0 0 16px;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
   font-size: 12px;

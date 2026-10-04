@@ -674,6 +674,17 @@ export class LlmService extends Service {
     if (!res.ok) throw new Error(tr('error.engineRoute', { route: '/mcp', status: res.status }))
   }
 
+  /** 끊은 서버를 다시 잇는다 (01u 실측 1: POST /mcp/{name}/connect → true — 실패해도 true 라 결과는 상태를 다시 읽어 본다) */
+  async mcpConnect(directory: string, name: string): Promise<void> {
+    const { conn, workdir } = await this.legacyTarget(directory)
+    const res = await fetch(`${conn.url}/mcp/${encodeURIComponent(name)}/connect?${at(workdir)}`, {
+      method: 'POST',
+      headers: conn.headers,
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (!res.ok) throw new Error(tr('error.engineRoute', { route: '/mcp', status: res.status }))
+  }
+
   /** 그 폴더의 도구 이름 → MCP 서버·도구 (마지막으로 본 서버 이름으로, 모르면 첫 `_` 에서 가른다) */
   mcpTool(workdir: string): McpToolResolver {
     return (name) => mcpToolOf(name, this.mcpServers.get(workdir))

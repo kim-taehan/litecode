@@ -43,15 +43,22 @@ class FakeLlm extends Service {
     this.calls.push(`disconnect ${path.basename(directory)} ${name}`)
     this.status.set(directory, { ...(this.status.get(directory) ?? {}), [name]: { status: 'disabled' } })
   }
+  async mcpConnect(directory: string, name: string) {
+    this.calls.push(`connect ${path.basename(directory)} ${name}`)
+    this.status.set(directory, { ...(this.status.get(directory) ?? {}), [name]: { status: 'connected' } })
+  }
 }
 
 let tmp: string
 let project: string
+let other: string
 
 beforeEach(async () => {
   tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'litecode-mcp-unit-')))
   project = path.join(tmp, 'proj')
+  other = path.join(tmp, 'other')
   await fs.mkdir(project)
+  await fs.mkdir(other)
 })
 afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true })
@@ -60,7 +67,14 @@ afterEach(async () => {
 async function start(env: NodeJS.ProcessEnv = { HOME: path.join(tmp, 'home'), XDG_CONFIG_HOME: path.join(tmp, 'xdg') }) {
   const ctx = new Context()
   ctx.plugin(FakeLlm)
-  ctx.plugin(McpService, { file: path.join(tmp, 'mcp.json'), secretsFile: path.join(tmp, 'mcp-secrets.json'), cipher: reversing, env, fallbackCwd: tmp })
+  ctx.plugin(McpService, {
+    file: path.join(tmp, 'mcp.json'),
+    secretsFile: path.join(tmp, 'mcp-secrets.json'),
+    projectsFile: path.join(tmp, 'mcp-projects.json'),
+    cipher: reversing,
+    env,
+    fallbackCwd: tmp,
+  })
   const ready = await new Promise<Context>((resolve) => ctx.inject(['llm', 'mcp'], resolve))
   return { ctx, llm: ready.llm as unknown as FakeLlm, mcp: ready.mcp }
 }
@@ -127,7 +141,7 @@ describe('McpService — 폴더에 붙이기', () => {
     llm.calls = []
     await mcp.prepare(project)
     expect(llm.calls).toEqual(['status proj']) // 그대로면 묻기만
-    mcp.setEnabled('loc', false)
+    mcp.setEnabled('loc', false, project)
     await mcp.prepare(project)
     expect(llm.calls).toContain('disconnect proj loc')
   })
@@ -178,6 +192,147 @@ describe('McpService — 폴더에 붙이기', () => {
   })
 })
 
+// 이슈 #43 — `+` 메뉴의 MCP 팝업은 프로젝트 기준이다: "이 프로젝트만" 서버(앱 안에 프로젝트 경로별로 저장)와 프로젝트별 켜기/끄기
+describe('McpService — 프로젝트 기준 (#43)', () => {
+  const local = (name: string, command = '/bin/cat'): McpServerInput => ({ name, type: 'local', command: [command], vars: [] })
+  const adds = (llm: FakeLlm) => llm.calls.filter((call) => call.startsWith('add')).sort()
+
+  it('"이 프로젝트만" 서버는 그 프로젝트의 턴에만 붙고, 프로젝트 경로별 파일에 남아 다시 켜도 읽힌다', async () => {
+    const { mcp, llm } = await start()
+    mcp.save({ ...local('billing-db'), scope: 'project' }, project)
+    mcp.save(local('wiki'))
+    await mcp.prepare(project)
+    await mcp.prepare(other)
+    expect(adds(llm)).toEqual(['add other wiki', 'add proj billing-db', 'add proj wiki'])
+    const stored = JSON.parse(await fs.readFile(path.join(tmp, 'mcp-projects.json'), 'utf8')) as Record<string, { servers: { name: string }[] }>
+    expect(Object.keys(stored)).toEqual([project])
+    expect(stored[project]!.servers.map((server) => server.name)).toEqual(['billing-db'])
+    expect(JSON.parse(await fs.readFile(path.join(tmp, 'mcp.json'), 'utf8'))).toHaveLength(1) // 모든 프로젝트 서버 파일은 예전 모양 그대로
+
+    const again = await start()
+    expect((await again.mcp.list(project)).map((entry) => [entry.name, entry.source, entry.scope])).toEqual([
+      ['billing-db', 'app', 'project'],
+      ['wiki', 'app', 'all'],
+    ])
+    expect((await again.mcp.list(other)).map((entry) => entry.name)).toEqual(['wiki'])
+  })
+
+  it('"이 프로젝트만" 서버의 비밀도 암호화 파일에만 있고, 다른 프로젝트의 같은 이름 서버와 섞이지 않는다', async () => {
+    const { mcp, llm } = await start()
+    mcp.save({ ...remote({ name: 'api', vars: [{ name: 'Authorization', value: 'Bearer proj-tok', secret: true }] }), scope: 'project' }, project)
+    mcp.save({ ...remote({ name: 'api', vars: [{ name: 'Authorization', value: 'Bearer other-tok', secret: true }] }), scope: 'project' }, other)
+    for (const file of ['mcp-projects.json', 'mcp-secrets.json']) expect(await fs.readFile(path.join(tmp, file), 'utf8')).not.toMatch(/proj-tok|other-tok/)
+    expect(JSON.stringify(await mcp.list(project))).not.toContain('proj-tok')
+    await mcp.prepare(project)
+    expect(llm.added['api']).toMatchObject({ headers: { Authorization: 'Bearer proj-tok' } })
+    await mcp.prepare(other)
+    expect(llm.added['api']).toMatchObject({ headers: { Authorization: 'Bearer other-tok' } })
+    // 비밀을 비워 두고 고치면 그 프로젝트의 저장 값
+    mcp.save({ ...remote({ name: 'api', vars: [{ name: 'Authorization', value: '', secret: true }] }), originalName: 'api' }, project)
+    await mcp.prepare(project)
+    expect(llm.added['api']).toMatchObject({ headers: { Authorization: 'Bearer proj-tok' } })
+    mcp.remove('api', project)
+    expect((await mcp.list(project)).map((entry) => entry.name)).toEqual([])
+    expect((await mcp.list(other)).map((entry) => entry.name)).toEqual(['api'])
+  })
+
+  it('스위치는 그 프로젝트에서만 — A 에서 꺼도 B 에서는 붙고, 값은 프로젝트 경로별로 남는다', async () => {
+    const { mcp, llm } = await start()
+    mcp.save(local('wiki'))
+    await mcp.prepare(project)
+    await mcp.prepare(other)
+    mcp.setEnabled('wiki', false, project)
+    llm.calls = []
+    await mcp.prepare(project)
+    await mcp.prepare(other)
+    expect(llm.calls).toContain('disconnect proj wiki')
+    expect(llm.calls.some((call) => call.endsWith('other wiki'))).toBe(false)
+    expect((await mcp.list(project))[0]).toMatchObject({ name: 'wiki', enabled: false, status: 'disabled' })
+    expect((await mcp.list(other))[0]).toMatchObject({ name: 'wiki', enabled: true, status: 'connected' })
+
+    const again = await start()
+    await again.mcp.prepare(project)
+    await again.mcp.prepare(other)
+    expect(adds(again.llm)).toEqual(['add other wiki'])
+    again.mcp.setEnabled('wiki', true, project)
+    await again.mcp.prepare(project)
+    expect(adds(again.llm)).toEqual(['add other wiki', 'add proj wiki'])
+  })
+
+  it('프로젝트 폴더 정의도 그 프로젝트에서 끌 수 있다 (파일은 안 고친다)', async () => {
+    const { mcp, llm } = await start()
+    const file = path.join(project, '.mcp.json')
+    const text = JSON.stringify({ mcpServers: { deploy: { command: '/bin/echo' } } })
+    await fs.writeFile(file, text)
+    expect((await mcp.list(project))[0]).toMatchObject({ name: 'deploy', source: 'project', scope: 'project', origin: '.mcp.json', enabled: true })
+    mcp.setEnabled('deploy', false, project)
+    await mcp.prepare(project)
+    expect(llm.calls).toContain('disconnect proj deploy')
+    expect((await mcp.list(project))[0]).toMatchObject({ enabled: false, status: 'disabled' })
+    expect(await fs.readFile(file, 'utf8')).toBe(text)
+  })
+
+  it('개인 설정 서버는 그 프로젝트에서 끄면 끊고 다시 켜면 잇는다', async () => {
+    const dir = path.join(tmp, 'xdg', 'opencode')
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(path.join(dir, 'opencode.json'), JSON.stringify({ mcp: { mine: { type: 'local', command: ['/bin/cat'] } } }))
+    const { mcp, llm } = await start()
+    llm.status.set(project, { mine: { status: 'connected' } }) // opencode 가 스스로 띄운 것
+    llm.status.set(other, { mine: { status: 'connected' } })
+    mcp.setEnabled('mine', false, project)
+    await mcp.prepare(project)
+    await mcp.prepare(other)
+    expect(llm.calls.filter((call) => !call.startsWith('status'))).toEqual(['disconnect proj mine'])
+    expect((await mcp.list(project))[0]).toMatchObject({ name: 'mine', source: 'personal', scope: 'all', enabled: false, status: 'disabled' })
+    mcp.setEnabled('mine', true, project)
+    await mcp.prepare(project)
+    expect(llm.calls).toContain('connect proj mine')
+  })
+
+  it('예전 mcp.json 의 꺼진 서버는 모든 프로젝트에서 꺼진 채로 — 프로젝트 하나에서만 켤 수 있다', async () => {
+    await fs.writeFile(path.join(tmp, 'mcp.json'), JSON.stringify([{ name: 'old', type: 'local', command: ['/bin/cat'], vars: [], enabled: false }]))
+    const { mcp, llm } = await start()
+    await mcp.prepare(project)
+    expect(llm.calls).toEqual([])
+    expect((await mcp.list(project))[0]).toMatchObject({ name: 'old', source: 'app', scope: 'all', enabled: false })
+    mcp.setEnabled('old', true, project)
+    await mcp.prepare(project)
+    await mcp.prepare(other)
+    expect(adds(llm)).toEqual(['add proj old'])
+  })
+
+  it('이름 충돌 — 앱 서버끼리는 묶음이 달라도 저장을 거절하고, 폴더 정의는 앱 서버(어느 묶음이든)에 가려진다', async () => {
+    const { mcp, llm } = await start()
+    mcp.save(local('wiki'))
+    mcp.save({ ...local('billing-db'), scope: 'project' }, project)
+    expect(() => mcp.save({ ...local('wiki'), scope: 'project' }, project)).toThrow(/같은 이름/)
+    expect(() => mcp.save({ ...local('billing-db'), scope: 'project' }, project)).toThrow(/같은 이름/)
+    expect(() => mcp.save(local('billing-db'))).toThrow(/proj/) // 어느 프로젝트의 것과 겹치는지 알려 준다
+    mcp.save({ ...local('billing-db', '/bin/echo'), scope: 'project' }, other) // 다른 프로젝트의 전용 서버끼리는 겹쳐도 된다
+    expect(() => mcp.save({ ...local('x'), scope: 'project' })).toThrow() // 프로젝트 없이 "이 프로젝트만" 은 없다
+
+    await fs.writeFile(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'billing-db': { command: '/bin/false' }, wiki: { command: '/bin/false' } } }))
+    const listed = await mcp.list(project)
+    expect(listed.filter((entry) => entry.source === 'project').map((entry) => [entry.name, entry.shadowed])).toEqual([
+      ['billing-db', true],
+      ['wiki', true],
+    ])
+    expect(llm.added['billing-db']).toMatchObject({ command: ['/bin/cat'] })
+    expect(llm.added['wiki']).toMatchObject({ command: ['/bin/cat'] })
+  })
+
+  it('고치기·지우기는 그 프로젝트의 전용 서버를 먼저 찾고, 지우면 켜기 값도 같이 지운다', async () => {
+    const { mcp } = await start()
+    mcp.save({ ...local('db'), scope: 'project' }, project)
+    mcp.setEnabled('db', false, project)
+    mcp.save({ ...local('db2', '/bin/echo'), originalName: 'db' }, project)
+    expect((await mcp.list(project))[0]).toMatchObject({ name: 'db2', scope: 'project', command: ['/bin/echo'] })
+    mcp.remove('db2', project)
+    mcp.save({ ...local('db'), scope: 'project' }, project)
+    expect((await mcp.list(project))[0]).toMatchObject({ name: 'db', enabled: true }) // 예전 "꺼짐" 이 되살아나지 않는다
+  })
+})
+
 describe('프로젝트·개인 정의 읽기', () => {
   it('.mcp.json(Claude Code)·opencode.jsonc·.opencode 를 겹쳐 읽는다 — 뒤가 이기고 enabled:false 는 꺼진 채', async () => {
     await fs.mkdir(path.join(project, '.opencode'))
@@ -185,9 +340,9 @@ describe('프로젝트·개인 정의 읽기', () => {
     await fs.writeFile(path.join(project, 'opencode.jsonc'), '{\n // 주석\n "mcp": { "b": { "type": "local", "command": ["b2"], }, "c": { "type": "remote", "url": "http://c", "enabled": false } },\n}')
     await fs.writeFile(path.join(project, '.opencode', 'opencode.json'), JSON.stringify({ mcp: { c: { type: 'remote', url: 'http://c2' } } }))
     const servers = Object.fromEntries(projectServers(project).map((server) => [server.name, server]))
-    expect(servers['a']).toEqual({ name: 'a', enabled: true, def: { type: 'remote', url: 'http://h/mcp', headers: { T: 'x' } } })
-    expect(servers['b']!.def).toEqual({ type: 'local', command: ['b2'] })
-    expect(servers['c']).toMatchObject({ enabled: true, def: { url: 'http://c2' } })
+    expect(servers['a']).toEqual({ name: 'a', enabled: true, origin: '.mcp.json', def: { type: 'remote', url: 'http://h/mcp', headers: { T: 'x' } } })
+    expect(servers['b']).toMatchObject({ origin: 'opencode.jsonc', def: { type: 'local', command: ['b2'] } })
+    expect(servers['c']).toMatchObject({ enabled: true, origin: '.opencode/opencode.json', def: { url: 'http://c2' } })
   })
 
   it('개인 설정은 XDG_CONFIG_HOME/opencode 에서 읽는다', async () => {

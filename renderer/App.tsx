@@ -21,6 +21,7 @@ import { useFeatures } from './featuresStore.ts'
 import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
+import { PlusMenu } from './PlusMenu.tsx'
 import { OpenInButton } from './OpenInButton.tsx'
 import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
@@ -1101,14 +1102,8 @@ export function App() {
                   }}
                 />
                 <div className="composer__row">
-                  {/* dsh 에선 첨부 메뉴. 첨부 기능이 생길 때까지 모양만 두고 막는다 — 막힌 버튼은 툴팁을 못 띄워 감싼 쪽에 둔다 */}
-                  <span className="composer__add-wrap" title={t('composer.comingSoon')}>
-                    <button type="button" className="composer__add" aria-label={t('composer.attach')} disabled>
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" strokeWidth="1.3" aria-hidden="true">
-                        <path d="M8 2V14M2 8H14" stroke="currentColor" />
-                      </svg>
-                    </button>
-                  </span>
+                  {/* `+` 메뉴 — 지금 프로젝트의 스킬·MCP 서버 팝업 (이슈 #43). dsh 에선 첨부 메뉴 — 파일·이미지 첨부는 #44 */}
+                  <PlusMenu project={projects?.find((candidate) => candidate.path === active.project)} />
                   <ModeChip value={mode} locked={!!active.pending} onChange={chooseMode} />
                   <div className="composer__trailing">
                     <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
@@ -1163,7 +1158,7 @@ export function App() {
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
       <FilePreviewPanel directory={active?.project} />
-      {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} directory={project?.path} />}
+      {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
     </div>
   )
