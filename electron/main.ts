@@ -3,10 +3,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
 import { ProviderRegistry, type KeyCipher, type ProviderInput } from '../src/services/providers.ts'
-import { LlmService, type Attention, type AttentionAnswer, type ChatImage, type ChatResult } from '../src/services/llm.ts'
-import { outgoing, pickAttachments } from '../src/services/attachments.ts'
-import type { AttachmentKind, PickedAttachment } from '../shared/contract.ts'
-import type { TurnItem } from '../src/services/turnProgress.ts'
+import { LlmService, type AttentionAnswer } from '../src/services/llm.ts'
+import { ChatService } from '../src/services/chat.ts'
+import { pickAttachments } from '../src/services/attachments.ts'
+import type { AttachmentKind } from '../shared/contract.ts'
+import type { ChatModel, QueuedSend } from '../shared/chat.ts'
 import { EngineService } from '../src/services/engine.ts'
 import { bundledPaths } from '../src/services/opencodeBinary.ts'
 import { ProjectsService } from '../src/services/projects.ts'
@@ -133,97 +134,16 @@ function bootstrap(ctx: Context): void {
   handle(ctx, Channel.FETCH_PROVIDER_MODELS, async (_event, draft: { id?: string; baseURL: string; apiKey?: string }) =>
     ctx.providers.fetchAvailableModels(draft),
   )
-  /** 대화 id → 도는 턴의 중지 (STOP_TURN) */
-  const stopping = new Map<string, AbortController>()
-  /** OS 파일 고르기로 사용자가 고른 첨부 경로 — 보낼 때 이 안의 것만 읽는다 (화면이 오염돼도 아무 파일이나 읽어 보내게 두지 않는다) */
-  const pickedPaths = new Set<string>()
-  // `+` 메뉴의 파일 추가·이미지 추가 (이슈 #44) — 이미지는 png·jpeg 만 (01y: 그 밖은 실측하지 않았다. 판정은 확장자가 아니라 매직 바이트)
-  handle(ctx, Channel.PICK_ATTACHMENTS, async (event, kind: AttachmentKind, directory: string, held: number) => {
-    const image = kind === 'image'
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const options = {
-      properties: ['openFile' as const, 'multiSelections' as const],
-      ...(image ? { filters: [{ name: tr('attach.imageFilter'), extensions: ['png', 'jpg', 'jpeg'] }] } : typeof directory === 'string' && { defaultPath: directory }),
-    }
-    const chosen = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
-    if (chosen.canceled) return { picked: [], rejected: [] }
-    const result = await pickAttachments(image ? 'image' : 'file', chosen.filePaths, Number(held) || 0)
-    for (const item of result.picked) pickedPaths.add(item.path)
-    return result
-  })
-  handle(
-    ctx,
-    Channel.SEND_MESSAGE,
-    async (
-      _event,
-      conversationId: string,
-      providerId: string,
-      modelId: string,
-      directory: string,
-      typed: string,
-      sessionId?: string,
-      display?: string,
-      mode?: Mode,
-      attachments?: PickedAttachment[],
-    ): Promise<ChatResult> => {
-      // 첨부 (이슈 #44) — 메인이 읽는다. 글 파일은 본문에 `@경로`·코드 블록으로 풀고, 이미지는 ctx.llm 이 file 파트로 싣는다.
-      // 못 붙이는 것이 있으면 보내지 않고 그 사유로 끝낸다 (화면은 실패한 턴으로 보인다)
-      const attached = Array.isArray(attachments) ? attachments : []
-      let prompt = typed
-      let images: ChatImage[] = []
-      if (attached.length > 0) {
-        try {
-          if (attached.some((item) => !pickedPaths.has(item.path))) throw new Error(tr('attach.notPicked'))
-          // 이미지를 안 받는 모델에 보내면 opencode 가 ERROR 글로 바꿔 보내고 이미지는 그래도 DB 에 남는다 (01y) — 화면이 막지만 여기서도 본다
-          const imageInput = ctx.providers.get(providerId)?.models.find((model) => model.id === modelId)?.imageInput
-          if (!imageInput && attached.some((item) => item.kind === 'image')) throw new Error(tr('plus.menu.image.blocked'))
-          ;({ text: prompt, images } = await outgoing(directory, typed, attached))
-        } catch (error) {
-          return { ok: false, sessionId, error: (error as Error).message }
-        }
-      }
-      const files = attached.filter((item) => item.kind !== 'image').map(({ name, size }) => ({ kind: 'file' as const, name, size }))
-      // 보낸 본문과 보일 글이 다르면(`/` 명령·글 파일 첨부) 엔진 메시지 id 를 정해 보일 글을 적어 둔다 — 다시 열어도 친 글이 보이게.
-      // 글 파일 칩도 그 id 로 적는다 (엔진 기록엔 첨부로 안 남는다 — 이미지 칩은 엔진 기록의 file 파트에서 온다)
-      const shown = display || (files.length > 0 ? typed : undefined)
-      const messageId = shown !== undefined ? ctx.llm.newMessageId() : undefined
-      if (messageId) await ctx.sessions.label(conversationId, messageId, shown!)
-      if (messageId && files.length > 0) await ctx.sessions.noteAttachments(conversationId, messageId, files)
-      // 진행 줄은 모든 창에 흘린다 (화면이 대화 id 로 거른다) — 터미널 출력과 같은 방식
-      const progress = (item: TurnItem) => {
-        for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TURN_PROGRESS, conversationId, item)
-      }
-      // 승인·질문 카드도 같은 방식 — 대화 id 를 붙여 흘린다
-      const attention = (requests: Attention[]) => {
-        for (const win of BrowserWindow.getAllWindows()) win.webContents.send(Channel.TURN_ATTENTION, conversationId, requests)
-      }
-      const stop = new AbortController() // 답변 중지 (STOP_TURN) — 첫 턴은 아직 엔진 세션이 없어 대화 id 로 쥔다
-      stopping.set(conversationId, stop)
-      return ctx.llm.chat(
-        providerId,
-        modelId,
-        directory,
-        prompt,
-        sessionId,
-        (created) => ctx.sessions.attach(conversationId, created),
-        messageId,
-        progress,
-        isMode(mode) ? mode : undefined,
-        attention,
-        stop.signal,
-        images,
-      ).finally(() => stopping.get(conversationId) === stop && stopping.delete(conversationId))
-    },
-  )
-  handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => {
-    const stop = stopping.get(conversationId)
-    stop?.abort()
-    return !!stop
-  })
-  handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.llm.stopSubtask(String(subtaskId)))
-  handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer) => ctx.llm.reply(sessionId, requestId, answer))
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
   handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))
+  // 고른 모델·모드·시각만 — 제목·통계·엔진 세션은 ctx.chat 이 적는다 (화면이 통째로 덮지 않게)
+  handle(ctx, Channel.PATCH_CONVERSATION, async (_event, id: string, patch: { model?: ChatModel; mode?: Mode; updatedAt?: number }) => {
+    await ctx.sessions.patch(String(id), () => ({
+      ...(typeof patch?.model?.providerId === 'string' && typeof patch.model.modelId === 'string' && { model: { providerId: patch.model.providerId, modelId: patch.model.modelId } }),
+      ...(isMode(patch?.mode) && { mode: patch.mode }),
+      ...(typeof patch?.updatedAt === 'number' && { updatedAt: patch.updatedAt }),
+    }))
+  })
   handle(ctx, Channel.REMOVE_CONVERSATION, async (_event, id: string) => ctx.sessions.remove(id))
   handle(ctx, Channel.LOAD_CONVERSATION, async (_event, id: string) => ctx.sessions.history(id))
   handle(ctx, Channel.QUERY_TRIGGER, async (_event, scope: TriggerScope, draft: string, caret: number) => ctx.triggers.query(scope, draft, caret))
@@ -294,6 +214,40 @@ function bootstrap(ctx: Context): void {
 // 기능 하나를 빼도(끄거나 서비스가 못 떠도) 이 연결은 그대로 뜬다
 bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'settings', 'features']
 mounted.push(ctx.plugin(bootstrap))
+
+// 대화 (ctx.chat, 이슈 #52) — 보내기·대기열·중지·답은 메인이 쥐고, 화면은 이벤트로 그린다. 이벤트는 모든 창에 흘린다 (화면이 대화 id 로 거른다).
+// 창이 없어도(macOS 에서 닫음) 턴은 돌고, 새 창은 CHAT_SNAPSHOT 으로 이어 그린다
+function chatBridge(ctx: Context): void {
+  // `+` 메뉴의 파일 추가·이미지 추가 (이슈 #44) — 이미지는 png·jpeg 만 (01y: 그 밖은 실측하지 않았다. 판정은 확장자가 아니라 매직 바이트)
+  handle(ctx, Channel.PICK_ATTACHMENTS, async (event, kind: AttachmentKind, directory: string, held: number) => {
+    const image = kind === 'image'
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      properties: ['openFile' as const, 'multiSelections' as const],
+      ...(image ? { filters: [{ name: tr('attach.imageFilter'), extensions: ['png', 'jpg', 'jpeg'] }] } : typeof directory === 'string' && { defaultPath: directory }),
+    }
+    const chosen = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (chosen.canceled) return { picked: [], rejected: [] }
+    const result = await pickAttachments(image ? 'image' : 'file', chosen.filePaths, Number(held) || 0)
+    ctx.chat.allowAttachments(result.picked.map((item) => item.path))
+    return result
+  })
+  handle(ctx, Channel.SEND_MESSAGE, async (_event, conversationId: string, input: QueuedSend) => ctx.chat.send(String(conversationId), { ...input, origin: 'user' }))
+  handle(ctx, Channel.TAKE_QUEUE, async (_event, conversationId: string) => ctx.chat.takeQueue(String(conversationId)))
+  handle(ctx, Channel.CHAT_SNAPSHOT, async () => ctx.chat.snapshot())
+  handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => ctx.chat.stop(String(conversationId)))
+  handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.chat.stopSubtask(String(subtaskId)))
+  handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer) => ctx.chat.reply(sessionId, requestId, answer))
+  ctx.on('chat/turn-started', (data) => broadcast(Channel.TURN_STARTED, data))
+  ctx.on('chat/turn-progress', ({ cid, item }) => broadcast(Channel.TURN_PROGRESS, cid, item))
+  ctx.on('chat/turn-attention', ({ cid, requests }) => broadcast(Channel.TURN_ATTENTION, cid, requests))
+  ctx.on('chat/turn-ended', (data) => broadcast(Channel.TURN_ENDED, data))
+  ctx.on('chat/queue-changed', (data) => broadcast(Channel.QUEUE_CHANGED, data))
+  ctx.on('chat/conversations-changed', (data) => broadcast(Channel.CONVERSATIONS_CHANGED, data))
+}
+chatBridge.inject = ['chat']
+mounted.push(ctx.plugin(ChatService))
+mounted.push(ctx.plugin(chatBridge))
 
 /** 모든 앱 창에 보낸다 */
 function broadcast(channel: string, ...args: unknown[]): void {

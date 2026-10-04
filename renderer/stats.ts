@@ -1,40 +1,9 @@
 // 입력창 아래 통계 줄의 읽기 값 — dsh ui-chat StatsPills·TurnUsagePanel, ui-conversation ContextMeter 의 표기를 따른다.
 // 숫자를 지어내지 않는다: 엔진이 준 값이 없으면 그 자리는 "—" (00_request 2026-10-01)
-import type { TurnUsage } from '../shared/ipc.ts'
 
-/** 한 대화에 쌓인 턴 사용량 — ctx.llm 이 턴마다 주는 TurnUsage 를 더한다. 컨텍스트 크기·메시지 몫은 마지막 턴 것 */
-export interface ChatUsage {
-  turns: number
-  steps: number
-  tokens: TurnUsage['tokens']
-  llmMs: number
-  toolMs: number
-  ttftMs: number
-  ttftSteps: number
-  lastContextTokens: number
-  messageTokens?: number
-}
-
-export function addTurn(chat: ChatUsage | undefined, turn: TurnUsage): ChatUsage {
-  const t = chat?.tokens
-  return {
-    turns: (chat?.turns ?? 0) + 1,
-    steps: (chat?.steps ?? 0) + turn.steps,
-    tokens: {
-      input: (t?.input ?? 0) + turn.tokens.input,
-      output: (t?.output ?? 0) + turn.tokens.output,
-      reasoning: (t?.reasoning ?? 0) + turn.tokens.reasoning,
-      cacheRead: (t?.cacheRead ?? 0) + turn.tokens.cacheRead,
-      cacheWrite: (t?.cacheWrite ?? 0) + turn.tokens.cacheWrite,
-    },
-    llmMs: (chat?.llmMs ?? 0) + turn.llmMs,
-    toolMs: (chat?.toolMs ?? 0) + turn.toolMs,
-    ttftMs: (chat?.ttftMs ?? 0) + turn.ttftMs,
-    ttftSteps: (chat?.ttftSteps ?? 0) + turn.ttftSteps,
-    lastContextTokens: turn.lastContextTokens,
-    messageTokens: turn.messageTokens,
-  }
-}
+// 한 대화에 쌓인 턴 사용량과 그 합산은 shared/usage.ts — 턴이 끝날 때 메인(ctx.chat)이 더해 저장한다 (이슈 #52). 여기는 읽어서 그리기만
+import { addTurn, type ChatUsage } from '../shared/usage.ts'
+export { addTurn, type ChatUsage }
 
 /** 화면에 보일 통계. 출력은 reasoning 을 포함한다 (OpenAI completion_tokens 와 같은 뜻 — opencode output 은 reasoning 을 뺀 값).
  *  컨텍스트 구성은 opencode 가 안 줘서 메시지 몫만 어림하고 나머지를 "시스템·도구" 한 줄로 둔다 — 둘로 나누지 않는다 (지어내지 않는다) */

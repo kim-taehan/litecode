@@ -101,10 +101,20 @@ const promptSkills = (text: string) => [...text.matchAll(/<name>([^<]+)<\/name>/
 async function probeTurn(label: string): Promise<Requests> {
   const text = `skills probe ${label} ${Date.now()}`
   const result = await page.evaluate(
-    ([dir, prompt]) => window.litecode.sendMessage(`skills-probe-${Date.now()}`, 'gateway-local', 'qwen3.8-27b', dir, prompt, undefined, undefined, 'build'),
+    ([dir, prompt]) => new Promise<{ text: string; error?: string }>((resolve) => {
+        // 보내기는 바로 돌아온다(ctx.chat, 이슈 #52) — 답은 그 대화의 턴 끝 이벤트로 온다
+        const id = `skills-probe-${Date.now()}`
+        const off = window.litecode.onTurnEnded((ended) => {
+          if (ended.cid !== id) return
+          off()
+          resolve(ended.message)
+        })
+        void window.litecode.sendMessage(id, { project: dir, text: prompt, mode: 'build', model: { providerId: 'gateway-local', modelId: 'qwen3.8-27b' } })
+      }),
     [project, text] as const,
   )
-  expect(result).toMatchObject({ ok: true, text: `echo: ${text}` })
+  expect(result).toMatchObject({ text: `echo: ${text}` })
+  expect(result.error).toBeUndefined()
   return requests()
 }
 

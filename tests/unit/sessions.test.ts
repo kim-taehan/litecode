@@ -202,6 +202,19 @@ describe('SessionsService', () => {
     ])
   })
 
+  // 이슈 #52 — 턴 끝의 시각·통계(ctx.chat)와 고른 모델·모드(화면)를 서로 덮지 않고 적는다
+  it('patch 는 준 필드만 고친다 — 제목·카드·보일 글은 그대로, 저장 안 된 대화면 아무것도 안 하고 undefined', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1', { engineSessionId: 'ses_1', usage: { turns: 1 } }))
+    await sessions.label('c1', 'msg_a', '/hi world')
+    const patched = await sessions.patch('c1', (entry) => ({ updatedAt: 5_000, usage: { turns: (entry.usage as { turns: number }).turns + 1 } }))
+    expect(patched).toMatchObject({ id: 'c1', title: '제목 c1', engineSessionId: 'ses_1', updatedAt: 5_000, usage: { turns: 2 }, labels: { msg_a: '/hi world' } })
+    await sessions.patch('c1', () => ({ model: { providerId: 'gw', modelId: 'm2' }, mode: 'plan' }))
+    expect((await sessions.list())[0]).toMatchObject({ updatedAt: 5_000, usage: { turns: 2 }, model: { providerId: 'gw', modelId: 'm2' }, mode: 'plan' })
+    expect(await sessions.patch('nope', () => ({ updatedAt: 1 }))).toBeUndefined()
+    expect(ids(await sessions.list())).toEqual(['c1'])
+  })
+
   it('손상된 파일이면 빈 목록으로 시작한다', async () => {
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(file, '{ 깨짐')

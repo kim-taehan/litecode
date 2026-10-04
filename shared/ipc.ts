@@ -4,7 +4,8 @@
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
 import type { Attention, AttentionAnswer, ChatResult, History } from '../src/services/llm.ts'
 import type { Mode } from './modes.ts'
-import type { AttachmentKind, AttachmentPick, PickedAttachment } from './contract.ts'
+import type { AttachmentKind, AttachmentPick } from './contract.ts'
+import type { ChatEventMap, ChatModel, ChatSnapshot, QueuedSend, SendResult } from './chat.ts'
 import type { Project } from '../src/services/projects.ts'
 import type { Conversation, ShellCard } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
@@ -23,6 +24,7 @@ export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry 
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
 export type { Mode } from './modes.ts'
 export type { Attachment, AttachmentKind, AttachmentPick, PickedAttachment } from './contract.ts'
+export type { ChatEvent, ChatEventMap, ChatLive, ChatModel, ChatSnapshot, QueuedSend, SendResult } from './chat.ts'
 export type { TurnUsage } from '../src/services/turnUsage.ts'
 export type { Subtask, TurnItem } from '../src/services/turnProgress.ts'
 export type { FileDiff } from '../src/services/toolDiffs.ts'
@@ -48,6 +50,16 @@ export const Channel = {
   REMOVE_PROVIDER: 'providers:remove',
   FETCH_PROVIDER_MODELS: 'providers:fetch-models',
   SEND_MESSAGE: 'chat:send',
+  TAKE_QUEUE: 'chat:take-queue',
+  CHAT_SNAPSHOT: 'chat:snapshot',
+  /** 메인 → 화면 (ChatEventMap['turn.started']) — 턴이 시작됐다: 그 턴의 내 말과 저장된 목록 정보 */
+  TURN_STARTED: 'chat:turn-started',
+  /** 메인 → 화면 (ChatEventMap['turn.ended']) — 턴이 끝났다: 답과 합산한 목록 정보 */
+  TURN_ENDED: 'chat:turn-ended',
+  /** 메인 → 화면 (ChatEventMap['queue.changed']) — 그 대화의 대기열 */
+  QUEUE_CHANGED: 'chat:queue',
+  /** 메인 → 화면 (ChatEventMap['conversations.changed']) */
+  CONVERSATIONS_CHANGED: 'chat:conversations-changed',
   PICK_ATTACHMENTS: 'chat:pick-attachments',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
@@ -57,6 +69,7 @@ export const Channel = {
   RENAME_PROJECT: 'projects:rename',
   LIST_CONVERSATIONS: 'sessions:list',
   SAVE_CONVERSATION: 'sessions:save',
+  PATCH_CONVERSATION: 'sessions:patch',
   REMOVE_CONVERSATION: 'sessions:remove',
   LOAD_CONVERSATION: 'sessions:history',
   QUERY_TRIGGER: 'triggers:query',
@@ -132,23 +145,21 @@ export interface LitecodeBridge {
   removeProvider(id: string): Promise<ProviderSummary[]>
   /** 메인 프로세스가 `GET {baseURL}/models` 로 묻는다. 키는 입력한 것, 없으면 id 의 저장된 키 */
   fetchProviderModels(draft: { id?: string; baseURL: string; apiKey?: string }): Promise<ModelCatalogEntry[]>
-  /** sessionId 를 안 주면 directory(작업 디렉터리)에서 세션을 새로 만든다 — 결과의 sessionId 를 다음 호출에 넘긴다.
-   *  conversationId 는 저장된 대화(saveConversation) — 새 세션이 생기자마자 거기에 붙인다 (답 대기 중 앱이 꺼져도 다시 열리게).
-   *  display 를 주면 다시 열었을 때 prompt 대신 그 글이 말풍선에 보인다 (`/` 명령: prompt 는 풀어 쓴 template).
-   *  mode 는 이 턴을 돌릴 모드 (입력창 칩) — 엔진 세션을 그 모드로 맞추고 보낸다.
+  /** 그 대화에 보낸다 (ctx.chat, 이슈 #52) — 바로 돌아온다: 'sent'(턴이 시작됐다) 또는 'queued'(그 대화의 턴이 도는 중이라 대기열에 쌓였다 —
+   *  턴이 끝나면 메인이 합쳐 보낸다). 내 말·진행 줄·답은 onTurnStarted·onTurnProgress·onTurnEnded 로 온다. 제목·저장·통계 합산은 메인이 한다.
+   *  input.project 는 아직 저장 안 된 새 대화가 만들어질 폴더. display 를 주면 다시 열었을 때 text 대신 그 글이 말풍선에 보인다 (`/` 명령: text 는
+   *  풀어 쓴 template). mode·model 은 이 턴부터 그 대화의 것이 된다.
    *  attachments 는 붙인 파일·이미지 (pickAttachments 가 준 것만 — 그 밖의 경로는 거절). 메인이 읽는다: 이미지는 엔진에 이미지로, 글 파일은
-   *  프로젝트 안이면 본문 끝 `@경로`, 밖이면 본문에 풀어서. 그 모델이 이미지를 안 받으면(설정 > 모델) 이미지가 붙은 메시지는 거절 */
-  sendMessage(
-    conversationId: string,
-    providerId: string,
-    modelId: string,
-    directory: string,
-    prompt: string,
-    sessionId?: string,
-    display?: string,
-    mode?: Mode,
-    attachments?: PickedAttachment[],
-  ): Promise<ChatResult>
+   *  프로젝트 안이면 본문 끝 `@경로`, 밖이면 본문에 풀어서. 그 모델이 이미지를 안 받으면(설정 > 모델) 이미지가 붙은 메시지는 실패한 턴으로 끝난다 */
+  sendMessage(conversationId: string, input: QueuedSend): Promise<SendResult>
+  /** 대기열 되돌리기 — 그 대화에 쌓인 것을 합쳐 받고 비운다 (입력창으로). 멈춰서 붙잡힌 대기열도 이것으로 푼다. 없으면 undefined */
+  takeQueue(conversationId: string): Promise<QueuedSend | undefined>
+  /** 메인이 쥔 지금 모습 — 대화마다 도는 턴(내 말·진행 줄·승인 카드)과 대기열. 화면이 (다시) 뜰 때 한 번 받고 그 뒤는 이벤트로 */
+  chatSnapshot(): Promise<ChatSnapshot>
+  onTurnStarted(listener: (event: ChatEventMap['turn.started']) => void): () => void
+  onTurnEnded(listener: (event: ChatEventMap['turn.ended']) => void): () => void
+  onQueueChanged(listener: (event: ChatEventMap['queue.changed']) => void): () => void
+  onConversationsChanged(listener: (event: ChatEventMap['conversations.changed']) => void): () => void
   /** `+` 메뉴의 파일 추가·이미지 추가 (이슈 #44) — OS 파일 고르기(여러 개)를 띄워 고른 것을 칩 정보로 준다. 화면은 경로만 들고 내용은 안 읽는다.
    *  held 는 그 메시지에 이미 붙은 같은 종류의 수. 못 붙이는 것(이미지: png·jpeg 아님, 파일: 글자 아님·폴더, 크기·개수 상한)은 rejected 에 사유로.
    *  취소하면 둘 다 빈 목록. directory 는 파일 고르기가 처음 여는 폴더(파일 추가만) */
@@ -167,8 +178,11 @@ export interface LitecodeBridge {
   renameProject(directory: string, name: string): Promise<Project[]>
   /** 저장된 대화 목록 정보 — 모든 프로젝트, 맨 앞이 가장 최근에 만든 것 */
   listConversations(): Promise<Conversation[]>
-  /** 넣거나 고친다. 그 프로젝트가 보관 개수를 넘어 지운 대화 id 를 준다 */
+  /** 넣거나 고친다. 그 프로젝트가 보관 개수를 넘어 지운 대화 id 를 준다. 보낸 대화의 저장은 메인(ctx.chat)이 한다 — 화면은 `!명령` 만
+   *  돌린 새 대화를 목록에 넣을 때만 쓴다 */
   saveConversation(conversation: Conversation): Promise<string[]>
+  /** 저장된 대화의 고른 모델·모드·마지막 활동 시각만 고친다 (저장 안 된 새 대화면 아무것도 안 한다 — 첫 보내기가 정한다) */
+  patchConversation(id: string, patch: { model?: ChatModel; mode?: Mode; updatedAt?: number }): Promise<void>
   /** 목록에서 빼고 엔진 세션도 지운다 (되돌리기 없음) */
   removeConversation(id: string): Promise<void>
   /** 저장된 대화의 말풍선. 작업 폴더가 없으면 엔진에 묻지 않고 missingFolder */
@@ -196,7 +210,8 @@ export interface LitecodeBridge {
   onTurnAttention(listener: (conversationId: string, requests: Attention[]) => void): () => void
   /** 카드의 답 — 권한 'once'|'reject', 질문은 질문 순서대로 고른 답 또는 'reject'. 이미 풀린 요청·빈 답이면 거절 */
   replyAttention(sessionId: string, requestId: string, answer: AttentionAnswer): Promise<void>
-  /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴의 sendMessage 가 "중단됨"(interrupted) 으로 끝난다. 도는 턴이 없으면 false */
+  /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴은 "중단됨"(interrupted) 으로 끝난다 (onTurnEnded). 쌓인 대기열은 보내지 않고
+   *  붙잡힌다(onQueueChanged 의 held) — takeQueue 로 입력창에 되돌린다. 도는 턴이 없으면 false */
   stopTurn(conversationId: string): Promise<boolean>
   /** 도는 턴의 하위 작업 하나만 멈춘다 (subtaskId = 그 하위 작업 진행 줄의 id) — 턴은 이어 간다. 도는 턴의 하위 작업이 아니면 false */
   stopSubtask(subtaskId: string): Promise<boolean>

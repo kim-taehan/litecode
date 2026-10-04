@@ -1,17 +1,18 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Attachment, AttachmentKind, Attention, Conversation, ConversationStatus, HistoryMessage, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, TurnItem } from '../shared/ipc.ts'
+import type { AttachmentKind, ChatEvent, Conversation, ConversationStatus, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
+import { titleFrom } from '../shared/chat.ts'
+import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from './chatState.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap, useFollowBottom } from './Minimap.tsx'
 import { ScrollToBottom } from './ScrollToBottom.tsx'
-import { upsertItem } from './turnView.ts'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { SettingsModal } from './Settings.tsx'
 import { StatsBar } from './StatsBar.tsx'
 import { Trajectory } from './Trajectory.tsx'
-import { addTurn, chatStats, type ChatUsage } from './stats.ts'
+import { chatStats, type ChatUsage } from './stats.ts'
 import { useTriggers } from './useTriggers.ts'
 import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
@@ -24,37 +25,18 @@ import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { PlusMenu } from './PlusMenu.tsx'
 import { AttachmentChips } from './Attachments.tsx'
-import { chipsOf, countOf } from './attachmentsView.ts'
+import { countOf } from './attachmentsView.ts'
 import { OpenInButton } from './OpenInButton.tsx'
 import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
-import { useSendQueue, type QueuedSend } from './useSendQueue.ts'
 import { QueueDock } from './QueueDock.tsx'
 import { RunningCount, RunningFilter } from './Background.tsx'
 import { runningIn, runningOutside } from './backgroundView.ts'
 import { StopIcon, useEscapeTwice, useStopTurn } from './stopTurn.tsx'
 
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  /** assistant 가 실패했으면 `⚠️ 사유` */
-  text: string
-  /** user: 보낸 시각 */
-  at?: number
-  /** user: 이 턴을 돌린 모드 — 앞 턴과 다르면 그 자리에 구분선 */
-  mode?: Mode
-  /** user: 붙인 파일·이미지 칩 */
-  attachments?: Attachment[]
-  /** assistant: 그 턴의 진행 줄 (생각·도구·글) */
-  items?: TurnItem[]
-  /** assistant: 걸린 시간(ms) */
-  duration?: number
-  failed?: boolean
-  interrupted?: boolean
-  /** assistant: 승인·질문을 거절해 끝났다 (실패 아님) */
-  declined?: boolean
-}
-
-interface Session {
+/** 말풍선·도는 턴(pending·progress·sentAt·attention)·대기열·제목·시각·통계는 메인(ctx.chat)이 정한다 — 이벤트로 받아 입힌다 (chatState.ts).
+ *  답이 실패·중단이면 message.error 에 사유 (`⚠️ 사유` 로 그린다) */
+interface Session extends ChatFields {
   id: string
   /** 이 대화가 속한 프로젝트(작업 디렉터리) — 사이드바는 현재 프로젝트의 대화만 보여준다 */
   project: string
@@ -65,20 +47,11 @@ interface Session {
   model?: ModelRef
   /** 입력창 칩의 모드. 없으면 설정의 "새 대화 기본 모드". 바꾸면 다음 턴을 보낼 때 엔진 세션이 그 모드가 된다 (ctx.llm) */
   mode?: Mode
-  title: string
-  messages: ChatMessage[]
-  /** 답을 기다리는 중 — 대화마다 따로. 기다리는 동안 다른 대화·프로젝트는 보낼 수 있다 (03_qa) */
-  pending?: boolean
-  /** 답을 기다리는 턴의 진행 줄 (메인이 실시간으로 민다) 과 보낸 시각 — 턴이 끝나면 답에 옮긴다 */
-  progress?: TurnItem[]
-  sentAt?: number
-  /** 답을 기다리는 턴이 기다리는 승인·질문 (메인이 민다) — 진행 중 턴 안에 카드로 */
-  attention?: Attention[]
   /** `!명령` 결과 카드 — 저장된 것은 메인(ctx.sessions)이 정본이고, 여기는 화면 사본 + 돌고 있는 카드 */
   shells?: ShellCardView[]
   /** 마지막 활동 시각(ms) — 목록에 `38min`·`1d` 로 보이고, 보관 개수 제한의 기준이 된다 */
   updatedAt: number
-  /** 입력창 아래 통계 줄의 값 — 턴마다 엔진이 주는 사용량·시간을 이 대화에 더한다. 없으면 "—" */
+  /** 입력창 아래 통계 줄의 값 — 턴마다 엔진이 주는 사용량·시간을 메인이 이 대화에 더한다. 없으면 "—" */
   usage?: ChatUsage
   /** 지난 실행에서 저장된 대화의 내용 상태 — 목록 정보만 저장되고 내용은 열 때 엔진에서 부른다(ctx.sessions). 이번 실행에 만든 대화는 없다 */
   history?: 'unloaded' | 'loading' | 'loaded' | 'missing'
@@ -93,14 +66,6 @@ function isBlank(session: Session): boolean {
   return session.messages.length === 0 && !session.history && !session.shells?.length
 }
 
-/** 대화 제목 = 첫 메시지의 첫 줄. 목록 행은 흘러가며·옆 카드는 줄바꿈해 전체를 보이므로 카드가 너무 커지지 않을 만큼만 자른다 */
-const TITLE_MAX = 80
-
-function titleFrom(text: string): string {
-  const line = text.split('\n').find((part) => part.trim()) ?? text
-  return line.trim().slice(0, TITLE_MAX)
-}
-
 /** 저장할 목록 정보 (말풍선·대기 상태·카드는 빼고 — 카드는 메인이 저장한다) */
 function toConversation({ id, project, engineSessionId, title, updatedAt, model, mode, usage }: Session): Conversation {
   return { id, project, engineSessionId, title, updatedAt, model, mode, usage }
@@ -108,11 +73,6 @@ function toConversation({ id, project, engineSessionId, title, updatedAt, model,
 
 function fromConversation(conversation: Conversation): Session {
   return { ...conversation, usage: conversation.usage as ChatUsage | undefined, messages: [], history: 'unloaded', shells: conversation.shells }
-}
-
-/** 실시간 턴과 같은 모양 — 실패·중단이면 사유를 ⚠️ 로 */
-function toChatMessage({ role, text, error, at, mode, attachments, items, duration, interrupted, declined }: HistoryMessage): ChatMessage {
-  return { role, text: error ? `⚠️ ${error}` : text, at, mode, attachments, items, duration, failed: !!error, interrupted, declined }
 }
 
 /** 그 프로젝트에 대화가 하나도 없으면 새 대화를 하나 더한다 — 같은 값을 두 번 넣어도 한 번만 더해진다 */
@@ -368,9 +328,6 @@ export function App() {
   const sessionsRef = useRef<Session[]>([])
   sessionsRef.current = sessions
 
-  /** 대화 id → 마지막으로 저장한 목록 정보(JSON) — 바뀐 대화만 저장한다 */
-  const saved = useRef(new Map<string, string>())
-
   useEffect(() => {
     void window.litecode.listProviders().then(setProviders)
     // 저장된 대화 목록을 먼저 올린다 — 프로젝트를 열 때 "대화가 없으면 새 대화" 가 저장된 대화를 보고 판단하게.
@@ -379,8 +336,9 @@ export function App() {
     // 목록은 그 뒤에 보인다 (열어 보는 동안 안내 화면이 번쩍이지 않게). 켠 직후에는 저장된 대화 위의 새 대화에서 시작한다
     void (async () => {
       const stored = (await window.litecode.listConversations()).map(fromConversation)
-      for (const session of stored) saved.current.set(session.id, JSON.stringify(toConversation(session)))
-      setSessions(stored)
+      // 메인이 쥔 도는 턴·대기열을 입힌다 — 창을 닫았다 열어도 진행 줄·대기열이 이어져 보인다 (그 뒤는 이벤트로)
+      const live = await window.litecode.chatSnapshot()
+      setSessions(stored.map((session) => applyLive(session, live[session.id])))
       const list = await window.litecode.listProjects()
       if (list[0] && (await pick(() => window.litecode.openProject(list[0]!.path), cannotOpen(list[0].path), list[0].path)) === 'opened') {
         setSessions(withBlankFor(list[0].path))
@@ -396,41 +354,29 @@ export function App() {
     return offOpen
   }, [])
 
-  // 대화 목록 정보가 바뀌면 저장한다 (제목·시각·엔진 세션·모델·통계). 빈 새 대화는 저장하지 않는다.
-  // 보관 개수를 넘어 지워진 대화는 화면에서도 뺀다
-  useEffect(() => {
-    for (const session of sessions) {
-      if (isBlank(session)) continue
-      const conversation = toConversation(session)
-      const key = JSON.stringify(conversation)
-      if (saved.current.get(session.id) === key) continue
-      saved.current.set(session.id, key)
-      void window.litecode.saveConversation(conversation).then(forgetPruned)
-    }
-  }, [sessions])
-
+  /** 보관 개수를 넘어 지워진 대화는 화면에서도 뺀다 */
   function forgetPruned(ids: string[]): void {
     if (ids.length === 0) return
-    for (const id of ids) saved.current.delete(id)
     setSessions((sessionsNow) => sessionsNow.filter((session) => !ids.includes(session.id)))
   }
 
-  // 답을 기다리는 턴의 진행 줄 — 보낸 대화에 쌓는다 (대화 id 로 온다. 끝난 뒤 늦게 온 것은 버린다)
-  useEffect(
-    () =>
-      window.litecode.onTurnProgress((conversationId, item) =>
-        updateSession(conversationId, (session) => (session.pending ? { ...session, progress: upsertItem(session.progress, item) } : session)),
-      ),
-    [],
-  )
-  // 답을 기다리는 턴의 승인·질문 — 진행 줄과 같은 방식 (끝난 뒤 늦게 온 것은 버린다)
-  useEffect(
-    () =>
-      window.litecode.onTurnAttention((conversationId, requests) =>
-        updateSession(conversationId, (session) => (session.pending ? { ...session, attention: requests } : session)),
-      ),
-    [],
-  )
+  // 대화의 턴·대기열은 메인(ctx.chat)이 쥔다 — 내 말·진행 줄·승인 카드·답·대기열을 이벤트로 받아 그 대화에 입힌다 (대화 id 로 온다).
+  // 제목·시각·통계도 메인이 저장한 것이 실려 온다. 턴이 시작되면 맨 아래를 따라간다
+  useEffect(() => {
+    const apply = (event: ChatEvent & { data: { cid: string } }) => updateSession(event.data.cid, (session) => applyChat(session, event))
+    const offs = [
+      window.litecode.onTurnStarted((data) => {
+        following.current = true
+        apply({ event: 'turn.started', data })
+      }),
+      window.litecode.onTurnProgress((cid, item) => apply({ event: 'turn.progress', data: { cid, item } })),
+      window.litecode.onTurnAttention((cid, requests) => apply({ event: 'turn.attention', data: { cid, requests } })),
+      window.litecode.onTurnEnded((data) => apply({ event: 'turn.ended', data })),
+      window.litecode.onQueueChanged((data) => apply({ event: 'queue.changed', data })),
+      window.litecode.onConversationsChanged((data) => forgetPruned(data.removed)),
+    ]
+    return () => offs.forEach((off) => off())
+  }, [])
   // 돌고 있는 `!명령` 카드의 출력 조각 — 카드 id 로 찾는다
   useEffect(
     () =>
@@ -462,13 +408,8 @@ export function App() {
   const running = runningIn(notices.state, project?.path)
   const [runningOnly, setRunningOnly] = useState(false)
   const listed = runningOnly && running.length > 0 ? visible.filter((session) => running.includes(session.id)) : visible
-  /** 답하는 중에 보낸 것 — 대화별 화면 큐. 그 대화의 턴이 끝나면 합쳐 한 번에 보낸다 (useSendQueue) */
-  const queue = useSendQueue(sessions, (id, merged) => {
-    const target = sessionsRef.current.find((session) => session.id === id)
-    if (target) void send(merged, { queued: target })
-  })
-  /** 답변 중지 — 입력창 ■·행 ■·Esc 두 번 (이슈 #3). 큐는 보내지 않고 입력창으로 되돌린다 */
-  const stopTurn = useStopTurn(queue, active?.id, restoreQueued)
+  /** 답변 중지 — 입력창 ■·행 ■·Esc 두 번 (이슈 #3). 대기열은 보내지 않고 입력창으로 되돌린다 */
+  const stopTurn = useStopTurn(active?.id, !!active?.held, restoreQueued)
   useEscapeTwice('.chat-pane, .composer', active?.pending ? active.id : undefined, stopTurn)
 
   /** 알림(토스트·PC 알림)을 누르면 — 기존 프로젝트 열기 경로로 그 프로젝트를 열고(목록에서 빠졌으면 다시 넣는다) 그 대화를 고른다.
@@ -506,13 +447,13 @@ export function App() {
     directory: active?.project,
     draft,
     setDraft,
-    onSend: (text, display) => void send({ text, display }),
+    onSend: (text, display) => send({ text, display }),
     onShell: (_directory, command) => void runShell(command),
   })
   /** Enter·보내기 — 입력 트리거(`/`·`!`)가 다루지 않으면 평범하게 보낸다 */
   const submit = () =>
     void trigger.submit().then((handled) => {
-      if (!handled) void send()
+      if (!handled) send()
     })
 
   // 터미널 칸 — ⌘↓ 로 펴고 키를 칸으로 내리고, ⌘↑ 로 접고 입력창으로 올라온다 (closed-code useShellDrawer. Windows·Linux 는 Ctrl).
@@ -544,9 +485,8 @@ export function App() {
     updateSession(id, (session) => ({ ...session, history: 'loading' }))
     void window.litecode.loadConversation(id).then((loaded) =>
       updateSession(id, (session) => ({
-        ...session,
+        ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
-        messages: [...loaded.messages.map(toChatMessage), ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])],
       })),
     )
   }, [active?.id, active?.history])
@@ -620,18 +560,23 @@ export function App() {
   async function removeConversation(target: Session): Promise<void> {
     setConfirming(undefined)
     await window.litecode.removeConversation(target.id)
-    saved.current.delete(target.id)
     const rest = (sessionsNow: Session[]) => sessionsNow.filter((session) => session.id !== target.id)
     // 안내 화면(못 연 프로젝트)에서 지운 것이면 새 대화를 두지 않는다 — 열린 프로젝트에만
     setSessions((sessionsNow) => (target.project === current ? withSessionFor(target.project)(rest(sessionsNow)) : rest(sessionsNow)))
   }
 
+  // 고른 모드·모델은 저장된 대화면 메인에도 적는다 (새 대화는 첫 보내기가 정한다) — 대기열의 다음 턴이 그것으로 간다
   function chooseMode(next: Mode): void {
-    if (active) updateSession(active.id, (session) => ({ ...session, mode: next }))
+    if (!active) return
+    updateSession(active.id, (session) => ({ ...session, mode: next }))
+    void window.litecode.patchConversation(active.id, { mode: next })
   }
 
   function chooseModel(next: ModelRef): void {
-    if (active) updateSession(active.id, (session) => ({ ...session, model: next }))
+    if (active) {
+      updateSession(active.id, (session) => ({ ...session, model: next }))
+      void window.litecode.patchConversation(active.id, { model: next })
+    }
     setLastModel(next)
   }
 
@@ -646,71 +591,32 @@ export function App() {
    *  상한(한 메시지 N개)은 입력 카드의 칩과 이 대화 대기열의 첨부를 합쳐 센다 — 턴 끝에 한 메시지로 합쳐 나간다 */
   async function addAttachments(kind: AttachmentKind): Promise<void> {
     if (!active) return
-    const queued = queue.items(active.id).flatMap((item) => item.attachments ?? [])
-    const result = await window.litecode.pickAttachments(kind, active.project, countOf(kind, attached, queued))
+    const result = await window.litecode.pickAttachments(kind, active.project, countOf(kind, attached, active.queuedAttachments))
     setAttached((now) => [...now, ...result.picked.filter((item) => !now.some((held) => held.path === item.path && held.kind === item.kind))])
     for (const reason of result.rejected) notices.say(reason)
     trigger.inputRef.current?.focus()
   }
 
   /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display. mode: 이 턴부터 그 모드로 ("이 계획대로 실행").
-   *  queued: 큐가 턴 끝에 보내는 대화 (입력창은 건드리지 않는다). 그 대화의 턴이 도는 중이면 보내지 않고 큐에 쌓는다.
-   *  첨부는 command.attachments(큐가 쥐고 있던 것·없음을 뜻하는 빈 목록), 안 주면 입력 카드의 칩 — 보내면 칩을 비운다 */
-  async function send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts: { mode?: Mode; queued?: Session } = {}): Promise<void> {
-    const target = opts.queued ?? active // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
+   *  보내기는 메인(ctx.chat)에 부탁한다 — 그 대화의 턴이 도는 중이면 메인이 대기열에 쌓고 턴 끝에 합쳐 보낸다. 내 말·답은 이벤트로 온다.
+   *  첨부는 command.attachments(없음을 뜻하는 빈 목록), 안 주면 입력 카드의 칩 — 보내면 칩을 비운다 */
+  function send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts: { mode?: Mode } = {}): void {
+    const target = active
     const prompt = command?.text ?? draft.trim()
-    const shown = command?.display ?? prompt
-    const fromCard = !command?.attachments && !opts.queued
-    const files = command?.attachments ?? (fromCard ? attached : [])
+    const fromCard = !command?.attachments
+    const files = command?.attachments ?? attached
     const selected = target?.model ?? initialModel(providers, lastModel)
     if ((!prompt && files.length === 0) || !selected || !findModel(providers, selected) || !target || !canWrite(target)) return
-    const turnMode = opts.mode ?? (opts.queued ? (opts.queued.mode ?? mode) : mode)
-    if (!opts.queued) setDraft('')
+    setDraft('')
     if (fromCard) setAttached([])
-    if (queue.submit(target.id, { text: prompt, display: command?.display, ...(files.length > 0 && { attachments: files }) }, !!target.pending)) return
-    following.current = true
-    const sentAt = Date.now()
-    const start = (session: Session): Session => ({
-      ...session,
-      pending: true,
-      progress: [],
-      sentAt,
-      updatedAt: Date.now(),
-      model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
-      mode: turnMode, // 모드도 — 설정의 기본 모드가 나중에 바뀌어도 이 대화는 그대로
-      title: isBlank(session) ? titleFrom(shown || (files[0]?.name ?? '')) : session.title, // 글 없이 첨부만 보냈으면 첫 파일 이름
-      messages: [...session.messages, { role: 'user', text: shown, at: sentAt, mode: turnMode, ...(files.length > 0 && { attachments: chipsOf(files) }) }],
+    void window.litecode.sendMessage(target.id, {
+      project: target.project,
+      text: prompt,
+      display: command?.display,
+      mode: opts.mode ?? mode,
+      model: selected,
+      ...(files.length > 0 && { attachments: files }),
     })
-    updateSession(target.id, start)
-    // 보내기 전에 목록에 저장해 둔다 — 엔진 세션이 생기면 메인 프로세스가 여기에 붙인다 (답을 기다리는 중 앱이 꺼져도 다시 열리게)
-    const conversation = toConversation(start(target))
-    saved.current.set(target.id, JSON.stringify(conversation))
-    forgetPruned(await window.litecode.saveConversation(conversation))
-
-    const display = command && command.display !== prompt ? command.display : undefined
-    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId, display, turnMode, files.length > 0 ? files : undefined)
-    updateSession(target.id, (session) => ({
-      ...session,
-      pending: false,
-      progress: undefined,
-      sentAt: undefined,
-      attention: undefined,
-      updatedAt: Date.now(),
-      engineSessionId: result.sessionId ?? session.engineSessionId,
-      usage: result.usage ? addTurn(session.usage, result.usage) : session.usage,
-      messages: [
-        ...session.messages,
-        {
-          role: 'assistant',
-          text: result.ok ? (result.text ?? '') : `⚠️ ${result.error}`,
-          items: session.progress,
-          duration: Date.now() - sentAt,
-          failed: !result.ok,
-          interrupted: result.interrupted,
-          declined: result.declined,
-        },
-      ],
-    }))
   }
 
   /** `!명령` — 그 대화에 카드를 붙이고 메인이 프로젝트 폴더에서 돌린다. 맥락에는 안 들어간다. 자리는 지금 말풍선 수
@@ -738,10 +644,11 @@ export function App() {
       shells: [...(session.shells ?? []), card],
     })
     updateSession(target.id, start)
-    // 카드를 붙일 대화가 메인에 먼저 있어야 한다 (빈 새 대화는 아직 저장 전이다)
+    // 카드를 붙일 대화가 메인에 먼저 있어야 한다 — 빈 새 대화는 아직 저장 전이라 여기서 넣는다. 저장된 대화는 시각만 고친다
+    // (통째로 저장하면 메인이 적은 통계·엔진 세션을 덮을 수 있다)
     const conversation = toConversation(start(target))
-    saved.current.set(target.id, JSON.stringify(conversation))
-    forgetPruned(await window.litecode.saveConversation(conversation))
+    if (isBlank(target)) forgetPruned(await window.litecode.saveConversation(conversation))
+    else await window.litecode.patchConversation(target.id, { updatedAt: conversation.updatedAt })
     const done = await window.litecode.runShell(target.id, runId, target.project, command, card.position)
     updateSession(target.id, (session) => ({ ...session, shells: session.shells?.map((shell) => (shell.id === runId ? done : shell)) }))
   }
@@ -1054,8 +961,8 @@ export function App() {
                   ) : (
                     <AssistantTurn
                       items={message.items ?? []}
-                      text={message.text}
-                      failed={message.failed}
+                      text={message.error ? `⚠️ ${message.error}` : message.text}
+                      failed={!!message.error}
                       interrupted={message.interrupted}
                       declined={message.declined}
                       duration={message.duration}
@@ -1073,7 +980,7 @@ export function App() {
                   disabled={!chosen}
                   onClick={() => {
                     const text = t('mode.runPlanPrompt')
-                    void send({ text, display: text, attachments: [] }, { mode: 'build' }) // 입력 카드의 칩은 그대로 둔다
+                    send({ text, display: text, attachments: [] }, { mode: 'build' }) // 입력 카드의 칩은 그대로 둔다
                   }}
                 >
                   {t('mode.runPlan')}
@@ -1102,10 +1009,9 @@ export function App() {
 
             <div className="composer">
               <QueueDock
-                items={queue.items(active.id)}
+                items={active.queue ?? []}
                 onRestore={() => {
-                  const taken = queue.take(active.id)
-                  if (taken) restoreQueued(taken)
+                  void window.litecode.takeQueue(active.id).then((taken) => taken && restoreQueued(taken))
                   trigger.inputRef.current?.focus()
                 }}
               />
@@ -1435,18 +1341,4 @@ function ProjectPopover({ projects, current, statusOf, runningOf, busy, error, o
       <HoverCard card={hover.card} />
     </div>
   )
-}
-
-/** 그 내 말이 앞 내 말과 다른 모드로 갔나 — 모드가 바뀐 자리의 구분선 */
-function switchedMode(messages: readonly ChatMessage[], index: number): boolean {
-  const mode = messages[index]?.mode
-  const previous = messages.slice(0, index).reverse().find((message) => message.role === 'user')?.mode
-  return !!mode && !!previous && mode !== previous
-}
-
-/** 마지막 턴이 계획 모드로 잘 끝났나 — "이 계획대로 실행" 자리 */
-function planEnded(messages: readonly ChatMessage[]): boolean {
-  const last = messages.at(-1)
-  const asked = messages.at(-2)
-  return last?.role === 'assistant' && !last.failed && !last.declined && asked?.role === 'user' && asked.mode === 'plan'
 }

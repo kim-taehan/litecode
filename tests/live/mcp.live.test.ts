@@ -169,10 +169,20 @@ async function closeSettings(): Promise<void> {
 async function toolsIn(directory: string, mode: Mode = 'build'): Promise<string[]> {
   const text = `mcp tools ${path.basename(directory)} ${mode} ${Date.now()}`
   const result = await page.evaluate(
-    ([dir, prompt, chosen]) => window.litecode.sendMessage(`mcp-probe-${Date.now()}`, 'gateway-local', 'qwen3.8-27b', dir, prompt, undefined, undefined, chosen as Mode),
+    ([dir, prompt, chosen]) => new Promise<{ text: string; error?: string }>((resolve) => {
+        // 보내기는 바로 돌아온다(ctx.chat, 이슈 #52) — 답은 그 대화의 턴 끝 이벤트로 온다
+        const id = `mcp-probe-${Date.now()}`
+        const off = window.litecode.onTurnEnded((ended) => {
+          if (ended.cid !== id) return
+          off()
+          resolve(ended.message)
+        })
+        void window.litecode.sendMessage(id, { project: dir, text: prompt, mode: chosen as Mode, model: { providerId: 'gateway-local', modelId: 'qwen3.8-27b' } })
+      }),
     [directory, text, mode] as const,
   )
-  expect(result, mode).toMatchObject({ ok: true, text: `echo: ${text}` })
+  expect(result, mode).toMatchObject({ text: `echo: ${text}` })
+  expect(result.error, mode).toBeUndefined()
   const { lastChat } = await requests()
   expect(lastChat.messages.at(-1)!.text.startsWith(text)).toBe(true)
   return lastChat.tools

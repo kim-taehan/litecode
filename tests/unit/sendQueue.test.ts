@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { mergeQueued, SendQueues } from '../../renderer/useSendQueue.ts'
+import { mergeQueued, SendQueues } from '../../src/services/sendQueue.ts'
 
-// 답하는 중 보내기 = 화면 큐 (closed-code useSendQueue 방식, 대화별). 엔진에는 늘 한 턴씩만 간다
+// 답하는 중 보내기 = 대화별 대기열 (closed-code useSendQueue 방식). 엔진에는 늘 한 턴씩만 간다. 메인의 ctx.chat 이 쥔다 (이슈 #52 —
+// 원래 화면의 renderer/useSendQueue.ts. 화면이 pending 을 지켜보던 observe 는 턴 끝에 부르는 next 가 됐다)
 
 describe('mergeQueued', () => {
   it('하나면 그대로, 여럿이면 본문을 줄바꿈으로 잇는다', () => {
@@ -14,7 +15,7 @@ describe('mergeQueued', () => {
   })
 
   it('필드를 골라 다시 쌓지 않는다 — 이을 수 없는 새 필드는 마지막 것이 살아남는다 (closed-code DC-1322)', () => {
-    const items = [{ text: 'a', mode: 'plan' }, { text: 'b', mode: 'build' }]
+    const items = [{ text: 'a', mode: 'plan' as const }, { text: 'b', mode: 'build' as const }]
     expect(mergeQueued(items)).toEqual({ text: 'a\nb', mode: 'build' })
   })
 
@@ -32,10 +33,9 @@ describe('SendQueues — 첨부 (이슈 #44)', () => {
 
   it('턴 중 쌓인 메시지는 첨부를 그대로 갖고 턴 끝에 나간다', () => {
     const queues = new SendQueues()
-    queues.observe('c1', true)
     queues.submit('c1', { text: 'look', attachments: [image] }, true)
     expect(queues.items('c1')).toEqual([{ text: 'look', attachments: [image] }])
-    expect(queues.observe('c1', false)).toEqual({ text: 'look', attachments: [image] })
+    expect(queues.next('c1')).toEqual({ text: 'look', attachments: [image] })
   })
 
   it('되돌리기(take)는 첨부도 돌려준다', () => {
@@ -69,66 +69,59 @@ describe('SendQueues', () => {
     queues.submit('c2', { text: 'b' }, true)
     expect(queues.items('c1')).toEqual([{ text: 'a' }])
     expect(queues.items('c2')).toEqual([{ text: 'b' }])
+    expect(queues.ids().sort()).toEqual(['c1', 'c2'])
   })
 
-  it('그 대화의 턴이 끝나는 순간에만 합친 것을 한 번 준다', () => {
+  it('그 대화의 턴이 끝나면(next) 합친 것을 한 번 준다', () => {
     const queues = new SendQueues()
-    expect(queues.observe('c1', true)).toBeUndefined()
     queues.submit('c1', { text: 'a' }, true)
     queues.submit('c1', { text: 'b' }, true)
-    expect(queues.observe('c1', true)).toBeUndefined() // 아직 도는 중
-    expect(queues.observe('c1', false)).toEqual({ text: 'a\nb' })
+    expect(queues.next('c1')).toEqual({ text: 'a\nb' })
     expect(queues.items('c1')).toEqual([])
-    expect(queues.observe('c1', false)).toBeUndefined() // 같은 끝을 두 번 보지 않는다 (StrictMode·다시 그리기)
+    expect(queues.next('c1')).toBeUndefined() // 같은 끝을 두 번 보지 않는다
   })
 
   it('다른 대화의 턴 끝은 이 대화 큐를 비우지 않는다', () => {
     const queues = new SendQueues()
-    queues.observe('c1', true)
-    queues.observe('c2', true)
     queues.submit('c1', { text: 'a' }, true)
-    expect(queues.observe('c2', false)).toBeUndefined()
+    expect(queues.next('c2')).toBeUndefined()
     expect(queues.items('c1')).toEqual([{ text: 'a' }])
-    expect(queues.observe('c1', false)).toEqual({ text: 'a' })
+    expect(queues.next('c1')).toEqual({ text: 'a' })
   })
 
   it('쌓인 것 없이 끝나면 보낼 것이 없다', () => {
-    const queues = new SendQueues()
-    queues.observe('c1', true)
-    expect(queues.observe('c1', false)).toBeUndefined()
+    expect(new SendQueues().next('c1')).toBeUndefined()
   })
 
   it('되돌리기(take) — 합친 것을 주고 비운다. 그 뒤 턴이 끝나도 보내지 않는다', () => {
     const queues = new SendQueues()
-    queues.observe('c1', true)
     queues.submit('c1', { text: 'a' }, true)
     queues.submit('c1', { text: 'b' }, true)
     expect(queues.take('c1')).toEqual({ text: 'a\nb' })
     expect(queues.take('c1')).toBeUndefined()
-    expect(queues.observe('c1', false)).toBeUndefined()
+    expect(queues.next('c1')).toBeUndefined()
   })
 
-  it('바뀌면 구독자에게 알린다 (화면 다시 그리기)', () => {
+  it('바뀌면 구독자에게 그 대화 id 로 알린다 (화면에 대기열을 다시 보낸다)', () => {
     const queues = new SendQueues()
-    let calls = 0
-    const off = queues.subscribe(() => calls++)
+    const calls: string[] = []
+    const off = queues.subscribe((id) => calls.push(id))
     queues.submit('c1', { text: 'a' }, true)
     queues.take('c1')
     off()
     queues.submit('c1', { text: 'b' }, true)
-    expect(calls).toBe(2)
+    expect(calls).toEqual(['c1', 'c1'])
   })
 })
 
 describe('SendQueues — 사용자가 멈춘 턴 (이슈 #3)', () => {
   it('멈춘(hold) 대화는 턴이 끝나도 보내지 않고 쌓인 것을 남긴다 — 되돌리기(take)로 가져가면 풀린다', () => {
     const queues = new SendQueues()
-    queues.observe('c1', true)
     queues.submit('c1', { text: 'a' }, true)
     queues.submit('c1', { text: 'b' }, true)
     queues.hold('c1')
     expect(queues.held('c1')).toBe(true)
-    expect(queues.observe('c1', false)).toBeUndefined()
+    expect(queues.next('c1')).toBeUndefined()
     expect(queues.items('c1').map((item) => item.text)).toEqual(['a', 'b'])
     expect(queues.take('c1')).toEqual({ text: 'a\nb' })
     expect(queues.held('c1')).toBe(false)
@@ -136,21 +129,48 @@ describe('SendQueues — 사용자가 멈춘 턴 (이슈 #3)', () => {
 
   it('쌓인 것이 없으면 멈춰도 붙잡지 않는다 — 다음 턴 끝은 평소대로', () => {
     const queues = new SendQueues()
-    queues.observe('c1', true)
     queues.hold('c1')
     expect(queues.held('c1')).toBe(false)
-    queues.observe('c1', false)
-    queues.observe('c1', true)
     queues.submit('c1', { text: 'next' }, true)
-    expect(queues.observe('c1', false)).toEqual({ text: 'next' })
+    expect(queues.next('c1')).toEqual({ text: 'next' })
   })
 
   it('다른 대화는 붙잡지 않는다', () => {
     const queues = new SendQueues()
-    queues.observe('c2', true)
     queues.submit('c2', { text: 'x' }, true)
     queues.submit('c1', { text: 'y' }, true)
     queues.hold('c1')
-    expect(queues.observe('c2', false)).toEqual({ text: 'x' })
+    expect(queues.next('c2')).toEqual({ text: 'x' })
+  })
+})
+
+// 출처 (이슈 #52) — 다른 대화가 보낸 지시(라운드 ③)와 사람이 친 글을 한 메시지로 이으면 출처가 사라진다
+describe('SendQueues — 출처가 같은 것끼리만 합친다', () => {
+  it('출처를 안 주면 user 다 — 전부 user 면 지금처럼 한 번에 합쳐 나간다', () => {
+    const queues = new SendQueues()
+    queues.submit('c1', { text: 'a' }, true)
+    queues.submit('c1', { text: 'b', origin: 'user' }, true)
+    expect(queues.next('c1')).toEqual({ text: 'a\nb', origin: 'user' })
+  })
+
+  it('출처가 바뀌는 자리에서 끊어 쌓인 순서대로 한 턴씩 준다', () => {
+    const queues = new SendQueues()
+    queues.submit('c1', { text: 'u1' }, true)
+    queues.submit('c1', { text: 'u2' }, true)
+    queues.submit('c1', { text: 's1', origin: 'session:c9' }, true)
+    queues.submit('c1', { text: 'u3' }, true)
+    expect(queues.next('c1')).toEqual({ text: 'u1\nu2' })
+    expect(queues.next('c1')).toEqual({ text: 's1', origin: 'session:c9' })
+    expect(queues.next('c1')).toEqual({ text: 'u3' })
+    expect(queues.next('c1')).toBeUndefined()
+  })
+
+  it('되돌리기는 그 출처가 쌓은 것만 가져간다 — 남의 지시는 대기열에 남는다', () => {
+    const queues = new SendQueues()
+    queues.submit('c1', { text: 'u1' }, true)
+    queues.submit('c1', { text: 's1', origin: 'session:c9' }, true)
+    queues.submit('c1', { text: 'u2' }, true)
+    expect(queues.take('c1')).toEqual({ text: 'u1\nu2' })
+    expect(queues.items('c1')).toEqual([{ text: 's1', origin: 'session:c9' }])
   })
 })

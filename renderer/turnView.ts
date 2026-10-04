@@ -4,13 +4,8 @@ import type { Translate } from './settingsStore.ts'
 // 답 한 턴의 화면 모양 — 진행 줄(TurnItem)을 "작업"(접히는 부분)과 "답"(늘 보이는 끝 글)으로 가르고 줄 글자를 만든다.
 // 규칙은 dsh ui-chat conversation-nodes 를 따른다 (참조만): 답 = 마지막 도구·생각 뒤의 글. 도구 앞에 쓴 글·답에 붙은 생각은 작업이다
 
-/** 같은 id 면 그 자리에서 바꾸고, 처음이면 끝에 붙인다 — 줄 순서는 처음 나타난 순서 */
-export function upsertItem(items: readonly TurnItem[] | undefined, item: TurnItem): TurnItem[] {
-  const list = items ?? []
-  const index = list.findIndex((existing) => existing.id === item.id)
-  if (index === -1) return [...list, item]
-  return list.map((existing, at) => (at === index ? item : existing))
-}
+// 진행 줄 끼워 넣기(upsertItem)는 shared/chatReducer.ts — 도는 턴의 진행 줄을 쥐는 메인(ctx.chat)과 같이 쓴다 (이슈 #52)
+export { upsertItem } from '../shared/chatReducer.ts'
 
 /** 끝난 턴을 작업과 답으로 가른다. 답 = 마지막 글이 아닌 줄 뒤에 이어지는 글 줄들 */
 export function splitTurn(items: readonly TurnItem[]): { work: TurnItem[]; answer: TurnItem[] } {

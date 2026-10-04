@@ -93,6 +93,16 @@ export class SessionsService extends Service {
     return removed.map((entry) => entry.id)
   }
 
+  /** 저장된 대화의 몇 필드만 고친다 — 고친 대화를 준다 (저장 안 된 대화면 undefined). 읽기-고치기-쓰기가 한 줄 안이라, 통째로 save 할 때처럼
+   *  그 사이 다른 쪽이 적은 값을 덮지 않는다: ctx.chat 은 턴 끝에 시각·통계를, 화면은 고른 모델·모드를 적는다 (이슈 #52) */
+  async patch(id: string, change: (entry: Conversation) => Partial<Pick<Conversation, 'updatedAt' | 'model' | 'mode' | 'usage' | 'engineSessionId'>>): Promise<Conversation | undefined> {
+    const stored = await this.update((stored) => ({
+      ...stored,
+      conversations: stored.conversations.map((entry) => (entry.id === id ? pick({ ...entry, ...change(entry) }) : entry)),
+    }))
+    return stored.conversations.find((entry) => entry.id === id)
+  }
+
   /** 엔진 세션이 생기자마자 붙인다 — 답을 기다리는 중에 앱이 꺼져도 다시 열 수 있게 (ctx.llm.chat 의 onSession) */
   async attach(id: string, engineSessionId: string): Promise<void> {
     await this.update((stored) => ({
