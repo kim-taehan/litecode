@@ -5,6 +5,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SessionsService, type Conversation } from '../../src/services/sessions.ts'
 import type { History } from '../../src/services/llm.ts'
+import { TITLE_MAX } from '../../shared/chat.ts'
 
 // 대화 목록 정보 — userData 의 sessions.json. 내용의 정본은 opencode DB 이고 여기는 목록에 보일 것만 쥔다 (00_request 방식 A).
 // 프로젝트마다 최근 50개(테스트는 낮춘다), 넘치면 마지막 활동이 가장 오래된 것부터 지운다. 지우기는 목록에서 빼고 엔진 세션도 지운다 —
@@ -232,5 +233,56 @@ describe('SessionsService', () => {
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(file, '{ 깨짐')
     expect(await (await start()).sessions.list()).toEqual([])
+  })
+})
+
+describe('SessionsService — 대화 이름 바꾸기 (이슈 #63)', () => {
+  it('제목만 바꾸고(앞뒤 공백은 뗀다) 고친 대화를 준다 — 다른 정보는 그대로, 다시 켜도 남는다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1', { engineSessionId: 'ses_1', updatedAt: 3_000, labels: { msg_a: '/hi world' } }))
+    await sessions.save(conversation('c2'))
+
+    expect(await sessions.rename('c1', '  결제 API 문서 정리  ')).toMatchObject({ id: 'c1', title: '결제 API 문서 정리', engineSessionId: 'ses_1', updatedAt: 3_000 })
+
+    const list = await (await start()).sessions.list()
+    expect(ids(list)).toEqual(['c2', 'c1']) // 순서·시각은 안 바뀐다
+    expect(list[1]).toMatchObject({ title: '결제 API 문서 정리', labels: { msg_a: '/hi world' } })
+    expect(list[0]!.title).toBe('제목 c2')
+  })
+
+  it('빈 이름(공백뿐)은 저장하지 않는다 — 제목은 그대로이고 undefined', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1'))
+
+    expect(await sessions.rename('c1', '   ')).toBeUndefined()
+    expect(await sessions.rename('c1', '')).toBeUndefined()
+    expect((await sessions.list())[0]!.title).toBe('제목 c1')
+  })
+
+  it('길이 상한(자동 제목과 같은 80자)을 넘으면 자른다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1'))
+
+    expect((await sessions.rename('c1', '가'.repeat(200)))!.title).toBe('가'.repeat(TITLE_MAX))
+  })
+
+  it('저장 안 된 대화는 못 바꾼다 (undefined, 새로 만들지 않는다)', async () => {
+    const { sessions } = await start()
+
+    expect(await sessions.rename('없는-대화', '이름')).toBeUndefined()
+    expect(await sessions.list()).toEqual([])
+  })
+
+  it('사용자가 바꾼 제목은 그 뒤의 통째 저장(save)이 덮지 않는다 — 다시 켠 뒤에도. 다시 이름 바꾸기는 된다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1'))
+    await sessions.rename('c1', '내가 지은 이름')
+    await sessions.save(conversation('c1', { title: '자동 제목', updatedAt: 9_000 }))
+
+    expect((await sessions.list())[0]).toMatchObject({ title: '내가 지은 이름', updatedAt: 9_000 })
+    const again = (await start()).sessions
+    await again.save(conversation('c1', { title: '또 자동 제목' }))
+    expect((await again.list())[0]!.title).toBe('내가 지은 이름')
+    expect((await again.rename('c1', '두 번째 이름'))!.title).toBe('두 번째 이름')
   })
 })

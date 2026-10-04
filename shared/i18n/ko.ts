@@ -15,6 +15,8 @@ export const ko = {
   'sidebar.messageCount': '메시지 {count}개',
   'sidebar.confirmDelete': '삭제 확인',
   'sidebar.deleteChat': '대화 삭제',
+  'sidebar.renameChat': '대화 이름 바꾸기',
+  'sidebar.chatNameLabel': '대화 이름',
   'sidebar.settings': '설정',
   'sidebar.running': '진행 중 {count}',
   'sidebar.runningOnly': '진행 중인 대화만 보기',

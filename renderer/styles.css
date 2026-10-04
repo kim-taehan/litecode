@@ -1164,6 +1164,20 @@ button {
   color: var(--text);
 }
 
+/* 대화 이름 바꾸기 (이슈 #63) — 프로젝트 이름 바꾸기와 같은 입력칸을 32px 행 안에 */
+.session-item__rename {
+  flex-grow: 1;
+  min-width: 0;
+  height: 26px;
+  margin: 0 3px;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+}
+
 /* 사이드바 오른쪽 경계를 끌어 폭 조절 (dsh ui-layout DragHandle) — 보이는 선은 테두리, 잡는 자리는 조금 넓게 */
 .sidebar__resize {
   position: absolute;

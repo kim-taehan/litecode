@@ -14,6 +14,8 @@ export const en = {
   'sidebar.messageCount': '{count} messages',
   'sidebar.confirmDelete': 'Confirm delete',
   'sidebar.deleteChat': 'Delete chat',
+  'sidebar.renameChat': 'Rename chat',
+  'sidebar.chatNameLabel': 'Chat name',
   'sidebar.settings': 'Settings',
   'sidebar.running': '{count} running',
   'sidebar.runningOnly': 'Show running chats only',

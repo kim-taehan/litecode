@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
 import type { AttachmentKind, ChatEvent, Conversation, ConversationStatus, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
-import { titleFrom } from '../shared/chat.ts'
+import { titleFrom, TITLE_MAX } from '../shared/chat.ts'
 import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from './chatState.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
@@ -112,6 +112,14 @@ function TrashIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
       <path d="M2.5 4.5H13.5M6.5 4.5V3H9.5V4.5M4 4.5L4.7 13.2C4.75 13.65 5.1 14 5.55 14H10.45C10.9 14 11.25 13.65 11.3 13.2L12 4.5M6.75 7V11.5M9.25 7V11.5" />
+    </svg>
+  )
+}
+
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M11.2 2.6L13.4 4.8L5.6 12.6L2.8 13.2L3.4 10.4Z" />
     </svg>
   )
 }
@@ -445,6 +453,10 @@ export function App() {
 
   /** 휴지통을 눌러 "삭제 확인" 을 기다리는 대화 */
   const [confirming, setConfirming] = useState<string>()
+  /** 이름을 바꾸는 중인 대화 (이슈 #63) — 프로젝트 이름 바꾸기처럼 행이 그 자리에서 입력칸으로 바뀐다. Enter·바깥으로 나가면 저장, Esc 는 취소 */
+  const [renaming, setRenaming] = useState<string>()
+  /** Esc 로 그만둔 입력칸이 사라지며 내는 blur 는 저장하지 않는다 */
+  const renameCancelled = useRef(false)
   // 한 번 연 대화는 "새로 생김" 이 아니다
   useEffect(() => {
     if (active && fresh.has(active.id)) setFresh((now) => new Set([...now].filter((id) => id !== active.id)))
@@ -600,6 +612,14 @@ export function App() {
     const rest = (sessionsNow: Session[]) => sessionsNow.filter((session) => session.id !== target.id)
     // 안내 화면(못 연 프로젝트)에서 지운 것이면 새 대화를 두지 않는다 — 열린 프로젝트에만
     setSessions((sessionsNow) => (target.project === current ? withSessionFor(target.project)(rest(sessionsNow)) : rest(sessionsNow)))
+  }
+
+  /** 대화 이름 바꾸기 (이슈 #63) — 제목은 메인(ctx.chat)이 적는다. 빈 이름·그대로인 이름은 보내지 않는다. 도는 중이어도 된다 */
+  async function renameConversation(target: Session, name: string): Promise<void> {
+    const title = name.trim()
+    if (!title || title === target.title) return
+    const renamed = await window.litecode.renameConversation(target.id, title)
+    if (renamed) updateSession(target.id, (session) => ({ ...session, title: renamed.title }))
   }
 
   // 고른 모드·모델은 저장된 대화면 메인에도 적는다 (새 대화는 첫 보내기가 정한다) — 대기열의 다음 턴이 그것으로 간다
@@ -852,6 +872,28 @@ export function App() {
               data-hover-row
               className={`session-item${session.id === active?.id ? ' session-item--active' : ''}${confirming === session.id ? ' session-item--confirming' : ''}`}
             >
+              {renaming === session.id ? (
+                <input
+                  className="session-item__rename"
+                  aria-label={t('sidebar.chatNameLabel')}
+                  defaultValue={session.title}
+                  maxLength={TITLE_MAX}
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) return // 한글 조합 확정 Enter
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                    if (event.key === 'Escape') {
+                      renameCancelled.current = true
+                      setRenaming(undefined)
+                    }
+                  }}
+                  onBlur={(event) => {
+                    setRenaming(undefined)
+                    if (!renameCancelled.current) void renameConversation(session, event.currentTarget.value)
+                  }}
+                />
+              ) : (
               <button
                 type="button"
                 className="session-item__main"
@@ -884,23 +926,35 @@ export function App() {
                   !isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>
                 )}
               </button>
-              {/* 도는 대화는 휴지통 자리에 ■ — 답변 중지 (01l A4) */}
-              {session.pending && (
-                <span className="session-item__actions">
-                  <button
-                    type="button"
-                    className="session-item__action session-item__stop"
-                    aria-label={t('sidebar.stopChat')}
-                    title={t('sidebar.stopChat')}
-                    onClick={() => stopTurn(session.id)}
-                  >
-                    <StopIcon size={14} />
-                  </button>
-                </span>
               )}
-              {!isBlank(session) && !session.pending && (
+              {/* 연필 — 이름 바꾸기 (저장된 대화만, 도는 중에도). 도는 대화는 휴지통 자리에 ■ — 답변 중지 (01l A4) */}
+              {renaming !== session.id && (session.pending || !isBlank(session)) && (
                 <span className="session-item__actions">
-                  {confirming === session.id ? (
+                  {!isBlank(session) && confirming !== session.id && (
+                    <button
+                      type="button"
+                      className="session-item__action"
+                      aria-label={t('sidebar.renameChat')}
+                      title={t('sidebar.renameChat')}
+                      onClick={() => {
+                        renameCancelled.current = false
+                        setRenaming(session.id)
+                      }}
+                    >
+                      <PencilIcon />
+                    </button>
+                  )}
+                  {session.pending ? (
+                    <button
+                      type="button"
+                      className="session-item__action session-item__stop"
+                      aria-label={t('sidebar.stopChat')}
+                      title={t('sidebar.stopChat')}
+                      onClick={() => stopTurn(session.id)}
+                    >
+                      <StopIcon size={14} />
+                    </button>
+                  ) : confirming === session.id ? (
                     <button
                       type="button"
                       className="session-item__confirm"

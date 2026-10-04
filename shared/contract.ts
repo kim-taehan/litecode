@@ -215,6 +215,8 @@ export interface Conversation {
   /** 엔진 세션 id — 첫 메시지를 보낼 때 생긴다 */
   engineSessionId?: string
   title: string
+  /** 사용자가 이름을 바꿨다 (이슈 #63) — 그 뒤로 제목은 이름 바꾸기로만 바뀐다 (통째 저장이 덮지 않는다) */
+  renamed?: boolean
   /** 마지막 활동 시각(ms) — 목록의 `38min`·`1d` 와 보관 개수 제한의 기준 */
   updatedAt: number
   /** 이 대화에서 고른 모델 */

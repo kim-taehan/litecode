@@ -556,3 +556,45 @@ describe('ChatService — 스냅샷과 전달', () => {
     expect(await chat.stopSubtask('nope')).toBe(false)
   })
 })
+
+describe('ChatService — 대화 이름 바꾸기 (이슈 #63)', () => {
+  it('제목을 바꿔 저장하고 목록 바뀜을 알린다 — 고친 대화를 준다. 그 뒤 턴이 돌아도 제목은 바꾼 그대로다 (자동 제목이 안 덮는다)', async () => {
+    const { chat, turn, ended, stored, of } = await start()
+    await chat.send('c1', input('처음 보낸 글'))
+    ;(await turn(1)).finish()
+    await ended(1)
+    const before = of('conversations.changed').length
+
+    expect(await chat.rename('c1', '  결제 API 문서 정리 ')).toMatchObject({ id: 'c1', title: '결제 API 문서 정리' })
+    expect(of('conversations.changed').slice(before)).toEqual([{ project: '/work/a', removed: [] }])
+
+    await chat.send('c1', input('둘째 질문', { title: '다른 제목' }))
+    expect(of('turn.started')[1]!.conversation.title).toBe('결제 API 문서 정리')
+    ;(await turn(2)).finish()
+    expect((await ended(2)).conversation!.title).toBe('결제 API 문서 정리')
+    expect((await stored('c1'))!.title).toBe('결제 API 문서 정리')
+  })
+
+  it('도는 중인 대화도 바꿀 수 있다 — 턴 끝에 실려 오는 목록 정보도 새 제목이다', async () => {
+    const { chat, turn, ended, stored } = await start()
+    await chat.send('c1', input('처음'))
+    const call = await turn(1)
+
+    expect((await chat.rename('c1', '도는 중에 바꾼 이름'))!.title).toBe('도는 중에 바꾼 이름')
+    call.finish({ usage: usage(5) })
+    expect((await ended(1)).conversation).toMatchObject({ title: '도는 중에 바꾼 이름', usage: { turns: 1 } })
+    expect((await stored('c1'))!.title).toBe('도는 중에 바꾼 이름')
+  })
+
+  it('빈 이름·저장 안 된 대화는 바꾸지 않는다 — 알림도 없다', async () => {
+    const { chat, turn, stored, of } = await start()
+    await chat.send('c1', input('처음'))
+    await turn(1)
+    const before = of('conversations.changed').length
+
+    expect(await chat.rename('c1', '   ')).toBeUndefined()
+    expect(await chat.rename('없는-대화', '이름')).toBeUndefined()
+    expect(of('conversations.changed').length).toBe(before)
+    expect((await stored('c1'))!.title).toBe('처음')
+  })
+})
