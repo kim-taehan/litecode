@@ -127,6 +127,7 @@ export const ko = {
   'filePreview.binary': '이진 파일이라 미리볼 수 없습니다 ({size})',
   'filePreview.truncated': '앞 {shown}만 보입니다 (전체 {size})',
   'filePreview.openPanel': '오른쪽 패널 열기',
+  'filePreview.hidePanel': '오른쪽 패널 숨기기',
   'filePreview.tabs': '열린 파일',
   'filePreview.files': '파일',
   'filePreview.filesLabel': '프로젝트 파일',
