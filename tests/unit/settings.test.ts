@@ -76,6 +76,18 @@ describe('SettingsService', () => {
     expect(settings.get().language).toBe('en')
   })
 
+  // 참고 레포 검토(02x A): 손으로 고치다 깨뜨린 파일을 다음 저장이 덮지 않게 옆에 옮겨 둔다
+  it('손상된 파일은 덮어쓰지 않고 옆에 .corrupt-<시각> 으로 옮겨 둔다', async () => {
+    const raw = '{ "language": "ko", not json'
+    await fs.writeFile(file, raw)
+    const { settings } = await service({ file })
+    settings.set({ fontSize: 15 })
+
+    const backups = (await fs.readdir(path.dirname(file))).filter((name) => name.startsWith('settings.json.corrupt-'))
+    expect(backups).toHaveLength(1)
+    expect(await fs.readFile(path.join(path.dirname(file), backups[0]!), 'utf8')).toBe(raw)
+  })
+
   it('설정 파일 열기 — 없으면 지금 값으로 만들어 경로를 준다', async () => {
     const { settings } = await service({ file })
     expect(await settings.ensureFile()).toBe(file)

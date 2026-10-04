@@ -43,11 +43,31 @@ describe('ShellService', () => {
     expect(chunks.join('')).toBe(result.output)
   })
 
-  it('출력은 상한에서 자른다', async () => {
+  // 참고 레포 검토(02x A·B): 앞 100KB 만 남기면 빌드 오류(끝)가 잘린다 — 앞과 끝을 함께 남기고 가운데에 생략 표시 한 줄
+  it('출력이 상한을 넘으면 앞과 끝을 남기고 가운데를 생략한다', async () => {
     const { shell } = await start()
-    const result = await shell.run('r2', tmp, `head -c ${OUTPUT_LIMIT * 2} /dev/zero | tr '\\0' a`)
-    expect(result.output.length).toBe(OUTPUT_LIMIT)
+    const result = await shell.run('r2', tmp, `echo START; head -c ${OUTPUT_LIMIT * 2} /dev/zero | tr '\\0' a; echo; echo 'error: END'`)
     expect(result.truncated).toBe(true)
+    expect(result.output.startsWith('START\n')).toBe(true)
+    expect(result.output.endsWith('error: END\n')).toBe(true)
+    const marker = result.output.match(/\n… .*생략.* …\n/)
+    expect(marker).not.toBeNull()
+    expect(result.output.length).toBe(OUTPUT_LIMIT + marker![0].length)
+  })
+
+  it('상한 안쪽이면 그대로다 (생략 표시 없음)', async () => {
+    const { shell } = await start()
+    const result = await shell.run('r2b', tmp, `head -c ${OUTPUT_LIMIT - 10} /dev/zero | tr '\\0' a`)
+    expect(result.output.length).toBe(OUTPUT_LIMIT - 10)
+    expect(result.truncated).toBe(false)
+  })
+
+  // 조각마다 toString() 하면 조각 경계에 걸린 한글이 깨진다 — '한'(ed 95 9c)을 두 번에 나눠 쓴다
+  it('여러 바이트 글자가 조각 경계에 걸려도 깨지지 않는다', async () => {
+    const { shell, chunks } = await start()
+    const result = await shell.run('r2c', tmp, `printf '\\355\\225'; sleep 0.3; printf '\\234\\n'`)
+    expect(result.output).toBe('한\n')
+    expect(chunks.join('')).toBe('한\n')
   })
 
   it('■ 로 멈추면 자식까지 끄고 stopped, 기한을 넘기면 timeout', async () => {
@@ -71,7 +91,7 @@ describe('shellContext (AI 에 넣는 본문)', () => {
     const text = shellContext({ command: 'npm test', output: 'FAIL x\n', exitCode: 1, status: 'done', truncated: true }, '/p')
     expect(text).toContain('/p')
     expect(text).toContain('$ npm test\n(종료 코드 1)\n\n```\nFAIL x\n```')
-    expect(text).toContain('100KB 에서 잘렸습니다')
+    expect(text).toContain('가운데가 생략됐습니다')
   })
 
   it('출력에 ``` 가 있으면 더 긴 울타리로 감싼다. 멈춘 것은 그 사정을', () => {

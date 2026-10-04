@@ -448,6 +448,50 @@ describe('listMcpTools — 앱이 직접 붙어 도구 목록만 본다', () => 
     expect(env['HOME']).toBe('/h')
   })
 
+  // 참고 레포 검토(02x A·B): 조각마다 toString() 하면 조각 경계에 걸린 한글이 깨진다 — 답을 '한' 의 첫 바이트 뒤에서 끊어 두 번에 쓴다
+  it('로컬: 여러 바이트 글자가 조각 경계에 걸려도 깨지지 않는다', async () => {
+    const script = path.join(tmp, 'split.cjs')
+    await fs.writeFile(
+      script,
+      [
+        "let buf = ''",
+        "process.stdin.on('data', (d) => {",
+        '  buf += d',
+        '  let i',
+        "  while ((i = buf.indexOf('\\n')) !== -1) {",
+        '    const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)',
+        '    if (m.id === undefined) continue',
+        "    if (m.method === 'initialize') { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: {} }) + '\\n'); continue }",
+        "    const bytes = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'search', description: '한글 설명' }] } }) + '\\n')",
+        "    const cut = bytes.indexOf(Buffer.from('한')) + 1",
+        '    process.stdout.write(bytes.subarray(0, cut), () => setTimeout(() => process.stdout.write(bytes.subarray(cut)), 100))',
+        '  }',
+        '})',
+      ].join('\n'),
+    )
+    expect(await listMcpTools({ type: 'local', command: [process.execPath, script] }, { cwd: tmp, env: { PATH: process.env.PATH } })).toEqual([{ name: 'search', description: '한글 설명' }])
+  })
+
+  // 참고 레포 검토(02x B): 헤더에 비밀을 실은 요청이 리다이렉트를 따라가면 그 값이 다른 곳으로 간다
+  it('원격: 리다이렉트는 따라가지 않는다 — 옮겨 간 주소로 요청이 나가지 않고 사유로 거절', async () => {
+    let followed = 0
+    const other = http.createServer((_req, res) => {
+      followed++
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }))
+    })
+    await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve))
+    const redirecting = http.createServer((_req, res) => void res.writeHead(307, { location: `http://127.0.0.1:${(other.address() as AddressInfo).port}/mcp` }).end())
+    await new Promise<void>((resolve) => redirecting.listen(0, '127.0.0.1', resolve))
+    try {
+      const url = `http://127.0.0.1:${(redirecting.address() as AddressInfo).port}/mcp`
+      await expect(listMcpTools({ type: 'remote', url, headers: { Authorization: 'Bearer good' } }, { cwd: tmp })).rejects.toThrow('다른 주소로 넘기려')
+      expect(followed).toBe(0)
+    } finally {
+      await new Promise<void>((resolve) => other.close(() => resolve()))
+      await new Promise<void>((resolve) => redirecting.close(() => resolve()))
+    }
+  })
+
   it('로컬: 없는 명령·바로 끝나는 서버는 사유로 실패한다', async () => {
     await expect(listMcpTools({ type: 'local', command: ['/nonexistent/mcp'] }, { cwd: tmp, env: {} })).rejects.toThrow(/ENOENT/)
     await expect(listMcpTools({ type: 'local', command: ['/usr/bin/false'] }, { cwd: tmp, env: {} })).rejects.toThrow(/끝났습니다/)

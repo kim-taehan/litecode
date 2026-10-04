@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { History } from './llm.ts'
 import { shellContext } from './shell.ts'
+import { readJsonFile } from './jsonFile.ts'
 import { isMode } from '../../shared/modes.ts'
 import { TITLE_MAX } from '../../shared/chat.ts'
 import './llm.ts'
@@ -255,10 +256,10 @@ export class SessionsService extends Service {
     return next
   }
 
-  /** 파일이 없거나 손상됐으면 빈 목록 — 앱 시작을 막지 않는다 (내용은 opencode DB 에 그대로 있다) */
+  /** 파일이 없거나 손상됐으면 빈 목록 — 앱 시작을 막지 않는다 (내용은 opencode DB 에 그대로 있다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts) */
   private async read(): Promise<Stored> {
     try {
-      const parsed = JSON.parse(await fs.readFile(this.opts.file, 'utf8')) as Partial<Record<keyof Stored, unknown>> | null
+      const parsed = (await readJsonFile(this.opts.file, 'object')) as Partial<Record<keyof Stored, unknown>> | undefined
       const conversations = Array.isArray(parsed?.conversations) ? parsed.conversations.filter(isConversation).map(pick) : []
       const orphans = Array.isArray(parsed?.orphans) ? parsed.orphans.filter((entry): entry is string => typeof entry === 'string') : []
       return { conversations, orphans }

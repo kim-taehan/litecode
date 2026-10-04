@@ -205,7 +205,7 @@ export interface ShellResult {
   exitCode: number | null
   /** done: 스스로 끝남, stopped: ■ 로 멈춤, timeout: 기한 초과, error: 실행 자체가 안 됨(셸 없음·폴더 없음) */
   status: 'done' | 'stopped' | 'timeout' | 'error'
-  /** 출력이 OUTPUT_LIMIT 에서 잘렸다 */
+  /** 출력이 OUTPUT_LIMIT 을 넘어 가운데가 생략됐다 (앞·끝만 남는다) */
   truncated: boolean
   error?: string
 }

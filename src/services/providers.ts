@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { providerIdFor } from '../../shared/providerId.ts'
 import { tr } from '../i18n.ts'
+import { readJsonFileSync } from './jsonFile.ts'
 
 // 모델 provider 설정 — dsh 의 Settings > Models 화면과 같은 모양을 따른다.
 // baseURL 을 직접 지정할 수 있어야 폐쇄망 내부 게이트웨이(LiteLLM 등)를 붙일 수 있다.
@@ -89,9 +90,9 @@ export class ProviderRegistry extends Service {
     private opts: ProviderRegistryOptions = {},
   ) {
     super(ctx, 'providers')
-    const stored = opts.file ? readJson<ProviderConfig[]>(opts.file) : undefined
+    const stored = opts.file ? (readJsonFileSync(opts.file, 'array') as ProviderConfig[] | undefined) : undefined
     for (const config of stored ?? opts.defaults ?? []) this.entries.set(config.id, config)
-    this.keys = (opts.keysFile && readJson<Record<string, string>>(opts.keysFile)) || {}
+    this.keys = (opts.keysFile && (readJsonFileSync(opts.keysFile, 'object') as Record<string, string> | undefined)) || {}
   }
 
   /** 되돌릴 수 있는 등록 — 호출부가 반환값을 불러 해제한다 (Cordis effect 원칙). 파일에는 안 쓴다 */
@@ -172,7 +173,12 @@ export class ProviderRegistry extends Service {
       if (normalizeBaseURL(this.entries.get(draft.id)?.baseURL ?? '') !== baseURL) throw new Error(tr('error.keyReenter'))
       key = this.storedKey(draft.id)
     }
-    const res = await fetch(`${baseURL}/models`, { headers: key ? { authorization: `Bearer ${key}` } : {} })
+    // 키가 실린다 — 서버가 다른 주소로 넘겨도 따라가지 않는다 (참고 레포 검토 02x B)
+    const res = await fetch(`${baseURL}/models`, { headers: key ? { authorization: `Bearer ${key}` } : {}, redirect: 'manual' })
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel()
+      throw new Error(tr('error.redirected', { status: res.status }))
+    }
     if (!res.ok) throw new Error(tr('error.fetchModels', { status: res.status }))
     const body = (await res.json()) as { data?: { id?: unknown; name?: unknown }[] }
     return (body.data ?? [])
@@ -206,15 +212,6 @@ function isHttpUrl(value: string): boolean {
     return ['http:', 'https:'].includes(new URL(value).protocol)
   } catch {
     return false
-  }
-}
-
-/** 없거나 손상됐으면 undefined */
-function readJson<T>(file: string): T | undefined {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as T
-  } catch {
-    return undefined
   }
 }
 

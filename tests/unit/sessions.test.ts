@@ -234,6 +234,20 @@ describe('SessionsService', () => {
     await fs.writeFile(file, '{ 깨짐')
     expect(await (await start()).sessions.list()).toEqual([])
   })
+
+  // 참고 레포 검토(02x A): 깨진 파일을 빈 목록으로 읽은 뒤 다음 쓰기가 원본을 덮었다 — 옆에 옮겨 둔다
+  it('손상된 파일은 덮어쓰지 않고 옆에 .corrupt-<시각> 으로 옮겨 둔다', async () => {
+    const raw = '{"conversations":[{"id":"c9" 깨짐'
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, raw)
+    const { sessions } = await start()
+    await sessions.save(conversation('c1'))
+
+    const backups = (await fs.readdir(path.dirname(file))).filter((name) => name.startsWith('sessions.json.corrupt-'))
+    expect(backups).toHaveLength(1)
+    expect(await fs.readFile(path.join(path.dirname(file), backups[0]!), 'utf8')).toBe(raw)
+    expect(ids(await sessions.list())).toEqual(['c1'])
+  })
 })
 
 describe('SessionsService — 대화 이름 바꾸기 (이슈 #63)', () => {

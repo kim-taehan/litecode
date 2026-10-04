@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { isLanguage, type Language } from '../../shared/i18n/index.ts'
 import { setMainLanguage, tr } from '../i18n.ts'
+import { readJsonFileSync } from './jsonFile.ts'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../shared/fontSize.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import { isFeatureSwitches, type FeatureSwitches } from '../../shared/features.ts'
@@ -104,14 +105,9 @@ export class SettingsService extends Service {
   }
 }
 
-/** 없거나 손상됐으면 undefined */
+/** 없으면 undefined. 손상됐으면 옆에 옮겨 두고 undefined (jsonFile.ts) */
 function readJson(file: string): Record<string, unknown> | undefined {
-  try {
-    const value: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
-    return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
-  } catch {
-    return undefined
-  }
+  return readJsonFileSync(file, 'object') as Record<string, unknown> | undefined
 }
 
 function writeJson(file: string, value: unknown): void {

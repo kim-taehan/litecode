@@ -100,6 +100,17 @@ describe('ProjectsService', () => {
     expect((await (await projects()).list()).map((project) => project.path)).toEqual([a])
   })
 
+  // 참고 레포 검토(02x A): 깨진 파일을 다음 쓰기가 덮지 않게 옆에 옮겨 둔다 (JSON 이 아니거나 맨 위가 객체가 아닐 때)
+  it.each([['{ 깨진'], ['"문자열"']])('손상된 파일(%s)은 덮어쓰지 않고 옆에 .corrupt-<시각> 으로 옮겨 둔다', async (raw) => {
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, raw)
+    await (await projects()).open(await folder('alpha'))
+
+    const backups = (await fs.readdir(path.dirname(file))).filter((name) => name.startsWith('projects.json.corrupt-'))
+    expect(backups).toHaveLength(1)
+    expect(await fs.readFile(path.join(path.dirname(file), backups[0]!), 'utf8')).toBe(raw)
+  })
+
   it('즐겨찾기는 표시되고 재시작해도 남으며, 다시 누르면 풀린다', async () => {
     const a = await folder('alpha')
     const b = await folder('beta')

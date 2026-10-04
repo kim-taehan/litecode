@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { readJsonFile } from '../jsonFile.ts'
 
 // 짝지은 기기 (userData/remote-devices.json) — 토큰은 **해시(SHA-256)만** 둔다. 파일이 새도 토큰을 되살릴 수 없다.
 // 연결 켜기 값과 데스크탑 id(폰이 "어느 PC 인가" 를 가리는 값 — 비밀이 아니다)도 같은 파일에 있다.
@@ -43,10 +44,11 @@ export class DeviceStore {
     private now: () => number = Date.now,
   ) {}
 
-  /** 파일이 없거나 손상됐으면 빈 목록·꺼짐 — 앱 시작을 막지 않는다 (기기는 다시 짝지으면 된다) */
+  /** 파일이 없거나 손상됐으면 빈 목록·꺼짐 — 앱 시작을 막지 않는다 (기기는 다시 짝지으면 된다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts) */
   async load(): Promise<void> {
     try {
-      const parsed = JSON.parse(await fs.readFile(this.file, 'utf8')) as Partial<Stored> | null
+      const parsed = (await readJsonFile(this.file, 'object')) as Partial<Stored> | undefined
+      if (!parsed) return // 처음이다 (또는 방금 옮겼다)
       this.stored = {
         version: 1,
         desktopId: typeof parsed?.desktopId === 'string' && parsed.desktopId ? parsed.desktopId : this.stored.desktopId,
