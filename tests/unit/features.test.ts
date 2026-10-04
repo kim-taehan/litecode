@@ -91,7 +91,7 @@ async function start(): Promise<{ ctx: Context; settings: SettingsService; featu
 /** 걸린 채널 (정렬) */
 const channels = () => [...ipc.handlers.keys()].sort()
 /** 기본으로 걸리는 채널 — 알림은 기본 꺼짐 */
-const ALL = ['at:x', 'bang:x', 'mcp:x', 'openIn:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
+const ALL = ['appMcp:x', 'at:x', 'bang:x', 'mcp:x', 'openIn:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
 
 beforeEach(async () => {
   ipc = new FakeIpc()
@@ -198,7 +198,7 @@ describe('featureOn', () => {
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'remote'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'remote', 'appMcp'])
     expect(featureOn(undefined, 'remote')).toBe(false)
     expect(featureOn({ remote: true }, 'remote')).toBe(true)
   })

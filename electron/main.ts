@@ -530,7 +530,13 @@ const features: FeatureDefinition[] = [
         fallbackCwd: userData,
       })
       ctx.plugin(mcpBridge)
-      // 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰) — ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다. 끄는 스위치는 없다
+    },
+  },
+  {
+    // 데스크탑 MCP — 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰). ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다.
+    // 설정 > 기능에서 끄면(이슈 #99) 서버·도구·IPC 가 함께 내려가고 다음 턴의 붙이기가 엔진에서 끊는다. open_terminal 은 터미널 묶음에 있다
+    id: 'appMcp',
+    plugin: (ctx) => {
       ctx.plugin(AppMcpService)
       ctx.plugin(OpenFileTool)
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
