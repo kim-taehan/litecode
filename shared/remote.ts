@@ -1,6 +1,6 @@
-// 모바일 원격 계약 — 폰 앱과 데스크탑(ctx.remote, 아직 없다)이 주고받는 REST 요청·응답과 SSE 이벤트 (이슈 #42).
+// 모바일 원격 계약 — 폰 앱과 데스크탑(ctx.remote — src/services/remote.ts, 이슈 #56)이 주고받는 REST 요청·응답과 SSE 이벤트 (이슈 #42).
 // 설계 정본: _workspace/01t_mobile_arch.md 2절. 페이로드는 데스크탑 화면이 쓰는 중립 타입(shared/contract.ts)을 그대로 싣는다.
-// 양쪽이 이 파일 하나를 import 한다 — 계약이 바뀌면 앱 빌드가 깨진다. 지금 이 계약을 말하는 서버는 mobile/dev/fake-desktop.mts 뿐이다.
+// 양쪽이 이 파일 하나를 import 한다 — 계약이 바뀌면 앱 빌드가 깨진다. 이 계약을 말하는 서버는 ctx.remote 와 개발용 mobile/dev/fake-desktop.mts 다.
 // Node·React Native 어느 쪽 API 도 쓰지 않는다 (타입 + 경로 문자열 + 상수).
 
 import type { Attention, AttentionAnswer, Conversation, ConversationStatus, History, HistoryMessage, NoticeState, Project, TurnItem, TurnUsage } from './contract.ts'

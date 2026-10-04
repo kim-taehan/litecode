@@ -19,6 +19,7 @@ import type { DirectoryListing } from '../src/services/fileTree.ts'
 import type { FeatureId } from './features.ts'
 import type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
+import type { RemoteStatus } from '../src/services/remote.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -43,6 +44,7 @@ export type { SkillSource } from './skills.ts'
 export type { McpScope, McpServerInput, McpServerSummary, McpTestResult, McpVarSummary } from '../src/services/mcp.ts'
 export type { McpTool } from '../src/services/mcpClient.ts'
 export type { McpToolRef } from '../src/services/turnProgress.ts'
+export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -135,6 +137,14 @@ export const Channel = {
   APP_MCP_OPEN_FILE: 'appMcp:open-file',
   /** 메인 → 화면 (directory) — AI 가 open_terminal 을 불렀다 (명령은 메인이 이미 채웠다) */
   APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
+  REMOTE_STATUS: 'remote:status',
+  REMOTE_SET_ENABLED: 'remote:set-enabled',
+  REMOTE_START_PAIRING: 'remote:start-pairing',
+  REMOTE_CANCEL_PAIRING: 'remote:cancel-pairing',
+  REMOTE_ANSWER_PAIR: 'remote:answer-pair',
+  REMOTE_REVOKE: 'remote:revoke',
+  /** 메인 → 화면 (RemoteStatus) — 모바일 연결 상태·짝짓기 요청·기기 목록이 바뀌었다 (이슈 #56) */
+  REMOTE_CHANGED: 'remote:changed',
 } as const
 
 export interface LitecodeBridge {
@@ -281,6 +291,19 @@ export interface LitecodeBridge {
   onAppMcpOpenFile(listener: (directory: string, path: string, line?: number) => void): () => void
   /** AI 가 그 프로젝트의 터미널 칸을 열라고 했다 — 명령은 메인이 이미 채웠다(실행하지 않았다) */
   onAppMcpOpenTerminal(listener: (directory: string) => void): () => void
+  /** 모바일 연결(ctx.remote, 이슈 #56)의 지금 상태 — 켜짐·듣는 주소(또는 못 뜬 사유)·짝짓기 코드·[허용] 을 기다리는 요청·짝지은 기기.
+   *  기능 `remote` 가 켜졌을 때만 있다 (꺼져 있으면 이 채널들은 거절된다) */
+  remoteStatus(): Promise<RemoteStatus>
+  /** 켜면 이 PC 안에서만 닿는 포트(127.0.0.1)를 연다. 못 뜨면 status.error 에 사유 */
+  setRemoteEnabled(enabled: boolean): Promise<RemoteStatus>
+  /** [기기 연결] — 새 짝짓기 코드 (2분·1회용, 앞 코드는 버린다). 듣고 있지 않으면 거절 */
+  startRemotePairing(): Promise<RemoteStatus>
+  cancelRemotePairing(): Promise<RemoteStatus>
+  /** 짝짓기 요청의 [허용]/[거절] */
+  answerRemotePair(requestId: string, allow: boolean): Promise<RemoteStatus>
+  /** 기기 해제 — 그 기기의 토큰은 곧바로 못 쓰고 붙어 있던 연결은 끊긴다 */
+  revokeRemoteDevice(deviceId: string): Promise<RemoteStatus>
+  onRemoteChanged(listener: (status: RemoteStatus) => void): () => void
 }
 
 declare global {

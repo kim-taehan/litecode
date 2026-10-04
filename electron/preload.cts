@@ -78,6 +78,13 @@ const Channel = {
   APP_MCP_VIEW: 'appMcp:view',
   APP_MCP_OPEN_FILE: 'appMcp:open-file',
   APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
+  REMOTE_STATUS: 'remote:status',
+  REMOTE_SET_ENABLED: 'remote:set-enabled',
+  REMOTE_START_PAIRING: 'remote:start-pairing',
+  REMOTE_CANCEL_PAIRING: 'remote:cancel-pairing',
+  REMOTE_ANSWER_PAIR: 'remote:answer-pair',
+  REMOTE_REVOKE: 'remote:revoke',
+  REMOTE_CHANGED: 'remote:changed',
 } as const
 
 /** 메인 → 화면 알림을 구독하고 해제 함수를 준다 */
@@ -177,6 +184,13 @@ const bridge: LitecodeBridge = {
   viewProject: (directory) => ipcRenderer.invoke(Channel.APP_MCP_VIEW, directory),
   onAppMcpOpenFile: (listener) => listen(Channel.APP_MCP_OPEN_FILE, listener),
   onAppMcpOpenTerminal: (listener) => listen(Channel.APP_MCP_OPEN_TERMINAL, listener),
+  remoteStatus: () => ipcRenderer.invoke(Channel.REMOTE_STATUS),
+  setRemoteEnabled: (enabled) => ipcRenderer.invoke(Channel.REMOTE_SET_ENABLED, enabled),
+  startRemotePairing: () => ipcRenderer.invoke(Channel.REMOTE_START_PAIRING),
+  cancelRemotePairing: () => ipcRenderer.invoke(Channel.REMOTE_CANCEL_PAIRING),
+  answerRemotePair: (requestId, allow) => ipcRenderer.invoke(Channel.REMOTE_ANSWER_PAIR, requestId, allow),
+  revokeRemoteDevice: (deviceId) => ipcRenderer.invoke(Channel.REMOTE_REVOKE, deviceId),
+  onRemoteChanged: (listener) => listen(Channel.REMOTE_CHANGED, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

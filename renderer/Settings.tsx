@@ -3,13 +3,16 @@ import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../share
 import { providerIdFor } from '../shared/providerId.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
+import { MobilePage } from './MobileSettings.tsx'
+import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
 import { ContextLengthNotes } from './ContextLengthNotes.tsx'
 import { defaultOutputLimit } from '../shared/outputLimit.ts'
 import './settings.css'
 
 // 설정 모달 — 틀은 dsh ui-settings-general SettingsRoot(왼쪽 메뉴·오른쪽 머리줄[설정 파일 열기][×]·내용, 가림막 클릭·Esc 로 닫기),
-// 치수는 01f 디자인 표 그대로(800×800 판·반경 28·메뉴 188 바탕 없음). 페이지는 일반(GeneralSettings.tsx)·모델·기능(FeaturesSettings.tsx).
+// 치수는 01f 디자인 표 그대로(800×800 판·반경 28·메뉴 188 바탕 없음). 페이지는 일반(GeneralSettings.tsx)·모델·기능(FeaturesSettings.tsx),
+// 그리고 기능 `remote` 가 켜졌을 때만 모바일(MobileSettings.tsx, 이슈 #56).
 // 스킬·MCP 는 입력창 `+` 메뉴의 팝업으로 옮겼다 (이슈 #43 — 같은 것이 두 군데 있지 않게).
 // 모델 페이지는 dsh ui-settings-models(ModelsSection·CustomProviderCard·ModelListEditor·ModelRow·EditorFooter)를 따른다:
 // provider 카드 목록, 편집 카드는 한 번에 하나, API 키는 쓰기 전용(저장된 값은 안 보이고 설정 여부만), 삭제는 한 번 더 확인.
@@ -22,7 +25,7 @@ export function reason(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
-type Page = 'general' | 'models' | 'features'
+type Page = 'general' | 'models' | 'features' | 'mobile'
 
 interface SettingsModalProps {
   providers: ProviderSummary[]
@@ -59,6 +62,16 @@ function PuzzleIcon() {
   )
 }
 
+/** 16px 폰 — 모바일 메뉴 */
+function PhoneIcon() {
+  return (
+    <svg className="settings-nav__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
+      <rect x="4.5" y="1.5" width="7" height="13" rx="1.6" />
+      <path d="M7.2 12.4H8.8" />
+    </svg>
+  )
+}
+
 function CloseIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
@@ -70,6 +83,7 @@ function CloseIcon() {
 export function SettingsModal({ providers, onProvidersChange, onClose }: SettingsModalProps) {
   const t = useT()
   const [page, setPage] = useState<Page>('general') // 첫 페이지는 일반 (dsh)
+  const mobileOn = useFeatures().has('remote')
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') onClose()
@@ -82,8 +96,10 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
     { id: 'general', label: t('settings.nav.general'), icon: <GearIcon /> },
     { id: 'models', label: t('settings.nav.models'), icon: <DataIcon /> },
     { id: 'features', label: t('settings.nav.features'), icon: <PuzzleIcon /> },
+    ...(mobileOn ? [{ id: 'mobile' as const, label: t('settings.nav.mobile'), icon: <PhoneIcon /> }] : []),
   ]
-  const shown = page
+  // 모바일 페이지를 보다가 그 기능을 끄면(다른 창·설정 파일) 일반으로 돌아간다
+  const shown = page === 'mobile' && !mobileOn ? 'general' : page
 
   return (
     <div className="settings-overlay" role="presentation">
@@ -120,6 +136,8 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
               <GeneralPage />
             ) : shown === 'features' ? (
               <FeaturesPage />
+            ) : shown === 'mobile' ? (
+              <MobilePage />
             ) : (
               <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />
             )}
