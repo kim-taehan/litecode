@@ -712,7 +712,7 @@ function reapStale(file: string): void {
   } catch {
     return
   }
-  if (typeof record.pid === 'number' && typeof record.command === 'string' && isOurServer(record, observe(record.pid))) {
+  if (typeof record?.pid === 'number' && typeof record.command === 'string' && isOurServer(record, observe(record.pid))) {
     try {
       process.kill(record.pid, 'SIGTERM')
     } catch {

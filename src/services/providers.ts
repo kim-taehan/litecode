@@ -92,7 +92,7 @@ export class ProviderRegistry extends Service {
   ) {
     super(ctx, 'providers')
     const stored = opts.file ? (readJsonFileSync(opts.file, 'array') as ProviderConfig[] | undefined) : undefined
-    for (const config of stored ?? opts.defaults ?? []) this.entries.set(config.id, config)
+    for (const config of stored?.filter((config) => typeof config?.id === 'string') ?? opts.defaults ?? []) this.entries.set(config.id, config)
     this.keys = (opts.keysFile && (readJsonFileSync(opts.keysFile, 'object') as Record<string, string> | undefined)) || {}
   }
 
