@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, screen, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, screen, session, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -27,6 +27,8 @@ import { listDirectory, type DirectoryListing } from '../src/services/fileTree.t
 import { SettingsService, type Settings } from '../src/services/settings.ts'
 import { NotificationsService } from '../src/services/notifications.ts'
 import { recordingHost, systemHost, type NotifyTestRecord, type WindowAccess } from './notificationHost.ts'
+import { QuitService } from '../src/services/quit.ts'
+import { systemQuitHost } from './quitHost.ts'
 import { tr } from '../src/i18n.ts'
 import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
@@ -372,20 +374,31 @@ notificationsBridge.inject = ['notifications']
 // 정리에는 전체 기한을 둔다 (참고 레포 검토 02x D) — 서비스 하나의 dispose 가 안 끝나도 앱은 꺼져야 한다. 엔진의 stop 은
 // SIGTERM → 5초(KILL_GRACE_MS) → SIGKILL 이라 기한은 그보다 길다. 기한이 지났든 아니든 끝내기 직전에 살아 있는 opencode 자식을
 // 죽인다(다 내려갔으면 아무 일도 없다) — 앱만 꺼지고 opencode 가 남는 길을 없앤다
+// 정리에 앞서 종료 확인 (이슈 #92) — 도는 턴·붙어 있는 폰이 있으면 ctx.quit 이 사용자에게 묻고, 취소면 아무 일도 없다. 끊길 것이 없거나
+// 자동 실행(실물 테스트)·OS 종료면 묻지 않는다. ctx.quit 이 안 떴으면(부팅 실패) 묻지 않고 끝낸다 — 못 끄는 앱보다 낫다
 const QUIT_DEADLINE_MS = 8_000
 let quitting = false
 app.on('before-quit', (event) => {
   if (quitting) return
-  quitting = true
   event.preventDefault()
-  const disposing = (async () => {
-    for (const fiber of mounted.reverse()) await fiber.dispose().catch((error: unknown) => console.error('[quit] 서비스 정리 실패', error))
-  })()
-  void withDeadline(disposing, QUIT_DEADLINE_MS).then((outcome) => {
-    if (outcome === 'timeout') console.error(`[quit] 서비스 정리가 ${QUIT_DEADLINE_MS / 1000}초 안에 끝나지 않았다 — 남은 opencode 를 죽이고 끝낸다`)
-    killEngineProcesses()
-    app.exit(0)
-  })
+  const asked = ctx.get('quit')?.confirmQuit() ?? Promise.resolve(true)
+  void asked
+    .catch((error: unknown) => {
+      console.error('[quit] 종료 확인 실패 — 묻지 않고 끝낸다', error)
+      return true
+    })
+    .then((go) => {
+      if (!go || quitting) return
+      quitting = true
+      const disposing = (async () => {
+        for (const fiber of mounted.reverse()) await fiber.dispose().catch((error: unknown) => console.error('[quit] 서비스 정리 실패', error))
+      })()
+      void withDeadline(disposing, QUIT_DEADLINE_MS).then((outcome) => {
+        if (outcome === 'timeout') console.error(`[quit] 서비스 정리가 ${QUIT_DEADLINE_MS / 1000}초 안에 끝나지 않았다 — 남은 opencode 를 죽이고 끝낸다`)
+        killEngineProcesses()
+        app.exit(0)
+      })
+    })
 })
 
 // 실물 테스트는 창을 화면에 띄우지 않는다 — 사용자 화면·포커스를 가로채지 않게. 그려지기는 하고(paintWhenInitiallyHidden),
@@ -410,6 +423,10 @@ const notifyTest: NotifyTestRecord | undefined = hiddenForTests ? { foreground: 
 const notifyHost = notifyTest ? recordingHost(notifyTest) : systemHost(windows)
 if (notifyTest) Object.assign(globalThis, { __litecodeNotifyTest: { record: notifyTest, emit: (name: string, ...args: unknown[]) => (ctx.emit as (...all: unknown[]) => void)(name, ...args) } })
 app.on('second-instance', () => notifyHost.reveal())
+
+// 종료 확인 · 창 닫기 = 숨기기 (ctx.quit, 이슈 #92) — 판정은 서비스가, 확인 창·트레이는 host 가. 실물 테스트는 묻지도 숨기지도 않는다(automatic).
+// 종료 때 가장 먼저 내려가 트레이를 거둔다
+mounted.push(ctx.plugin(QuitService, { host: systemQuitHost(windows), automatic: hiddenForTests }))
 
 // 다른 앱에서 열기 (대화 머리 분할 버튼) — 실물 테스트는 실행을 기록만 한다(globalThis.__litecodeOpenInTest). 제품은 이 길이 없다
 const openInTest: OpenInTestRecord | undefined = hiddenForTests ? { launches: [] } : undefined
@@ -626,13 +643,22 @@ function createWindow(): BrowserWindow {
   }
   if (process.platform !== 'darwin') nativeTheme.on('updated', recolor)
 
-  win.on('close', () => {
+  win.on('close', (event) => {
     try {
       writeJsonFileSync(windowFile, win.getNormalBounds()) // 최대화·전체 화면이면 그 전의 크기
     } catch (error) {
       console.warn('[window] 창 자리를 못 적었다', (error as Error).message)
     }
+    // 창 닫기를 무엇으로 (이슈 #92) — macOS 는 그대로 닫는다. Windows·Linux 는 숨기거나(앱은 트레이에 남는다 — 턴·폰 연결이 이어진다),
+    // "창을 닫아도 계속 실행" 을 껐으면 닫는 대신 종료를 요청한다(before-quit 의 종료 확인을 거친다 — 취소하면 창이 그대로 남는다)
+    const action = ctx.get('quit')?.windowClosing() ?? 'close'
+    if (action === 'close') return
+    event.preventDefault()
+    if (action === 'hide') win.hide()
+    else app.quit()
   })
+  // Windows 의 로그오프·종료 — 뒤따르는 종료는 묻지 않는다 (macOS·Linux 는 아래 powerMonitor 'shutdown')
+  win.on('session-end', () => ctx.get('quit')?.allowQuit())
 
   mainWindow = win
   win.on('closed', () => {
@@ -663,6 +689,8 @@ void app.whenReady().then(async () => {
   setTimeout(checkBoot, BOOT_DEADLINE_MS).unref()
   await settingsFiber // 설정 서비스가 올라온 뒤 — 테마를 창보다 먼저 정한다
   nativeTheme.themeSource = ctx.settings.get().appearance
+  // OS 종료·로그아웃(macOS·Linux) — 뒤따르는 종료는 묻지 않는다: 확인 창이 로그아웃을 붙잡지 않게 (실제 동작은 미검증)
+  powerMonitor.on('shutdown', () => ctx.get('quit')?.allowQuit())
   createWindow()
 })
 

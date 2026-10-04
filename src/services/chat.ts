@@ -126,6 +126,11 @@ export class ChatService extends Service {
     return turn && { origin: turn.origin, waiting: turn.attention.length > 0 }
   }
 
+  /** 지금 도는 턴 수 (대화마다 하나) — 앱을 끝내면 중단될 것들 (종료 확인 ctx.quit, 이슈 #92) */
+  running(): number {
+    return this.turns.size
+  }
+
   /** 그 대화의 대기열에 쌓인 수 */
   queued(cid: string): number {
     return this.queues.items(cid).length
