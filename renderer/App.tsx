@@ -881,18 +881,6 @@ export function App() {
       </aside>
 
       <main className={`main${layout.hidden ? ' main--full' : ''}`}>
-        {/* 사이드바를 숨기면 로고 줄의 접기 버튼도 같이 사라지므로 그때만 여기서 다시 연다 */}
-        {layout.hidden && (
-          <button
-            type="button"
-            className="sidebar-toggle sidebar-toggle--floating"
-            aria-label={t('sidebar.show')}
-            title={t('sidebar.show')}
-            onClick={() => setLayout((now) => ({ ...now, hidden: false }))}
-          >
-            <SidebarIcon />
-          </button>
-        )}
         {projects && !project && (
           <div className="open-guide">
             {openError && (
@@ -1106,6 +1094,19 @@ export function App() {
               />
             )}
           </>
+        )}
+        {/* 사이드바를 숨기면 로고 줄의 접기 버튼도 같이 사라지므로 그때만 여기서 다시 연다. 대화 머리(창 끌기 줄)보다 **문서 뒤**에 둔다 —
+            Electron 은 끌기 영역을 문서 순서로 합쳐서, 앞에 있으면 머리의 끌기가 이 버튼을 덮어 눌리지 않는다 (styles.css 창 끌기 주석) */}
+        {layout.hidden && (
+          <button
+            type="button"
+            className="sidebar-toggle sidebar-toggle--floating"
+            aria-label={t('sidebar.show')}
+            title={t('sidebar.show')}
+            onClick={() => setLayout((now) => ({ ...now, hidden: false }))}
+          >
+            <SidebarIcon />
+          </button>
         )}
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
