@@ -9,6 +9,7 @@ import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 
 // 4 설정 (시안 Settings). 언어·테마 줄은 모양만, 연결 유지 스위치는 값만 바뀐다(포그라운드 서비스는 다음 라운드).
+// "연결 해제" 는 저장된 짝(토큰)을 지우고 연결 화면으로 간다.
 export function SettingsScreen({ session, onBack, onDisconnect }: { session: AppSession; onBack(): void; onDisconnect(): void }) {
   const insets = useSafeAreaInsets()
   const status = useConnectionStatus(session)
@@ -36,7 +37,7 @@ export function SettingsScreen({ session, onBack, onDisconnect }: { session: App
             </View>
             <View style={styles.facts}>
               <Fact label={S.address} value={session.desktop.address} mono />
-              <Fact label={S.fingerprint} value={session.desktop.fingerprint} mono />
+              <Fact label={S.fingerprint} value={session.desktop.fingerprint ?? S.fingerprintNone} mono={session.desktop.fingerprint !== undefined} />
               <Fact label={S.lastConnected} value={S.justNow} />
             </View>
             <Pressable accessibilityRole="button" style={styles.disconnect} onPress={onDisconnect}>

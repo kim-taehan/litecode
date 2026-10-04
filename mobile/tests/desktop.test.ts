@@ -1,6 +1,7 @@
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Attention } from '../../shared/contract.ts'
+import { DesktopLink, type DesktopStore, type SavedDesktop } from '../src/app/link.ts'
 import { Connection, RemoteClient, createFetchTransport, newClientMessageId, type StreamHandlers, type Transport } from '../src/core/index.ts'
 
 // 연결 코어(폰 앱이 쓰는 RemoteClient·Connection·리듀서 그대로)를 **진짜 데스크탑 서비스**(ctx.remote, 이슈 #56)에 붙인다.
@@ -12,6 +13,8 @@ import { Connection, RemoteClient, createFetchTransport, newClientMessageId, typ
 // 그래서 여기서 쓰는 만큼만 모양을 적는다 (어긋나면 아래 테스트가 실행에서 깨진다).
 interface PairRequestView {
   id: string
+  deviceName: string
+  confirm: string
 }
 interface DesktopStatus {
   pairing?: { code: string }
@@ -192,6 +195,70 @@ describe('모바일 클라이언트 코어 ↔ ctx.remote', () => {
     await until(() => connection.state.views.c1!.messages.length === 2, '다시 받은 스냅샷')
     expect(connection.state.resync).toBe(1)
     expect(connection.state.views.c1!.messages.map((message) => message.text)).toEqual(['그사이', 'echo: 그사이'])
+  })
+})
+
+describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
+  it('폰 화면의 확인 코드가 데스크탑 [허용] 창의 것과 같다 → 허용 → 붙어서 목록을 받고, 전체 권한 대화에는 못 보낸다', async () => {
+    const { ctx, remote, save, base } = await start()
+    await save('c_old', { updatedAt: 1000 })
+    await save('c_full', { updatedAt: 2000, mode: 'full' })
+    let saved: SavedDesktop | undefined
+    const store: DesktopStore = { load: async () => saved, save: async (value) => void (saved = value), clear: async () => void (saved = undefined) }
+    const link = new DesktopLink({ store, transport: createFetchTransport(), platform: 'android' })
+    cleanups.push(() => link.dispose())
+    await link.restore()
+
+    // 데스크탑이 보여 준 코드를 사람이 소문자로 친다
+    const shown = remote.startPairing().pairing!.code
+    let request: PairRequestView | undefined
+    const off = ctx.on('remote/changed', (status) => {
+      request ??= status.requests[0]
+    })
+    const pairing = link.pair({ address: base().replace('http://', ''), code: shown.toLowerCase(), deviceName: ' 김의 Pixel 8 ' })
+    await until(() => request !== undefined, '데스크탑에 짝짓기 요청')
+    off()
+    expect(link.state).toEqual({ phase: 'pairing', confirm: request!.confirm })
+    expect(request!.deviceName).toBe('김의 Pixel 8')
+
+    remote.answerPair(request!.id, true)
+    await pairing
+    if (link.state.phase !== 'linked') throw new Error(`붙지 못했다: ${JSON.stringify(link.state)}`)
+    const { session } = link.state
+    expect(saved).toMatchObject({ baseUrl: base(), deviceId: expect.any(String), token: expect.any(String) })
+
+    await until(() => session.getStatus().kind === 'connected' && session.models.length > 0, '목록')
+    expect(session.getState().conversations[project]!.map((entry) => entry.id)).toEqual(['c_full', 'c_old'])
+    expect(session.models.map((model) => model.modelId)).toEqual(['m1', 'm2'])
+
+    expect(await session.send('c_full', '폰에서')).toBe(false)
+    expect(session.getNotice()).toBe('desktop-only')
+
+    // 데스크탑에서 해제 → 저장이 지워지고 연결 화면으로
+    await remote.revoke(saved!.deviceId)
+    await until(() => link.state.phase === 'unpaired', '해제')
+    expect(link.state).toEqual({ phase: 'unpaired', revoked: true })
+    expect(saved).toBeUndefined()
+  })
+
+  it('데스크탑에서 거절하면 denied, 틀린 코드는 wrong-code', async () => {
+    const { ctx, remote, base } = await start()
+    const store: DesktopStore = { load: async () => undefined, save: async () => undefined, clear: async () => undefined }
+    const link = new DesktopLink({ store, transport: createFetchTransport(), platform: 'android' })
+    cleanups.push(() => link.dispose())
+    await link.restore()
+    const address = base().replace('http://', '')
+
+    const code = remote.startPairing().pairing!.code
+    await link.pair({ address, code: 'ZZZZ-ZZZZ-ZZZZ', deviceName: 'Pixel 8' })
+    expect(link.state).toEqual({ phase: 'unpaired', failure: 'wrong-code' })
+
+    const off = ctx.on('remote/changed', (status) => {
+      if (status.requests[0]) remote.answerPair(status.requests[0].id, false)
+    })
+    await link.pair({ address, code, deviceName: 'Pixel 8' })
+    off()
+    expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
   })
 })
 

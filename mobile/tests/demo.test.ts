@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppSession } from '../src/app/session.ts'
 import { ago, rowView, runningSubtasks, statusBanner, turnHead, turnLines, turnStartedAt, turnTexts } from '../src/app/view.ts'
-import { createDemoSession, DEMO_CHAT, DEMO_PROJECT, DEMO_RECONNECT_MS, DEMO_STEP_MS } from '../src/demo/demoSession.ts'
+import { createDemoSession, DEMO_CHAT, DEMO_PROJECT, DEMO_RECONNECT_MS, DEMO_STEP_MS } from './demoSession.ts'
 
 // 견본 세션이 리듀서 상태를 기대대로 만드는지 — 화면은 이 상태를 그리기만 한다 (화면 렌더 테스트는 없다).
 
@@ -139,7 +139,7 @@ describe('견본의 살아 있는 동작', () => {
 
   it('새 대화 → 목록 맨 위에 생기고, 첫 글이 제목이 된다', async () => {
     await vi.advanceTimersByTimeAsync(1_000)
-    const cid = await session.createConversation(DEMO_PROJECT.path)
+    const cid = (await session.createConversation(DEMO_PROJECT.path))!
     expect(chat(cid)).toMatchObject({ messages: [], running: false })
     session.send(cid, '새로 시작')
     expect(rows()[0]).toMatchObject({ title: '새로 시작', dot: 'running' })
