@@ -113,6 +113,17 @@ export const en = {
   'chat.subtaskStopped': 'Stopped',
   'chat.subtaskEmpty': 'Nothing recorded yet',
   'chat.subtaskTokens': '{count} tokens',
+  // The AI's to-do list (todowrite, issue #83) — the row in the conversation and the strip above the input card
+  'todo.title': 'To-dos',
+  'todo.progress': '{done}/{total} done',
+  'todo.empty': 'List cleared',
+  'todo.now': 'Now: {text}',
+  'todo.stalled': 'Paused: {text}',
+  'todo.status.pending': 'Pending',
+  'todo.status.active': 'In progress',
+  'todo.status.stalled': 'Paused',
+  'todo.status.done': 'Done',
+  'todo.status.cancelled': 'Cancelled',
   // Running jobs list — chat header button (issue #32)
   'jobs.button': 'Jobs {count}',
   'jobs.buttonLabel': '{count} running jobs',

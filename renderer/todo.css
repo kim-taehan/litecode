@@ -1,0 +1,134 @@
+/* AI 의 할 일 목록 (이슈 #83) — 대화 안 줄의 체크리스트와 입력 카드 위 줄. 색은 토큰만 (라이트·다크 공통) */
+
+/* 체크리스트 — dsh TodoPanel: 13/20, 표시 16px 자리, 줄 사이 6px */
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-list__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.todo-list__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 20px;
+  color: var(--text-caption);
+}
+
+.todo-list__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.todo-list__item[data-status='done'] { color: var(--text-tertiary); }
+.todo-list__item[data-status='done'] .todo-list__mark { color: var(--ok); }
+
+.todo-list__item[data-status='active'] { color: var(--text); font-weight: 500; }
+.todo-list__item[data-status='active'] .todo-list__mark { color: var(--accent); }
+
+.todo-list__item[data-status='stalled'] { color: var(--text); }
+.todo-list__item[data-status='stalled'] .todo-list__mark { color: var(--warn); }
+
+.todo-list__item[data-status='cancelled'] { color: var(--text-caption); }
+.todo-list__item[data-status='cancelled'] .todo-list__text { text-decoration: line-through; }
+
+/* 입력 카드 위에 붙은 판 — 대기열 판(.queue-dock, background.css)과 같은 치수: 카드보다 양쪽 16px 좁고, 위만 둥글고, 아래는 3px 숨는다 */
+.todo-dock {
+  box-sizing: border-box;
+  width: calc(100% - 32px);
+  max-width: calc(clamp(712px, calc((100% + 32px) * 0.64 + 32px), 952px) - 32px);
+  margin-bottom: -3px;
+  padding: 2px 0 5px;
+  border: 0.5px solid var(--border);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  background: var(--menu);
+  backdrop-filter: blur(20px);
+}
+
+/* 대기열 판이 같이 있으면 할 일 줄이 위, 대기열이 카드 쪽 — 이어 붙게 대기열의 위 모서리를 편다 */
+.todo-dock + .queue-dock {
+  border-radius: 0;
+}
+
+.todo-dock__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo-dock__head:hover .todo-dock__title,
+.todo-dock__head:focus-visible .todo-dock__title {
+  color: var(--text-strong-hover, var(--text));
+}
+
+.todo-dock__icon,
+.todo-dock__chevron {
+  flex: none;
+}
+
+.todo-dock__title {
+  flex: none;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.todo-dock__count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-dock__current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-dock__current[data-stalled] {
+  color: var(--warn);
+}
+
+.todo-dock__chevron {
+  margin-left: auto;
+  transition: transform 100ms ease;
+}
+
+.todo-dock__head[aria-expanded='true'] .todo-dock__chevron {
+  transform: rotate(180deg);
+}
+
+.todo-dock .todo-list {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 4px 12px 6px;
+}

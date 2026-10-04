@@ -318,3 +318,54 @@ describe('하위 작업 기록 (다시 열기)', () => {
     ])
   })
 })
+
+// 이슈 #83 실측 (2026-10-05, opencode 1.18.18, _workspace/01ae_todo.md 1절): todowrite 파트는 pending{input:{}} → running{input:{todos}} →
+// completed{metadata:{todos, truncated}, title:"N todos"} | error. 목록의 정본은 completed 의 metadata.todos (그 시점 목록 전체)
+describe('할 일 목록 (todowrite, 이슈 #83)', () => {
+  const todos = [
+    { content: 'read a.txt', status: 'completed', priority: 'high' },
+    { content: 'edit b.txt', status: 'in_progress', priority: 'medium' },
+    { content: 'run tests', status: 'pending', priority: 'low' },
+    { content: 'write docs', status: 'cancelled', priority: 'low' },
+  ]
+  const mapped = [
+    { text: 'read a.txt', status: 'done' },
+    { text: 'edit b.txt', status: 'active' },
+    { text: 'run tests', status: 'pending' },
+    { text: 'write docs', status: 'cancelled' },
+  ]
+  const part = (state: Record<string, unknown>) => ({ type: 'tool', id: 'p1', messageID: 'm', tool: 'todowrite', state })
+  const completed = (list: unknown) => part({ status: 'completed', input: { todos: list }, output: '[]', metadata: { todos: list, truncated: false }, title: '2 todos' })
+
+  it('끝난 todowrite 파트의 metadata.todos 를 중립 모양으로 싣는다 — content → text, in_progress → active, completed → done, priority 는 버린다', () => {
+    expect(messageItems([completed(todos)])[0]).toMatchObject({ kind: 'tool', name: 'todowrite', status: 'done', todos: mapped })
+  })
+
+  it('모르는 status 는 pending, 항목의 id 는 버린다 (엔진이 status 를 검사하지 않는다)', () => {
+    const [item] = messageItems([completed([{ content: 'one', status: 'done', priority: 'urgent', id: '7' }, { content: 'two', priority: 'low' }])])
+    expect((item as { todos: object[] }).todos).toEqual([{ text: 'one', status: 'pending' }, { text: 'two', status: 'pending' }])
+  })
+
+  it('빈 목록도 성공이다 — 빈 todos', () => {
+    expect(messageItems([completed([])])[0]).toMatchObject({ status: 'done', todos: [] })
+  })
+
+  it('running·error 파트엔 todos 가 없다 — 틀린 인자도 running 에 input.todos 가 실린 뒤 error 가 된다', () => {
+    const running = messageItems([part({ status: 'running', input: { todos }, time: { start: 1 } })])[0]
+    const failed = messageItems([part({ status: 'error', input: { todos }, error: 'The todowrite tool was called with invalid arguments' })])[0]
+    expect(running).not.toHaveProperty('todos')
+    expect(failed).toMatchObject({ status: 'error' })
+    expect(failed).not.toHaveProperty('todos')
+  })
+
+  it('metadata.todos 가 배열이 아니면 싣지 않고, 다른 도구의 metadata.todos 는 보지 않는다', () => {
+    expect(messageItems([part({ status: 'completed', input: { todos }, output: '' })])[0]).not.toHaveProperty('todos')
+    expect(messageItems([{ type: 'tool', id: 'p2', messageID: 'm', tool: 'bash', state: { status: 'completed', input: { command: 'ls' }, output: '', metadata: { todos } } }])[0]).not.toHaveProperty('todos')
+  })
+
+  it('실시간도 같은 길 — completed 가 오면 그 줄에 todos 가 실린다', () => {
+    const tracker = new TurnTracker()
+    expect(tracker.observe(...updated({ type: 'tool', id: 'p1', tool: 'todowrite', state: { status: 'running', input: { todos } } }))).not.toHaveProperty('todos')
+    expect(tracker.observe(...updated({ type: 'tool', id: 'p1', tool: 'todowrite', state: { status: 'completed', input: { todos }, output: '[]', metadata: { todos } } }))).toMatchObject({ status: 'done', todos: mapped })
+  })
+})

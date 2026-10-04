@@ -33,6 +33,7 @@ import { OpenInButton } from './OpenInButton.tsx'
 import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { QueueDock } from './QueueDock.tsx'
+import { TodoDock } from './Todo.tsx'
 import { DelegationContext, FromIcon } from './Delegation.tsx'
 import { peerOf, sidebarMark } from './delegationView.ts'
 import { RunningCount, RunningFilter } from './Background.tsx'
@@ -1190,6 +1191,8 @@ export function App() {
             </ErrorBoundary>
 
             <div className="composer">
+              {/* AI 의 지금 할 일 목록 (이슈 #83) — 남은 일이 있을 때만. 대화를 바꾸면 접힌다 (key) */}
+              <TodoDock key={active.id} messages={active.messages} progress={active.progress} running={!!active.pending} />
               <QueueDock
                 items={active.queue ?? []}
                 sources={active.queueSources}

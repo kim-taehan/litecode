@@ -13,6 +13,7 @@ import type { MessageOrigin } from '../shared/contract.ts'
 import { DelegationRow, OriginTag, useDelegation } from './Delegation.tsx'
 import { delegationLine } from './delegationView.ts'
 import { useFindFold } from './ChatFind.tsx'
+import { TodoRow } from './Todo.tsx'
 import './chat.css'
 
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
@@ -162,6 +163,8 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   // 다른 대화에 지시 보내기·결과 읽기 (앱 MCP 의 세션 도구, 이슈 #55) — "MCP · 서버 · 도구" 대신 받는 대화의 제목과 지금 상태
   const delegation = delegationLine(item, peers)
   if (delegation) return <DelegationRow line={delegation} />
+  // 성공한 할 일 목록 쓰기 (이슈 #83) — 도구 줄 대신 "할 일 · 완료 2/5" + 체크리스트
+  if (item.kind === 'tool' && item.todos) return <TodoRow todos={item.todos} />
   if (item.kind === 'text') {
     if (!item.text.trim()) return null
     return (
@@ -204,7 +207,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   const skill = item.kind === 'tool' ? item.skill : undefined
   // MCP 도구(`<서버>_<도구>`)는 "MCP · 서버 · 도구" (이슈 #28)
   const mcp = item.kind === 'tool' ? item.mcp : undefined
-  const title = think ? t('chat.think') : skill ? t('chat.skill') : mcp ? `${t('mcp.chat')} · ${mcp.server} · ${mcp.tool}` : toolTitle(item.name)
+  const title = think ? t('chat.think') : skill ? t('chat.skill') : mcp ? `${t('mcp.chat')} · ${mcp.server} · ${mcp.tool}` : item.name === 'todowrite' ? t('todo.title') : toolTitle(item.name)
   const summary = think
     ? thinkSummary(item.text, item.done) || (item.done ? '' : t('chat.thinking'))
     : (item.summary ?? (item.status === 'preparing' ? t('chat.toolPreparing') : ''))
