@@ -564,6 +564,36 @@ describe('ChatService — 스냅샷과 전달', () => {
   })
 })
 
+describe('ChatService — 대화 고정 (이슈 #79)', () => {
+  it('고정·해제를 저장하고 목록 바뀜을 알린다 — 그 뒤 턴이 돌아도 고정은 그대로다', async () => {
+    const { chat, turn, ended, stored, of } = await start()
+    await chat.send('c1', input('처음 보낸 글'))
+    ;(await turn(1)).finish()
+    await ended(1)
+    const before = of('conversations.changed').length
+
+    expect(await chat.pin('c1', true)).toMatchObject({ id: 'c1', pinned: true })
+    expect(of('conversations.changed').slice(before)).toEqual([{ project: '/work/a', removed: [] }])
+
+    await chat.send('c1', input('둘째 질문'))
+    ;(await turn(2)).finish()
+    await ended(2)
+    expect((await stored('c1'))!.pinned).toBe(true)
+
+    const beforeUnpin = of('conversations.changed').length
+    expect((await chat.pin('c1', false))!.pinned).toBeUndefined()
+    expect(of('conversations.changed').slice(beforeUnpin)).toEqual([{ project: '/work/a', removed: [] }])
+  })
+
+  it('저장 안 된 대화는 고정하지 않는다 — 알림도 없다', async () => {
+    const { chat, of } = await start()
+    const before = of('conversations.changed').length
+
+    expect(await chat.pin('없는-대화', true)).toBeUndefined()
+    expect(of('conversations.changed').length).toBe(before)
+  })
+})
+
 describe('ChatService — 대화 이름 바꾸기 (이슈 #63)', () => {
   it('제목을 바꿔 저장하고 목록 바뀜을 알린다 — 고친 대화를 준다. 그 뒤 턴이 돌아도 제목은 바꾼 그대로다 (자동 제목이 안 덮는다)', async () => {
     const { chat, turn, ended, stored, of } = await start()

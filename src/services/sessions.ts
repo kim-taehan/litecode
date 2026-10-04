@@ -18,6 +18,7 @@ export type { Conversation, ShellCard } from '../../shared/contract.ts'
 // (01c Q1). 그래서 제목·마지막 활동 시각과, 화면이 쌓는 고른 모델·통계 합계를 앱이 들고 있는다. 내용은 ctx.llm.history 로 다시 부른다.
 //
 // 보관: 프로젝트마다 최근 limit 개(기본 50, 사용자 결정 2026-10-01). 넘치면 마지막 활동이 가장 오래된 것부터 지운다.
+// 고정한 대화(이슈 #79)는 이 개수에 세지 않고 자동으로 지우지 않는다 — 고정 안 한 것만 limit 개.
 // 지우기(제한·수동 모두)는 목록에서 빼고 엔진 세션도 지운다. 엔진 삭제가 실패해도 목록에선 빼고 orphans 에 남겨 다음 시작 때 다시 지워 본다.
 // 프로젝트를 최근 목록에서 빼도 여기는 그대로다 — 같은 폴더를 다시 열면 대화가 돌아온다.
 
@@ -79,6 +80,7 @@ export class SessionsService extends Service {
         // 사용자가 지은 이름은 통째 저장이 덮지 않는다 — 이름 바꾸기(rename)로만 바뀐다 (이슈 #63)
         title: existing?.renamed ? existing.title : input.title,
         renamed: existing?.renamed,
+        pinned: existing?.pinned, // 고정도 통째 저장이 덮지 않는다 — 고정·해제(pin)로만 바뀐다 (이슈 #79)
         engineSessionId: input.engineSessionId ?? existing?.engineSessionId,
         labels: input.labels ?? existing?.labels,
         attachments: input.attachments ?? existing?.attachments,
@@ -88,7 +90,7 @@ export class SessionsService extends Service {
       const conversations = existing
         ? stored.conversations.map((entry) => (entry === existing ? next : entry))
         : [next, ...stored.conversations]
-      const same = conversations.filter((entry) => entry.project === next.project)
+      const same = conversations.filter((entry) => entry.project === next.project && !entry.pinned)
       removed = [...same].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, Math.max(0, same.length - limit))
       return dropping(conversations, stored.orphans, removed)
     })
@@ -117,6 +119,16 @@ export class SessionsService extends Service {
     const stored = await this.update((stored) => ({
       ...stored,
       conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, title, renamed: true } : entry)),
+    }))
+    return stored.conversations.find((entry) => entry.id === id)
+  }
+
+  /** 사용자가 대화를 고정하거나 푼다 (이슈 #79) — 고친 대화를 준다 (저장 안 된 대화면 undefined). 시각·순서는 그대로다.
+   *  고정한 대화는 보관 개수 제한에서 빠진다 (save). 풀면 다음 저장 때 다시 든다 */
+  async pin(id: string, pinned: boolean): Promise<Conversation | undefined> {
+    const stored = await this.update((stored) => ({
+      ...stored,
+      conversations: stored.conversations.map((entry) => (entry.id === id ? pick({ ...entry, pinned }) : entry)),
     }))
     return stored.conversations.find((entry) => entry.id === id)
   }
@@ -278,8 +290,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, renamed, updatedAt, model, mode, usage, labels, attachments, origins, shells }: Conversation): Conversation {
-  return { id, project, engineSessionId, title, ...(renamed === true && { renamed }), updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, origins, shells }
+function pick({ id, project, engineSessionId, title, renamed, pinned, updatedAt, model, mode, usage, labels, attachments, origins, shells }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, ...(renamed === true && { renamed }), ...(pinned === true && { pinned }), updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, origins, shells }
 }
 
 function isConversation(value: unknown): value is Conversation {

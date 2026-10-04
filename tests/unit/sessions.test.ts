@@ -250,6 +250,62 @@ describe('SessionsService', () => {
   })
 })
 
+describe('SessionsService — 대화 고정 (이슈 #79)', () => {
+  it('고정·해제를 적고 고친 대화를 준다 — 시각·순서는 그대로, 다시 켜도 남는다. 해제하면 표식이 없다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1', { updatedAt: 3_000 }))
+    await sessions.save(conversation('c2'))
+
+    expect(await sessions.pin('c1', true)).toMatchObject({ id: 'c1', pinned: true, updatedAt: 3_000 })
+    const again = (await start()).sessions
+    expect(ids(await again.list())).toEqual(['c2', 'c1'])
+    expect((await again.list())[1]!.pinned).toBe(true)
+
+    expect((await again.pin('c1', false))!.pinned).toBeUndefined()
+    expect((await (await start()).sessions.list())[1]).not.toHaveProperty('pinned')
+  })
+
+  it('저장 안 된 대화는 고정하지 못한다 (undefined, 새로 만들지 않는다)', async () => {
+    const { sessions } = await start()
+
+    expect(await sessions.pin('없는-대화', true)).toBeUndefined()
+    expect(await sessions.list()).toEqual([])
+  })
+
+  it('고정은 그 뒤의 통째 저장(save)·patch 가 지우지 않는다 — 화면이 보낸 목록 정보엔 고정이 없다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1'))
+    await sessions.pin('c1', true)
+    await sessions.save(conversation('c1', { updatedAt: 9_000 }))
+    await sessions.patch('c1', () => ({ updatedAt: 9_500 }))
+
+    expect((await sessions.list())[0]).toMatchObject({ pinned: true, updatedAt: 9_500 })
+  })
+
+  it('고정한 대화는 보관 개수에 세지 않고 자동 삭제되지 않는다 — 가장 오래됐어도 남고, 고정 안 한 것 중 오래된 것부터 지운다', async () => {
+    const { sessions, llm } = await start({ limit: 2 })
+    await sessions.save(conversation('old', { updatedAt: 1, engineSessionId: 'ses_old' }))
+    await sessions.pin('old', true)
+    await sessions.save(conversation('c2', { updatedAt: 2, engineSessionId: 'ses_2' }))
+    expect(await sessions.save(conversation('c3', { updatedAt: 3 }))).toEqual([]) // 고정 1 + 나머지 2 — 아직 안 넘쳤다
+    expect(await sessions.save(conversation('c4', { updatedAt: 4 }))).toEqual(['c2'])
+    await settle()
+
+    expect(ids(await sessions.list())).toEqual(['c4', 'c3', 'old'])
+    expect(llm.deleted).toEqual(['ses_2'])
+  })
+
+  it('고정을 풀면 다음 저장 때 다시 보관 개수에 든다', async () => {
+    const { sessions } = await start({ limit: 1 })
+    await sessions.save(conversation('old', { updatedAt: 1 }))
+    await sessions.pin('old', true)
+    await sessions.save(conversation('c2', { updatedAt: 2 }))
+    await sessions.pin('old', false)
+
+    expect(await sessions.save(conversation('c3', { updatedAt: 3 }))).toEqual(['old', 'c2'])
+  })
+})
+
 describe('SessionsService — 대화 이름 바꾸기 (이슈 #63)', () => {
   it('제목만 바꾸고(앞뒤 공백은 뗀다) 고친 대화를 준다 — 다른 정보는 그대로, 다시 켜도 남는다', async () => {
     const { sessions } = await start()
