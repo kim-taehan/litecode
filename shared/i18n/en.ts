@@ -121,6 +121,7 @@ export const en = {
   'filePreview.binary': 'Binary file — cannot be previewed ({size})',
   'filePreview.truncated': 'Showing the first {shown} of {size}',
   'filePreview.openPanel': 'Open side panel',
+  'filePreview.hidePanel': 'Hide right panel',
   'filePreview.tabs': 'Open files',
   'filePreview.files': 'Files',
   'filePreview.filesLabel': 'Project files',

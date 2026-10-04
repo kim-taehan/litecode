@@ -52,18 +52,20 @@ export function FilePreviewPanel({ directory }: { directory?: string }) {
   return state?.open && !stale ? <Panel state={state} /> : null
 }
 
-/** 대화 머리 오른쪽 끝 — 패널이 숨어 있을 때만 보이는 "오른쪽 패널 열기" (dsh ui-sidebar-right 의 펼침 버튼, 왼쪽 사이드바 접기 그림을 뒤집은 것) */
+/** 대화 머리 오른쪽 끝 — 오른쪽 패널을 열고 숨기는 버튼 (왼쪽 사이드바 접기 그림을 뒤집은 것). 늘 보인다 — 숨겨도 탭은 남는다 (사용자 요청 2026-10-04) */
 export function RightPanelButton({ directory }: { directory: string }) {
   const t = useT()
   const state = usePanelState()
-  if (state?.open && state.directory === directory) return null
+  const open = !!state?.open && state.directory === directory
+  const label = open ? t('filePreview.hidePanel') : t('filePreview.openPanel')
   return (
     <button
       type="button"
       className="right-panel-open"
-      aria-label={t('filePreview.openPanel')}
-      title={t('filePreview.openPanel')}
-      onClick={() => revealPanel(directory)}
+      aria-label={label}
+      title={label}
+      aria-pressed={open}
+      onClick={() => (open ? closeFilePreview() : revealPanel(directory))}
     >
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
         <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />

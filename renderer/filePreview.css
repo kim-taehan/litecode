@@ -517,6 +517,12 @@ html[data-platform='darwin']:not([data-fullscreen]) .file-preview--full .file-pr
   background: var(--fill-hover);
 }
 
+/* 패널이 열려 있을 때 — 누르면 숨긴다 */
+.right-panel-open[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--fill-active);
+}
+
 .main__header .open-in + .right-panel-open {
   margin-left: 8px;
 }
