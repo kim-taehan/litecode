@@ -147,7 +147,7 @@ export interface Attachment {
 
 /** 입력 카드에 붙여 둔(아직 안 보낸) 첨부 — 화면은 경로만 들고, 읽기는 보낼 때 메인이 한다 */
 export interface PickedAttachment extends Attachment {
-  /** OS 파일 고르기가 준 절대 경로 */
+  /** 메인이 준 절대 경로 — OS 파일 고르기로 골랐거나, 놓거나 붙여넣은 파일(이슈 #80; 경로 없는 이미지는 메인이 둔 임시 파일) */
   path: string
   size: number
 }

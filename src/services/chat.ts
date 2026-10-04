@@ -36,6 +36,8 @@ declare module 'cordis' {
     'chat/turn-ended'(data: ChatEventMap['turn.ended']): void
     'chat/queue-changed'(data: ChatEventMap['queue.changed']): void
     'chat/conversations-changed'(data: ChatEventMap['conversations.changed']): void
+    /** 보낼 첨부를 메인이 다 읽었다 (못 읽어 실패한 턴도) — 그 경로들. 화면에는 안 간다 */
+    'chat/attachments-read'(paths: string[]): void
   }
 }
 
@@ -59,7 +61,7 @@ export class ChatService extends Service {
   private queues = new SendQueues()
   /** 대화 id → 도는 턴. 보내기를 받은 그 순간(엔진에 닿기 전)부터 있다 — 같은 대화에 둘이 동시에 보내도 한 턴씩 */
   private turns = new Map<string, LiveTurn>()
-  /** OS 파일 고르기로 사용자가 고른 첨부 경로 — 보낼 때 이 안의 것만 읽는다 (화면이 오염돼도 아무 파일이나 읽어 보내게 두지 않는다) */
+  /** 사용자가 OS 파일 고르기로 골랐거나 놓거나 붙여넣은(이슈 #80) 첨부 경로 — 보낼 때 이 안의 것만 읽는다 (화면이 오염돼도 아무 파일이나 읽어 보내게 두지 않는다) */
   private picked = new Set<string>()
 
   constructor(ctx: Context) {
@@ -72,6 +74,11 @@ export class ChatService extends Service {
   /** 파일 고르기가 준 경로를 적어 둔다 — send 의 첨부는 이 안의 것만 받는다 */
   allowAttachments(paths: readonly string[]): void {
     for (const file of paths) this.picked.add(file)
+  }
+
+  /** 그 모델이 이미지를 받는가 (설정 > 모델의 "이미지 입력") — 모르는 모델이면 false */
+  acceptsImages(model: { providerId: string; modelId: string } | undefined): boolean {
+    return !!model && !!this.ctx.providers.get(model.providerId)?.models.find((entry) => entry.id === model.modelId)?.imageInput
   }
 
   /** 보낸다. 그 대화의 턴이 도는 중이면(또는 붙잡힌 대기열이 있으면) 대기열에 쌓는다 — 턴이 끝나면 합쳐 간다.
@@ -302,11 +309,13 @@ export class ChatService extends Service {
       try {
         if (attached.some((file) => !this.picked.has(file.path))) throw new Error(tr('attach.notPicked'))
         // 이미지를 안 받는 모델에 보내면 opencode 가 ERROR 글로 바꿔 보내고 이미지는 그래도 DB 에 남는다 (01y) — 화면이 막지만 여기서도 본다
-        const imageInput = this.ctx.providers.get(model!.providerId)?.models.find((entry) => entry.id === model!.modelId)?.imageInput
-        if (!imageInput && attached.some((file) => file.kind === 'image')) throw new Error(tr('plus.menu.image.blocked'))
+        if (!this.acceptsImages(model) && attached.some((file) => file.kind === 'image')) throw new Error(tr('plus.menu.image.blocked'))
         ;({ text: prompt, images } = await outgoing(project, typed, attached))
       } catch (error) {
         return { ok: false, sessionId, error: (error as Error).message }
+      } finally {
+        // 읽기가 끝났다(못 읽었어도 이 첨부는 다시 안 쓰인다) — 붙여넣은 이미지의 임시 파일을 이때 지운다 (이슈 #80)
+        this.ctx.emit('chat/attachments-read', attached.map((file) => file.path))
       }
     }
     const files = attached.filter((file) => file.kind !== 'image').map(({ name, size }) => ({ kind: 'file' as const, name, size }))

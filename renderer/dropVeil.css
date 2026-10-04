@@ -1,0 +1,37 @@
+/* 놓을 자리 표시 (이슈 #80) — 대화 영역(.main, position: relative)을 덮는 막. 색은 토큰만 — 다크는 styles.css 의 :root 미디어 쿼리가 맡는다 */
+
+.drop-veil {
+  position: absolute;
+  inset: 8px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1.5px dashed var(--accent);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  pointer-events: none;
+}
+
+.drop-veil__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 22px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  color: var(--accent);
+}
+
+.drop-veil__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.drop-veil__hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
