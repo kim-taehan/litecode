@@ -76,6 +76,7 @@ export const Channel = {
   SAVE_CONVERSATION: 'sessions:save',
   PATCH_CONVERSATION: 'sessions:patch',
   RENAME_CONVERSATION: 'sessions:rename',
+  PIN_CONVERSATION: 'sessions:pin',
   REMOVE_CONVERSATION: 'sessions:remove',
   LOAD_CONVERSATION: 'sessions:history',
   QUERY_TRIGGER: 'triggers:query',
@@ -202,6 +203,8 @@ export interface LitecodeBridge {
   patchConversation(id: string, patch: { model?: ChatModel; mode?: Mode; updatedAt?: number }): Promise<void>
   /** 대화 이름을 바꾼다 (이슈 #63) — 제목은 메인(ctx.chat)이 적는다. 고친 목록 정보를 준다. 빈 이름·저장 안 된 대화면 undefined */
   renameConversation(id: string, name: string): Promise<Conversation | undefined>
+  /** 대화를 고정하거나 푼다 (이슈 #79) — 메인(ctx.chat)이 적는다. 고친 목록 정보를 준다. 저장 안 된 대화면 undefined */
+  pinConversation(id: string, pinned: boolean): Promise<Conversation | undefined>
   /** 목록에서 빼고 엔진 세션도 지운다 (되돌리기 없음) */
   removeConversation(id: string): Promise<void>
   /** 저장된 대화의 말풍선. 작업 폴더가 없으면 엔진에 묻지 않고 missingFolder */

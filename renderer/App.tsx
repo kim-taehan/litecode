@@ -40,6 +40,9 @@ import { changeDraft, draftOf, restoreInto, withoutDrafts, type Draft, type Draf
 import { browseHistory, sentTexts } from './inputHistory.ts'
 import { questionDrafts } from './Attention.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
+import { ChatFind, FindingProvider } from './ChatFind.tsx'
+import { PinButton, PinnedMark, SessionSearch } from './SessionListTools.tsx'
+import { matchesTitle, pinnedFirst } from './sessionListView.ts'
 
 /** 말풍선·도는 턴(pending·progress·sentAt·attention)·대기열·제목·시각·통계는 메인(ctx.chat)이 정한다 — 이벤트로 받아 입힌다 (chatState.ts).
  *  답이 실패·중단이면 message.error 에 사유 (`⚠️ 사유` 로 그린다) */
@@ -58,6 +61,8 @@ interface Session extends ChatFields {
   shells?: ShellCardView[]
   /** 마지막 활동 시각(ms) — 목록에 `38min`·`1d` 로 보이고, 보관 개수 제한의 기준이 된다 */
   updatedAt: number
+  /** 고정한 대화 (이슈 #79) — 목록 맨 위 묶음. 정본은 메인(ctx.sessions) */
+  pinned?: boolean
   /** 입력창 아래 통계 줄의 값 — 턴마다 엔진이 주는 사용량·시간을 메인이 이 대화에 더한다. 없으면 "—" */
   usage?: ChatUsage
   /** 지난 실행에서 저장된 대화의 내용 상태 — 목록 정보만 저장되고 내용은 열 때 엔진에서 부른다(ctx.sessions). 이번 실행에 만든 대화는 없다 */
@@ -452,7 +457,13 @@ export function App() {
   /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다 (정본은 알림 상태) */
   const running = runningIn(notices.state, project?.path)
   const [runningOnly, setRunningOnly] = useState(false)
-  const listed = runningOnly && running.length > 0 ? visible.filter((session) => running.includes(session.id)) : visible
+  /** 대화 목록 위 찾기 칸의 글 (이슈 #79) — 제목으로 거른다. "진행 중" 필터와 함께 걸린다. 고정한 대화가 위 */
+  const [titleQuery, setTitleQuery] = useState('')
+  const listed = pinnedFirst(
+    (runningOnly && running.length > 0 ? visible.filter((session) => running.includes(session.id)) : visible).filter((session) => matchesTitle(titleOf(session), titleQuery)),
+  )
+  /** 대화 안 찾기가 찾는 중 (이슈 #79) — 접힌 작업 줄이 숨긴 채 그려진다 (ChatFind.tsx) */
+  const [finding, setFinding] = useState(false)
   /** 답변 중지 — 입력창 ■·행 ■·Esc 두 번 (이슈 #3). 대기열은 보내지 않고 입력창으로 되돌린다 */
   const stopTurn = useStopTurn(active?.id, !!active?.held, restoreQueued)
   useEscapeTwice('.chat-pane, .composer', active?.pending ? active.id : undefined, stopTurn)
@@ -653,6 +664,12 @@ export function App() {
     if (!title || title === target.title) return
     const renamed = await window.litecode.renameConversation(target.id, title)
     if (renamed) updateSession(target.id, (session) => ({ ...session, title: renamed.title }))
+  }
+
+  /** 대화 고정·해제 (이슈 #79) — 이름 바꾸기처럼 메인(ctx.chat)이 적는다 */
+  async function pinConversation(target: Session): Promise<void> {
+    const changed = await window.litecode.pinConversation(target.id, !target.pinned)
+    if (changed) updateSession(target.id, (session) => ({ ...session, pinned: changed.pinned }))
   }
 
   // 고른 모드·모델은 저장된 대화면 메인에도 적는다 (새 대화는 첫 보내기가 정한다) — 대기열의 다음 턴이 그것으로 간다
@@ -893,13 +910,17 @@ export function App() {
           {t('sidebar.conversations')}
           <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
         </div>
+        <SessionSearch value={titleQuery} onChange={setTitleQuery} />
 
         <div className="sidebar__sessions">
           {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
               바뀌고 한 번 더 눌러야 지운다(설정 화면 provider 삭제와 같은 방식). 포커스를 잃거나 Esc 면 되돌린다 */}
-          {listed.map((session) => (
+          {listed.length === 0 && titleQuery.trim() && <div className="session-list__empty">{t('sidebar.noMatch')}</div>}
+          {listed.map((session, at) => (
+            <Fragment key={session.id}>
+            {/* 고정 묶음과 나머지 사이의 선 */}
+            {at > 0 && !session.pinned && listed[at - 1]!.pinned && <div className="session-list__divider" role="separator" />}
             <div
-              key={session.id}
               data-hover-row
               className={`session-item${session.id === active?.id ? ' session-item--active' : ''}${confirming === session.id ? ' session-item--confirming' : ''}`}
             >
@@ -946,6 +967,7 @@ export function App() {
                   {notices.state[session.id] && <StatusDot status={notices.state[session.id]!.status} className="session-item__notice" />}
                 </span>
                 <span className="session-item__title marquee">{titleOf(session)}</span>
+                {session.pinned && <PinnedMark />}
                 {/* 시각 자리 — 지시로 새로 생긴 대화는 "새로 생김", 다른 대화가 시킨 일을 하는 중이면 그 아이콘 (이슈 #55 시안) */}
                 {sidebarMark(session, fresh) === 'fresh' ? (
                   <span className="session-item__fresh">{t('delegate.sidebar.fresh')}</span>
@@ -975,6 +997,7 @@ export function App() {
                       <PencilIcon />
                     </button>
                   )}
+                  {!isBlank(session) && confirming !== session.id && <PinButton pinned={!!session.pinned} onToggle={() => void pinConversation(session)} />}
                   {session.pending ? (
                     <button
                       type="button"
@@ -1010,6 +1033,7 @@ export function App() {
                 </span>
               )}
             </div>
+            </Fragment>
           ))}
         </div>
         <div className="sidebar__fade" aria-hidden="true" />
@@ -1074,6 +1098,9 @@ export function App() {
               <Trajectory key={active.id} directory={active.project} sessionId={active.engineSessionId} pending={!!active.pending} />
             ) : (
             <div className="chat-pane">
+            {/* 대화 안 찾기 (이슈 #79) — ⌘F. 대화를 바꾸면 닫힌다 (key) */}
+            <ChatFind key={active.id} scroller={listRef} onFinding={setFinding} />
+            <FindingProvider value={finding}>
             <div className="main__messages" ref={listRef}>
               <div className="chat-column">
               {active.history === 'missing' ? (
@@ -1140,6 +1167,7 @@ export function App() {
               {shellCards(active, (position) => position > active.messages.length)}
               </div>
             </div>
+            </FindingProvider>
             <Minimap scroller={listRef} turns={active.messages.filter((message) => message.role === 'user').map((message) => message.text || (message.attachments ?? []).map((item) => item.name).join(', '))} />
             <ScrollToBottom scroller={listRef} following={following} />
             </div>

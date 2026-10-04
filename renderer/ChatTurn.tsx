@@ -12,6 +12,7 @@ import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import type { MessageOrigin } from '../shared/contract.ts'
 import { DelegationRow, OriginTag, useDelegation } from './Delegation.tsx'
 import { delegationLine } from './delegationView.ts'
+import { useFindFold } from './ChatFind.tsx'
 import './chat.css'
 
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
@@ -91,6 +92,8 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   const [open, setOpen] = useState(false)
   const t = useT()
   const showWork = running || failed || open
+  // 접힌 작업 줄도 대화 안 찾기(이슈 #79)에 걸리게 — 찾는 동안에는 숨긴 채 그려 두고, 일치가 그 안이면 펼친다 (ChatFind.tsx)
+  const workFold = useFindFold(showWork, () => setOpen(true))
   /** 답의 마크다운 원문 — 그리는 글이자 "답 복사" 가 복사하는 글 */
   const source = failed ? text : answerText(answer, text).trim()
   const [copied, setCopied] = useCopied()
@@ -115,8 +118,8 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
             <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted, declined)}</span>
           </div>
         ))}
-      {showWork && work.length > 0 && (
-        <div className="turn__work">
+      {workFold.mounted && work.length > 0 && (
+        <div className="turn__work" {...workFold.fold}>
           {work.map((item) =>
             item.kind === 'compaction' ? <CompactionMark key={item.id} item={item} /> : <WorkRow key={item.id} item={item} directory={directory} turnRunning={running} />,
           )}
@@ -152,6 +155,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다) */
 function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
+  const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
   const { peers } = useDelegation()
   if (item.kind === 'subtask') return <SubtaskRow item={item} directory={directory} turnRunning={turnRunning} />
@@ -243,7 +247,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
         {skill && <SkillBadge source={skill.source} />}
         {!think && item.diffs && item.status === 'done' && <DiffStat diffs={item.diffs} />}
       </button>
-      {open && body && <div className="turn-row__body">{body}</div>}
+      {bodyFold.mounted && body && <div className="turn-row__body" {...bodyFold.fold}>{body}</div>}
     </div>
   )
 }
@@ -253,6 +257,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
  *  끝난 턴에 아직 running 으로 남은 줄(중지·엔진 재시작으로 끝 신호를 못 받음)은 "중단됨" 이다 */
 function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
+  const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
   const unfinished = item.status === 'running' || item.status === 'preparing'
   const live = turnRunning && unfinished
@@ -289,8 +294,8 @@ function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory
           {item.tokens !== undefined && <span className="turn-subtask__tokens"> · {t('chat.subtaskTokens', { count: item.tokens.toLocaleString() })}</span>}
         </span>
       </button>
-      {open && (
-        <div className="turn-subtask__body">
+      {bodyFold.mounted && (
+        <div className="turn-subtask__body" {...bodyFold.fold}>
           {rows.map((child) => <WorkRow key={child.id} item={child} directory={directory} turnRunning={turnRunning} />)}
           {rows.length === 0 && !item.error && <p className="turn-subtask__empty">{t('chat.subtaskEmpty')}</p>}
           {item.error && <pre className="turn-row__code turn-row__code--error">{item.error}</pre>}

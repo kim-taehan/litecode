@@ -1,0 +1,167 @@
+/* 대화 안 찾기 · 대화 목록 제목 찾기 · 고정 (이슈 #79) */
+
+/* 찾기 줄 — 대화 칸 오른쪽 위에 떠 있는 작은 판 (떠 있는 팝업 바탕·그림자는 다른 팝업과 같은 토큰) */
+.chat-find {
+  position: absolute;
+  top: 8px;
+  right: 24px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 6px 0 4px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lv3);
+}
+
+.chat-find__input {
+  width: 180px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.chat-find__input:focus {
+  outline: none;
+}
+
+.chat-find__count {
+  min-width: 44px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: right;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chat-find__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+}
+
+.chat-find__button:hover:not(:disabled),
+.chat-find__button:focus-visible {
+  background: var(--fill-hover);
+  color: var(--text);
+  outline: none;
+}
+
+.chat-find__button:disabled {
+  color: var(--text-caption);
+}
+
+/* 일치 표시 (CSS Custom Highlight) — 호박색은 두 테마에서 같은 값(--warn)이다. ::highlight 안에서는 변수를 못 믿어 값을 그대로 적는다 */
+::highlight(litecode-find) {
+  background-color: rgba(245, 158, 11, 0.32);
+}
+
+::highlight(litecode-find-current) {
+  background-color: #f59e0b;
+  color: #0f1115;
+}
+
+/* 찾는 동안 숨긴 채 그려 둔 접힌 칸 (useFindFold) — 칸의 display 규칙(flex)이 hidden 을 이기지 않게 */
+[data-find-fold][hidden] {
+  display: none !important;
+}
+
+/* 대화 목록 위 제목 찾기 칸 — 프로젝트 팝오버의 찾기 칸과 같은 모양 */
+.session-search {
+  position: relative;
+  flex: none;
+  margin: 0 12px 6px;
+}
+
+.session-search__input {
+  width: 100%;
+  height: 28px;
+  padding: 0 26px 0 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 10px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text);
+}
+
+.session-search__input::placeholder {
+  color: var(--text-caption);
+}
+
+.session-search__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.session-search__clear {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-tertiary);
+}
+
+.session-search__clear:hover,
+.session-search__clear:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.session-list__empty {
+  padding: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-caption);
+}
+
+/* 고정한 대화 — 시각 앞의 작은 핀 (행에 마우스를 올리면 버튼 줄이 대신 보인다), 고정 묶음과 나머지 사이의 가는 선 */
+.session-item__pinned {
+  flex: none;
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+  color: var(--text-caption);
+}
+
+.session-item:hover .session-item__pinned,
+.session-item:focus-within .session-item__pinned,
+.session-item--confirming .session-item__pinned {
+  display: none;
+}
+
+.session-item__action[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.session-list__divider {
+  flex: none;
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-light);
+}

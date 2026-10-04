@@ -94,6 +94,13 @@ export class ChatService extends Service {
     return renamed
   }
 
+  /** 사용자가 대화를 고정하거나 푼다 (이슈 #79) — 이름 바꾸기와 같은 길: 저장은 ctx.sessions, 목록 바뀜을 알린다. 저장 안 된 대화면 undefined */
+  async pin(cid: string, pinned: boolean): Promise<Conversation | undefined> {
+    const changed = await this.ctx.sessions.pin(cid, pinned)
+    if (changed) this.ctx.emit('chat/conversations-changed', { project: changed.project, removed: [] })
+    return changed
+  }
+
   /** 대기열 되돌리기 — 그 출처가 쌓은 것을 합쳐 주고 뺀다 (부른 쪽 입력창으로). 붙잡힌 대기열도 풀린다. 없으면 undefined */
   takeQueue(cid: string, origin: ChatOrigin = 'user'): QueuedSend | undefined {
     const taken = this.queues.take(cid, origin)
