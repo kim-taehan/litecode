@@ -208,6 +208,12 @@ export const ko = {
   'diff.copied': '복사됨',
   'diff.show': '변경 내용 보기',
   'diff.hide': '변경 내용 접기',
+  // 턴 끝 고친 파일 카드 (이슈 #82)
+  'changes.title': 'AI 가 고친 파일 {count}',
+  'changes.modified': '고침',
+  'changes.edits': '{count}번',
+  'changes.more': '{count}개 더',
+  'changes.note': '편집 도구로 고친 파일만 셉니다. 명령으로 바꾼 파일은 빠져 있을 수 있고, 여러 번 고친 파일의 줄 수는 합계입니다.',
   // 입력창
   'composer.placeholder': '메시지를 입력하세요…',
   'plus.open': '파일·이미지 추가, 스킬·MCP 서버 열기',

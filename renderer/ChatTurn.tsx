@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Attachment, Attention, AttentionAnswer, AttentionTarget, Subtask, TurnItem } from '../shared/ipc.ts'
 import { AttachmentChips } from './Attachments.tsx'
 import { AttentionCard } from './Attention.tsx'
@@ -14,6 +14,8 @@ import { DelegationRow, OriginTag, useDelegation } from './Delegation.tsx'
 import { delegationLine } from './delegationView.ts'
 import { useFindFold } from './ChatFind.tsx'
 import { TodoRow } from './Todo.tsx'
+import { ChangedFilesCard } from './ChangedFiles.tsx'
+import { changedFiles } from './changedFiles.ts'
 import './chat.css'
 
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
@@ -98,6 +100,8 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   /** 답의 마크다운 원문 — 그리는 글이자 "답 복사" 가 복사하는 글 */
   const source = failed ? text : answerText(answer, text).trim()
   const [copied, setCopied] = useCopied()
+  // 끝난 턴(완료·실패·중단)이 고친 파일 — 도는 중에는 없다 (이슈 #82)
+  const changes = useMemo(() => (running ? undefined : changedFiles(items)), [running, items])
 
   return (
     <div className="turn" data-state={running ? 'running' : interrupted ? 'interrupted' : failed ? 'failed' : 'done'}>
@@ -132,6 +136,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
           {failed ? text : <Markdown text={source} directory={directory} />}
         </div>
       )}
+      {changes && <ChangedFilesCard changes={changes} directory={directory} />}
       {/* 답 행동 줄 (dsh ui-chat MessageIconActions) — 답 전체 복사. 마우스를 올리거나 포커스가 들어올 때만 보인다 (chat.css) */}
       {!running && source.trim() && (
         <div className="turn__meta">
