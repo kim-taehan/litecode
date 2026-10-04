@@ -66,6 +66,12 @@ if (process.platform === 'win32') app.setAppUserModelId('com.litecode.desktop')
 
 // Cordis 컨텍스트는 메인 프로세스에 하나만 둔다 — 렌더러는 IPC 로만 닿는다.
 const ctx = new Context()
+ctx.logger.exporter({
+  export: (message) => {
+    if (message.type === 'error') console.error(`[cordis] ${message.name}`, ...message.args)
+    else if (message.type === 'warn') console.warn(`[cordis] ${message.name}`, ...message.args)
+  },
+})
 // 올린 순서대로 쥔다 — 앱을 끌 때 거꾸로 내려 각 서비스가 걸어 둔 정리(effect)를 다 돌린다 (opencode·키 프록시 끄기 등)
 const mounted: { dispose(): Promise<void> }[] = []
 // userData 는 --user-data-dir 스위치를 따른다 (실물 테스트가 이걸로 격리한다).

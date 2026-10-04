@@ -290,6 +290,8 @@ export function App() {
   const settings = useSettings()
   /** 켜진 기능 (설정 > 기능) — 꺼진 기능의 버튼·탭·단축키는 그리지 않는다 */
   const features = useFeatures()
+  const featuresRef = useRef(features)
+  featuresRef.current = features
   /** Trajectory 탭 — 설정 > 일반의 코딩 뷰와 설정 > 기능의 추론 과정이 둘 다 켜져야 보인다 */
   const trajectoryOn = settings.codingView && features.has('trajectory')
   const terminalOn = features.has('terminal')
@@ -488,6 +490,7 @@ export function App() {
   }
 
   async function pullPendingOpen(): Promise<void> {
+    if (!featuresRef.current.has('notifications')) return
     const target = await window.litecode.takePendingOpen().catch(() => undefined)
     if (target) await openNotice(target)
   }
