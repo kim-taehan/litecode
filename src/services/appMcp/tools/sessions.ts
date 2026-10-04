@@ -124,7 +124,7 @@ export function SessionTools(ctx: Context): void {
     const found = conversations.find((entry) => entry.engineSessionId === caller.sessionId)
     const turn = found && ctx.chat.turnOf(found.id)
     if (!found || !turn) throw new Error(NO_CALLER)
-    if (turn.origin !== 'user') throw new Error('This turn was started by another conversation and cannot delegate further.')
+    if (turn.origin.startsWith('session:')) throw new Error('This turn was started by another conversation and cannot delegate further.')
     return found
   }
 

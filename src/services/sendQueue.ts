@@ -16,6 +16,8 @@ import type { ChatOrigin, QueuedSend } from '../../shared/chat.ts'
 export type { QueuedSend } from '../../shared/chat.ts'
 
 const originOf = (item: QueuedSend): ChatOrigin => item.origin ?? 'user'
+/** 사람이 친 글인가 — 데스크탑 화면('user')과 짝지은 폰(`device:…`)은 사람, 다른 대화가 보낸 지시(`session:…`)만 아니다 */
+const fromPerson = (item: QueuedSend): boolean => !originOf(item).startsWith('session:')
 
 /**
  * 쌓인 것을 하나로 — 본문(과 보일 글)을 줄바꿈으로 잇고(첨부만 보낸 빈 본문은 건너뛴다) 첨부를 순서대로 모은다.
@@ -59,8 +61,10 @@ export class SendQueues {
     const current = this.items(id)
     const mine = current.filter((item) => originOf(item) === origin)
     if (mine.length === 0) return undefined
-    this.holds.delete(id)
-    this.set(id, current.filter((item) => originOf(item) !== origin))
+    const rest = current.filter((item) => originOf(item) !== origin)
+    // 다른 사람(데스크탑 화면·짝지은 폰)의 글이 남아 있으면 계속 붙잡는다 — 그 사람이 자기 입력창으로 되돌릴 것이다
+    if (!rest.some(fromPerson)) this.holds.delete(id)
+    this.set(id, rest)
     return mergeQueued(mine)
   }
 
@@ -68,7 +72,7 @@ export class SendQueues {
   drop(id: string, index: number): boolean {
     const current = this.items(id)
     const item = current[index]
-    if (!item || originOf(item) === 'user') return false
+    if (!item || fromPerson(item)) return false
     this.set(id, current.filter((_, at) => at !== index))
     return true
   }
@@ -81,7 +85,7 @@ export class SendQueues {
 
   /** 사용자가 멈췄다 — 사람이 친 글이 쌓여 있으면 턴 끝에 보내지 않고 붙잡아 둔다 (화면이 입력창으로 되돌린다) */
   hold(id: string): void {
-    if (!this.items(id).some((item) => originOf(item) === 'user')) return
+    if (!this.items(id).some(fromPerson)) return
     this.holds.add(id)
     for (const listener of this.listeners) listener(id)
   }
