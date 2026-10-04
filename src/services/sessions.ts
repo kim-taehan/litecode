@@ -6,7 +6,7 @@ import { shellContext } from './shell.ts'
 import { isMode } from '../../shared/modes.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
-import type { Conversation, ShellCard } from '../../shared/contract.ts'
+import type { Attachment, Conversation, ShellCard } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { Conversation, ShellCard } from '../../shared/contract.ts'
@@ -76,6 +76,7 @@ export class SessionsService extends Service {
         ...input,
         engineSessionId: input.engineSessionId ?? existing?.engineSessionId,
         labels: input.labels ?? existing?.labels,
+        attachments: input.attachments ?? existing?.attachments,
         shells: existing?.shells, // 카드는 메인만 고친다 — 화면이 보낸 목록 정보로 덮지 않는다
       })
       const conversations = existing
@@ -105,6 +106,14 @@ export class SessionsService extends Service {
     await this.update((stored) => ({
       ...stored,
       conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, labels: { ...entry.labels, [messageId]: display } } : entry)),
+    }))
+  }
+
+  /** 엔진 메시지 하나에 붙인 글 파일 칩을 적는다 (이슈 #44) — 글 파일은 본문에 풀려 가서 엔진 기록엔 첨부로 안 남는다. 다시 열 때 그 말풍선에 붙인다 */
+  async noteAttachments(id: string, messageId: string, attachments: Attachment[]): Promise<void> {
+    await this.update((stored) => ({
+      ...stored,
+      conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, attachments: { ...entry.attachments, [messageId]: attachments } } : entry)),
     }))
   }
 
@@ -160,7 +169,20 @@ export class SessionsService extends Service {
     const shared = new Set((conversation.shells ?? []).flatMap((card) => (card.sharedMessageId ? [card.sharedMessageId] : [])))
     const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId, shared)
     const labels = conversation.labels ?? {}
-    return { ...history, messages: history.messages.map((message) => (message.id && message.id in labels ? { ...message, text: labels[message.id]! } : message)) }
+    const noted = conversation.attachments ?? {}
+    return {
+      ...history,
+      messages: history.messages.map((message) => {
+        if (!message.id) return message
+        const files = noted[message.id]
+        return {
+          ...message,
+          ...(message.id in labels && { text: labels[message.id]! }),
+          // 앱이 적어 둔 글 파일 칩 + 엔진 기록의 이미지 칩 (화면의 chipsOf 와 같은 순서)
+          ...(files && { attachments: [...files, ...(message.attachments ?? [])] }),
+        }
+      }),
+    }
   }
 
   /** orphans 를 하나씩 지워 보고, 지운 게 있으면 DB 파일 정리를 부탁한다. 실패한 것은 남겨 다음에 다시 — 한 번에 한 줄만 돈다 */
@@ -217,8 +239,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, updatedAt, model, mode, usage, labels, shells }: Conversation): Conversation {
-  return { id, project, engineSessionId, title, updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, shells }
+function pick({ id, project, engineSessionId, title, updatedAt, model, mode, usage, labels, attachments, shells }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, shells }
 }
 
 function isConversation(value: unknown): value is Conversation {

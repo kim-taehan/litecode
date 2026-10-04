@@ -127,6 +127,31 @@ export interface AttentionQuestion {
 /** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'. "항상 허용" 은 없다(사용자 결정) */
 export type AttentionAnswer = 'once' | 'reject' | string[][]
 
+/** 첨부 종류 (이슈 #44) — file: 글 파일(본문에 `@경로` 나 글로 풀려 간다), image: png·jpeg (엔진에 이미지로 간다) */
+export type AttachmentKind = 'file' | 'image'
+
+/** 말풍선·입력 카드의 첨부 칩 하나 — 이름과(알면) 크기뿐. 파일 내용·data: 주소는 화면으로 넘기지 않는다 */
+export interface Attachment {
+  kind: AttachmentKind
+  /** 파일 이름 (경로 없이) */
+  name: string
+  /** 바이트 — 다시 연 대화의 이미지 칩엔 없다 */
+  size?: number
+}
+
+/** 입력 카드에 붙여 둔(아직 안 보낸) 첨부 — 화면은 경로만 들고, 읽기는 보낼 때 메인이 한다 */
+export interface PickedAttachment extends Attachment {
+  /** OS 파일 고르기가 준 절대 경로 */
+  path: string
+  size: number
+}
+
+/** 파일 고르기의 결과 — 칩이 된 것과, 칩을 만들지 않은 사유(지금 언어, 파일마다 한 줄) */
+export interface AttachmentPick {
+  picked: PickedAttachment[]
+  rejected: string[]
+}
+
 /** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */
 export interface HistoryMessage {
   /** 엔진 메시지 id (user 만) — chat 에 messageId 로 넘긴 값이 그대로 온다 */
@@ -138,6 +163,8 @@ export interface HistoryMessage {
   at?: number
   /** user: 이 턴을 돌린 모드 (그 턴 답의 에이전트, 없으면 앞서 바꾼 에이전트) — 화면이 모드가 바뀐 자리에 구분선을 긋는다 */
   mode?: Mode
+  /** user: 이 메시지에 붙인 파일·이미지 칩 (이슈 #44) */
+  attachments?: Attachment[]
   /** assistant: 그 턴의 진행 줄 (생각·도구·글·지시문) — 실시간 턴의 chat onProgress 와 같은 모양 */
   items?: TurnItem[]
   /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
@@ -188,6 +215,8 @@ export interface Conversation {
   usage?: unknown
   /** 엔진 메시지 id → 말풍선에 보일 글. `/` 명령처럼 보낸 본문(풀어 쓴 template)과 사용자가 친 글이 다른 입력만 (label) */
   labels?: Record<string, string>
+  /** 엔진 메시지 id → 그 메시지에 붙인 글 파일 칩 (이슈 #44). 글 파일은 본문에 풀려 가서 엔진 기록에 첨부로 안 남는다 — 이미지 칩은 엔진 기록에서 온다 */
+  attachments?: Record<string, Attachment[]>
   /** `!명령` 결과 카드 — opencode 는 모르는 로컬 기록이다(AI 에게 보내기 전까지). 메인만 고친다(addShell·shareShell) */
   shells?: ShellCard[]
 }

@@ -158,4 +158,44 @@ describe('historyMessages (레거시 기록)', () => {
     // 실패한 도구 뒤에 이어 답한 턴은 거절이 아니다
     expect(historyMessages([user('[call:write]'), declined, assistant('tool: Unknown tool')], false)[1]!.declined).toBeUndefined()
   })
+
+  // 첨부 (이슈 #44, 01y 5절): user 메시지의 file 파트는 칩 정보(이름·종류)로만 — url(data: 통째, 장당 수 MB)은 화면으로 안 넘긴다.
+  // opencode 가 덧붙인 synthetic 글("Called the Read tool…")은 내 말이 아니다
+  it('user 의 file 파트는 칩 정보가 되고 data: 본문·synthetic 글은 빠진다', () => {
+    const url = `data:image/png;base64,${'A'.repeat(4_000)}`
+    const asked: EngineMessage = {
+      info: { id: 'msg_img', role: 'user', time: { created: 1 }, agent: 'build' },
+      parts: [
+        { type: 'text', id: 'prt_1', text: 'see' },
+        { type: 'text', id: 'prt_2', synthetic: true, text: 'Called the Read tool with the following input: {"filePath":"/w/red.png"}' },
+        { type: 'file', id: 'prt_3', mime: 'image/png', filename: 'red.png', url },
+        { type: 'file', id: 'prt_4', mime: 'text/plain', filename: 'note.txt', url: 'file:///w/note.txt' },
+      ],
+    }
+    const [mine] = historyMessages([asked, assistant('ok')], false)
+    expect(mine).toMatchObject({
+      id: 'msg_img',
+      text: 'see',
+      attachments: [
+        { kind: 'image', name: 'red.png' },
+        { kind: 'file', name: 'note.txt' },
+      ],
+    })
+    expect(JSON.stringify(mine)).not.toContain('base64')
+  })
+
+  it('글 없이 이미지만 보낸 user 메시지도 말풍선이다 (text 파트가 없다 — 01y 2절)', () => {
+    const only: EngineMessage = {
+      info: { id: 'msg_only', role: 'user', time: { created: 1 }, agent: 'build' },
+      parts: [{ type: 'file', id: 'prt_1', mime: 'image/jpeg', filename: 'a.jpg', url: 'data:image/jpeg;base64,AAAA' }],
+    }
+    expect(historyMessages([only, assistant('ok')], false)).toMatchObject([
+      { role: 'user', text: '', attachments: [{ kind: 'image', name: 'a.jpg' }] },
+      { role: 'assistant', text: 'ok' },
+    ])
+  })
+
+  it('첨부가 없는 user 메시지에는 attachments 가 없다', () => {
+    expect(historyMessages([user('hi'), assistant('ok')], false)[0]).not.toHaveProperty('attachments')
+  })
 })

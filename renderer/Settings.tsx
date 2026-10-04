@@ -388,6 +388,17 @@ function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
             disabled={busy}
             onChange={(event) => setModel(index, { maxOutput: event.target.value === '' ? undefined : Number(event.target.value) })}
           />
+          {/* 이미지 입력 — 켠 모델만 엔진이 이미지를 받는 모델로 알린다 (이슈 #44, 01y: 이 표시 없이는 붙인 이미지가 오류 글로 바뀐다). 기본 꺼짐 */}
+          <label className="model-row__check" title={t('models.imageInputTitle')}>
+            <input
+              type="checkbox"
+              aria-label={t('models.imageInput', { n: index + 1 })}
+              checked={model.imageInput === true}
+              disabled={busy}
+              onChange={(event) => setModel(index, { imageInput: event.target.checked || undefined })}
+            />
+            {t('models.imageInputLabel')}
+          </label>
           <button
             type="button"
             className="settings-icon-button"

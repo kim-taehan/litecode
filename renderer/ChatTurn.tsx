@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { Attention, AttentionAnswer, Subtask, TurnItem } from '../shared/ipc.ts'
+import type { Attachment, Attention, AttentionAnswer, Subtask, TurnItem } from '../shared/ipc.ts'
+import { AttachmentChips } from './Attachments.tsx'
 import { AttentionCard } from './Attention.tsx'
 import { DiffCard, DiffStat } from './DiffCard.tsx'
 import { CompactionMark } from './Compaction.tsx'
@@ -17,12 +18,14 @@ import './chat.css'
 // 접기 규칙(dsh TurnProcessNodeView): 잘 끝난 턴만 접는다. 실패한 턴은 작업을 펼친 채로 두고 접기 버튼이 없다
 
 /** 내 말 — 말풍선 아래에 보낸 시각과 복사 */
-export function UserMessage({ text, at }: { text: string; at?: number }) {
+export function UserMessage({ text, at, attachments }: { text: string; at?: number; attachments?: readonly Attachment[] }) {
   const t = useT()
   const [copied, setCopied] = useCopied()
   return (
     <div className="user-turn">
-      <div className="bubble bubble--user">{text.trim()}</div>
+      {/* 붙인 파일·이미지 칩 (이슈 #44) — 글 없이 첨부만 보냈으면 말풍선 없이 칩만 */}
+      {attachments && <AttachmentChips items={attachments} />}
+      {text.trim() && <div className="bubble bubble--user">{text.trim()}</div>}
       <div className="user-turn__meta">
         {at !== undefined && <time dateTime={new Date(at).toISOString()}>{clockTime(at)}</time>}
         <button

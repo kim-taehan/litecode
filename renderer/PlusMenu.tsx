@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Project } from '../shared/ipc.ts'
+import type { AttachmentKind, Project } from '../shared/ipc.ts'
+import { FILE_ICON_PATHS } from './Attachments.tsx'
 import { McpPopup } from './McpPopup.tsx'
 import { mcpCounts } from './plusView.ts'
 import { SKILL_ICON_PATH } from './SkillBadge.tsx'
@@ -9,13 +10,15 @@ import './plus.css'
 
 // 입력 카드의 `+` 버튼과 메뉴 (이슈 #43, 시안 _workspace/mock-plus/Main.dc.html). 누르면 입력 카드 위에 메뉴가 뜬다: 머리 "<프로젝트> 에서 쓰는 것",
 // 스킬(오른쪽에 개수) · MCP 서버(오른쪽에 "연결 N · 실패 M"). 고르면 각각 따로 된 팝업(SkillsPopup·McpPopup)이 그 프로젝트 기준으로 열린다.
-// 시안의 "파일 추가"·"이미지 추가" 는 다음 이슈(#44) — 이 메뉴의 머리 위에 구분선과 함께 끼운다.
+// 맨 위는 "파일 추가"·"이미지 추가"(이슈 #44) — 누르면 메뉴를 닫고 onAttach 로 넘긴다(OS 파일 고르기는 메인이 띄운다). 그 아래 구분선.
+// 지금 고른 모델이 이미지를 못 받으면(설정 > 모델의 "이미지 입력" — 01y: 그 표시 없이는 이미지가 ERROR 글로 바뀐다) "이미지 추가" 는 못 누르고
+// 사유 한 줄을 보인다. disabled 가 아니라 aria-disabled 다 — 화살표로 닿아 사유가 읽힌다.
 // 메뉴 동작은 모드 칩 메뉴(ModeChip — dsh ui-primitives Menu)와 같다: Esc·바깥 누르기로 닫힘, 화살표로 이동, 닫히면 버튼으로 포커스.
 // 개수·요약은 메뉴를 열 때마다 묻는다(스킬 파일·서버 상태는 앱 밖에서 바뀐다). 프로젝트가 없으면 버튼을 못 누른다.
 
 type Popup = 'skills' | 'mcp'
 
-export function PlusMenu({ project }: { project?: Project }) {
+export function PlusMenu({ project, imageInput, onAttach }: { project?: Project; imageInput: boolean; onAttach(kind: AttachmentKind): void }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [popup, setPopup] = useState<Popup>()
@@ -79,6 +82,11 @@ export function PlusMenu({ project }: { project?: Project }) {
     list[(at + (event.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus()
   }
 
+  function attach(kind: AttachmentKind): void {
+    setOpen(false)
+    onAttach(kind)
+  }
+
   function show(next: Popup): void {
     setOpen(false)
     setPopup(next)
@@ -110,6 +118,26 @@ export function PlusMenu({ project }: { project?: Project }) {
       </span>
       {open && project && (
         <div className="plus-menu" role="menu" aria-label={t('plus.open')} ref={menuRef} onKeyDown={onMenuKeyDown}>
+          <button type="button" role="menuitem" className="plus-menu__item" data-plus="file" onClick={() => attach('file')}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {FILE_ICON_PATHS.map((d) => (
+                <path key={d} d={d} />
+              ))}
+            </svg>
+            <span className="plus-menu__name">{t('plus.menu.file')}</span>
+          </button>
+          <button type="button" role="menuitem" className="plus-menu__item" data-plus="image" aria-disabled={!imageInput} onClick={() => imageInput && attach('image')}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+              <circle cx="5.5" cy="6.25" r="1.25" />
+              <path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3" />
+            </svg>
+            <span className="plus-menu__name">
+              {t('plus.menu.image')}
+              {!imageInput && <span className="plus-menu__note">{t('plus.menu.image.blocked')}</span>}
+            </span>
+          </button>
+          <div className="plus-menu__divider" role="separator" />
           <div className="plus-menu__label">{t('plus.menu.title', { project: project.name })}</div>
           <button type="button" role="menuitem" className="plus-menu__item" data-plus="skills" onClick={() => show('skills')}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">

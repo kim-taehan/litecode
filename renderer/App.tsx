@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Attention, Conversation, ConversationStatus, HistoryMessage, Mode, OpenTarget, Project, ProviderSummary, TurnItem } from '../shared/ipc.ts'
+import type { Attachment, AttachmentKind, Attention, Conversation, ConversationStatus, HistoryMessage, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, TurnItem } from '../shared/ipc.ts'
 import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
@@ -22,10 +22,12 @@ import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { PlusMenu } from './PlusMenu.tsx'
+import { AttachmentChips } from './Attachments.tsx'
+import { chipsOf, countOf } from './attachmentsView.ts'
 import { OpenInButton } from './OpenInButton.tsx'
 import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
-import { useSendQueue } from './useSendQueue.ts'
+import { useSendQueue, type QueuedSend } from './useSendQueue.ts'
 import { QueueDock } from './QueueDock.tsx'
 import { RunningCount, RunningFilter } from './Background.tsx'
 import { runningIn, runningOutside } from './backgroundView.ts'
@@ -39,6 +41,8 @@ interface ChatMessage {
   at?: number
   /** user: 이 턴을 돌린 모드 — 앞 턴과 다르면 그 자리에 구분선 */
   mode?: Mode
+  /** user: 붙인 파일·이미지 칩 */
+  attachments?: Attachment[]
   /** assistant: 그 턴의 진행 줄 (생각·도구·글) */
   items?: TurnItem[]
   /** assistant: 걸린 시간(ms) */
@@ -106,8 +110,8 @@ function fromConversation(conversation: Conversation): Session {
 }
 
 /** 실시간 턴과 같은 모양 — 실패·중단이면 사유를 ⚠️ 로 */
-function toChatMessage({ role, text, error, at, mode, items, duration, interrupted, declined }: HistoryMessage): ChatMessage {
-  return { role, text: error ? `⚠️ ${error}` : text, at, mode, items, duration, failed: !!error, interrupted, declined }
+function toChatMessage({ role, text, error, at, mode, attachments, items, duration, interrupted, declined }: HistoryMessage): ChatMessage {
+  return { role, text: error ? `⚠️ ${error}` : text, at, mode, attachments, items, duration, failed: !!error, interrupted, declined }
 }
 
 /** 그 프로젝트에 대화가 하나도 없으면 새 대화를 하나 더한다 — 같은 값을 두 번 넣어도 한 번만 더해진다 */
@@ -319,6 +323,8 @@ export function App() {
   const [failedProject, setFailedProject] = useState<string>()
   const switchRef = useRef<HTMLButtonElement>(null)
   const [draft, setDraft] = useState('')
+  /** 입력 카드에 붙여 둔 파일·이미지 (이슈 #44) — 글(draft)처럼 입력창 하나의 것이다. 경로만 든다(읽기는 보낼 때 메인) */
+  const [attached, setAttached] = useState<PickedAttachment[]>([])
   /** 본문 탭 — 대화(Chat) 또는 스텝·도구 기록(Trajectory) */
   const [view, setView] = useState<'chat' | 'trajectory'>('chat')
   const sessionHover = useHoverCard()
@@ -461,7 +467,7 @@ export function App() {
     if (target) void send(merged, { queued: target })
   })
   /** 답변 중지 — 입력창 ■·행 ■·Esc 두 번 (이슈 #3). 큐는 보내지 않고 입력창으로 되돌린다 */
-  const stopTurn = useStopTurn(queue, active?.id, setDraft)
+  const stopTurn = useStopTurn(queue, active?.id, restoreQueued)
   useEscapeTwice('.chat-pane, .composer', active?.pending ? active.id : undefined, stopTurn)
 
   /** 알림(토스트·PC 알림)을 누르면 — 기존 프로젝트 열기 경로로 그 프로젝트를 열고(목록에서 빠졌으면 다시 넣는다) 그 대화를 고른다.
@@ -622,17 +628,39 @@ export function App() {
     setLastModel(next)
   }
 
+  /** 대기열에서 꺼낸 것(되돌리기·멈춘 턴)을 입력창으로 — 글은 입력 앞에, 첨부 칩도 함께 */
+  function restoreQueued(taken: QueuedSend): void {
+    setDraft((now) => [taken.display ?? taken.text, now.trim()].filter(Boolean).join('\n'))
+    const files = taken.attachments
+    if (files) setAttached((now) => [...files, ...now.filter((item) => !files.some((file) => file.path === item.path && file.kind === item.kind))])
+  }
+
+  /** `+` 메뉴의 파일 추가·이미지 추가 — 메인이 OS 파일 고르기를 띄우고 거른다. 고른 것은 칩으로 쌓고, 못 붙인 사유는 짧은 안내로.
+   *  상한(한 메시지 N개)은 입력 카드의 칩과 이 대화 대기열의 첨부를 합쳐 센다 — 턴 끝에 한 메시지로 합쳐 나간다 */
+  async function addAttachments(kind: AttachmentKind): Promise<void> {
+    if (!active) return
+    const queued = queue.items(active.id).flatMap((item) => item.attachments ?? [])
+    const result = await window.litecode.pickAttachments(kind, active.project, countOf(kind, attached, queued))
+    setAttached((now) => [...now, ...result.picked.filter((item) => !now.some((held) => held.path === item.path && held.kind === item.kind))])
+    for (const reason of result.rejected) notices.say(reason)
+    trigger.inputRef.current?.focus()
+  }
+
   /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display. mode: 이 턴부터 그 모드로 ("이 계획대로 실행").
-   *  queued: 큐가 턴 끝에 보내는 대화 (입력창은 건드리지 않는다). 그 대화의 턴이 도는 중이면 보내지 않고 큐에 쌓는다 */
-  async function send(command?: { text: string; display?: string }, opts: { mode?: Mode; queued?: Session } = {}): Promise<void> {
+   *  queued: 큐가 턴 끝에 보내는 대화 (입력창은 건드리지 않는다). 그 대화의 턴이 도는 중이면 보내지 않고 큐에 쌓는다.
+   *  첨부는 command.attachments(큐가 쥐고 있던 것·없음을 뜻하는 빈 목록), 안 주면 입력 카드의 칩 — 보내면 칩을 비운다 */
+  async function send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts: { mode?: Mode; queued?: Session } = {}): Promise<void> {
     const target = opts.queued ?? active // 답이 오기 전에 프로젝트·대화를 바꿔도 이 대화에 붙인다 — 보낸 시점의 대화를 쥔다
     const prompt = command?.text ?? draft.trim()
     const shown = command?.display ?? prompt
+    const fromCard = !command?.attachments && !opts.queued
+    const files = command?.attachments ?? (fromCard ? attached : [])
     const selected = target?.model ?? initialModel(providers, lastModel)
-    if (!prompt || !selected || !findModel(providers, selected) || !target || !canWrite(target)) return
+    if ((!prompt && files.length === 0) || !selected || !findModel(providers, selected) || !target || !canWrite(target)) return
     const turnMode = opts.mode ?? (opts.queued ? (opts.queued.mode ?? mode) : mode)
     if (!opts.queued) setDraft('')
-    if (queue.submit(target.id, { text: prompt, display: command?.display }, !!target.pending)) return
+    if (fromCard) setAttached([])
+    if (queue.submit(target.id, { text: prompt, display: command?.display, ...(files.length > 0 && { attachments: files }) }, !!target.pending)) return
     following.current = true
     const sentAt = Date.now()
     const start = (session: Session): Session => ({
@@ -643,8 +671,8 @@ export function App() {
       updatedAt: Date.now(),
       model: session.model ?? selected, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
       mode: turnMode, // 모드도 — 설정의 기본 모드가 나중에 바뀌어도 이 대화는 그대로
-      title: isBlank(session) ? titleFrom(shown) : session.title,
-      messages: [...session.messages, { role: 'user', text: shown, at: sentAt, mode: turnMode }],
+      title: isBlank(session) ? titleFrom(shown || (files[0]?.name ?? '')) : session.title, // 글 없이 첨부만 보냈으면 첫 파일 이름
+      messages: [...session.messages, { role: 'user', text: shown, at: sentAt, mode: turnMode, ...(files.length > 0 && { attachments: chipsOf(files) }) }],
     })
     updateSession(target.id, start)
     // 보내기 전에 목록에 저장해 둔다 — 엔진 세션이 생기면 메인 프로세스가 여기에 붙인다 (답을 기다리는 중 앱이 꺼져도 다시 열리게)
@@ -653,7 +681,7 @@ export function App() {
     forgetPruned(await window.litecode.saveConversation(conversation))
 
     const display = command && command.display !== prompt ? command.display : undefined
-    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId, display, turnMode)
+    const result = await window.litecode.sendMessage(target.id, selected.providerId, selected.modelId, target.project, prompt, target.engineSessionId, display, turnMode, files.length > 0 ? files : undefined)
     updateSession(target.id, (session) => ({
       ...session,
       pending: false,
@@ -1015,7 +1043,7 @@ export function App() {
                     </div>
                   )}
                   {message.role === 'user' ? (
-                    <UserMessage text={message.text} at={message.at} />
+                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} />
                   ) : (
                     <AssistantTurn
                       items={message.items ?? []}
@@ -1038,7 +1066,7 @@ export function App() {
                   disabled={!chosen}
                   onClick={() => {
                     const text = t('mode.runPlanPrompt')
-                    void send({ text, display: text }, { mode: 'build' })
+                    void send({ text, display: text, attachments: [] }, { mode: 'build' }) // 입력 카드의 칩은 그대로 둔다
                   }}
                 >
                   {t('mode.runPlan')}
@@ -1060,7 +1088,7 @@ export function App() {
               {shellCards(active, (position) => position > active.messages.length)}
               </div>
             </div>
-            <Minimap scroller={listRef} turns={active.messages.filter((message) => message.role === 'user').map((message) => message.text)} />
+            <Minimap scroller={listRef} turns={active.messages.filter((message) => message.role === 'user').map((message) => message.text || (message.attachments ?? []).map((item) => item.name).join(', '))} />
             <ScrollToBottom scroller={listRef} following={following} />
             </div>
             )}
@@ -1070,13 +1098,19 @@ export function App() {
                 items={queue.items(active.id)}
                 onRestore={() => {
                   const taken = queue.take(active.id)
-                  if (taken) setDraft((now) => [taken.display ?? taken.text, now.trim()].filter(Boolean).join('\n'))
+                  if (taken) restoreQueued(taken)
                   trigger.inputRef.current?.focus()
                 }}
               />
               {/* dsh InputBar: 둥근 카드 하나에 입력칸과 아래 줄(왼쪽 +, 오른쪽 모델 선택·둥근 보내기)을 담고, 카드 밑에 통계 줄 */}
               <div className={`composer__box${trigger.query?.tone ? ` composer__box--${trigger.query.tone}` : ''}`}>
                 <TriggerPopup trigger={trigger} />
+                {/* 붙인 파일·이미지 칩 — 글 입력칸 위 (이슈 #44 시안). × 로 뺀다 */}
+                {attached.length > 0 && (
+                  <div className="composer__attachments">
+                    <AttachmentChips items={attached} onRemove={(index) => setAttached((now) => now.filter((_, at) => at !== index))} />
+                  </div>
+                )}
                 <textarea
                   ref={trigger.inputRef}
                   {...trigger.inputProps}
@@ -1102,13 +1136,17 @@ export function App() {
                   }}
                 />
                 <div className="composer__row">
-                  {/* `+` 메뉴 — 지금 프로젝트의 스킬·MCP 서버 팝업 (이슈 #43). dsh 에선 첨부 메뉴 — 파일·이미지 첨부는 #44 */}
-                  <PlusMenu project={projects?.find((candidate) => candidate.path === active.project)} />
+                  {/* `+` 메뉴 — 파일·이미지 추가(이슈 #44)와 지금 프로젝트의 스킬·MCP 서버 팝업(이슈 #43). 이미지는 고른 모델이 받을 때만 */}
+                  <PlusMenu
+                    project={projects?.find((candidate) => candidate.path === active.project)}
+                    imageInput={!!chosen?.model.imageInput}
+                    onAttach={(kind) => void addAttachments(kind)}
+                  />
                   <ModeChip value={mode} locked={!!active.pending} onChange={chooseMode} />
                   <div className="composer__trailing">
                     <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
                     {/* dsh InputBar: 턴이 도는 동안 입력이 비면 보내기 자리가 ■, 글을 쓰면 다시 보내기(=큐) */}
-                    {active.pending && !draft.trim() ? (
+                    {active.pending && !draft.trim() && attached.length === 0 ? (
                       <button
                         type="button"
                         className="composer__send composer__stop"
@@ -1125,7 +1163,7 @@ export function App() {
                       aria-label={t('composer.send')}
                       title={t('composer.sendTitle')}
                       onClick={submit}
-                      disabled={!chosen || !draft.trim() || !canWrite(active)}
+                      disabled={!chosen || (!draft.trim() && attached.length === 0) || !canWrite(active)}
                     >
                       {/* dsh 보내기 화살표 (16 격자) */}
                       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">

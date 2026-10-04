@@ -17,6 +17,34 @@ describe('mergeQueued', () => {
     const items = [{ text: 'a', mode: 'plan' }, { text: 'b', mode: 'build' }]
     expect(mergeQueued(items)).toEqual({ text: 'a\nb', mode: 'build' })
   })
+
+  // 첨부 (이슈 #44) — 쌓인 메시지마다의 첨부를 순서대로 다 가진다 (마지막 것만 남으면 앞 메시지의 첨부가 조용히 사라진다)
+  it('첨부는 쌓인 순서대로 잇는다 — 첨부가 없는 것과 섞여도', () => {
+    const a = { kind: 'file' as const, path: '/w/a.md', name: 'a.md', size: 1 }
+    const b = { kind: 'image' as const, path: '/w/b.png', name: 'b.png', size: 2 }
+    expect(mergeQueued([{ text: 'one', attachments: [a] }, { text: 'two' }, { text: '', attachments: [b] }])).toEqual({ text: 'one\ntwo', attachments: [a, b] })
+    expect(mergeQueued([{ text: 'x' }, { text: 'y' }])).not.toHaveProperty('attachments')
+  })
+})
+
+describe('SendQueues — 첨부 (이슈 #44)', () => {
+  const image = { kind: 'image' as const, path: '/w/shot.png', name: 'shot.png', size: 9 }
+
+  it('턴 중 쌓인 메시지는 첨부를 그대로 갖고 턴 끝에 나간다', () => {
+    const queues = new SendQueues()
+    queues.observe('c1', true)
+    queues.submit('c1', { text: 'look', attachments: [image] }, true)
+    expect(queues.items('c1')).toEqual([{ text: 'look', attachments: [image] }])
+    expect(queues.observe('c1', false)).toEqual({ text: 'look', attachments: [image] })
+  })
+
+  it('되돌리기(take)는 첨부도 돌려준다', () => {
+    const queues = new SendQueues()
+    queues.submit('c1', { text: '', attachments: [image] }, true)
+    queues.submit('c1', { text: 'and this' }, true)
+    expect(queues.take('c1')).toEqual({ text: 'and this', attachments: [image] })
+    expect(queues.items('c1')).toEqual([])
+  })
 })
 
 describe('SendQueues', () => {

@@ -14,7 +14,7 @@ import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
-import type { Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
+import type { Attachment, Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
@@ -90,6 +90,13 @@ export interface ChatResult {
   interrupted?: boolean
   /** 사용자가 승인·질문을 거절해 끝났다 — 실패가 아니다 (ok 는 true) */
   declined?: boolean
+}
+
+/** 메시지에 붙여 보낼 이미지 하나 (이슈 #44) — 읽은 바이트 그대로. 종류는 부르는 쪽이 매직 바이트로 정한다 (attachments.ts) */
+export interface ChatImage {
+  mime: 'image/png' | 'image/jpeg'
+  filename: string
+  data: Buffer
 }
 
 /** 레거시 GET /session/{id}/message 의 항목 (01w 실측 — 감싸지 않은 배열, 오래된 것부터) */
@@ -258,7 +265,8 @@ export class LlmService extends Service {
    *  onProgress 는 턴 중 진행 줄(생각·도구·글)이 바뀔 때마다 불린다 — 화면의 실시간 진행 표시용. 턴 끝은 여전히 반환값이 정본이다.
    *  onAttention 은 턴이 기다리는 승인·질문 목록이 바뀔 때마다 (빈 목록 = 더 기다리는 것 없음) — 화면의 카드. 답은 reply.
    *  stop 이 걸리면 사용자가 멈춘 것이다 — 보내기 전이면 안 보내고, 받아들여진 뒤면 opencode 턴도 멈추고(abort) "중단됨" 으로 끝낸다.
-   *  세션이 아직 없을 때(첫 턴)도 멈출 수 있게 세션 id 가 아니라 신호로 받는다 */
+   *  세션이 아직 없을 때(첫 턴)도 멈출 수 있게 세션 id 가 아니라 신호로 받는다.
+   *  images 는 이 입력에 붙일 이미지 — 글 뒤에 file 파트(data: URI)로 싣는다 (promptParts). 그 모델이 이미지를 받는지는 부르는 쪽이 본다 */
   async chat(
     providerId: string,
     modelId: string,
@@ -271,12 +279,13 @@ export class LlmService extends Service {
     mode: Mode = DEFAULT_MODE,
     onAttention?: (requests: Attention[]) => void,
     stop?: AbortSignal,
+    images: readonly ChatImage[] = [],
   ): Promise<ChatResult> {
     this.turns++
     /** busy: 이 턴이 쥔 세션(addContext 를 막는다), sessionId: 받아들여진 턴의 세션 — 그때만 turn-started/ended 를 낸다 */
     const admitted: { busy?: string; sessionId?: string } = {}
     try {
-      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention, stop)
+      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention, stop, images)
       const interrupted = !result.ok && !!result.interrupted
       if (admitted.sessionId) {
         this.ctx.emit('llm/turn-ended', {
@@ -373,6 +382,7 @@ export class LlmService extends Service {
     mode: Mode,
     onAttention: ((requests: Attention[]) => void) | undefined,
     stop: AbortSignal | undefined,
+    images: readonly ChatImage[],
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
@@ -381,7 +391,7 @@ export class LlmService extends Service {
     let id = sessionId
     try {
       conn = await this.ctx.engine.connection()
-      const ready = await this.prepare(conn, providerId, modelId, directory, id, sessionTitle(prompt), onSession, mode)
+      const ready = await this.prepare(conn, providerId, modelId, directory, id, sessionTitle(prompt || (images[0]?.filename ?? '')), onSession, mode)
       if ('error' in ready) return { ok: false, sessionId: id, error: ready.error }
       id = ready.id
       const { workdir } = ready
@@ -417,7 +427,7 @@ export class LlmService extends Service {
             model: { providerID: providerId, modelID: modelId },
             agent: MODE_AGENT[mode],
             ...(system && { system }),
-            parts: [{ type: 'text', text: prompt }],
+            parts: promptParts(prompt, images),
           }),
         }).catch((error: unknown) => {
           admitted(false)
@@ -1005,11 +1015,23 @@ function parseFrame(frame: string): EngineEvent | undefined {
   }
 }
 
+/** prompt_async 의 parts (01y 1절) — 글 파트 뒤에 이미지를 `{type:"file", mime, filename, url:"data:<mime>;base64,…"}` 로. 글이 없고 이미지만
+ *  있으면 글 파트를 싣지 않는다. url 은 늘 data: 다 — `file://` 는 없는 파일이 끝 신호 없는 거절이 되고, LLM 에 "Called the Read tool…" 머리
+ *  줄이 끼며, 폴더 밖 읽기가 권한을 안 거친다. **이미지 밖의 mime 을 file 파트로 보내지 않는다** — `application/json` 등은 그 세션의 모든 턴을
+ *  망가뜨린다(12/12) */
+export function promptParts(text: string, images: readonly ChatImage[] = []): Record<string, unknown>[] {
+  return [
+    ...(text || images.length === 0 ? [{ type: 'text', text }] : []),
+    ...images.map((image) => ({ type: 'file', mime: image.mime, filename: image.filename, url: `data:${image.mime};base64,${image.data.toString('base64')}` })),
+  ]
+}
+
 /** 레거시 메시지(asc) → 말풍선. 한 턴의 assistant 여럿(도구 스텝)은 한 답으로 합치고 텍스트만 쓴다 — 실시간 턴이 글 줄만 모으는 것과 같은 모양.
  *  끊긴 턴: 엔진 재시작 뒤 그 턴은 완료 시각 없는 assistant(+ running 도구)로 남는다(01w) — 그 세션이 돌고 있지 않은데 마지막이 답 없는 user 이거나
  *  완료 시각 없는 assistant 면 끝에 "중단됨" 을 단다. 마지막이 아닌 턴도 같은 모양이면 중단이다. 사용자가 멈춘 턴은 MessageAbortedError 다.
  *  자동 요약(L2): 요약 user(compaction 파트)는 그 턴 답의 요약 줄(끝나면 done — 화면은 구분선)이고, 요약 답(summary:true)의 글은 답이 아니다.
  *  요약 뒤 user 하나(합성 Continue·한도 초과 뒤 앞 user 의 복사본)는 말풍선이 아니라 이음이다 — 그 답은 같은 턴 답에 붙는다 (TurnScope 와 같은 규칙).
+ *  첨부(01y 5절): user 의 file 파트는 칩 정보(종류·이름)만 싣는다 — url(data: 통째)은 안 넘긴다. opencode 가 덧붙인 synthetic 글은 내 말이 아니다.
  *  root 는 세션 폴더 — 바꾼 파일 경로를 그 기준 상대로 보인다. children 은 task 파트가 띄운 자식 세션의 기록 — 하위 작업 줄 안에 넣는다 (#31) */
 export function historyMessages(raw: readonly EngineMessage[], running: boolean, root = '', mcp?: McpToolResolver, children?: SubtaskHistory): HistoryMessage[] {
   const messages: HistoryMessage[] = []
@@ -1053,12 +1075,15 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
         continue
       }
       const text = parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
-      if (!parts.some((part) => part.type === 'text' && !part.synthetic)) continue // 합성 글뿐
+      const attachments = parts
+        .filter((part) => part.type === 'file')
+        .map((part): Attachment => ({ kind: part.mime?.startsWith('image/') ? 'image' : 'file', name: part.filename ?? '' }))
+      if (!parts.some((part) => part.type === 'text' && !part.synthetic) && attachments.length === 0) continue // 합성 글뿐
       closeTurn(false)
       sentAt = info.time?.created
       lastStep = undefined
       const mode = modeOf(info.agent)
-      asked = { id: info.id, role: 'user', text, ...(sentAt !== undefined && { at: sentAt }), ...(mode && { mode }) }
+      asked = { id: info.id, role: 'user', text, ...(sentAt !== undefined && { at: sentAt }), ...(mode && { mode }), ...(attachments.length > 0 && { attachments }) }
       messages.push(asked)
       continue
     }

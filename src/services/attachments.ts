@@ -1,0 +1,107 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { ATTACHMENT_LIMITS } from '../../shared/attachments.ts'
+import type { AttachmentKind, AttachmentPick, PickedAttachment } from '../../shared/contract.ts'
+import { tr } from '../i18n.ts'
+import { reference } from '../triggers/at.ts'
+import type { ChatImage } from './llm.ts'
+
+// 메시지 첨부 (이슈 #44, 실측 _workspace/01y_attachments.md — opencode 1.18.18 레거시). 화면은 경로만 들고 읽기는 여기(메인)서 한다.
+// - **이미지**: 앱이 읽어 ctx.llm 에 바이트로 넘긴다(ctx.llm 이 data: file 파트로 싣는다). file:// 로 넘기지 않는 이유 — 없는 파일·깨진
+//   이미지·svg 는 opencode 에서 user 메시지도 idle 도 없이 session.error 하나만 온다. 그래서 확장자가 아니라 매직 바이트로 png·jpeg 만 받는다
+//   (gif·webp 는 실측하지 않았다)
+// - **글 파일은 file 파트로 보내지 않는다**: mime 이 `application/json`·`octet-stream` 이면 그 세션의 모든 턴이 실패한다(12/12). 확장자 →
+//   mime 추측에 세션 생사를 걸지 않는다. 프로젝트 안이면 `@경로` 글자(`@` 트리거와 같은 모양 — 모델이 read 도구로 읽는다), 밖이면 읽어서 글로
+// - 칩을 만들 때(pickAttachments)와 보낼 때(outgoing) 두 번 거른다 — 그 사이에 파일이 바뀌거나 사라질 수 있다
+
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const JPEG = [0xff, 0xd8, 0xff]
+
+/** 매직 바이트로 본 이미지 종류 — png·jpeg 가 아니면 undefined */
+export function imageMime(data: Uint8Array): ChatImage['mime'] | undefined {
+  const startsWith = (magic: number[]) => data.length >= magic.length && magic.every((byte, index) => data[index] === byte)
+  if (startsWith(PNG)) return 'image/png'
+  if (startsWith(JPEG)) return 'image/jpeg'
+  return undefined
+}
+
+/** 글자 파일인가 — NUL 바이트가 없고 UTF-8 로 읽힌다 */
+export function isText(data: Uint8Array): boolean {
+  if (data.includes(0)) return false
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(data)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 파일 하나를 읽어 붙일 수 있는지 본다 — 못 붙이면 지금 언어의 사유 */
+async function inspect(kind: AttachmentKind, file: string): Promise<{ item: PickedAttachment; data: Buffer } | { error: string }> {
+  const name = path.basename(file)
+  const image = kind === 'image'
+  try {
+    const stat = await fs.stat(file)
+    if (!stat.isFile()) return { error: tr('attach.notFile', { name }) }
+    if (image && stat.size > ATTACHMENT_LIMITS.imageBytes) return { error: tr('attach.imageTooLarge', { name, max: ATTACHMENT_LIMITS.imageBytes / 1024 / 1024 }) }
+    if (!image && stat.size > ATTACHMENT_LIMITS.fileBytes) return { error: tr('attach.fileTooLarge', { name, max: ATTACHMENT_LIMITS.fileBytes / 1024 }) }
+    const data = await fs.readFile(file)
+    if (image ? !imageMime(data) : !isText(data)) return { error: tr(image ? 'attach.notImage' : 'attach.notText', { name }) }
+    return { item: { kind, path: file, name, size: data.length }, data }
+  } catch {
+    return { error: tr('attach.unreadable', { name }) }
+  }
+}
+
+/** OS 파일 고르기가 준 경로들 → 칩. held 는 그 메시지에 이미 붙은 같은 종류의 수 — 합쳐 상한을 넘는 것은 칩을 만들지 않는다 */
+export async function pickAttachments(kind: AttachmentKind, files: readonly string[], held: number): Promise<AttachmentPick> {
+  const max = kind === 'image' ? ATTACHMENT_LIMITS.images : ATTACHMENT_LIMITS.files
+  const picked: PickedAttachment[] = []
+  const rejected: string[] = []
+  let over = false
+  for (const file of new Set(files)) {
+    const result = await inspect(kind, file)
+    if ('error' in result) rejected.push(result.error)
+    else if (held + picked.length >= max) over = true
+    else picked.push(result.item)
+  }
+  if (over) rejected.push(tr(kind === 'image' ? 'attach.tooManyImages' : 'attach.tooManyFiles', { max }))
+  return { picked, rejected }
+}
+
+/** 프로젝트 폴더 기준 상대 경로(`/` 구분) — 폴더 밖이면 undefined. 둘 다 realpath 한 값이어야 한다 (링크로 밖을 가리키면 밖이다) */
+function insideOf(root: string, file: string): string | undefined {
+  const relative = path.relative(root, file)
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined
+  return relative.split(path.sep).join('/')
+}
+
+/** 파일 이름을 머리로 한 코드 블록 — 울타리는 본문의 가장 긴 백틱 줄보다 길게 */
+function fileBlock(name: string, content: string): string {
+  const longest = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length))
+  const fence = '`'.repeat(Math.max(3, longest + 1))
+  return `${name}:\n${fence}\n${content}${content.endsWith('\n') ? '' : '\n'}${fence}`
+}
+
+/** 보낼 글과 이미지 — 프로젝트 안 글 파일은 글 끝에 `@상대경로`, 밖의 글 파일은 그 뒤에 코드 블록으로, 이미지는 읽은 바이트로.
+ *  다시 걸러서 못 붙이는 것이 있으면 그 사유로 거절한다(통째로 — 일부만 빠진 메시지를 보내지 않는다) */
+export async function outgoing(directory: string, text: string, attachments: readonly PickedAttachment[]): Promise<{ text: string; images: ChatImage[] }> {
+  const root = await fs.realpath(directory).catch(() => undefined) // 폴더가 없으면 ctx.llm 이 그 사유로 거절한다
+  const mentions: string[] = []
+  const blocks: string[] = []
+  const images: ChatImage[] = []
+  for (const attachment of attachments) {
+    const kind: AttachmentKind = attachment.kind === 'image' ? 'image' : 'file'
+    const result = await inspect(kind, String(attachment.path))
+    if ('error' in result) throw new Error(result.error)
+    const { item, data } = result
+    if (kind === 'image') {
+      images.push({ mime: imageMime(data)!, filename: item.name, data })
+      continue
+    }
+    const relative = root && insideOf(root, await fs.realpath(item.path))
+    if (relative) mentions.push(reference(relative))
+    else blocks.push(fileBlock(item.name, data.toString('utf8')))
+  }
+  return { text: [text.trim(), mentions.join(' '), ...blocks].filter(Boolean).join('\n\n'), images }
+}

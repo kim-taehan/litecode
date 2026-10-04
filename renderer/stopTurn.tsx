@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useRef } from 'react'
 import type { QueuedSend } from './useSendQueue.ts'
 
 // 답변 중지 (이슈 #3) — 입력창 ■ · 사이드바 행 ■ · Esc 두 번. 모양·동작은 dsh ui-conversation 참조: 턴이 도는 동안 입력이 비면 보내기
@@ -27,17 +27,18 @@ export class EscapeTwice {
 
 /**
  * 멈추기 함수를 준다 — 그 대화의 큐를 붙잡고(턴 끝에 보내지 않는다) 메인에 멈춤을 보낸다. 턴 끝은 그 턴의 sendMessage 결과("중단됨")가 정한다.
- * 붙잡힌 큐는 그 대화가 화면에 있으면 곧장, 아니면 그 대화를 열 때 입력창으로 되돌린다 (입력창은 하나라 보이는 대화의 것만 넣는다)
+ * 붙잡힌 큐는 그 대화가 화면에 있으면 곧장, 아니면 그 대화를 열 때 입력창으로 되돌린다 (입력창은 하나라 보이는 대화의 것만 넣는다).
+ * restore 는 되돌릴 것(합친 글·첨부)을 입력창에 넣는 함수 — 대기열의 "되돌리기" 와 같은 것을 쓴다
  */
 export function useStopTurn(
   queue: { hold(id: string): void; held(id: string): boolean; take(id: string): QueuedSend | undefined },
   active: string | undefined,
-  setDraft: Dispatch<SetStateAction<string>>,
+  restore: (taken: QueuedSend) => void,
 ): (id: string) => void {
   const held = !!active && queue.held(active)
   useEffect(() => {
     const taken = active && held ? queue.take(active) : undefined
-    if (taken) setDraft((now) => [taken.display ?? taken.text, now.trim()].filter(Boolean).join('\n'))
+    if (taken) restore(taken)
   }, [active, held])
   return (id) => {
     queue.hold(id)

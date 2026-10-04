@@ -91,6 +91,10 @@ export interface EnginePart {
   /** compaction 파트 (자동 요약을 시작한 user 메시지) */
   auto?: boolean
   overflow?: boolean
+  /** file 파트 (user 메시지의 첨부 — 01y). url 은 data: 통째(이미지 한 장에 수 MB)이거나 file:// */
+  mime?: string
+  filename?: string
+  url?: string
 }
 
 /** 레거시 메시지 정보 중 우리가 읽는 필드 */

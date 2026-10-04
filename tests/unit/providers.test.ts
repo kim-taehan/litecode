@@ -124,6 +124,13 @@ describe('ProviderRegistry', () => {
     expect(() => providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', contextLength: 24_000, maxOutput: 24_000 }] })).toThrow('최대 출력')
   })
 
+  // 이미지 입력(이슈 #44) — 켠 모델만 엔진이 modalities 를 싣는다 (01y). 기본 꺼짐
+  it('모델의 이미지 입력은 켰을 때만 남고 다시 열어도 그대로다', async () => {
+    const providers = await registry(files)
+    providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', imageInput: true }, { id: 'm2', displayName: 'N', imageInput: false }] })
+    expect((await registry(files)).get('gw')!.models).toEqual([{ id: 'm1', displayName: 'M', imageInput: true }, { id: 'm2', displayName: 'N' }])
+  })
+
   // 03_qa 1차 재확인 · 리더 결정: 주소를 바꿔 저장하려면 키를 다시 넣어야 한다 — 안 그러면 save → fetch 로 저장 키가 새 주소로 간다
   it('저장 키가 있는 provider 의 Base URL 을 키 없이 바꾸면 저장을 거부하고 파일·키는 그대로다', async () => {
     const providers = await registry(files)

@@ -21,6 +21,9 @@ export interface ModelCatalogEntry {
   /** 최대 출력(토큰, 선택, 이슈 #27) — opencode limit.output 으로 넘어가 요청의 max_tokens 이자 자동 요약 문턱(context − 출력)의 몫이 된다.
    *  비우면 엔진이 컨텍스트 길이의 1/4(최대 32000)를 넣는다 (shared/outputLimit.ts) */
   maxOutput?: number
+  /** 이미지 입력(선택, 이슈 #44) — 켠 모델만 엔진이 opencode.json 모델 정의에 modalities.input 의 image 를 싣는다. 그게 없으면 opencode 가
+   *  붙인 이미지를 "ERROR: Cannot read …(this model does not support image input)" 글로 바꿔 보낸다 (01y). 기본 꺼짐 */
+  imageInput?: boolean
 }
 
 export interface ProviderConfig {
@@ -119,6 +122,7 @@ export class ProviderRegistry extends Service {
       displayName: model.displayName.trim() || model.id.trim(),
       ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
       ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
+      ...(model.imageInput === true && { imageInput: true }),
     }))
     if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
       throw new Error(tr('error.contextLength'))
