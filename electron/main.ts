@@ -235,6 +235,8 @@ function chatBridge(ctx: Context): void {
     return result
   })
   handle(ctx, Channel.SEND_MESSAGE, async (_event, conversationId: string, input: QueuedSend) => ctx.chat.send(String(conversationId), { ...input, origin: 'user' }))
+  // 이름 바꾸기 — 제목은 ctx.chat 이 적는다 (빈 이름·모르는 대화면 undefined)
+  handle(ctx, Channel.RENAME_CONVERSATION, async (_event, id: string, name: string) => ctx.chat.rename(String(id), String(name)))
   handle(ctx, Channel.TAKE_QUEUE, async (_event, conversationId: string) => ctx.chat.takeQueue(String(conversationId)))
   handle(ctx, Channel.DROP_QUEUED, async (_event, conversationId: string, index: number) => ctx.chat.dropQueued(String(conversationId), Number(index)))
   handle(ctx, Channel.CHAT_SNAPSHOT, async () => ctx.chat.snapshot())

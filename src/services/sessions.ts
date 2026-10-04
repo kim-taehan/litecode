@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { History } from './llm.ts'
 import { shellContext } from './shell.ts'
 import { isMode } from '../../shared/modes.ts'
+import { TITLE_MAX } from '../../shared/chat.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
 import type { Attachment, Conversation, MessageOrigin, ShellCard } from '../../shared/contract.ts'
@@ -74,6 +75,9 @@ export class SessionsService extends Service {
       const existing = stored.conversations.find((entry) => entry.id === input.id)
       const next = pick({
         ...input,
+        // 사용자가 지은 이름은 통째 저장이 덮지 않는다 — 이름 바꾸기(rename)로만 바뀐다 (이슈 #63)
+        title: existing?.renamed ? existing.title : input.title,
+        renamed: existing?.renamed,
         engineSessionId: input.engineSessionId ?? existing?.engineSessionId,
         labels: input.labels ?? existing?.labels,
         attachments: input.attachments ?? existing?.attachments,
@@ -100,6 +104,18 @@ export class SessionsService extends Service {
     const stored = await this.update((stored) => ({
       ...stored,
       conversations: stored.conversations.map((entry) => (entry.id === id ? pick({ ...entry, ...change(entry) }) : entry)),
+    }))
+    return stored.conversations.find((entry) => entry.id === id)
+  }
+
+  /** 사용자가 대화 이름을 바꾼다 (이슈 #63) — 앞뒤 공백을 떼고 자동 제목과 같은 길이(TITLE_MAX)로 자른다. 고친 대화를 준다.
+   *  빈 이름·저장 안 된 대화면 아무것도 안 하고 undefined. 시각·순서는 그대로다 (이름 바꾸기는 활동이 아니다) */
+  async rename(id: string, name: string): Promise<Conversation | undefined> {
+    const title = String(name).trim().slice(0, TITLE_MAX)
+    if (!title) return undefined
+    const stored = await this.update((stored) => ({
+      ...stored,
+      conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, title, renamed: true } : entry)),
     }))
     return stored.conversations.find((entry) => entry.id === id)
   }
@@ -261,8 +277,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, updatedAt, model, mode, usage, labels, attachments, origins, shells }: Conversation): Conversation {
-  return { id, project, engineSessionId, title, updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, origins, shells }
+function pick({ id, project, engineSessionId, title, renamed, updatedAt, model, mode, usage, labels, attachments, origins, shells }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, ...(renamed === true && { renamed }), updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, origins, shells }
 }
 
 function isConversation(value: unknown): value is Conversation {

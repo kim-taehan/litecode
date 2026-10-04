@@ -86,6 +86,14 @@ export class ChatService extends Service {
     return { state: 'sent' }
   }
 
+  /** 사용자가 대화 이름을 바꾼다 (이슈 #63) — 도는 중이어도 된다. 고친 목록 정보를 주고 목록 바뀜을 알린다 (다른 손님이 목록을 다시 받게).
+   *  빈 이름·저장 안 된 대화면 undefined. 그 뒤로 제목은 다시 이름을 바꿀 때만 바뀐다 (ctx.sessions) */
+  async rename(cid: string, name: string): Promise<Conversation | undefined> {
+    const renamed = await this.ctx.sessions.rename(cid, name)
+    if (renamed) this.ctx.emit('chat/conversations-changed', { project: renamed.project, removed: [] })
+    return renamed
+  }
+
   /** 대기열 되돌리기 — 그 출처가 쌓은 것을 합쳐 주고 뺀다 (부른 쪽 입력창으로). 붙잡힌 대기열도 풀린다. 없으면 undefined */
   takeQueue(cid: string, origin: ChatOrigin = 'user'): QueuedSend | undefined {
     const taken = this.queues.take(cid, origin)
