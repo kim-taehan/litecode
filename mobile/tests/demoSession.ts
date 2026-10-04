@@ -1,17 +1,17 @@
-// 견본 세션 — 데스크탑·가짜 서버 없이 앱을 켜 화면을 눌러 볼 수 있게 한다 (이슈 #47). 네트워크를 쓰지 않는다.
-// 데스크탑이 할 일을 앱 안에서 흉내 낸다: 계약(shared/remote.ts)의 스냅샷·이벤트를 만들어 **진짜 리듀서(core/state.ts)에 흘린다.**
-// 화면은 견본인지 모른다 — AppSession(app/session.ts)만 본다. 진짜 연결(Connection)을 꽂으면 이 파일은 빠진다.
+// 견본 세션 — **테스트 지원**이다 (제품 번들에 들어가지 않는다 — 앱은 remoteSession.ts 로 데스크탑에 붙는다, 이슈 #62).
+// 네트워크 없이 데스크탑이 할 일을 흉내 낸다: 계약(shared/remote.ts)의 스냅샷·이벤트를 만들어 **진짜 리듀서(core/state.ts)에 흘린다.**
+// tests/demo.test.ts 가 이것으로 "이벤트 흐름 → 리듀서 상태 → 화면 글(view.ts)" 을 지킨다.
 //
 // 내용은 시안(_workspace/mock-mobile)의 것: billing-api, 대화 5개(답 필요·진행 중·완료·읽은 것 둘), "배포 스크립트 정리" 대화의
-// 진행 줄·승인 카드 `npm test -- --run`·대기 1. 살아 있는 동작:
+// 진행 줄·승인 카드 `npm test -- --run`·대기 1. 동작:
 // - 승인에 답하면 카드가 사라지고 턴이 이어져 답이 붙는다(거절이면 그 자리에서 끝). 끝나면 대기 글이 합쳐져 다음 턴으로 간다
 // - 보내면 내 말이 붙고 "echo: …" 로 답한다. 턴 중에 보낸 것은 대기열로
 // - 중지하면 그 턴이 "중단됨" 으로 끝나고 대기열은 보내지 않고 남는다. 되돌리기는 대기 글을 돌려주고 비운다
 
-import type { Attention, ConversationStatus, HistoryMessage, NoticeState, TurnItem } from '../../../shared/contract.ts'
-import type { ConversationSnapshot, RemoteConversation, RemoteEvent, RemoteEventMap, RemoteEventName, RemoteModel, RemoteProject } from '../../../shared/remote.ts'
-import { initialState, reduce, type ConnectionStatus, type RemoteAction, type RemoteState } from '../core/index.ts'
-import type { AppSession } from '../app/session.ts'
+import type { Attention, ConversationStatus, HistoryMessage, NoticeState, TurnItem } from '../../shared/contract.ts'
+import type { ConversationSnapshot, RemoteConversation, RemoteEvent, RemoteEventMap, RemoteEventName, RemoteModel, RemoteProject } from '../../shared/remote.ts'
+import { initialState, reduce, type ConnectionStatus, type RemoteAction, type RemoteState } from '../src/core/index.ts'
+import type { AppSession } from '../src/app/session.ts'
 
 /** 진행 줄 사이 간격 */
 export const DEMO_STEP_MS = 700
@@ -205,6 +205,11 @@ export function createDemoSession(): AppSession {
   return {
     getState: () => state,
     getStatus: () => status,
+    getNotice: () => undefined,
+    clearNotice: () => undefined,
+    openConversation: () => undefined, // 견본은 전부 받아 둔 채로 시작한다
+    closeConversation: () => undefined,
+    wake: () => undefined,
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -212,15 +217,16 @@ export function createDemoSession(): AppSession {
     desktop: { name: '김의 MacBook', address: '10.1.2.3:47821', fingerprint: '9F:2C:41:AB' },
     models: [DEMO_MODEL],
 
-    send(cid, text) {
+    async send(cid, text) {
       const chat = chats.get(cid)
-      if (!chat || !text.trim()) return
+      if (!chat || !text.trim()) return false
       if (chat.turn || chat.queue.length > 0) {
         chat.queue.push(text)
         emit('queue.changed', { cid, items: [...chat.queue] })
       } else {
         startEcho(chat, text)
       }
+      return true
     },
 
     stop(cid) {

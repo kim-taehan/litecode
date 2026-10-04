@@ -1,16 +1,18 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Attention, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
-import { useKeyboardVisible, useNow, useRemoteState } from '../hooks.ts'
+import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
 import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
 import type { AppSession } from '../session.ts'
+import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 import { attentionTitle, composerBottomMargin, outcomeLabel, runningSubtasks, turnHead, turnLines, turnStartedAt, turnTexts } from '../view.ts'
 
 // 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
 // 답은 글자 그대로 그린다 — 마크다운은 다음 라운드. 모드 칩·"작업 N" 은 모양만.
+// 명령(보내기·중지·되돌리기·답)은 전부 데스크탑으로 간다. 안 된 것은 입력창 위 안내 띠(notice)로 — 누르면 닫힌다.
 export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid: string; onBack(): void }) {
   const insets = useSafeAreaInsets()
   const keyboardVisible = useKeyboardVisible()
@@ -22,6 +24,16 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
   const now = useNow(view?.running ?? false)
   const [draft, setDraft] = useState('')
   const scroll = useRef<ScrollView>(null)
+  const notice = useNotice(session)
+
+  // 이 대화를 받아 두고 이벤트를 따라간다 — 나가면 놓는다
+  useEffect(() => {
+    session.openConversation(cid)
+    return () => {
+      session.closeConversation(cid)
+      session.clearNotice()
+    }
+  }, [session, cid])
 
   const project = state.projects.find((candidate) => candidate.path === conversation?.project)
   const model = session.models.find((candidate) => candidate.providerId === conversation?.model?.providerId && candidate.modelId === conversation?.model?.modelId)
@@ -30,9 +42,13 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
   const mode = S.mode[conversation?.mode ?? 'build']
 
   const send = (): void => {
-    if (!draft.trim()) return
-    session.send(cid, draft.trim())
+    const text = draft.trim()
+    if (!text) return
     setDraft('')
+    // 못 보냈으면(안내가 선다) 친 글을 돌려놓는다 — 그사이 새로 친 것이 있으면 건드리지 않는다
+    void session.send(cid, text).then((sent) => {
+      if (!sent) setDraft((current) => current || text)
+    })
   }
   const takeBack = async (): Promise<void> => {
     const text = await session.takeQueue(cid)
@@ -63,6 +79,10 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
         )}
       </View>
 
+      <View style={styles.status}>
+        <StatusBanner session={session} />
+      </View>
+
       <ScrollView ref={scroll} style={styles.body} contentContainerStyle={styles.bodyContent} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
         {view?.messages.map((message, index) => (message.role === 'user' ? <UserBubble key={index} text={message.text} /> : <Answer key={index} message={message} />))}
         {view?.running && (
@@ -82,6 +102,12 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
             <Text style={styles.takeBackText}>{S.takeBack}</Text>
           </Pressable>
         </View>
+      )}
+
+      {notice !== undefined && (
+        <Pressable accessibilityRole="alert" style={styles.notice} onPress={() => session.clearNotice()}>
+          <Text style={styles.noticeText}>{S.notice[notice]}</Text>
+        </Pressable>
       )}
 
       <View style={[styles.composer, { marginBottom: composerBottomMargin(insets.bottom, keyboardVisible) }]}>
@@ -201,6 +227,7 @@ const styles = StyleSheet.create({
   jobs: { height: 36, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: C.blueBorder, backgroundColor: C.blueBg, marginRight: 8 },
   jobsRing: { width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: C.link },
   jobsText: { fontSize: 13, fontWeight: '500', color: C.blueDark },
+  status: { paddingTop: 8 },
   body: { flex: 1 },
   bodyContent: { padding: 16, gap: 14 },
   bubble: { alignSelf: 'flex-end', maxWidth: 290, backgroundColor: C.surface2, borderRadius: 16, paddingVertical: 10, paddingHorizontal: 14 },
@@ -227,6 +254,8 @@ const styles = StyleSheet.create({
   queueText: { flex: 1, minWidth: 0, fontSize: 13, color: C.sub },
   takeBack: { height: 44, paddingHorizontal: 10, justifyContent: 'center' },
   takeBackText: { fontSize: 13, fontWeight: '500', color: C.link },
+  notice: { marginHorizontal: 16, marginBottom: 8, borderRadius: 10, backgroundColor: C.amberBg, borderWidth: 1, borderColor: C.amberBorder, paddingVertical: 8, paddingHorizontal: 12 },
+  noticeText: { fontSize: 13, lineHeight: 18, color: C.amberText },
   composer: { marginHorizontal: 12, borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', borderRadius: 20, paddingVertical: 10, paddingHorizontal: 12, gap: 8, backgroundColor: C.white, elevation: 2 },
   input: { fontSize: 15, color: C.text, paddingVertical: 6, paddingHorizontal: 4, maxHeight: 120 },
   composerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

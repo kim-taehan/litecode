@@ -12,8 +12,9 @@
 // 띄우기 (Node 22.18+ — .ts 를 그대로 실행한다):
 //   node mobile/dev/fake-desktop.mts                        # http://127.0.0.1:47600 (안드로이드 에뮬레이터에서는 http://10.0.2.2:47600)
 //   node mobile/dev/fake-desktop.mts --host 192.168.0.12    # 실제 폰에서 붙을 때 — 그 주소에도 연다 (127.0.0.1 은 늘 연다)
-//   옵션: --port <n>(기본 47600) · --step <ms>(진행 줄 간격, 기본 700)
-// 뜬 뒤 터미널에 한 줄 치면: `drop`(이벤트 스트림을 끊는다 — 다시 붙기 확인) · `restart`(데스크탑 재시작 흉내 — runId 가 바뀐다) ·
+//   옵션: --port <n>(기본 47600) · --step <ms>(진행 줄 간격, 기본 700) · --auto-allow(짝짓기를 묻지 않고 허용)
+// 짝짓기: 폰이 코드를 보내면 터미널에 기기 이름과 확인 코드가 찍힌다 — 폰 화면의 것과 같은지 보고 `allow`(또는 `deny`)를 친다. 60초 안에 안 치면 408
+// 뜬 뒤 터미널에 한 줄 치면: `allow`·`deny`(짝짓기 요청에 답) · `drop`(이벤트 스트림을 끊는다 — 다시 붙기 확인) · `restart`(데스크탑 재시작 흉내 — runId 가 바뀐다) ·
 //   `revoke`(모든 기기 해제)
 
 import { randomBytes } from 'node:crypto'
@@ -39,6 +40,7 @@ import {
   type SendMessageResponse,
   type StopResponse,
 } from '../../shared/remote.ts'
+import { confirmCode, groupCode, normalizePairCode, pairDeviceName } from '../../shared/remotePairing.ts'
 
 export const FAKE_PAIR_CODE = 'DEV0DEV0DEV0'
 const EVENT_RING = 2000
@@ -51,6 +53,12 @@ export interface FakeDesktopOptions {
   /** 진행 줄 사이 간격 */
   stepMs?: number
   pingMs?: number
+  /** 짝짓기 요청을 바로 허용하지 않고 answerPair 를 기다린다 (진짜 데스크탑의 [허용] 확인처럼). 기본은 바로 허용 */
+  manualPair?: boolean
+  /** manualPair 일 때 답을 기다리는 시간 (기본 60초 — 지나면 408) */
+  pairWaitMs?: number
+  /** manualPair 일 때 요청이 왔다 — confirm 은 폰 화면에 뜬 것과 같아야 하는 확인 코드 */
+  onPairRequest?(request: { deviceName: string; confirm: string }): void
 }
 
 export interface FakeDesktop {
@@ -65,9 +73,19 @@ export interface FakeDesktop {
   dropStreams(): void
   /** 데스크탑 재시작 흉내 — runId 가 바뀌고 seq 가 0 부터 다시 간다. 돌던 턴은 "중단됨" 으로 남는다 */
   restart(): void
+  /** 기다리는 짝짓기 요청 (manualPair) */
+  pendingPair(): { deviceName: string; confirm: string } | undefined
+  /** 기다리는 짝짓기 요청에 답한다. 기다리는 것이 없으면 false */
+  answerPair(allow: boolean): boolean
   /** 모든 기기를 해제한다 — `device.revoked` 를 보내고 끊는다. 그 토큰은 401 */
   revokeAll(): void
   close(): Promise<void>
+}
+
+interface PendingPair {
+  deviceName: string
+  confirm: string
+  settle(result: 'allow' | 'deny' | 'timeout'): void
 }
 
 interface Turn {
@@ -109,6 +127,7 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
   let counter = 0
   let turns = 0
   const tokens = new Map<string, string>() // 토큰 → deviceId
+  let pending: PendingPair | undefined
   const streams = new Set<http.ServerResponse>()
   const sent = new Map<string, SendMessageResponse>() // clientMessageId → 처음 결과
   const notices: NoticeState = {}
@@ -364,11 +383,36 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/pair') {
+      // 진짜 데스크탑(src/services/remote.ts)과 같은 답: 틀린 코드 403 'wrong pairing code', 거절 403 'denied on the desktop', 시간 초과 408.
+      // 다른 점: 코드가 고정이고 몇 번이든 쓸 수 있다(진짜는 2분·1회용·5회 폐기), 여러 번 틀려도 막지 않는다(진짜는 429)
       const pair = body as PairRequest | undefined
-      if (pair?.code !== FAKE_PAIR_CODE) return reply(403, { error: '페어링 코드가 틀리다' })
-      const paired: PairResponse = { deviceId: `dev_${++counter}`, token: randomBytes(32).toString('hex') }
-      tokens.set(paired.token, paired.deviceId)
-      return reply(200, paired)
+      const deviceName = typeof pair?.deviceName === 'string' ? pairDeviceName(pair.deviceName) : ''
+      if (typeof pair?.code !== 'string' || !deviceName || (pair.platform !== 'android' && pair.platform !== 'ios')) return reply(400, { error: 'code, deviceName and platform are required' })
+      if (normalizePairCode(pair.code) !== FAKE_PAIR_CODE) return reply(403, { error: 'wrong pairing code' })
+      const allow = (): void => {
+        const paired: PairResponse = { deviceId: `dev_${++counter}`, token: randomBytes(32).toString('hex') }
+        tokens.set(paired.token, paired.deviceId)
+        reply(200, paired)
+      }
+      if (!options.manualPair) return allow()
+      // 데스크탑 [허용] 을 기다린다 — answerPair(터미널의 allow·deny) 또는 시간 초과
+      pending?.settle('deny') // 앞 요청은 새 요청이 밀어낸다 (가짜 서버는 한 번에 하나만 쥔다)
+      const timer = setTimeout(() => waiting.settle('timeout'), options.pairWaitMs ?? 60_000)
+      const waiting: PendingPair = {
+        deviceName,
+        confirm: confirmCode(FAKE_PAIR_CODE, deviceName, pair.platform),
+        settle(result) {
+          if (pending !== waiting) return
+          pending = undefined
+          clearTimeout(timer)
+          if (result === 'allow') allow()
+          else if (result === 'deny') reply(403, { error: 'denied on the desktop' })
+          else reply(408, { error: 'nobody answered on the desktop' })
+        },
+      }
+      pending = waiting
+      options.onPairRequest?.({ deviceName, confirm: waiting.confirm })
+      return
     }
 
     const deviceId = tokens.get((request.headers.authorization ?? '').replace(/^Bearer /, ''))
@@ -425,11 +469,18 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
       log = []
       dropStreams()
     },
+    pendingPair: () => pending && { deviceName: pending.deviceName, confirm: pending.confirm },
+    answerPair(allow) {
+      if (!pending) return false
+      pending.settle(allow ? 'allow' : 'deny')
+      return true
+    },
     revokeAll() {
       tokens.clear()
       for (const stream of streams) stream.end(frame('device.revoked', {}))
     },
     async close() {
+      pending?.settle('deny')
       for (const chat of chats.values()) clearTimeout(chat.turn?.timer)
       dropStreams()
       await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))))
@@ -446,17 +497,24 @@ function newRunId(): string {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2)
   const values = (name: string): string[] => args.flatMap((arg, index) => (arg === name && args[index + 1] ? [args[index + 1]!] : []))
-  const desktop = await startFakeDesktop({ hosts: values('--host'), port: Number(values('--port')[0] ?? 47600), stepMs: Number(values('--step')[0] ?? 700) })
+  const desktop = await startFakeDesktop({
+    hosts: values('--host'),
+    port: Number(values('--port')[0] ?? 47600),
+    stepMs: Number(values('--step')[0] ?? 700),
+    manualPair: !args.includes('--auto-allow'),
+    onPairRequest: ({ deviceName, confirm }) => console.log(`짝짓기 요청: "${deviceName}" · 확인 코드 ${confirm} (폰 화면과 같은지 보고) → allow 또는 deny`),
+  })
   console.log(`가짜 데스크탑 (개발용 · 평문 http) — ${['127.0.0.1', ...values('--host')].map((host) => `http://${host}:${desktop.port}`).join(' , ')}`)
-  console.log(`페어링 코드: ${FAKE_PAIR_CODE}   (안드로이드 에뮬레이터에서는 http://10.0.2.2:${desktop.port})`)
-  console.log('명령: drop | restart | revoke   (Ctrl+C 로 끝낸다)')
+  console.log(`페어링 코드: ${groupCode(FAKE_PAIR_CODE)}   (안드로이드 에뮬레이터에서는 10.0.2.2:${desktop.port})`)
+  console.log('명령: allow | deny (짝짓기 요청에 답) · drop | restart | revoke   (Ctrl+C 로 끝낸다)')
   process.stdin.setEncoding('utf8')
-  process.stdin.on('data', (line: string) => {
-    const command = line.trim()
-    if (command === 'drop') desktop.dropStreams()
-    else if (command === 'restart') desktop.restart()
-    else if (command === 'revoke') desktop.revokeAll()
-    else if (command) return console.log('모르는 명령')
-    if (command) console.log(`→ ${command}`)
+  process.stdin.on('data', (chunk: string) => {
+    for (const command of chunk.split('\n').map((line) => line.trim()).filter(Boolean)) {
+      if (command === 'allow' || command === 'deny') console.log(desktop.answerPair(command === 'allow') ? `→ ${command}` : '기다리는 짝짓기 요청이 없다')
+      else if (command === 'drop') (desktop.dropStreams(), console.log('→ drop'))
+      else if (command === 'restart') (desktop.restart(), console.log('→ restart'))
+      else if (command === 'revoke') (desktop.revokeAll(), console.log('→ revoke'))
+      else console.log('모르는 명령')
+    }
   })
 }

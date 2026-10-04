@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Keyboard } from 'react-native'
 import type { ConnectionStatus, RemoteState } from '../core/index.ts'
-import type { AppSession } from './session.ts'
+import type { DesktopLink, LinkState } from './link.ts'
+import type { AppSession, SessionNotice } from './session.ts'
 
 /** 세션의 리듀서 상태 — 바뀌면 다시 그린다 */
 export function useRemoteState(session: AppSession): RemoteState {
@@ -10,6 +11,18 @@ export function useRemoteState(session: AppSession): RemoteState {
 
 export function useConnectionStatus(session: AppSession): ConnectionStatus {
   return useSyncExternalStore(session.subscribe, session.getStatus)
+}
+
+export function useNotice(session: AppSession): SessionNotice | undefined {
+  return useSyncExternalStore(session.subscribe, session.getNotice)
+}
+
+/** 데스크탑과의 짝이 지금 어느 단계인가 */
+export function useLinkState(link: DesktopLink): LinkState {
+  return useSyncExternalStore(
+    (listener) => link.subscribe(listener),
+    () => link.state,
+  )
 }
 
 /** 1초마다 오르는 지금 시각 — 진행 초·"12초 전"·"다시 연결 중 · n초" */

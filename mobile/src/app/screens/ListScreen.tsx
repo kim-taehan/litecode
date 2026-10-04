@@ -3,11 +3,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useConnectionStatus, useNow, useRemoteState } from '../hooks.ts'
 import { ChevronDown, Gear } from '../icons.tsx'
 import type { AppSession } from '../session.ts'
+import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
 import { C } from '../theme.ts'
-import { ago, initials, rowView, statusBanner, type RowView } from '../view.ts'
+import { ago, initials, rowView, type RowView } from '../view.ts'
 
-// 2 대화 목록 (시안 List). 프로젝트 바꾸기 버튼은 모양만 — 견본에는 프로젝트가 하나다.
+// 2 대화 목록 (시안 List). 데스크탑의 첫 프로젝트(가장 최근에 연 것)의 대화를 보인다 — 프로젝트 바꾸기 버튼은 아직 모양만.
 export function ListScreen({ session, onOpen, onSettings }: { session: AppSession; onOpen(cid: string): void; onSettings(): void }) {
   const insets = useSafeAreaInsets()
   const state = useRemoteState(session)
@@ -15,10 +16,10 @@ export function ListScreen({ session, onOpen, onSettings }: { session: AppSessio
   const now = useNow()
   const project = state.projects[0]
   const conversations = project ? (state.conversations[project.path] ?? []) : []
-  const banner = statusBanner(status, now)
 
   const create = async (): Promise<void> => {
-    if (project) onOpen(await session.createConversation(project.path))
+    const cid = project ? await session.createConversation(project.path) : undefined
+    if (cid !== undefined) onOpen(cid)
   }
 
   return (
@@ -43,18 +44,15 @@ export function ListScreen({ session, onOpen, onSettings }: { session: AppSessio
         </Pressable>
       </View>
 
-      {banner !== undefined && (
-        <View style={styles.banner}>
-          <View style={styles.bannerDot} />
-          <Text style={styles.bannerText}>{banner}</Text>
-        </View>
-      )}
+      <StatusBanner session={session} />
 
       <Text style={styles.section}>{S.conversations}</Text>
 
       <ScrollView style={styles.list}>
+        {project !== undefined && state.conversations[project.path] !== undefined && conversations.length === 0 && <Text style={styles.empty}>{S.noConversations}</Text>}
         {conversations.map((conversation, index) => {
-          const row = rowView(conversation, state.notices[conversation.id]?.status, state.views[conversation.id])
+          // 상태 점: 이벤트로 온 것(notices)이 먼저, 없으면 목록을 받을 때 실려 온 것 (앱을 다시 켠 직후엔 notices 이벤트가 아직 없다)
+          const row = rowView(conversation, state.notices[conversation.id]?.status ?? conversation.status, state.views[conversation.id])
           return (
             <Pressable
               key={conversation.id}
@@ -120,11 +118,9 @@ const styles = StyleSheet.create({
   projectName: { fontSize: 14, fontWeight: '600', color: C.text },
   projectPath: { fontSize: 12, color: C.sub },
   gear: { width: 48, height: 48, borderRadius: 12, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
-  banner: { marginHorizontal: 16, marginBottom: 8, height: 36, borderRadius: 10, backgroundColor: C.amberBg, borderWidth: 1, borderColor: C.amberBorder, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 },
-  bannerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.amber },
-  bannerText: { fontSize: 13, color: C.amberText },
   section: { paddingTop: 8, paddingHorizontal: 20, paddingBottom: 6, fontSize: 12, color: C.sub, fontWeight: '600' },
   list: { flex: 1 },
+  empty: { paddingHorizontal: 20, paddingVertical: 16, fontSize: 13, color: C.sub },
   row: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20 },
   rowBorder: { borderTopWidth: 1, borderTopColor: C.hair },
   rowAttention: { backgroundColor: C.amberBg },
