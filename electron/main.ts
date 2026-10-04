@@ -5,8 +5,8 @@ import { Context } from 'cordis'
 import { ProviderRegistry, type KeyCipher, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService, type AttentionAnswer } from '../src/services/llm.ts'
 import { ChatService } from '../src/services/chat.ts'
-import { attachDropped, attachPasted, pickAttachments } from '../src/services/attachments.ts'
-import { PastedImages } from '../src/services/pastedImages.ts'
+import { AttachmentsService } from '../src/services/attachmentsService.ts'
+import { systemAttachmentsHost } from './attachmentsHost.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
 import { EngineService, killEngineProcesses } from '../src/services/engine.ts'
@@ -257,45 +257,6 @@ mounted.push(ctx.plugin(bootstrap))
 // 대화 (ctx.chat, 이슈 #52) — 보내기·대기열·중지·답은 메인이 쥐고, 화면은 이벤트로 그린다. 이벤트는 모든 창에 흘린다 (화면이 대화 id 로 거른다).
 // 창이 없어도(macOS 에서 닫음) 턴은 돌고, 새 창은 CHAT_SNAPSHOT 으로 이어 그린다
 function chatBridge(ctx: Context): void {
-  // `+` 메뉴의 파일 추가·이미지 추가 (이슈 #44) — 이미지는 png·jpeg 만 (01y: 그 밖은 실측하지 않았다. 판정은 확장자가 아니라 매직 바이트)
-  handle(ctx, Channel.PICK_ATTACHMENTS, async (event, kind: AttachmentKind, directory: string, held: number) => {
-    const image = kind === 'image'
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const options = {
-      properties: ['openFile' as const, 'multiSelections' as const],
-      ...(image ? { filters: [{ name: tr('attach.imageFilter'), extensions: ['png', 'jpg', 'jpeg'] }] } : typeof directory === 'string' && { defaultPath: directory }),
-    }
-    const chosen = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
-    if (chosen.canceled) return { picked: [], rejected: [] }
-    const result = await pickAttachments(image ? 'image' : 'file', chosen.filePaths, Number(held) || 0)
-    ctx.chat.allowAttachments(result.picked.map((item) => item.path))
-    return result
-  })
-  // 붙여넣기·끌어다 놓기 (이슈 #80). 본문은 preload 가 File 객체에서 만든 것이다 — paths: 사용자가 실제로 놓거나 붙여넣은 파일의 경로
-  // (webUtils.getPathForFile), blobs: 경로 없는 이미지의 바이트(스크린숏). 종류·상한·사유는 고르기와 같은 검사로 메인이 정하고,
-  // 칩이 된 경로만 보낼 수 있게 적어 둔다. 경로 없는 이미지는 userData/pasted-images 의 임시 파일이 된다 (pastedImages.ts — 지우는 때 포함)
-  const pasted = new PastedImages(path.join(userData, 'pasted-images'))
-  const cleared = pasted.reset().catch((error: unknown) => console.error('[attachments] 붙여넣은 이미지 폴더 비우기 실패', (error as Error).message))
-  ctx.effect(() => () => pasted.reset().catch(() => {}))
-  ctx.on('chat/attachments-read', (paths) => void pasted.discard(paths))
-  ctx.on('sessions/removed', (ids) => void pasted.discardOf(ids))
-  handle(ctx, Channel.ATTACH_DROPPED, async (_event, conversationId: string, input: { paths?: unknown; blobs?: unknown } | undefined, held: Partial<Record<AttachmentKind, number>> | undefined, model: ChatModel | undefined) => {
-    await cleared
-    const paths = Array.isArray(input?.paths) ? input.paths.filter((file): file is string => typeof file === 'string' && path.isAbsolute(file)) : []
-    const blobs = (Array.isArray(input?.blobs) ? (input.blobs as { name?: unknown; data?: unknown }[]) : []).map((blob) => ({
-      name: String(blob?.name ?? ''),
-      ...(blob?.data instanceof Uint8Array && { data: blob.data }),
-    }))
-    const imageInput = typeof model === 'object' && ctx.chat.acceptsImages(model)
-    const count = { file: Number(held?.file) || 0, image: Number(held?.image) || 0 }
-    const dropped = await attachDropped(paths, count, imageInput)
-    for (const item of dropped.picked) count[item.kind]++
-    const fromBytes = await attachPasted(pasted, String(conversationId), blobs, count, imageInput)
-    const picked = [...dropped.picked, ...fromBytes.picked]
-    ctx.chat.allowAttachments(picked.map((item) => item.path))
-    return { picked, rejected: [...new Set([...dropped.rejected, ...fromBytes.rejected])] }
-  })
-  handle(ctx, Channel.DISCARD_ATTACHMENTS, async (_event, paths: unknown) => pasted.discard(Array.isArray(paths) ? paths.filter((file): file is string => typeof file === 'string') : []))
   handle(ctx, Channel.SEND_MESSAGE, async (_event, conversationId: string, input: QueuedSend) => ctx.chat.send(String(conversationId), { ...input, origin: 'user' }))
   // 이름 바꾸기 — 제목은 ctx.chat 이 적는다 (빈 이름·모르는 대화면 undefined)
   handle(ctx, Channel.RENAME_CONVERSATION, async (_event, id: string, name: string) => ctx.chat.rename(String(id), String(name)))
@@ -318,6 +279,19 @@ function chatBridge(ctx: Context): void {
 chatBridge.inject = ['chat']
 mounted.push(ctx.plugin(ChatService))
 mounted.push(ctx.plugin(chatBridge))
+
+// 첨부 (ctx.attachments, 이슈 #97) — 고르기·놓기·붙여넣기를 칩으로 만들고 붙여넣은 이미지의 임시 파일(userData/pasted-images)을 쥔다.
+// 여기는 채널만 잇는다. 파일 고르기 대화상자는 host 가 요청을 보낸 창에 붙인다 (event.sender)
+function attachmentsBridge(ctx: Context): void {
+  handle(ctx, Channel.PICK_ATTACHMENTS, async (event, kind: AttachmentKind, directory: string, held: number) => ctx.attachments.pick(kind, directory, held, event.sender))
+  handle(ctx, Channel.ATTACH_DROPPED, async (_event, conversationId: string, input: { paths?: unknown; blobs?: unknown } | undefined, held: Partial<Record<AttachmentKind, number>> | undefined, model: ChatModel | undefined) =>
+    ctx.attachments.drop(conversationId, input, held, model),
+  )
+  handle(ctx, Channel.DISCARD_ATTACHMENTS, async (_event, paths: unknown) => ctx.attachments.discard(paths))
+}
+attachmentsBridge.inject = ['attachments']
+mounted.push(ctx.plugin(AttachmentsService, { host: systemAttachmentsHost, pastedDir: path.join(userData, 'pasted-images') }))
+mounted.push(ctx.plugin(attachmentsBridge))
 
 /** 모든 앱 창에 보낸다 */
 function broadcast(channel: string, ...args: unknown[]): void {
@@ -676,11 +650,11 @@ function createWindow(): BrowserWindow {
   return win
 }
 
-// 부팅 진단 (참고 레포 검토 02x A) — 바탕 서비스 하나라도 안 뜨면 그것을 inject 한 bootstrap·chatBridge 가 말없이 기다리기만 하고
+// 부팅 진단 (참고 레포 검토 02x A) — 바탕 서비스 하나라도 안 뜨면 그것을 inject 한 bootstrap·chatBridge·attachmentsBridge 가 말없이 기다리기만 하고
 // 창은 IPC 핸들러 없이 뜬다. 기한 뒤에도 안 뜬 서비스의 이름을 로그에 남기고 사용자에게 한 줄로 알린다
 const BOOT_DEADLINE_MS = 15_000
 function checkBoot(): void {
-  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject], (name) => ctx.get(name))
+  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject], (name) => ctx.get(name))
   if (!missing.length) return
   console.error(`[boot] ${BOOT_DEADLINE_MS / 1000}초 안에 안 뜬 서비스: ${missing.join(', ')}`)
   if (hiddenForTests) return // 실물 테스트는 대화상자를 띄우지 않는다 — 기록만
