@@ -4,6 +4,7 @@ import path from 'node:path'
 import { providerIdFor } from '../../shared/providerId.ts'
 import { tr } from '../i18n.ts'
 import { readJsonFileSync } from './jsonFile.ts'
+import { describeHttpError, errorDetail } from '../../shared/httpError.ts'
 
 // 모델 provider 설정 — dsh 의 Settings > Models 화면과 같은 모양을 따른다.
 // baseURL 을 직접 지정할 수 있어야 폐쇄망 내부 게이트웨이(LiteLLM 등)를 붙일 수 있다.
@@ -179,7 +180,7 @@ export class ProviderRegistry extends Service {
       await res.body?.cancel()
       throw new Error(tr('error.redirected', { status: res.status }))
     }
-    if (!res.ok) throw new Error(tr('error.fetchModels', { status: res.status }))
+    if (!res.ok) throw new Error(tr('error.fetchModels', { reason: describeHttpError(tr, res.status, errorDetail(await res.text().catch(() => ''))) }))
     const body = (await res.json()) as { data?: { id?: unknown; name?: unknown }[] }
     return (body.data ?? [])
       .filter((model): model is { id: string; name?: unknown } => typeof model.id === 'string')

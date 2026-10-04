@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ShellCard as ShellCardData } from '../shared/ipc.ts'
 import { useT, type Translate } from './settingsStore.ts'
+import { stripAnsi } from '../shared/ansi.ts'
 import './chat.css'
 
 // 대화 안의 `!명령` 결과 카드 (closed-code shellRecord·TurnExtras 참조) — 명령 · 끝난 사정(종료 코드) · 고정폭 출력(길면 접기).
@@ -26,7 +27,8 @@ export function ShellCard({ card, shareBlocked, onStop, onShare }: ShellCardProp
   const [expanded, setExpanded] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [error, setError] = useState<string>()
-  const output = card.output.replace(/\n+$/, '')
+  // 색을 강제하는 도구의 색 코드(ANSI)는 뗀다 — 그리지는 않는다. "AI 에게 보내기" 본문도 같게 뗀다 (shell.ts shellContext)
+  const output = stripAnsi(card.output).replace(/\n+$/, '')
   const long = output.split('\n').length > COLLAPSE_LINES
   const shared = !!card.sharedMessageId
   const state = card.running ? 'running' : card.status === 'done' ? (card.exitCode === 0 ? 'ok' : 'failed') : card.status

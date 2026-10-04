@@ -32,6 +32,35 @@
 }
 .user-turn__copy:hover { color: var(--text); background: var(--fill-hover); }
 
+/* 답 행동 줄 — 답 아래 왼쪽, 내 말의 복사와 같은 24px 버튼. 그 턴에 마우스를 올리거나 포커스가 들어올 때만 보인다
+   (dsh MessageIconActions — hover 가 없는 기기에선 늘 보인다) */
+.turn__meta {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin-top: 4px;
+  opacity: 0;
+}
+.turn:hover > .turn__meta,
+.turn__meta:focus-within { opacity: 1; }
+@media (hover: none) {
+  .turn__meta { opacity: 1; }
+}
+
+.turn__copy {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  color: var(--text-tertiary);
+}
+.turn__copy:hover { color: var(--text); background: var(--fill-hover); }
+
 .turn {
   display: flex;
   flex-direction: column;

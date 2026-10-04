@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import type { Mode } from '../shared/ipc.ts'
 import { CYCLE_MODES, MODES } from '../shared/modes.ts'
 import { useT } from './settingsStore.ts'
+import { useFocusTrap } from './focusTrap.ts'
 
 // 입력창 왼쪽 모드 칩 (사용자 결정 2026-10-02, 01k §5). 칩 하나·항상 보임, 기본이 아니면 모드 색(계획 파랑·매번 묻기 회색 테두리·전체 권한 주황).
 // 색만으로 가르지 않는다 — 이름이 늘 보인다(closed-code PermissionModeSwitch 와 같은 이유). 메뉴 모양은 모델 드롭다운(dsh ui-model-selection)과
@@ -152,6 +153,8 @@ export function ModeChip({ value, locked, onChange }: ModeChipProps) {
 export function ConfirmFullAccess({ onCancel, onConfirm }: { onCancel(): void; onConfirm(): void }) {
   const t = useT()
   const [acknowledged, setAcknowledged] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(dialogRef)
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
@@ -163,7 +166,7 @@ export function ConfirmFullAccess({ onCancel, onConfirm }: { onCancel(): void; o
   }, [onCancel])
   return (
     <div className="confirm-mask" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
-      <div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-full-title" aria-describedby="confirm-full-description">
+      <div className="confirm-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="confirm-full-title" aria-describedby="confirm-full-description">
         <h2 id="confirm-full-title" className="confirm-dialog__title">
           {t('mode.confirm.title')}
         </h2>

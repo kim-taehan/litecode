@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RemoteDeviceInfo, RemoteStatus } from '../shared/ipc.ts'
 import { reason } from './Settings.tsx'
 import { useSettings, useT } from './settingsStore.ts'
+import { useFocusTrap } from './focusTrap.ts'
 
 // 설정 > 모바일 (이슈 #56) — 폰 앱이 이 PC 에 붙는 문(ctx.remote)의 화면. 기능 `remote` 가 켜졌을 때만 메뉴에 보인다.
 // 일반 페이지의 행(이름 + 회색 설명, 오른쪽 컨트롤)과 스위치·버튼을 그대로 쓴다: 연결 켜기 → 기기 연결(주소·코드·남은 시간) → 짝지은 기기.
@@ -165,11 +166,14 @@ export function MobilePage() {
 export function RemotePairPrompt({ on }: { on: boolean }) {
   const t = useT()
   const request = useRemoteStatus(on)?.requests[0]
+  // Tab 은 가두되 포커스를 빼앗지는 않는다 — 폰이 띄우는 창이라, 치던 Enter 가 [허용] 에 떨어지면 안 된다
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(dialogRef, { on: !!request, steal: false })
   if (!request) return null
   const answer = (allow: boolean) => void window.litecode.answerRemotePair(request.id, allow).catch(() => {})
   return (
     <div className="confirm-mask">
-      <div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="remote-pair-title" aria-describedby="remote-pair-description">
+      <div className="confirm-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="remote-pair-title" aria-describedby="remote-pair-description">
         <h2 id="remote-pair-title" className="confirm-dialog__title">
           {t('remote.request.title')}
         </h2>

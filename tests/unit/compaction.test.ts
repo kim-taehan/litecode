@@ -21,7 +21,8 @@ describe('한도 초과 알아보기', () => {
   it('속도 제한·그 밖의 실패는 그대로 둔다', () => {
     expect(isContextOverflow('Rate limit reached: too many tokens per minute')).toBe(false)
     expect(isContextOverflow('fake-llm: 요청된 실패')).toBe(false)
-    expect(turnError('Provider request failed with HTTP 500')).toBe('Provider request failed with HTTP 500')
+    // 상태 코드가 있는 실패는 문구가 앞에 붙고 원문은 괄호에 남는다 (httpError.test.ts)
+    expect(turnError('Provider request failed with HTTP 500')).toContain('(Provider request failed with HTTP 500)')
   })
 
   it('안내 문장 (ko)', () => {
