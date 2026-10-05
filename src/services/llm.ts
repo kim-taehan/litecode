@@ -1226,11 +1226,12 @@ async function runningCall(calls: ToolCalls | undefined, callId: string | undefi
 }
 
 /** running 파트를 못 봤을 때 요청에 실린 것으로 만드는 인자 — bash 는 `metadata.command`, edit·write 는 `metadata.filepath` (01af §4),
- *  webfetch 는 metadata 가 인자 그대로다 (`{url, format, timeout?}` — 01ai) */
+ *  webfetch·glob·grep 은 metadata 가 인자 그대로다 (`{url, format, timeout?}` · `{pattern, path?}` · `{pattern, path?, include?}` — 01ai) */
 function requestInput(permission: string, metadata: Record<string, unknown> | undefined): unknown {
   if (permission === 'bash' && typeof metadata?.['command'] === 'string') return { command: metadata['command'] }
   if (permission === 'edit' && typeof metadata?.['filepath'] === 'string') return { filePath: metadata['filepath'] }
   if (permission === 'webfetch' && typeof metadata?.['url'] === 'string') return { ...metadata }
+  if ((permission === 'glob' || permission === 'grep') && typeof metadata?.['pattern'] === 'string') return { ...metadata }
   return {}
 }
 

@@ -69,17 +69,20 @@ describe('줄의 뷰 모델 (hookRow · hooksOn)', () => {
 
   it('걸리지 않는 도구만 가리키는 도구 실행 전 훅은 unreachable — 도구 실행 후 훅·빈 매처·걸리는 도구가 섞인 매처는 아니다', () => {
     const unreachable = (event: HookDef['event'], matcher: string): boolean => hookRow(entry(hook(event, 'a', { matcher }), 'project')).unreachable
-    expect(unreachable('PreToolUse', 'glob')).toBe(true)
-    expect(unreachable('PreToolUse', 'Grep | webfetch')).toBe(true)
-    expect(unreachable('PreToolUse', 'glob|bash')).toBe(false)
+    expect(unreachable('PreToolUse', 'websearch')).toBe(true)
+    expect(unreachable('PreToolUse', ' WebSearch ')).toBe(true)
+    expect(unreachable('PreToolUse', 'websearch|bash')).toBe(false)
+    expect(unreachable('PreToolUse', 'webfetch|websearch')).toBe(false)
+    for (const matcher of ['glob', 'Grep | webfetch']) expect(unreachable('PreToolUse', matcher), matcher).toBe(false) // 이제 걸린다 (#107 뒤)
     expect(unreachable('PreToolUse', '')).toBe(false)
     expect(unreachable('PreToolUse', 'github_.*')).toBe(false)
-    expect(unreachable('PostToolUse', 'grep')).toBe(false) // 도구 실행 후 훅은 돈다
+    expect(unreachable('PostToolUse', 'websearch')).toBe(false) // 도구 실행 전 훅만의 경고다
   })
 
   it('걸리지 않는 도구 목록은 엔진의 게이트와 같다 — 그 이름만으로는 아무것도 걸리지 않는다', () => {
+    expect(UNGATED_TOOLS).toEqual(['websearch'])
     for (const tool of UNGATED_TOOLS) expect(toolGate([tool])).toEqual({ permissions: [], mcp: false })
-    expect(toolGate(['bash']).permissions).toEqual(['bash'])
+    for (const tool of ['bash', 'glob', 'grep', 'webfetch']) expect(toolGate([tool]).permissions, tool).toEqual([tool])
     expect(preToolUnreachable(UNGATED_TOOLS.join('|'))).toBe(true)
   })
 
@@ -121,9 +124,10 @@ describe('폼 검증 (checkHookDraft — 메인과 화면이 같은 함수)', ()
   })
 
   it('폼의 매처 경고: 도구 실행 전 훅이 걸리지 않는 도구만 가리킬 때만', () => {
-    expect(formUnreachable({ event: 'PreToolUse', matcher: 'grep|glob' })).toBe(true)
-    expect(formUnreachable({ event: 'PreToolUse', matcher: 'grep|read' })).toBe(false)
-    expect(formUnreachable({ event: 'PostToolUse', matcher: 'grep' })).toBe(false)
+    expect(formUnreachable({ event: 'PreToolUse', matcher: 'websearch' })).toBe(true)
+    expect(formUnreachable({ event: 'PreToolUse', matcher: 'grep|glob' })).toBe(false)
+    expect(formUnreachable({ event: 'PreToolUse', matcher: 'websearch|read' })).toBe(false)
+    expect(formUnreachable({ event: 'PostToolUse', matcher: 'websearch' })).toBe(false)
   })
 })
 
@@ -362,13 +366,13 @@ describe('훅 팝업의 IPC 다리 (hooks/bridge.ts)', () => {
     const { invoke, project, llm, files } = await start()
     llm.gates.length = 0
     await invoke(Channel.SAVE_HOOK, draft({ scope: 'project', matcher: 'bash', command: './guard.sh', timeout: 10 }), project)
-    await invoke(Channel.SAVE_HOOK, draft({ scope: 'all', event: 'PreToolUse', matcher: 'grep', command: './grep-guard.sh' }), project)
+    await invoke(Channel.SAVE_HOOK, draft({ scope: 'all', event: 'PreToolUse', matcher: 'websearch', command: './search-guard.sh' }), project)
     const rows = await invoke<HookRow[]>(Channel.LIST_HOOKS, project)
     expect(rows.map((row) => [row.scope, row.event, row.matcher, row.command, row.seconds, row.on, row.unreachable])).toEqual([
-      ['all', 'PreToolUse', 'grep', './grep-guard.sh', 30, true, true],
+      ['all', 'PreToolUse', 'websearch', './search-guard.sh', 30, true, true],
       ['project', 'PreToolUse', 'bash', './guard.sh', 10, true, false],
     ])
-    await vi.waitFor(() => expect(llm.gates.at(-1)).toEqual(['bash', 'grep'])) // 저장 뒤 알리기는 비동기다 (파일을 다시 읽는다)
+    await vi.waitFor(() => expect(llm.gates.at(-1)).toEqual(['bash', 'websearch'])) // 저장 뒤 알리기는 비동기다 (파일을 다시 읽는다)
     // 저장 형식은 Claude Code hooks 그대로 — 프로젝트만의 훅은 realpath 열쇠 아래에
     expect(JSON.parse(await fs.readFile(files.projectsFile, 'utf8'))[project].hooks.PreToolUse).toEqual([{ matcher: 'bash', hooks: [{ type: 'command', command: './guard.sh', timeout: 10 }] }])
   })

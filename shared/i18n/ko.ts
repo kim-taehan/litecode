@@ -674,7 +674,7 @@ export const ko = {
   'hooks.popup.seconds': '{seconds}초',
   'hooks.popup.edit': '{event} 훅 편집 — {command}',
   'hooks.popup.enabled': '{command} 켜기',
-  'hooks.popup.unreachable': '이 매처는 glob·grep·webfetch·websearch 만 가리킵니다 — 도구 실행 전 훅이 걸리지 않는 도구라 돌지 않습니다.',
+  'hooks.popup.unreachable': '이 매처는 websearch 만 가리킵니다 — 지금 엔진에 없는 도구라 훅이 돌지 않습니다.',
   'hooks.popup.footer': '줄을 누르면 편집과 시험 실행이 열립니다. 훅은 이 PC 에서만 돌고, 폰에는 결과 줄만 보입니다.',
   'hooks.popup.candidates': '이 폴더에 훅 정의 {count}개가 있습니다',
   'hooks.popup.candidates.note': '{files} — 자동으로 실행하지 않습니다.',

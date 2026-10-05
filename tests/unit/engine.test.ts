@@ -315,14 +315,19 @@ describe('toolGate — 매처 → 게이트 대상', () => {
     expect(toolGate(['Bash', ' read|Skill ', 'TodoWrite|Task'])).toEqual({ permissions: ['bash', 'read', 'skill', 'task', 'todowrite'], mcp: false })
   })
 
-  // 격리 실행 2026-10-05 (동봉 1.18.18): 이 도구들에 ask 를 얹으면 엔진의 승인 목록 읽기가 실패해 턴이 멈춘다 — 걸지 않는다
-  it('glob·grep·webfetch·websearch 에는 걸지 않는다 — 이름은 아는 내장 도구라 MCP 로 번지지도 않는다', () => {
-    expect(toolGate(['glob', 'Grep|WebFetch', 'websearch'])).toEqual({ permissions: [], mcp: false })
-    expect(toolGate(['read|glob|grep'])).toEqual({ permissions: ['read'], mcp: false })
+  // 승인 목록 400 은 #107 의 이벤트 폴백으로 풀렸다 (01ai "훅 게이트" 각 3/3) — glob·grep·webfetch 도 자기 권한 이름으로 건다
+  it('glob·grep·webfetch 는 자기 권한 이름으로 건다 — 대소문자를 가리지 않고, MCP 로 번지지 않는다', () => {
+    expect(toolGate(['glob', 'Grep|WebFetch'])).toEqual({ permissions: ['glob', 'grep', 'webfetch'], mcp: false })
+    expect(toolGate(['read|glob|grep'])).toEqual({ permissions: ['glob', 'grep', 'read'], mcp: false })
+  })
+
+  it('websearch 에는 걸지 않는다 (레거시 경로에 그 도구가 없다) — 이름은 아는 내장 도구라 MCP 로 번지지도 않는다', () => {
+    expect(toolGate(['websearch'])).toEqual({ permissions: [], mcp: false })
+    expect(toolGate(['WebFetch|WebSearch'])).toEqual({ permissions: ['webfetch'], mcp: false })
   })
 
   it('빈 매처·* 는 전부 — 걸 수 있는 내장 권한 전부 + MCP 도구', () => {
-    const all = { permissions: ['bash', 'edit', 'read', 'skill', 'task', 'todowrite'], mcp: true }
+    const all = { permissions: ['bash', 'edit', 'glob', 'grep', 'read', 'skill', 'task', 'todowrite', 'webfetch'], mcp: true }
     expect(toolGate([''])).toEqual(all)
     expect(toolGate(['  '])).toEqual(all)
     expect(toolGate(['*'])).toEqual(all)
@@ -395,17 +400,37 @@ describe('engineConfig — 도구 실행 전 게이트 (#102)', () => {
     expect(agent['plan']!.permission).toMatchObject({ edit: 'deny', bash: 'deny' })
   })
 
-  it('읽기(read)는 계획에서도 걸린다 — 계획은 그 도구를 쓴다. glob·grep 에는 어디에도 얹지 않는다', () => {
+  it('읽기·검색(read·glob·grep)은 계획에서도 걸린다 — 계획은 그 도구를 쓴다. 모든 모드와 하위 에이전트에 맨 뒤 ask', () => {
     const agent = agents(['read|glob|grep'])
     for (const name of ['plan', MODE_AGENT.build, MODE_AGENT.ask, MODE_AGENT.full, SUBAGENT_ASK, 'general', 'explore']) {
-      expect(agent[name]!.permission, name).toMatchObject({ read: 'ask' })
-      expect(agent[name]!.permission, name).not.toHaveProperty('glob')
-      expect(agent[name]!.permission, name).not.toHaveProperty('grep')
+      expect(last(agent[name]!.permission, 3), name).toEqual([['glob', 'ask'], ['grep', 'ask'], ['read', 'ask']])
     }
-    expect(agent['plan']!.permission).toMatchObject({ edit: 'deny', bash: 'deny' })
+    expect(agent['plan']!.permission).toMatchObject({ edit: 'deny', bash: 'deny', webfetch: 'deny' })
   })
 
-  it('끈 스킬에는 얹지 않는다 (deny 그대로), 켠 스킬에는 얹는다 — 숨긴 내장 스킬은 숨긴 채. 웹 도구 규칙은 건드리지 않는다', () => {
+  it('webfetch: 허용하던 곳(기본·전체 권한·general·explore)만 ask 로 — 계획의 deny, 매번 묻기와 그 하위 에이전트의 ask 는 그대로', () => {
+    const plain = agents([])
+    const agent = agents(['webfetch'])
+    for (const name of ['plan', MODE_AGENT.ask, SUBAGENT_ASK]) expect(JSON.stringify(agent[name]), name).toBe(JSON.stringify(plain[name]))
+    expect(agent['plan']!.permission['webfetch']).toBe('deny')
+    expect(agent[MODE_AGENT.ask]!.permission['webfetch']).toBe('ask')
+    expect(last(agent[MODE_AGENT.build]!.permission, 1)).toEqual([['webfetch', 'ask']])
+    expect(last(agent[MODE_AGENT.full]!.permission, 1)).toEqual([['webfetch', 'ask']]) // "*":allow 뒤
+    expect(agent['general']).toEqual({ permission: { webfetch: 'ask' } })
+    expect(agent['explore']).toEqual({ permission: { webfetch: 'ask' } })
+  })
+
+  it('웹 가져오기를 껐으면 webfetch 훅이 있어도 어디에도 얹지 않는다 — ask 를 얹으면 도구가 되살아난다 (설정이 한 글자도 안 달라진다)', () => {
+    for (const extra of variants.filter((variant) => !variant.webTools)) {
+      const plain = JSON.stringify(engineConfig([provider('gw')], proxy, extra), null, 2)
+      expect(JSON.stringify(engineConfig([provider('gw')], proxy, { ...extra, gate: toolGate(['webfetch']) }), null, 2)).toBe(plain)
+    }
+    const all = agents([''], { webTools: false, skills: { enabled: true, claude: false } })
+    for (const name of ['plan', MODE_AGENT.build, MODE_AGENT.ask, MODE_AGENT.full, SUBAGENT_ASK]) expect(all[name]!.permission['webfetch'], name).toBe('deny')
+    for (const name of ['general', 'explore']) expect(all[name]!.permission, name).not.toHaveProperty('webfetch') // 전역 deny 그대로
+  })
+
+  it('끈 스킬·끈 웹 도구에는 얹지 않는다 (deny 그대로), 켠 스킬에는 얹는다 — 숨긴 내장 스킬은 숨긴 채. websearch 규칙은 건드리지 않는다', () => {
     const plain = agents([])
     const off = agents(['webfetch|websearch|skill'], { webTools: false, skills: { enabled: false, claude: false } })
     expect(off[MODE_AGENT.full]!.permission).toMatchObject({ webfetch: 'deny', websearch: 'deny', skill: 'deny' })
@@ -413,9 +438,9 @@ describe('engineConfig — 도구 실행 전 게이트 (#102)', () => {
     const on = agents(['webfetch|websearch|skill'])
     for (const name of ['plan', MODE_AGENT.build, MODE_AGENT.ask, MODE_AGENT.full]) {
       expect(on[name]!.permission['skill'], name).toEqual({ '*': 'ask', 'customize-opencode': 'deny' })
-      expect(on[name]!.permission['webfetch'], name).toEqual(plain[name]!.permission['webfetch'])
+      expect(on[name]!.permission['websearch'], name).toEqual(plain[name]!.permission['websearch'])
     }
-    expect(on['general']!.permission).toEqual({ skill: { '*': 'ask', 'customize-opencode': 'deny' } })
+    expect(on['general']!.permission).toEqual({ skill: { '*': 'ask', 'customize-opencode': 'deny' }, webfetch: 'ask' })
   })
 
   it('task: 허용된 하위 에이전트만 묻게 한다 — 막은 하위 에이전트(다른 모드의 general-ask, 매번 묻기의 나머지)는 막힌 채, 계획은 그대로', () => {
@@ -458,8 +483,10 @@ describe('engineConfig — 도구 실행 전 게이트 (#102)', () => {
     expect(lines).toMatchSnapshot()
   })
 
-  it('explore 는 원래 가진 도구에만 얹는다 — task·skill·편집·MCP 가 되살아나지 않는다', () => {
-    expect(agents([''])['explore']).toEqual({ permission: { bash: 'ask', read: 'ask' } })
+  it('explore 는 원래 가진 도구(bash·glob·grep·read·webfetch)에만 얹는다 — task·skill·편집·할 일·MCP 가 되살아나지 않는다', () => {
+    expect(agents([''])['explore']).toEqual({ permission: { bash: 'ask', glob: 'ask', grep: 'ask', read: 'ask', webfetch: 'ask' } })
+    // 웹 가져오기를 껐으면 explore 의 내장 webfetch allow 는 전역 deny 에 진다 — 얹지 않는다
+    expect(agents([''], { webTools: false })['explore']).toEqual({ permission: { bash: 'ask', glob: 'ask', grep: 'ask', read: 'ask' } })
   })
 })
 

@@ -15,7 +15,7 @@ import { translate } from '../../shared/i18n/index.ts'
 // {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
 // (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask' | 'mcpgate' | 'twoasks' | 'webask' | 'webchild'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask' | 'mcpgate' | 'twoasks' | 'webask' | 'webchild' | 'globchild' | 'grepchild'
 
 /** 'mcpask' 턴이 묻는 앱 MCP 도구 호출의 인자 (이슈 #55) */
 const MCP_ARGS = { session: 'c-1a2b3c4d', message: 'fix the tests' }
@@ -24,6 +24,9 @@ const MCP_CALL_MS = 250
 
 /** 'webask'·'webchild' 턴이 가져오려는 주소 */
 const WEB_URL = 'http://127.0.0.1:9/doc'
+/** 'globchild'·'grepchild' 턴의 하위 작업이 부르는 검색 인자 (01ai — 요청 metadata 에 그대로 실린다) */
+const GLOB_ARGS = { pattern: '*.txt' }
+const GREP_ARGS = { pattern: 'needle', path: 'src', include: '*.ts' }
 /** 정본 목록이 깨졌을 때의 응답 (01ai 실측 — 인자에 빠진 선택 항목이 있는 webfetch·glob·grep 요청이 하나라도 대기 중이면 그 폴더 목록 전체가 400) */
 const BROKEN_LIST = { name: 'BadRequest', data: { message: 'Expected JSON value, got undefined\n  at [0]["metadata"]["timeout"]', kind: 'Body' } }
 
@@ -103,7 +106,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
     if (route === '/session/ses_1/message') return void res.end(JSON.stringify(legacy))
     if (route === '/api/session/ses_1/message') return void res.end(JSON.stringify({ data: previous, cursor: { next: null } }))
     // 'webask'·'webchild': 정본 목록 GET /permission 이 응답 검증에 실패한다 — 답한 뒤에도(멈춘 턴의 요청이 남은 폴더처럼) 계속 (01ai)
-    if (route === '/permission' && (ending === 'webask' || ending === 'webchild')) return void res.writeHead(400).end(JSON.stringify(BROKEN_LIST))
+    if (route === '/permission' && (ending === 'webask' || ending === 'webchild' || ending === 'globchild' || ending === 'grepchild')) return void res.writeHead(400).end(JSON.stringify(BROKEN_LIST))
     if (route === '/permission' || route === '/question') return void res.end(JSON.stringify(pending[route === '/permission' ? 'permission' : 'question']))
     // 답: once·답하기는 도구가 이어서 끝나고 턴이 끝난다. 거절은 도구 error 뒤 곧바로 idle (01w)
     const answered = /^\/(permission|question)\/(\w+)\/(reply|reject)$/.exec(route)
@@ -137,7 +140,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           answer('done')
           idle()
         }
-        if (ending === 'mcpask' || ending === 'mcpgate' || ending === 'webask' || ending === 'webchild') setTimeout(finish, MCP_CALL_MS)
+        if (ending === 'mcpask' || ending === 'mcpgate' || ending === 'webask' || ending === 'webchild' || ending === 'globchild' || ending === 'grepchild') setTimeout(finish, MCP_CALL_MS)
         else finish()
       })
     }
@@ -261,6 +264,12 @@ async function fakeOpencode(ending: Ending): Promise<string> {
               part({ type: 'tool', id: 'prt_b', tool: 'webfetch', callID: 'call_1', state: { status: 'running', input: { url: WEB_URL, format: 'text' } } })
               emit('permission.asked', { id: 'per_w', ...request, tool: { messageID: A, callID: 'call_1' } })
             }
+          }
+          // 하위 작업의 검색 (게이트를 건 glob·grep, 01ai): 요청의 metadata 가 인자 그대로다 — path 를 뺀 호출은 정본 목록이 400
+          if (ending === 'globchild' || ending === 'grepchild') {
+            const request = ending === 'globchild' ? { permission: 'glob', patterns: ['*.txt'], metadata: GLOB_ARGS } : { permission: 'grep', patterns: ['needle'], metadata: GREP_ARGS }
+            emit('session.created', { info: { id: 'ses_c', parentID: 'ses_1' } })
+            emit('permission.asked', { id: 'per_c', sessionID: 'ses_c', ...request, always: ['*'], tool: { messageID: 'msg_c1', callID: 'call_c' } })
           }
           if (ending === 'cut') {
             closer.abort(new Error('engine exited')) // 엔진이 끝나면 closed 가 먼저 걸리고 소켓이 닫힌다
@@ -682,6 +691,23 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
       if (requests[0]) void llm.reply(requests[0].sessionId, requests[0].id, 'once')
     })
     expect(asked).toEqual([expect.objectContaining({ tool: 'webfetch', input: { url: WEB_URL, format: 'text' }, child: true })])
+    vi.restoreAllMocks()
+  })
+
+  it('glob·grep 도 같다 — 판정 인자는 요청에 실린 패턴·경로이고, 게이트가 건 요청이면 훅 통과 뒤 카드 없이 once', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    for (const [ending, tool, input] of [['globchild', 'glob', GLOB_ARGS], ['grepchild', 'grep', GREP_ARGS]] as const) {
+      const { llm, ctx } = await start(await fakeOpencode(ending))
+      gatedPermissions = [tool]
+      const asked: PreTool[] = []
+      ctx.on('llm/pre-tool', (info) => void asked.push(info))
+      const shown: Attention[][] = []
+      const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => void shown.push(requests))
+      expect(result.ok, tool).toBe(true)
+      expect(asked, tool).toEqual([expect.objectContaining({ tool, input, child: true })])
+      expect(calls.filter((call) => call.startsWith('/permission/')), tool).toEqual(['/permission/per_c/reply {"reply":"once"}'])
+      expect(shown, tool).toEqual([])
+    }
     vi.restoreAllMocks()
   })
 

@@ -21,6 +21,12 @@ describe('modePermission — 메인 대화', () => {
     }
   })
 
+  it('검색(glob·grep)은 대상이 무엇이든 묻지 않는다 — .env 를 가리키는 패턴도 (엔진의 .env 규칙은 read 에만 있다)', () => {
+    for (const permission of ['glob', 'grep']) {
+      for (const resources of [['*.txt'], ['.env'], ['needle'], []]) expect(row(permission, { resources }), `${permission} ${resources}`).toEqual({ plan: 'allow', build: 'allow', ask: 'allow', full: 'allow' })
+    }
+  })
+
   it('.env 읽기는 전체 권한만 묻지 않는다 — .env.example 은 아니다', () => {
     for (const file of ['.env', 'config/.env', '.env.local', '/abs/app/.env.production']) {
       expect(row('read', { resources: [file] }), file).toEqual({ plan: 'ask', build: 'ask', ask: 'ask', full: 'allow' })
@@ -66,6 +72,7 @@ describe('modePermission — 하위 작업 (자식은 부모 모드 권한을 �
     expect(child('external_directory')).toMatchObject({ build: 'ask', ask: 'ask', full: 'ask' })
     expect(child('read', ['.env'])).toMatchObject({ build: 'ask', ask: 'ask', full: 'ask' })
     expect(child('read', ['a.ts'])).toMatchObject({ build: 'allow', ask: 'allow', full: 'allow' })
+    for (const permission of ['glob', 'grep']) expect(child(permission, ['*.ts']), permission).toMatchObject({ build: 'allow', ask: 'allow', full: 'allow' })
   })
 
   it('하위 작업은 보내기·결과물 도구와 task 를 못 쓴다', () => {

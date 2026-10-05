@@ -66,8 +66,8 @@ export function matchesTool(matcher: string, tool: string): boolean {
 
 export type HookScope = HookEntry['scope']
 
-/** 엔진이 실행 전에 묻게 할 수 없는 내장 도구 — 도구 실행 전 훅이 걸리지 않는다 (ctx.engine 의 toolGate 와 같은 목록, engine.ts 의 ⚠️) */
-export const UNGATED_TOOLS: readonly string[] = ['glob', 'grep', 'webfetch', 'websearch']
+/** 도구 실행 전 훅이 걸리지 않는 내장 도구 — 지금 엔진 경로에 없는 도구다 (ctx.engine 의 toolGate 와 같은 목록, engine.ts 의 ⚠️) */
+export const UNGATED_TOOLS: readonly string[] = ['websearch']
 
 /** 도구 실행 전 훅의 매처가 걸리지 않는 도구만 가리키나 — 그 훅은 한 번도 돌지 않는다 (화면이 경고한다). 이름의 `|` 나열만 본다 */
 export function preToolUnreachable(matcher: string): boolean {
