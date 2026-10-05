@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ChatService } from '../../src/services/chat.ts'
 import { HooksService, stopFeedback } from '../../src/services/hooks.ts'
-import { entriesFor, parseHooks, parseProjects, serializeHooks, serializeProjects } from '../../src/services/hooks/config.ts'
+import { entriesFor, gateMatchers, parseHooks, parseProjects, serializeHooks, serializeProjects } from '../../src/services/hooks/config.ts'
 import { decodeHook, hookEnv, hookSpawn, hookStdin, runHook, type HookInput } from '../../src/services/hooks/run.ts'
 import { SessionsService } from '../../src/services/sessions.ts'
 import type { ChatResult, ToolDone } from '../../src/services/llm.ts'
@@ -272,6 +272,11 @@ class FakeLlm extends Service {
   }
   async deleteSession(): Promise<void> {}
   purgeDeleted(): void {}
+  /** 받은 게이트 대상 (ctx.hooks 가 알린 매처 — 부를 때마다) */
+  gates: string[][] = []
+  gateTools(matchers: readonly string[]): void {
+    this.gates.push([...matchers])
+  }
 }
 
 class FakeProviders extends Service {
@@ -561,7 +566,7 @@ describe('ctx.hooks ↔ ctx.chat (턴 앞뒤)', () => {
     ])
   })
 
-  it('도구 실행 전(PreToolUse) 훅은 이번 단계에서 돌지 않는다 — 정의는 읽힌다', async () => {
+  it('도구 실행 전(PreToolUse) 훅은 도구가 끝난 것으로는 돌지 않는다 — 실행 전 판정(llm/pre-tool)으로만 돈다', async () => {
     const { ctx, chat, hooks, turn, ended } = await start()
     await writeHooks([hook('PreToolUse', 'touch pre-ran; exit 2', { matcher: 'bash' })])
     await chat.send('c1', send('hi'))
@@ -571,6 +576,154 @@ describe('ctx.hooks ↔ ctx.chat (턴 앞뒤)', () => {
     await ended(1)
     expect(await fs.readdir(root)).not.toContain('pre-ran')
     expect((await hooks.list(root)).map((entry) => entry.event)).toEqual(['PreToolUse'])
+  })
+})
+
+// 2단계 (01af §6-1·§6-6 ②) — 도구 실행 전 훅. ctx.llm 이 승인 요청마다 묻는 중립 확장점 'llm/pre-tool' 에 답한다
+describe("도구 실행 전 훅 ('llm/pre-tool' — 이슈 #102 2단계)", () => {
+  const never = new AbortController().signal
+  const pre = (patch: Record<string, unknown> = {}) => ({ sessionId: 'ses_1', directory: root, tool: 'bash', input: { command: 'rm -rf build' }, child: false, signal: never, ...patch })
+
+  /** 턴 하나를 띄워 두고(ses_1) 판정을 묻는다 */
+  async function asking(hooks: HookDef[], opts: { timeoutMs?: number } = {}) {
+    const started = await start(opts)
+    await writeHooks(hooks)
+    await started.chat.send('c1', send('hi'))
+    const call = await started.turn(1)
+    const lines = async () => {
+      call.finish()
+      return hookLines((await started.ended(1)).message.items)
+    }
+    return { ...started, call, lines }
+  }
+
+  it('막기(종료 코드 2): { deny, reason } — stderr 가 사유, 그 턴에 "막음" 줄. stdin 으로 도구 이름·인자를 받는다', async () => {
+    const { ctx, lines } = await asking([hook('PreToolUse', 'cat > pre.json; echo "rm -rf 는 금지" >&2; exit 2', { matcher: 'bash' })])
+    expect(await ctx.serial('llm/pre-tool', pre())).toEqual({ deny: true, reason: 'rm -rf 는 금지' })
+    expect(JSON.parse(await fs.readFile(path.join(root, 'pre.json'), 'utf8'))).toMatchObject({ hook_event_name: 'PreToolUse', session_id: 'c1', tool_name: 'bash', tool_input: { command: 'rm -rf build' }, mode: 'build' })
+    expect(await lines()).toMatchObject([{ event: 'PreToolUse', outcome: 'blocked', reason: 'rm -rf 는 금지' }])
+  })
+
+  it("통과(종료 코드 0): 'allow' — 통과 줄이 남는다", async () => {
+    const { ctx, lines } = await asking([hook('PreToolUse', 'true', { matcher: 'bash' })])
+    expect(await ctx.serial('llm/pre-tool', pre())).toBe('allow')
+    expect(await lines()).toMatchObject([{ event: 'PreToolUse', outcome: 'passed' }])
+  })
+
+  it('stdout JSON 의 permissionDecision: deny 는 막기(사유 permissionDecisionReason), ask 는 사용자에게 묻기, allow 는 통과', async () => {
+    const decide = (decision: string) => `echo '{"hookSpecificOutput":{"permissionDecision":"${decision}","permissionDecisionReason":"정책 위반"}}'`
+    const { ctx } = await asking([hook('PreToolUse', decide('deny'), { matcher: 'bash' }), hook('PreToolUse', decide('ask'), { matcher: 'edit' }), hook('PreToolUse', decide('allow'), { matcher: 'read' })])
+    expect(await ctx.serial('llm/pre-tool', pre())).toEqual({ deny: true, reason: '정책 위반' })
+    expect(await ctx.serial('llm/pre-tool', pre({ tool: 'edit' }))).toBe('ask')
+    expect(await ctx.serial('llm/pre-tool', pre({ tool: 'read' }))).toBe('allow')
+  })
+
+  it('여럿이면 가장 제한적인 것: 막기 > 묻기 > 통과 — 막으면 그 뒤 훅은 돌지 않는다', async () => {
+    const ask = `echo '{"permissionDecision":"ask"}'`
+    const { ctx } = await asking([hook('PreToolUse', ask, { matcher: 'bash|edit' }), hook('PreToolUse', 'true'), hook('PreToolUse', 'exit 2', { matcher: 'edit' }), hook('PreToolUse', 'touch after-block', { matcher: 'edit' })])
+    expect(await ctx.serial('llm/pre-tool', pre())).toBe('ask')
+    expect(await ctx.serial('llm/pre-tool', pre({ tool: 'edit' }))).toMatchObject({ deny: true })
+    expect(await fs.readdir(root)).not.toContain('after-block')
+  })
+
+  it('실패(그 밖의 종료 코드)·기한 초과는 통과다 — 훅 버그가 작업을 세우지 않는다. 줄에는 실패로 남는다', async () => {
+    const failing = await asking([hook('PreToolUse', 'echo oops >&2; exit 1', { matcher: 'bash' })])
+    expect(await failing.ctx.serial('llm/pre-tool', pre())).toBe('allow')
+    expect(await failing.lines()).toMatchObject([{ outcome: 'failed' }])
+    const slow = await asking([hook('PreToolUse', 'sleep 5; exit 2', { matcher: 'bash' })], { timeoutMs: 150 })
+    expect(await slow.ctx.serial('llm/pre-tool', pre())).toBe('allow')
+    expect(await slow.lines()).toMatchObject([{ outcome: 'failed', reason: tr('hooks.timeout', { seconds: 30 }) }])
+  })
+
+  it('맞는 훅이 없으면 답하지 않는다(undefined) — 꺼 둔 훅·다른 도구의 훅·다른 이벤트의 훅', async () => {
+    const { ctx, hooks, lines } = await asking([hook('PreToolUse', 'exit 2', { matcher: 'edit' }), hook('PreToolUse', 'exit 2', { matcher: 'bash', enabled: false }), hook('PostToolUse', 'exit 2')])
+    expect(await ctx.serial('llm/pre-tool', pre())).toBeUndefined()
+    hooks.setEnabled(root, hookKey(hook('PreToolUse', 'exit 2', { matcher: 'bash' })), true) // 이 프로젝트에서만 켠다
+    expect(await ctx.serial('llm/pre-tool', pre())).toMatchObject({ deny: true })
+    expect(await lines()).toHaveLength(1)
+  })
+
+  it('하위 작업의 도구에도 걸린다 — 줄은 부모 턴에. 파일 도구면 LITECODE_FILE 로 경로를 받는다', async () => {
+    const { ctx, lines } = await asking([hook('PreToolUse', 'printf %s "$LITECODE_FILE" > file.txt; exit 2', { matcher: 'write' })])
+    const file = path.join(root, 'src', 'a.ts')
+    expect(await ctx.serial('llm/pre-tool', pre({ tool: 'write', input: { filePath: file }, file, child: true }))).toMatchObject({ deny: true })
+    expect(await fs.readFile(path.join(root, 'file.txt'), 'utf8')).toBe(file)
+    expect(await lines()).toMatchObject([{ event: 'PreToolUse', outcome: 'blocked' }])
+  })
+
+  it('앱이 모르는 세션의 호출에는 답하지 않는다', async () => {
+    const { ctx } = await asking([hook('PreToolUse', 'touch ran; exit 2')])
+    expect(await ctx.serial('llm/pre-tool', pre({ sessionId: 'ses_other' }))).toBeUndefined()
+    expect(await fs.readdir(root)).not.toContain('ran')
+  })
+
+  it('턴이 멈추면(signal) 도는 훅을 끄고 막지 않는다', async () => {
+    const { ctx } = await asking([hook('PreToolUse', 'sleep 5; exit 2')])
+    const stop = new AbortController()
+    setTimeout(() => stop.abort(), 100)
+    const startedAt = Date.now()
+    expect(await ctx.serial('llm/pre-tool', pre({ signal: stop.signal }))).toBe('allow')
+    expect(Date.now() - startedAt).toBeLessThan(3_000)
+  })
+})
+
+describe('게이트 대상 알리기 (ctx.llm.gateTools — 이슈 #102 2단계)', () => {
+  it('gateMatchers: 어느 프로젝트에서든 켜진 도구 실행 전 훅의 매처 합집합 — 다른 이벤트·모두에서 꺼진 훅은 빠진다', () => {
+    const all = [hook('PreToolUse', 'a', { matcher: 'bash' }), hook('PreToolUse', 'b', { matcher: 'edit', enabled: false }), hook('PreToolUse', 'c', { matcher: 'read', enabled: false }), hook('PostToolUse', 'd', { matcher: 'write' })]
+    const projects = {
+      '/p1': { hooks: [hook('PreToolUse', 'e', { matcher: ' mcp_.* ' }), hook('PreToolUse', 'f', { matcher: 'glob', enabled: false })], enabled: { [hookKey(all[1]!)]: true } },
+      '/p2': { hooks: [hook('PreToolUse', 'g')], enabled: { [hookKey(all[0]!)]: false } },
+    }
+    expect(gateMatchers(all, projects)).toEqual(['', 'bash', 'edit', 'mcp_.*'])
+    expect(gateMatchers([], {})).toEqual([])
+    expect(gateMatchers([hook('Stop', 'x')], {})).toEqual([])
+  })
+
+  it('서비스가 뜰 때·턴을 보내기 전(손으로 고친 파일)·저장할 때·켜고 끌 때 알린다', async () => {
+    await writeHooks([hook('PreToolUse', 'true', { matcher: 'bash' })])
+    const { llm, chat, hooks, turn } = await start()
+    await until(() => llm.gates.length >= 1)
+    expect(llm.gates.at(-1)).toEqual(['bash'])
+    await writeHooks([hook('PreToolUse', 'true', { matcher: 'bash' }), hook('PreToolUse', 'true', { matcher: 'edit|write' })])
+    await chat.send('c1', send('hi'))
+    await turn(1)
+    expect(llm.gates.at(-1)).toEqual(['bash', 'edit|write'])
+    const before = llm.gates.length
+    hooks.save([hook('PreToolUse', 'true', { matcher: 'read' })], root)
+    await until(() => llm.gates.length > before)
+    expect(llm.gates.at(-1)).toEqual(['bash', 'edit|write', 'read'])
+    hooks.setEnabled(root, hookKey(hook('PreToolUse', 'true', { matcher: 'read' })), false)
+    await until(() => llm.gates.at(-1)?.length === 2)
+    expect(llm.gates.at(-1)).toEqual(['bash', 'edit|write'])
+  })
+
+  it('도구 실행 전 훅이 없으면 빈 목록을 알린다 (게이트 없음)', async () => {
+    await writeHooks([hook('PostToolUse', 'true'), hook('Stop', 'true')])
+    const { llm } = await start()
+    await until(() => llm.gates.length >= 1)
+    expect(llm.gates.at(-1)).toEqual([])
+  })
+})
+
+describe('decodeHook — 도구 실행 전의 permissionDecision', () => {
+  const ok = { status: 'done' as const, exitCode: 0 }
+  it('도구 실행 전에서만 읽는다 — 다른 이벤트에서는 무시한다', () => {
+    const out = '{"permissionDecision":"deny","permissionDecisionReason":"no"}'
+    expect(decodeHook(ok, out, '', 30, 'PreToolUse')).toEqual({ outcome: 'blocked', reason: 'no' })
+    expect(decodeHook(ok, out, '', 30, 'UserPromptSubmit')).toEqual({ outcome: 'passed' })
+    expect(decodeHook(ok, out, '', 30)).toEqual({ outcome: 'passed' })
+  })
+
+  it('deny 에 사유가 없으면 기본 문구, ask 는 통과 + 묻기, allow·모르는 값은 통과. updatedInput 은 무시한다(지원 안 함)', () => {
+    expect(decodeHook(ok, '{"hookSpecificOutput":{"permissionDecision":"deny"}}', '', 30, 'PreToolUse')).toEqual({ outcome: 'blocked', reason: tr('hooks.blockedDefault') })
+    expect(decodeHook(ok, '{"permissionDecision":"ask"}', '', 30, 'PreToolUse')).toEqual({ outcome: 'passed', ask: true })
+    expect(decodeHook(ok, '{"permissionDecision":"allow","updatedInput":{"command":"ls"}}', '', 30, 'PreToolUse')).toEqual({ outcome: 'passed' })
+    expect(decodeHook(ok, '{"permissionDecision":"maybe"}', '', 30, 'PreToolUse')).toEqual({ outcome: 'passed' })
+  })
+
+  it('종료 코드 2 와 decision:block 은 그대로 막기다', () => {
+    expect(decodeHook({ status: 'done', exitCode: 2 }, '', '안 됨', 30, 'PreToolUse')).toEqual({ outcome: 'blocked', reason: '안 됨' })
+    expect(decodeHook(ok, '{"decision":"block","reason":"x"}', '', 30, 'PreToolUse')).toEqual({ outcome: 'blocked', reason: 'x' })
   })
 })
 

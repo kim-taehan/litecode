@@ -113,6 +113,16 @@ describe('TurnTracker', () => {
     expect(tracker.observe(...updated({ type: 'step-finish', id: 'prt_f', reason: 'stop', tokens: {} }))).toBeUndefined()
     expect(tracker.observe('session.idle', { sessionID: S })).toBeUndefined()
   })
+
+  // 이슈 #102 2단계 (01af §4): 사유를 실어 거절하면 엔진이 고정 문구 뒤에 사유를 붙인다 — 실행 전에 막힌 호출이다. 화면엔 사유만 간다
+  it('실행 전에 막힌 도구: 엔진의 고정 문구를 떼고 사유만 싣고 blocked 로 표시한다 — 사용자의 거절(사유 없음)은 그대로', () => {
+    const tracker = new TurnTracker()
+    const error = 'The user rejected permission to use this specific tool call with the following feedback: rm -rf 는 금지입니다'
+    const item = tracker.observe(...updated({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'c', state: { status: 'error', input: { command: 'rm -rf build' }, error } }))
+    expect(item).toMatchObject({ status: 'error', error: 'rm -rf 는 금지입니다', blocked: true })
+    const rejected = tracker.observe(...updated({ type: 'tool', id: 'prt_c', tool: 'bash', callID: 'd', state: { status: 'error', input: {}, error: 'The user rejected permission to use this specific tool call.' } }))
+    expect(rejected).not.toHaveProperty('blocked')
+  })
 })
 
 describe('TurnTracker — 요약·재시도·diff (이슈 #20 L2)', () => {

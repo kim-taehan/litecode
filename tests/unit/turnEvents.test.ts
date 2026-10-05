@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import { ascendingId, finishedTool, interruptedError, LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
+import { ascendingId, finishedTool, interruptedError, LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
@@ -15,7 +15,7 @@ import { translate } from '../../shared/i18n/index.ts'
 // {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
 // (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask' | 'mcpgate' | 'twoasks'
 
 /** 'mcpask' 턴이 묻는 앱 MCP 도구 호출의 인자 (이슈 #55) */
 const MCP_ARGS = { session: 'c-1a2b3c4d', message: 'fix the tests' }
@@ -42,6 +42,10 @@ let urls: string[] = []
 /** 신규 세대 기록(레거시 전환 전에 쌓인 대화, GET /api/session/{id}/message). 비어 있지 않으면 레거시 기록(GET /session/{id}/message)도
  *  흉내 낸다 — 받은 prompt_async 의 user 메시지가 쌓인다 (#21 이어 쓰기) */
 let previous: unknown[] = []
+/** 가짜 엔진이 도구 실행 전 게이트를 걸어 둔 권한 이름 (EngineConnection.gated — 이슈 #102 2단계) */
+let gatedPermissions: string[] = []
+/** 가짜 엔진이 받은 게이트 대상 (EngineService.setGate — 받으면 다시 띄울 수 있다) */
+let engineGates: string[][] = []
 const AGENTS = ['build', 'plan', 'litecode-ask', 'litecode-full'].map((id) => ({ id, mode: 'primary' }))
 
 afterEach(() => {
@@ -60,6 +64,8 @@ async function fakeOpencode(ending: Ending): Promise<string> {
   urls = []
   const legacy: unknown[] = []
   const pending: { permission: unknown[]; question: unknown[] } = { permission: [], question: [] }
+  /** 허용 뒤에 이어서 올 승인 요청 ('twoasks') */
+  const followUp: unknown[] = []
   const emit = (type: string, properties: Record<string, unknown>) => events?.write(`data: ${JSON.stringify({ type, properties: { sessionID: 'ses_1', ...properties } })}\n\n`)
   const part = (p: Record<string, unknown>) => emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: A, ...p }, time: Date.now() })
   const answer = (text: string) => {
@@ -99,8 +105,22 @@ async function fakeOpencode(ending: Ending): Promise<string> {
         const kind = answered[1] as 'permission' | 'question'
         pending[kind] = []
         res.end('true')
-        const rejected = answered[3] === 'reject' || (JSON.parse(raw || '{}') as { reply?: string }).reply === 'reject'
+        // 'twoasks': 폴더 밖 경로를 허용하면 같은 호출이 자기 권한(bash)을 이어서 묻는다
+        const next = (JSON.parse(raw || '{}') as { reply?: string }).reply === 'once' ? followUp.shift() : undefined
+        if (next) {
+          pending.permission = [next]
+          emit('permission.replied', { requestID: answered[2] })
+          return void emit('permission.asked', { id: (next as { id: string }).id })
+        }
+        const body = JSON.parse(raw || '{}') as { reply?: string; message?: string }
+        const rejected = answered[3] === 'reject' || body.reply === 'reject'
         emit(`${kind}.${rejected && kind === 'question' ? 'rejected' : 'replied'}`, { requestID: answered[2] })
+        // 사유를 실은 거절(01af §4, 3/3): 도구는 고정 문구 + 사유의 오류로 끝나고 모델이 그 글을 받아 턴이 이어진다
+        if (rejected && body.message) {
+          part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'error', input: {}, error: `The user rejected permission to use this specific tool call with the following feedback: ${body.message}` } })
+          answer('went on')
+          return idle()
+        }
         if (rejected) {
           part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'error', input: {}, error: 'The user rejected permission to use this specific tool call.' } })
           return idle()
@@ -110,7 +130,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           answer('done')
           idle()
         }
-        if (ending === 'mcpask') setTimeout(finish, MCP_CALL_MS)
+        if (ending === 'mcpask' || ending === 'mcpgate') setTimeout(finish, MCP_CALL_MS)
         else finish()
       })
     }
@@ -197,6 +217,22 @@ async function fakeOpencode(ending: Ending): Promise<string> {
             if (ending === 'permission') pending.permission = [{ id: 'per_old', sessionID: 'ses_1', permission: 'bash', patterns: ['old'], tool: { messageID: 'msg_stopped', callID: 'c0' } }, { id: 'per_1', sessionID: 'ses_1', permission: 'bash', patterns: ['ls'], metadata: {}, always: ['ls *'], tool }]
             else pending.question = [{ id: 'que_1', sessionID: 'ses_1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'SQLite' }] }], tool }]
             emit(`${ending}.asked`, { id: ending === 'permission' ? 'per_1' : 'que_1' })
+            // 아직 답이 없으면 같은 폴더의 승인 신호가 한 번 더 온다 (목록을 다시 읽게 한다)
+            if (ending === 'permission') setTimeout(() => pending.permission.length > 0 && emit('permission.asked', { id: 'per_1' }), 40)
+          }
+          // 한 bash 호출이 두 번 묻는다: 폴더 밖 경로(external_directory) → 허용하면 bash 자신의 권한 (이슈 #102 2단계)
+          if (ending === 'twoasks') {
+            const tool = { messageID: A, callID: 'call_1' }
+            part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'running', input: { command: 'ls /etc' } } })
+            pending.permission = [{ id: 'per_0', sessionID: 'ses_1', permission: 'external_directory', patterns: ['/etc/*'], tool }]
+            followUp.push({ id: 'per_1', sessionID: 'ses_1', permission: 'bash', patterns: ['ls /etc'], tool })
+            emit('permission.asked', { id: 'per_0' })
+          }
+          // 사용자 MCP 서버의 도구 — 기본 모드는 원래 묻지 않는다. 묻는 것은 게이트 때문이다 (이슈 #102 2단계)
+          if (ending === 'mcpgate') {
+            part({ type: 'tool', id: 'prt_b', tool: 'github_search', callID: 'call_1', state: { status: 'running', input: MCP_ARGS } })
+            pending.permission = [{ id: 'per_1', sessionID: 'ses_1', permission: 'github_search', patterns: ['*'], metadata: {}, always: ['*'], tool: { messageID: A, callID: 'call_1' } }]
+            emit('permission.asked', { id: 'per_1' })
           }
           // 앱 MCP 도구의 승인 (01z 1-3): 묻는 이벤트에는 인자가 없고, 그 순간 그 callID 의 파트가 running + input 이다
           if (ending === 'mcpask') {
@@ -224,6 +260,8 @@ async function fakeOpencode(ending: Ending): Promise<string> {
 async function start(url: string, config?: ConstructorParameters<typeof LlmService>[1]): Promise<{ llm: LlmService; seen: string[]; ctx: Context }> {
   closer = new AbortController()
   prompts = []
+  gatedPermissions = []
+  engineGates = []
   class FakeProviders extends Service {
     constructor(ctx: Context) {
       super(ctx, 'providers')
@@ -237,9 +275,12 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
       super(ctx, 'engine')
     }
     async connection() {
-      return { url, headers: {}, closed: closer.signal, providerBaseURL: () => PROXY }
+      return { url, headers: {}, closed: closer.signal, providerBaseURL: () => PROXY, gated: (permission: string) => gatedPermissions.includes(permission) }
     }
     async purgeDeleted() {}
+    setGate(matchers: readonly string[]) {
+      engineGates.push([...matchers])
+    }
   }
   const ctx = new Context()
   const seen: string[] = []
@@ -657,6 +698,130 @@ describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
     expect(shown[0]?.[0]).toMatchObject({ kind: 'permission' })
     expect(calls).toContain('/session/ses_1/abort')
     await expect(llm.reply('ses_1', 'per_1', 'once')).rejects.toThrow()
+  })
+})
+
+// 도구 실행 전 판정 (이슈 #102 2단계, 01af §6-1) — 엔진이 승인을 물으면 'llm/pre-tool' 을 한 번 묻고 답한다. 듣는 쪽(ctx.hooks)은 중립 레코드만 본다
+describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
+  type Decide = (info: PreTool) => PreToolDecision | undefined
+  /** 판정을 정해 두고 턴 하나를 돌린다. gated: 가짜 엔진이 게이트를 건 권한 이름. 카드가 뜨면 answerAfterMs 뒤에 허용한다 */
+  async function judged(ending: Ending, decide: Decide | undefined, opts: { gated?: string[]; mode?: 'build' | 'ask' | 'full'; answerAfterMs?: number } = {}) {
+    const { llm, seen, ctx } = await start(await fakeOpencode(ending))
+    gatedPermissions = opts.gated ?? []
+    const asked: PreTool[] = []
+    if (decide) ctx.on('llm/pre-tool', (info) => (asked.push(info), decide(info)))
+    const shown: Attention[][] = []
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, opts.mode ?? 'build', (requests) => {
+      shown.push(requests)
+      if (requests[0]) setTimeout(() => void llm.reply('ses_1', requests[0]!.id, 'once'), opts.answerAfterMs ?? 0)
+    })
+    return { llm, seen, asked, shown, result, replies: calls.filter((call) => call.startsWith('/permission/')) }
+  }
+
+  it('요청마다 한 번 묻는다 — 도구 이름·인자는 그 callID 의 running 파트에서, 세션은 턴의 세션, 폴더는 realpath', async () => {
+    const { asked } = await judged('mcpgate', () => 'allow', { gated: ['github_search'] })
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toMatchObject({ sessionId: 'ses_1', directory, tool: 'github_search', input: MCP_ARGS, child: false })
+  })
+
+  it('막기 → 엔진에 reject + 사유(message) — 카드·attention 없이 턴이 이어져 끝난다 (거절로 끝난 턴이 아니다)', async () => {
+    const { result, shown, seen, replies } = await judged('permission', () => ({ deny: true, reason: 'rm -rf 는 금지' }), { gated: ['bash'] })
+    expect(replies).toEqual(['/permission/per_1/reply {"reply":"reject","message":"rm -rf 는 금지"}'])
+    expect(result).toMatchObject({ ok: true, text: 'went on' })
+    expect(result.declined).toBeUndefined()
+    expect(shown).toEqual([])
+    expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} done`])
+  })
+
+  it('막기는 게이트가 안 걸린 권한의 요청에도 먹는다 (모드가 원래 묻는 호출), 사유가 비면 기본 문구를 싣는다 — message 없는 reject 는 턴을 끝낸다', async () => {
+    const { replies, shown } = await judged('permission', () => ({ deny: true, reason: ' ' }), { mode: 'ask' })
+    expect(replies).toEqual(['/permission/per_1/reply {"reply":"reject","message":"Blocked before running."}'])
+    expect(shown).toEqual([])
+  })
+
+  it('통과 + 게이트 때문에 온 요청(모드는 원래 묻지 않는다) → 묻지 않고 once', async () => {
+    const { result, shown, seen, replies } = await judged('permission', () => 'allow', { gated: ['bash'] })
+    expect(replies).toEqual(['/permission/per_1/reply {"reply":"once"}'])
+    expect(result).toMatchObject({ ok: true, text: 'done' })
+    expect(shown).toEqual([])
+    expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} done`])
+  })
+
+  it('판정한 쪽이 없어도(그 폴더엔 맞는 훅이 없다) 게이트 때문에 온 요청은 once — 전체 권한 모드도 같다', async () => {
+    expect((await judged('permission', () => undefined, { gated: ['bash'] })).replies).toEqual(['/permission/per_1/reply {"reply":"once"}'])
+    const full = await judged('permission', undefined, { gated: ['bash'], mode: 'full' })
+    expect(full.replies).toEqual(['/permission/per_1/reply {"reply":"once"}'])
+    expect(full.shown).toEqual([])
+  })
+
+  it('통과여도 모드가 원래 묻는 호출이면 승인 카드가 뜬다 (매번 묻기의 bash) — 통과는 사전 승인이 아니다', async () => {
+    const { shown, replies, seen } = await judged('permission', () => 'allow', { gated: ['bash'], mode: 'ask' })
+    expect(shown[0]).toEqual([{ kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'bash', resources: ['ls'] }])
+    expect(replies).toEqual(['/permission/per_1/reply {"reply":"once"}']) // 사용자가 카드에서 누른 것 하나뿐
+    expect(seen).toContain(`attention ses_1@${directory} permission: bash ls`)
+  })
+
+  it('게이트가 안 걸린 권한의 요청은 통과여도 늘 카드다 — 모드나 사용자 설정이 원래 묻는 것이다', async () => {
+    const { shown, asked } = await judged('permission', () => 'allow')
+    expect(asked).toHaveLength(1)
+    expect(shown[0]).toMatchObject([{ kind: 'permission', id: 'per_1' }])
+  })
+
+  it("'ask' 판정 → 게이트 때문에 온 요청이어도 승인 카드", async () => {
+    const { shown, result } = await judged('permission', () => 'ask', { gated: ['bash'] })
+    expect(shown[0]).toMatchObject([{ kind: 'permission', id: 'per_1' }])
+    expect(result).toMatchObject({ ok: true, text: 'done' })
+  })
+
+  it('판정이 던지면 승인 카드로 내려앉는다 (사람이 정한다)', async () => {
+    const boom: Decide = () => {
+      throw new Error('boom')
+    }
+    const { shown } = await judged('permission', boom, { gated: ['bash'] })
+    expect(shown[0]).toMatchObject([{ kind: 'permission', id: 'per_1' }])
+  })
+
+  it('카드가 떠 있는 동안 승인 신호가 다시 와도 같은 요청을 두 번 판정하지 않는다', async () => {
+    const { asked, shown, result } = await judged('permission', () => 'ask', { gated: ['bash'], answerAfterMs: 150 })
+    expect(result.ok).toBe(true)
+    expect(asked).toHaveLength(1)
+    expect(shown).toHaveLength(2) // 카드 한 번, 답한 뒤 빈 목록 한 번
+  })
+
+  it('한 호출이 승인을 두 번 물어도(폴더 밖 경로 → 그 도구의 권한) 판정은 한 번이다 — 폴더 밖은 모드가 원래 묻는 것이라 카드, 이어진 bash 는 once', async () => {
+    const { asked, shown, replies, result } = await judged('twoasks', () => 'allow', { gated: ['bash'] })
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toMatchObject({ tool: 'bash', input: { command: 'ls /etc' } })
+    expect(shown[0]).toMatchObject([{ kind: 'permission', id: 'per_0', action: 'external_directory' }])
+    expect(shown.flat().map((entry) => entry.id)).toEqual(['per_0'])
+    expect(replies).toEqual(['/permission/per_0/reply {"reply":"once"}', '/permission/per_1/reply {"reply":"once"}'])
+    expect(result).toMatchObject({ ok: true, text: 'done' })
+  })
+
+  it('gateTools: 도는 턴이 없으면 바로 엔진에 넘기고, 도는 턴이 있으면 끝난 뒤로 미룬다 (엔진을 다시 띄우면 도는 턴이 끊긴다) — 마지막 것만', async () => {
+    const { llm } = await start(await fakeOpencode('permission'))
+    llm.gateTools(['bash'])
+    expect(engineGates).toEqual([['bash']])
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      if (!requests[0]) return
+      llm.gateTools(['bash', 'edit'])
+      llm.gateTools(['edit'])
+      expect(engineGates).toEqual([['bash']]) // 턴이 도는 중 — 아직
+      void llm.reply('ses_1', requests[0].id, 'once')
+    })
+    expect(result.ok).toBe(true)
+    expect(engineGates).toEqual([['bash'], ['edit']])
+  })
+
+  it('판정 통과로 보낸 once 는 사용자 승인이 아니다 — 호출 장부에 허용으로 적히지 않는다 (앱 MCP 세션 도구가 그 기록만 받는다, #55)', async () => {
+    const { llm, ctx } = await start(await fakeOpencode('mcpgate'))
+    gatedPermissions = ['github_search']
+    ctx.on('llm/pre-tool', () => 'allow' as const)
+    const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build')
+    for (let tries = 0; tries < 200 && !calls.includes('/permission/per_1/reply {"reply":"once"}'); tries++) await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(calls).toContain('/permission/per_1/reply {"reply":"once"}')
+    expect(await llm.callerOf(directory, { server: 'github', tool: 'search' }, MCP_ARGS)).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: false })
+    expect((await turn).ok).toBe(true)
   })
 })
 

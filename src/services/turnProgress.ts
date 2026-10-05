@@ -319,6 +319,8 @@ export class TurnTracker {
 
 /** opencode 1.18.18 이 부모 중지로 취소한 task 의 오류 글 */
 const TASK_CANCELLED = 'Task cancelled'
+/** 사유를 실어 거절한 승인 요청의 도구 오류 머리 (opencode 1.18.18 고정 문구 — 뒤에 사유가 온다) */
+export const REJECTED_WITH_FEEDBACK = 'The user rejected permission to use this specific tool call with the following feedback:'
 
 /** 스텝 토큰 합 — 하위 작업 줄에 보이는 값 (dsh ui-subagent: 네 갈래를 더한다) */
 function tokenTotal(tokens: EnginePart['tokens']): number {
@@ -399,7 +401,13 @@ function partItem(part: EnginePart, done: boolean, root: string, mcp: McpToolRes
     if (presented) item.presented = presented
   }
   else if (status === 'running' && typeof state.metadata?.output === 'string' && state.metadata.output !== '') item.result = state.metadata.output // bash 실시간 출력
-  if (status === 'error') item.error = state.error || '알 수 없는 오류'
+  if (status === 'error') {
+    // 실행 전에 막힌 호출 (이슈 #102): 승인 요청을 사유와 함께 거절하면 엔진이 고정 문구 뒤에 그 사유를 붙여 오류로 끝낸다 (01af §4, 3/3).
+    // 사유를 싣는 거절은 도구 실행 전 판정(ctx.llm 'llm/pre-tool')뿐이다 — 사용자의 거절은 사유가 없다. 화면엔 사유만 넘긴다
+    const reason = state.error?.startsWith(REJECTED_WITH_FEEDBACK) ? state.error.slice(REJECTED_WITH_FEEDBACK.length).trim() : undefined
+    item.error = reason ?? (state.error || '알 수 없는 오류')
+    if (reason !== undefined) item.blocked = true
+  }
   // skill 도구 (레거시 실측 2026-10-02): input {name}, 끝나면 metadata {name, dir, truncated}, output 은 `<skill_content name=…>본문…</skill_content>`
   const skillName = item.name === 'skill' && input && typeof input === 'object' ? (input as { name?: unknown }).name : undefined
   if (typeof skillName === 'string' && skillName) {

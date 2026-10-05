@@ -239,7 +239,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
     (item.input || item.result || item.error) && (
       <>
         {item.input && <pre className="turn-row__code">{item.input}</pre>}
-        {item.error ? <pre className="turn-row__code turn-row__code--error">{item.error}</pre> : item.result && <pre className="turn-row__code">{item.result}</pre>}
+        {item.error ? <pre className="turn-row__code turn-row__code--error">{item.blocked ? t('hooks.blocked', { reason: item.error }) : item.error}</pre> : item.result && <pre className="turn-row__code">{item.result}</pre>}
       </>
     )
   )

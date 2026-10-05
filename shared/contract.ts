@@ -24,8 +24,9 @@ export type TurnItem =
   | { kind: 'text'; id: string; text: string; done: boolean }
   /** summary: 도구가 무엇을 하는지 한 줄 (bash 는 description, 없으면 command 등). input 은 인자 JSON, result 는 결과 글.
    *  todos: 성공한 할 일 목록 쓰기(todowrite)에만 — 그 시점의 목록 전체 (이슈 #83).
-   *  presented: 성공한 결과물 선언에만 — 그 호출이 선언한 파일 (이슈 #91) */
-  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef; todos?: TodoItem[]; presented?: PresentedFile[] }
+   *  presented: 성공한 결과물 선언에만 — 그 호출이 선언한 파일 (이슈 #91).
+   *  blocked: 실행 전에 막혔다 (사용자 훅, 이슈 #102) — 도구는 돌지 않았고 error 는 막은 사유만이다 */
+  | { kind: 'tool'; id: string; name: string; status: 'preparing' | 'running' | 'done' | 'error'; summary?: string; input?: string; result?: string; error?: string; blocked?: boolean; diffs?: FileDiff[]; skill?: ToolSkill; mcp?: McpToolRef; todos?: TodoItem[]; presented?: PresentedFile[] }
   /** 대화 중 지시문(AGENTS.md 등)이 바뀌었다 — opencode 에 도구 목록 변화 이력은 없다 (01e) */
   | { kind: 'context'; id: string; text: string }
   /** 엔진이 앞 대화를 요약(자동 압축)한다 — running 동안 "요약 중", done 이면 그 자리에 구분선, failed(요약 요청 실패 — ended 없이 스텝이
