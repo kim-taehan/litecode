@@ -1,6 +1,6 @@
 // 화면이 기대는 것 전부 — 리듀서 상태(core/state.ts)·연결 상태·명령 몇 개. 화면은 이 인터페이스만 안다.
 // 구현은 remoteSession.ts 하나다: `Connection`(core/connection.ts)을 이 모양으로 감싼다 — 대화의 정본은 데스크탑이고 앱은 붙은 화면이다.
-// (테스트에는 네트워크 없이 리듀서에 이벤트를 흘리는 견본 구현이 하나 더 있다 — tests/support/demoSession.ts.)
+// (테스트에는 네트워크 없이 리듀서에 이벤트를 흘리는 견본 구현이 하나 더 있다 — mobile/tests/demoSession.ts.)
 
 import type { Attention, AttentionAnswer } from '../../../shared/contract.ts'
 import type { RemoteEvent, RemoteModel } from '../../../shared/remote.ts'

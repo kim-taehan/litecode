@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RemoteConversation } from '../../shared/remote.ts'
-import { ago, attentionTitle, composerBottomMargin, initials, outcomeLabel, rowView, statusBanner, turnHead, turnLines } from '../src/app/view.ts'
+import { ago, attentionTitle, composerBottomMargin, initials, outcomeLabel, questionView, rowView, statusBanner, turnHead, turnLines, userMessageView } from '../src/app/view.ts'
 
 const NOW = 1_800_000_000_000
 const conversation: RemoteConversation = { id: 'c', project: '/p', title: '제목', updatedAt: NOW }
@@ -61,5 +61,30 @@ describe('view — 상태를 화면 글로', () => {
     expect(statusBanner({ kind: 'reconnecting', attempt: 2, retryAt: NOW + 1_200 }, NOW)).toBe('다시 연결 중 · 2초')
     expect(statusBanner({ kind: 'unresponsive', attempt: 1, retryAt: NOW }, NOW)).toBe('데스크탑 응답 없음 (잠자기?)')
     expect(statusBanner({ kind: 'revoked' }, NOW)).toBe('연결이 해제됐습니다')
+  })
+
+  it('userMessageView: 훅이 이어 보낸 글은 말풍선이 아니라 훅 줄 — 머리("Stop hook feedback:")는 떼고 사유만', () => {
+    expect(userMessageView({ role: 'user', text: 'Stop hook feedback: 테스트가 빨강입니다' })).toEqual({ kind: 'hook', reason: '테스트가 빨강입니다' })
+    expect(userMessageView({ role: 'user', text: '\nStop hook feedback:' })).toEqual({ kind: 'hook', reason: '' })
+  })
+
+  it('userMessageView: 첨부만 보낸 메시지는 빈 말풍선이 아니라 첨부 이름만. 글은 앞뒤 빈칸을 뗀다', () => {
+    expect(userMessageView({ role: 'user', text: '', attachments: [{ kind: 'image', name: 'shot.png' }, { kind: 'file', name: 'a.ts', size: 10 }] })).toEqual({ kind: 'bubble', text: '', attachments: ['shot.png', 'a.ts'] })
+    expect(userMessageView({ role: 'user', text: '  안녕\n' })).toEqual({ kind: 'bubble', text: '안녕', attachments: [] })
+  })
+
+  it('userMessageView: 다른 대화가 보낸 지시는 딱지를 단다 — 내가 친 글과 가른다', () => {
+    expect(userMessageView({ role: 'user', text: '빌드해', origin: { conversationId: 'x', title: '기획' } })).toEqual({ kind: 'bubble', text: '빌드해', attachments: [], origin: '기획' })
+    expect(userMessageView({ role: 'user', text: '빌드해', origin: { conversationId: 'x', title: '' } })).toEqual({ kind: 'bubble', text: '빌드해', attachments: [], origin: '새 대화' })
+  })
+
+  it('questionView: 질문 하나 + 보기 + 하나 고르기만 폰에서 답한다 — 그 밖(보기 없음·여러 질문·여럿 고르기)은 데스크탑으로', () => {
+    const question = (questions: Parameters<typeof questionView>[0]['questions']) => questionView({ kind: 'question', id: 'q', sessionId: 's', questions })
+    const pick = { question: '어느 쪽?', options: [{ label: 'A' }, { label: 'B' }] }
+    expect(question([pick])).toEqual({ kind: 'pick', question: '어느 쪽?', options: ['A', 'B'] })
+    expect(question([{ question: '이름은?', options: [] }])).toEqual({ kind: 'desktop', questions: ['이름은?'] })
+    expect(question([pick, { question: '둘째', options: [{ label: 'C' }] }])).toEqual({ kind: 'desktop', questions: ['어느 쪽?', '둘째'] })
+    expect(question([{ ...pick, multiple: true }])).toEqual({ kind: 'desktop', questions: ['어느 쪽?'] })
+    expect(question([])).toEqual({ kind: 'desktop', questions: [] })
   })
 })

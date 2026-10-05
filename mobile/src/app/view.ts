@@ -1,6 +1,7 @@
 // 상태 → 화면에 쓸 글·모양 (순수 함수, React 없음 — tests/view.test.ts). 화면 컴포넌트는 이것을 그리기만 한다.
 
-import type { Attention, ConversationStatus, HistoryMessage, TurnItem } from '../../../shared/contract.ts'
+import type { Attention, ConversationStatus, HistoryMessage, QuestionAttention, TurnItem } from '../../../shared/contract.ts'
+import { stopFeedbackReason } from '../../../shared/hooks.ts'
 import type { RemoteConversation } from '../../../shared/remote.ts'
 import type { ConnectionStatus, ConversationView } from '../core/index.ts'
 import { S } from './strings.ts'
@@ -34,6 +35,36 @@ export function attentionTitle(request: Attention): string {
   if (request.action === 'bash') return S.approveCommand
   if (request.action === 'edit') return S.approveEdit
   return S.approveOther
+}
+
+/**
+ * 질문 카드의 모양. pick: 질문 하나 + 보기 + 하나 고르기 — 보기를 누르면 그것이 답이다.
+ * desktop: 그 밖(보기 없는 직접 입력형·여러 질문·여럿 고르기)은 폰에서 못 그린다 — 질문 글과 "데스크탑에서 답해 주세요" 만. 거절은 둘 다 된다
+ */
+export type QuestionView = { kind: 'pick'; question: string; options: string[] } | { kind: 'desktop'; questions: string[] }
+
+export function questionView(request: QuestionAttention): QuestionView {
+  const [only] = request.questions
+  if (request.questions.length === 1 && only && only.options.length > 0 && !only.multiple) return { kind: 'pick', question: only.question, options: only.options.map((option) => option.label) }
+  return { kind: 'desktop', questions: request.questions.map((question) => question.question) }
+}
+
+/**
+ * 내 말(user) 하나의 모양 — 데스크탑 ChatTurn 의 UserMessage 와 같은 판정.
+ * hook: 턴 끝 훅이 이어 보낸 글 — 말풍선이 아니라 구분되는 줄(사유는 빈 글일 수 있다).
+ * bubble: 첨부 이름(있으면) + 다른 대화가 보낸 지시면 그 대화 제목(origin) + 글. 글이 비면(첨부만 보냄) 말풍선은 그리지 않는다
+ */
+export type UserMessageView = { kind: 'hook'; reason: string } | { kind: 'bubble'; text: string; attachments: string[]; origin?: string }
+
+export function userMessageView(message: HistoryMessage): UserMessageView {
+  const reason = stopFeedbackReason(message.text)
+  if (reason !== undefined) return { kind: 'hook', reason }
+  return {
+    kind: 'bubble',
+    text: message.text.trim(),
+    attachments: (message.attachments ?? []).map((attachment) => attachment.name),
+    ...(message.origin && { origin: message.origin.title || S.untitled }),
+  }
 }
 
 function firstLine(text: string): string {

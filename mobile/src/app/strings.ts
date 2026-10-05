@@ -3,8 +3,7 @@
 export const S = {
   appName: 'litecode',
 
-  connectIntro: '데스크탑의 litecode 에 연결합니다. 데스크탑에서 설정 › 모바일을 열어 QR 을 띄워 주세요.',
-  scanQr: 'QR 스캔',
+  connectIntro: '데스크탑의 litecode 에 연결합니다. 데스크탑에서 설정 › 모바일 › 기기 연결을 눌러 주소와 코드를 확인해 주세요.',
   scanQrSoon: 'QR 스캔 · 준비 중',
   addressLabel: '데스크탑 주소',
   codeLabel: '연결 코드',
@@ -22,7 +21,7 @@ export const S = {
     denied: '데스크탑에서 연결을 거절했습니다.',
     timeout: '데스크탑에서 허용을 누르지 않아 시간이 지났습니다. 다시 시도해 주세요.',
     blocked: '여러 번 실패해 잠시 막혔습니다. 몇 분 뒤 다시 시도해 주세요.',
-    unreachable: '데스크탑에 닿지 못했습니다. 데스크탑의 설정 › 모바일이 켜져 있는지, 주소가 맞는지 확인해 주세요.',
+    unreachable: '데스크탑에 닿지 못했습니다. 데스크탑의 설정 › 기능에서 "모바일 연결" 이 켜져 있는지, 주소가 맞는지 확인해 주세요.',
     failed: '연결하지 못했습니다. 다시 시도해 주세요.',
   },
   notice: {
@@ -36,7 +35,7 @@ export const S = {
   enterManually: '주소와 코드 직접 입력',
   allowOnDesktop: '데스크탑에서 허용을 눌러 주세요',
   checkCode: '확인 코드가 데스크탑 화면의 코드와 같은지 보세요.',
-  connectFootnote: '같은 사내망(Wi-Fi 또는 VPN)에 있어야 연결됩니다. 대화 내용은 데스크탑에만 저장됩니다.',
+  connectFootnote: '지금은 데스크탑과 같은 컴퓨터 안(에뮬레이터)에서만 연결됩니다. 대화 내용은 데스크탑에만 저장됩니다.',
 
   switchProject: '프로젝트 바꾸기',
   settings: '설정',
@@ -59,6 +58,9 @@ export const S = {
   approveEdit: '파일 수정 승인',
   approveOther: '실행 승인',
   question: '질문',
+  answerOnDesktop: '이 질문은 폰에서 답할 수 없습니다. 데스크탑에서 답해 주세요.',
+  hookFollowUp: '턴 끝 훅이 이어서 보냄',
+  delegatedFrom: (title: string) => `다른 대화에서 온 지시 · ${title}`,
 
   now: '지금',
   secondsAgo: (n: number) => `${n}초`,
