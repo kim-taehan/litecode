@@ -650,7 +650,7 @@ export const en = {
   'hooks.popup.seconds': '{seconds}s',
   'hooks.popup.edit': 'Edit {event} hook — {command}',
   'hooks.popup.enabled': 'Enable {command}',
-  'hooks.popup.unreachable': 'This matcher only names glob, grep, webfetch or websearch — before-tool hooks cannot attach to those tools, so it never runs.',
+  'hooks.popup.unreachable': 'This matcher only names websearch — that tool does not exist in this engine, so the hook never runs.',
   'hooks.popup.footer': 'Click a row to edit it or try it out. Hooks run on this PC only; the phone shows result lines only.',
   'hooks.popup.candidates': 'This folder has {count} hook definitions',
   'hooks.popup.candidates.note': '{files} — never run automatically.',

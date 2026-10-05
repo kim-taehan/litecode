@@ -272,10 +272,12 @@ const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
 // - `*_*` 는 밑줄 있는 내장 권한에도 걸린다 (MCP_TOOL_RULES 와 같은 함정) → deny 였던 밑줄 이름(하위 작업의 보내기·결과물 도구, plan_exit 등)은
 //   와일드카드 뒤에 deny 를 다시 적는다. external_directory·doom_loop 는 ask 가 된다 (전체 권한에서도 — 판정 뒤 모드가 허용하면 ctx.llm 이 once)
 // - 게이트가 비면 설정은 한 글자도 달라지지 않는다 (general·explore 정의도 없다)
-// ⚠️ **glob·grep·webfetch 에는 걸지 않는다** (격리 실행 2026-10-05, 동봉 1.18.18 + 가짜 LLM, 각 1~2회): ask 를 얹으면 permission.asked 는 오지만
-//   정본 목록 `GET /permission` 이 응답 검증에 실패하고(로그 `schema rejection … [0]["metadata"]["path"]` — glob 에서 확인, grep·webfetch 는 증상만)
-//   ctx.llm 이 요청을 못 읽어 **턴이 멈춘다**. 그래서 이 도구들(과 레거시에 없는 websearch)의 훅은 돌지 않는다 — 이름은 알아서 MCP 로 번지지는 않는다.
-//   같은 실행에서 확인한 것(각 1회): bash·edit·write·read·task·todowrite·skill, 전체 권한에서도 묻는 것, 계획의 read, 자식 general·explore·general-ask 의 bash,
+// ⚠️ **glob·grep·webfetch 에 ask 를 얹으면 정본 목록 `GET /permission` 이 400 이 된다** (01ai, 동봉 1.18.18): 요청 metadata 가 도구 인자 그대로라
+//   빠진 선택 인자(glob·grep 의 path, webfetch 의 timeout)가 응답 검증에 걸린다 (로그 `schema rejection … [0]["metadata"]["path"]`) — 그 요청이 대기 중인
+//   동안 그 폴더의 목록 전체가. 처음엔 ctx.llm 이 요청을 못 읽어 턴이 멈춰서 이 셋을 게이트에서 뺐다. 지금은 건다: ctx.llm 이 목록을 못 읽으면
+//   permission.asked 이벤트의 요청으로 잇는다 (#107 — 판정·once·reject 까지 각 3/3, 01ai "훅 게이트"). 답(POST …/reply)은 원래 정상이다.
+//   websearch 만 걸지 않는다 — 레거시 경로에 그 도구가 없다 (이름은 알아서 MCP 로 번지지는 않는다).
+//   처음 격리 실행에서 확인한 것(각 1회): bash·edit·write·read·task·todowrite·skill, 전체 권한에서도 묻는 것, 계획의 read, 자식 general·explore·general-ask 의 bash,
 //   reject+message 뒤 턴이 이어지는 것, general·explore 에 권한만 적은 정의. MCP 도구는 01af §4(개별 이름 ask)·#28(`*_*` ask), gpt- 모델의 apply_patch 는 미확인
 export interface EngineGate {
   /** 게이트를 걸 내장 권한 이름 (정렬) */
@@ -292,12 +294,15 @@ const TOOL_PERMISSION: Record<string, string> = {
   apply_patch: 'edit',
   multiedit: 'edit',
   read: 'read',
+  glob: 'glob',
+  grep: 'grep',
+  webfetch: 'webfetch',
   task: 'task',
   skill: 'skill',
   todowrite: 'todowrite',
 }
-/** 게이트를 걸 수 없는 내장 도구 (위 ⚠️) — 매처에 적혀 있어도 아무것도 걸지 않는다 */
-const UNGATED_TOOLS = ['glob', 'grep', 'webfetch', 'websearch']
+/** 게이트를 걸지 않는 내장 도구 (위 ⚠️ — 레거시 경로에 없다) — 매처에 적혀 있어도 아무것도 걸지 않는다 */
+const UNGATED_TOOLS = ['websearch']
 const MCP_WILDCARD = '*_*'
 /** opencode 기본 규칙 중 allow 가 아닌 것 */
 const DEFAULT_RULES: Permission = { question: 'deny', plan_enter: 'deny', plan_exit: 'deny', external_directory: 'ask', doom_loop: 'ask' }
@@ -306,7 +311,9 @@ const BUILTIN_AGENT_RULES: Record<string, Permission> = {
   build: { question: 'allow', plan_enter: 'allow' },
   plan: { question: 'allow', plan_exit: 'allow' },
   general: { todowrite: 'deny' },
-  explore: { '*': 'deny', bash: 'allow', read: 'allow', external_directory: 'ask' }, // + grep·glob·webfetch·websearch allow (게이트를 걸지 않는 도구)
+  // 바이너리 그대로: "*" deny 뒤에 grep·glob·list·bash·webfetch·websearch·read allow (list·websearch 는 게이트 대상이 아니라 옮기지 않았다).
+  // 끈 웹 도구는 이 뒤의 전역 deny 가 이긴다
+  explore: { '*': 'deny', grep: 'allow', glob: 'allow', bash: 'allow', webfetch: 'allow', read: 'allow', external_directory: 'ask' },
 }
 /** 앱이 정의하지 않지만 게이트는 걸어야 하는 내장 하위 에이전트 */
 const BUILTIN_SUBAGENTS = ['general', 'explore']

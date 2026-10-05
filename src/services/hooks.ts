@@ -55,7 +55,7 @@ import type { Conversation } from '../../shared/contract.ts'
 //     사유가 모델에 가고 턴은 이어진다. `permissionDecision: "ask"` 는 'ask'(승인 카드), 통과는 'allow', 맞는 훅이 없으면 답하지 않는다.
 //     실패·기한 초과는 통과다(훅 버그가 작업을 세우지 않게). 하위 작업의 도구에도 걸리고 줄은 부모 턴에 남는다. 계획 모드처럼 도구가 빠진
 //     곳에서는 요청이 없어 돌지 않는다. **통과는 사용자 승인이 아니다** — 모드가 원래 묻는 호출은 ctx.llm 이 승인 카드를 그대로 띄운다.
-//     엔진이 실행 전에 묻게 할 수 없는 도구(glob·grep·webfetch — engine.ts 의 ⚠️)에는 돌지 않는다 (도구 실행 후 훅은 돈다)
+//     지금 엔진 경로에 없는 도구(websearch — engine.ts 의 ⚠️)에는 돌지 않는다. glob·grep·webfetch 에는 돈다 (#107 뒤)
 // - 표시: 훅이 끝날 때마다 그 대화의 도는 턴에 진행 줄 하나(ctx.chat.note — kind 'hook'). 최근 실행은 메모리(recent), 막음·실패만 main.log 한 줄
 // - 화면(3단계): 입력창 `+` 메뉴의 훅 팝업 — saveHook·removeHook·setEnabled·test·candidates·importHooks·recentIn (다리는 hooks/bridge.ts)
 
