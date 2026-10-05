@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import type { Appearance, Mode, Settings } from '../shared/ipc.ts'
 import { LANGUAGES } from '../shared/i18n/index.ts'
 import { MODES } from '../shared/modes.ts'
+import { speechLanguage, type SpeechLanguage } from '../shared/speech.ts'
 import { ConfirmFullAccess } from './ModeChip.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../shared/fontSize.ts'
+import { useFeatures } from './featuresStore.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 
 // 설정 > 일반 — dsh ui-settings-general GeneralSection 의 행 모양(이름 + 회색 설명, 오른쪽 컨트롤, 행 사이 0.5px 선)과
@@ -63,6 +65,7 @@ export function GeneralPage() {
   /** 새 대화 기본 모드로 전체 권한을 고르는 중 — 확인 대화상자 (dsh PermissionRow) */
   const [confirmingFull, setConfirmingFull] = useState(false)
   const [version, setVersion] = useState<string>()
+  const voiceOn = useFeatures().has('voice')
   useEffect(() => void window.litecode.getAppVersion().then(setVersion, () => {}), [])
   const save = (patch: Partial<Settings>): void =>
     void updateSettings(patch).then(
@@ -105,6 +108,24 @@ export function GeneralPage() {
         </div>
         <OptionSelect value={settings.language} options={LANGUAGES} onChange={(language) => save({ language })} />
       </div>
+
+      {/* 받아쓰기 언어 (음성 입력, 이슈 #109) — 기능이 켜져 있을 때만. 고른 적이 없으면 화면 언어를 따른다 (shared/speech.ts) */}
+      {voiceOn && (
+        <div className="settings-row" data-setting="speechLanguage">
+          <div className="settings-row__text">
+            <div className="settings-row__title">{t('settings.speechLanguage')}</div>
+            <div className="settings-row__description">{t('settings.speechLanguage.description')}</div>
+          </div>
+          <OptionSelect<SpeechLanguage>
+            value={speechLanguage(settings)}
+            options={[
+              { id: 'auto', label: t('settings.speechLanguage.auto') },
+              ...LANGUAGES,
+            ]}
+            onChange={(next) => save({ speechLanguage: next })}
+          />
+        </div>
+      )}
 
       <div className="settings-row settings-row--stacked">
         <div className="settings-row__title">{t('settings.appearance')}</div>

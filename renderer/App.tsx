@@ -25,6 +25,7 @@ import { StatusDot, Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { PlusMenu } from './PlusMenu.tsx'
+import { useVoiceInput, VoiceButton, VoiceStrip } from './VoiceInput.tsx'
 import { AttachmentChips } from './Attachments.tsx'
 import { pasteIntent, useFileDrop } from './dropPaste.ts'
 import { DropVeil } from './DropVeil.tsx'
@@ -534,6 +535,13 @@ export function App() {
     setDraft,
     onSend: (text, display) => send({ text, display }),
     onShell: (_directory, command) => void runShell(command),
+  })
+  /** 음성 입력 (이슈 #109) — 받아쓴 글은 녹음을 시작한 대화의 초안에 넣기만 한다 (VoiceInput.tsx) */
+  const voice = useVoiceInput({
+    sessionId: active?.id,
+    inputRef: trigger.inputRef,
+    hasSession: (id) => sessions.some((session) => session.id === id),
+    edit: (id, change) => changeDraftOf(id, (now) => ({ ...now, text: change(now.text) })),
   })
   /** Enter·보내기 — 입력 트리거(`/`·`!`)가 다루지 않으면 평범하게 보낸다 */
   const submit = () =>
@@ -1267,6 +1275,7 @@ export function App() {
                     }
                   }}
                 />
+                <VoiceStrip voice={voice} />
                 <div className="composer__row">
                   {/* `+` 메뉴 — 파일·이미지 추가(이슈 #44)와 지금 프로젝트의 스킬·MCP 서버 팝업(이슈 #43). 이미지는 고른 모델이 받을 때만 */}
                   <PlusMenu
@@ -1277,6 +1286,7 @@ export function App() {
                   <ModeChip value={mode} locked={!!active.pending} onChange={chooseMode} />
                   <div className="composer__trailing">
                     <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
+                    <VoiceButton voice={voice} />
                     {/* dsh InputBar: 턴이 도는 동안 입력이 비면 보내기 자리가 ■, 글을 쓰면 다시 보내기(=큐) */}
                     {active.pending && !draft.trim() && attached.length === 0 ? (
                       <button

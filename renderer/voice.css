@@ -1,0 +1,170 @@
+/* 음성 입력 (이슈 #109 2단계) — 마이크 버튼과 녹음 띠. 치수는 dsh client-ui-voice-input(28px 버튼, 32px 둥근 버튼, 24px 파형)을 따르고
+   색은 styles.css 의 토큰만 쓴다 (라이트·다크 공통) */
+
+/* 마이크 버튼 — 모델 선택과 보내기 사이. 바탕 없는 28px 원, 도는 동안은 눌린 모양 */
+.composer__voice {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  outline: none;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.composer__voice:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.composer__voice:focus-visible,
+.voice-strip__button:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.composer__voice[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.composer__voice[data-voice='recording'] {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.composer__voice:disabled {
+  cursor: default;
+}
+
+/* 녹음 띠 — 입력칸과 아래 줄 사이의 한 줄 */
+.voice-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+  margin: 0 8px;
+  padding: 0 4px 0 12px;
+  border-radius: 16px;
+  background: var(--fill-selector);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.voice-strip[data-voice='requesting'],
+.voice-strip[data-voice='recording'],
+.voice-strip[data-voice='transcribing'] {
+  padding-left: 4px;
+}
+
+.voice-strip[data-tone='error'] {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.voice-strip__text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+/* 녹음 중엔 글이 제 너비만, 그 밖엔 줄을 채운다 */
+.voice-strip:not([data-voice='recording']) .voice-strip__text {
+  flex: 1;
+}
+
+.voice-strip[data-voice='recording'] .voice-strip__text {
+  flex: none;
+  white-space: nowrap;
+}
+
+.voice-strip__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+.voice-strip[data-voice='recording'] .voice-strip__dot {
+  background: var(--danger);
+}
+
+.voice-strip__meter {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 24px;
+  height: 24px;
+  overflow: hidden;
+}
+
+.voice-strip__bar {
+  flex: none;
+  width: 3px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+}
+
+.voice-strip__time {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.voice-strip__button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  outline: none;
+  background: transparent;
+  color: inherit;
+}
+
+.voice-strip__button:hover {
+  background: var(--fill-active);
+}
+
+.voice-strip__stop {
+  background: var(--danger);
+  color: #fff;
+}
+
+.voice-strip__stop:hover {
+  background: var(--danger);
+  opacity: 0.85;
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-strip__dot {
+    animation: none;
+  }
+}
