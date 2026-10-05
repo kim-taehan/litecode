@@ -1,11 +1,11 @@
 import { Context, Service } from 'cordis'
-import { realpathSync } from 'node:fs'
+import { mkdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import './chat.ts'
 import './sessions.ts'
 import { realDirectory } from './llm.ts'
 import type { ExecHandle } from './exec.ts'
-import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
+import { readJsonFileSync } from './jsonFile.ts'
 import path from 'node:path'
 import { dropHook, entriesFor, gateMatchers, importCandidates, lenientReader, parseHooks, parseProjects, putHook, serializeHooks, serializeProjects, type HookStore } from './hooks/config.ts'
 import { hookSpawn, runHook, type HookInput, type HookRun } from './hooks/run.ts'
@@ -36,8 +36,8 @@ import type { Conversation } from '../../shared/contract.ts'
 // ctx.llm 의 중립 이벤트뿐이다. 기능 `hooks`(기본 꺼짐)의 묶음이라 꺼져 있으면 이 서비스가 통째로 없다.
 //
 // - 정의: userData `hooks.json`(모든 프로젝트) + `hooks-projects.json`(이 프로젝트만 + 프로젝트별 켜기 값) — hooks/config.ts.
-//   **돌 때마다 다시 읽는다** — 화면이 생기기 전(3단계)에는 파일을 직접 고쳐 쓰고, 고치면 다음 실행부터 반영된다.
-//   프로젝트 폴더가 가진 훅(`.claude/settings.json`)은 읽지 않는다 (자동 실행 금지, 사용자 결정 — 가져오기는 3단계)
+//   **돌 때마다 다시 읽는다** — 파일을 직접 고쳐도 되고(사람이 고치는 파일이라 들여 써서 저장한다), 고치면 다음 실행부터 반영된다.
+//   프로젝트 폴더가 가진 훅(`.claude/settings.json`)은 읽지 않는다 (자동 실행 금지, 사용자 결정 — 사용자가 고른 것만 가져온다: importHooks)
 // - 실행·결과 해석: hooks/run.ts. 같은 이벤트의 훅은 모든 프로젝트 → 이 프로젝트 순으로 **하나씩** 돌고, 결과는 가장 제한적인 것 —
 //   하나라도 막으면 막기다 (그 뒤 훅은 돌지 않는다). 실패(그 밖의 코드·기한 초과·실행 실패)는 막지 않는다
 // - 이벤트 연결:
@@ -110,6 +110,15 @@ function realKey(directory: string): string {
   }
 }
 
+/** hooks.json·hooks-projects.json 을 쓴다 — 사람이 열어 고치는 파일이라 들여 쓴다 (settings.json 과 같이). 임시 파일에 쓰고 바꿔 끼운다.
+ *  jsonFile.ts 의 writeJsonFileSync 가 들여쓰기를 받게 되면 그것으로 합친다 (이슈 #126 오류 12) */
+function writeHooksFile(file: string, value: unknown): void {
+  mkdirSync(path.dirname(file), { recursive: true })
+  const temp = `${file}.${process.pid}.tmp`
+  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`)
+  renameSync(temp, file)
+}
+
 export class HooksService extends Service {
   static readonly inject = ['chat', 'sessions', 'llm']
 
@@ -148,6 +157,7 @@ export class HooksService extends Service {
     })
     ctx.on('chat/before-send', async (send) => {
       await this.syncGate() // 손으로 고친 훅 파일을 이 턴부터 — 엔진을 다시 띄워야 하면 이 턴이 새 엔진에 붙는다
+      // ↑ 받아들인 한계: ctx.llm 은 도는 **턴**만 세므로, 그 재시작 때 열려 있던 터미널 칸(엔진 pty)·맥락 넣기·기록 읽기는 끊긴다 (이슈 #126 오류 11)
       const directory = await realDirectory(send.project)
       if (!directory) return
       const base = { directory, conversationId: send.cid, mode: send.mode }
@@ -204,16 +214,6 @@ export class HooksService extends Service {
     const all = parseHooks(await this.read(this.opts.file))
     const project = key ? parseProjects(await this.read(this.opts.projectsFile))[key] : undefined
     return entriesFor(all, project)
-  }
-
-  /** 훅 목록을 통째로 저장한다 — directory 를 주면 그 프로젝트만의 훅, 안 주면 모든 프로젝트 훅. 모양이 틀린 것은 빠진다 */
-  save(hooks: readonly HookDef[], directory?: string): void {
-    const valid = parseHooks(serializeHooks(hooks))
-    if (!directory) {
-      readJsonFileSync(this.opts.file, 'object') // 덮어쓰기 전에 깨진 파일은 옆으로 옮겨 둔다 (jsonFile.ts)
-      writeJsonFileSync(this.opts.file, serializeHooks(valid))
-    } else this.updateProject(directory, (entry) => ({ ...entry, hooks: valid }))
-    void this.syncGate()
   }
 
   /** 그 프로젝트에서만 훅 하나를 켜거나 끈다 (key 는 HookEntry.key) — 모든 프로젝트 훅도 이 프로젝트에서만 바뀐다 */
@@ -349,8 +349,8 @@ export class HooksService extends Service {
     const projects = parseProjects(readJsonFileSync(this.opts.projectsFile, 'object'))
     const project = (projects[realKey(directory)] ??= { hooks: [], enabled: {} })
     apply({ all, project, projects })
-    writeJsonFileSync(this.opts.file, serializeHooks(all))
-    writeJsonFileSync(this.opts.projectsFile, serializeProjects(projects))
+    writeHooksFile(this.opts.file, serializeHooks(all))
+    writeHooksFile(this.opts.projectsFile, serializeProjects(projects))
     void this.syncGate()
   }
 
@@ -358,10 +358,11 @@ export class HooksService extends Service {
     const key = realKey(directory)
     const projects = parseProjects(readJsonFileSync(this.opts.projectsFile, 'object'))
     projects[key] = change(projects[key] ?? { hooks: [], enabled: {} })
-    writeJsonFileSync(this.opts.projectsFile, serializeProjects(projects))
+    writeHooksFile(this.opts.projectsFile, serializeProjects(projects))
   }
 
   private async conversation(match: (entry: Conversation) => boolean): Promise<Conversation | undefined> {
+    if (this.disposed) return undefined // 내려간 컨텍스트에서 서비스를 꺼내면 던진다 — 밀려 있던 도구 실행 후 훅·알림이 여기로 온다
     return (await this.ctx.sessions.list().catch(() => [])).find(match)
   }
 
@@ -372,8 +373,10 @@ export class HooksService extends Service {
     await this.run({ event: 'Notification', directory, conversationId: conversation.id, mode: conversation.mode, notification: { type, message } })
   }
 
-  /** 대화의 도는 턴에 훅 줄 하나 */
+  /** 대화의 도는 턴에 훅 줄 하나. 내려간 뒤(기능 끄기·앱 종료)에 끝난 훅은 적지 않는다 — 내려간 컨텍스트에서 ctx.chat 을 꺼내면 던지고,
+   *  'llm/tool-done' 의 줄은 아무도 기다리지 않아 처리 안 된 거절이 된다 (이슈 #126 오류 2) */
   private show(cid: string, run: HookRun): void {
+    if (this.disposed) return
     this.ctx.chat.note(cid, {
       kind: 'hook',
       id: `hook_${++this.seq}`,

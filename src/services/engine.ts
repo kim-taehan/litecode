@@ -11,7 +11,7 @@ import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
 import type { ProviderConfig } from './providers.ts'
 import type { Mode } from '../../shared/modes.ts'
-import { matchesTool } from '../../shared/hooks.ts'
+import { matchesTool, UNGATED_TOOLS } from '../../shared/hooks.ts'
 import { engineLimit } from '../../shared/outputLimit.ts'
 import { tr } from '../i18n.ts'
 import { removeAppPluginDirs } from './enginePlugins.ts'
@@ -23,7 +23,7 @@ import type {} from './settings.ts' // ctx.settings·'settings/changed' 타입
 // opencode 를 모른다. 프로젝트마다 띄우지 않는다 — 세션마다 location.directory 로 폴더를 가른다 (01_probe Q1).
 //
 // 설정 전달은 실측(2026-09-30, opencode 1.18.18, _workspace/01_probe.md)을 따른다:
-// - 신규 세대(/api/session/*)가 읽는 설정은 `OPENCODE_CONFIG_DIR` 폴더(있으면 전역 폴더를 대신한다) + 세션 폴더의 opencode.json 뿐이다.
+// - (이력 — 실측은 신규 세대 /api/session/* 로 했다. 채팅은 지금 레거시 경로다) 신규 세대가 읽는 설정은 `OPENCODE_CONFIG_DIR` 폴더(있으면 전역 폴더를 대신한다) + 세션 폴더의 opencode.json 뿐이다.
 //   OPENCODE_CONFIG_CONTENT·OPENCODE_CONFIG 는 턴이 prompted 에서 멈춘다 → 앱 전용 폴더에 opencode.json 을 생성한다
 // - **진짜 키는 opencode 프로세스에 두지 않는다** (파일에도 env 에도). opencode 는 자기 env 를 프로젝트 플러그인·bash 도구에 넘긴다
 //   (03_qa 재현, --pure 로 못 막음). provider baseURL 은 메인 프로세스의 키 프록시(keyProxy.ts) 주소, apiKey 는 프록시 토큰이다
@@ -105,7 +105,7 @@ const PURGE_SCRIPT = [
   'db.close()',
   'console.log(JSON.stringify({ busy: before.busy || after.busy }))',
 ].join(';')
-// 모드 = opencode primary 에이전트 하나 (01k). 세션마다 POST /api/session 의 agent 로 고르고, 바꿀 땐 POST /api/session/{id}/agent.
+// 모드 = opencode primary 에이전트 하나 (01k). ctx.llm 이 매 프롬프트의 agent 로 고른다 (레거시 경로 — 세션에 묶이지 않는다).
 // 정의는 이 파일이 생성하는 opencode.json 에만 있다 — 위층은 모드 이름(shared/modes.ts)만 안다.
 // - plan: opencode 기본 plan 을 덮어쓴다. 기본 plan 은 편집만 막고(bash 허용, .opencode/plans/*.md 쓰기 허용) "계획만 세워라" 프롬프트도
 //   신규 세대엔 없다(01k). 규칙은 뒤가 이긴다 — edit·bash·webfetch deny 를 덧붙이면 그 도구들이 LLM 요청에서 빠지고 plans 예외도 막힌다
@@ -301,8 +301,6 @@ const TOOL_PERMISSION: Record<string, string> = {
   skill: 'skill',
   todowrite: 'todowrite',
 }
-/** 게이트를 걸지 않는 내장 도구 (위 ⚠️ — 레거시 경로에 없다) — 매처에 적혀 있어도 아무것도 걸지 않는다 */
-const UNGATED_TOOLS = ['websearch']
 const MCP_WILDCARD = '*_*'
 /** opencode 기본 규칙 중 allow 가 아닌 것 */
 const DEFAULT_RULES: Permission = { question: 'deny', plan_enter: 'deny', plan_exit: 'deny', external_directory: 'ask', doom_loop: 'ask' }
@@ -596,14 +594,12 @@ export class EngineService extends Service {
   private proxy?: Promise<KeyProxy>
   /** DB 정리는 한 번에 하나만 */
   private purging: Promise<void> = Promise.resolve()
-  /** 떠 있는(띄우는 중인) 서버의 opencode.json 에 넣은 웹 도구 켜짐 (설정 > 기능 web, 기본 꺼짐) */
-  private launchedWebTools = false
-  /** 떠 있는(띄우는 중인) 서버에 넣은 스킬 설정 (JSON — 바뀌었는지만 본다) */
-  private launchedSkills = ''
+  /** 떠 있는(띄우는 중인) 서버의 opencode.json 에 넣은 웹 도구 켜짐(설정 > 기능 web, 기본 꺼짐)·스킬 설정·게이트 (JSON — 바뀌었는지만 본다).
+   *  **띄우는 중인 서버가 아직 설정을 읽기 전이면 없다** — 그 사이에 바뀐 값은 그 기동이 읽으므로 다시 띄울 일이 아니다. 지난 서버의 값과 비교하면
+   *  앱 시작 때 뜨는 중에 도착한 게이트(ctx.hooks)가 "달라졌다" 로 보여 엔진이 두 번 떴다 (이슈 #126) */
+  private launched?: string
   /** 도구 실행 전 판정을 받을 도구의 매처 (setGate) — 다음 기동이 읽는다 */
   private gateMatchers: readonly string[] = []
-  /** 떠 있는(띄우는 중인) 서버에 넣은 게이트 (JSON) */
-  private launchedGate = JSON.stringify(toolGate([]))
 
   constructor(
     ctx: Context,
@@ -615,14 +611,14 @@ export class EngineService extends Service {
     ctx.on('providers/changed', () => void this.restart().catch((error: unknown) => console.error('[engine] 설정 변경 후 재시작 실패', (error as Error).message)))
     // 웹 도구 켜기/끄기 (이슈 #14) — 설정은 재시작해야 먹는다. 떠 있는 서버와 값이 다르면 다시 띄운다(진행 중 턴은 중단됨).
     // 안 떠 있으면 다음 기동이 읽는다(launch). features 는 inject 하지 않는다 — 기능 레지스트리 없이 띄운 엔진(서비스 실물 테스트)은 꺼짐으로 돈다
-    ctx.on('features/changed', (enabled) => {
+    ctx.on('features/changed', () => {
       // 훅 기능(이슈 #102)을 끄면 도구 실행 전 게이트도 걷는다 — 판정할 쪽이 없는데 묻기만 하게 두지 않는다
-      if (!this.current || (enabled.includes('web') === this.launchedWebTools && JSON.stringify(this.skills()) === this.launchedSkills && JSON.stringify(this.gate()) === this.launchedGate)) return
+      if (!this.outdated()) return
       void this.restart().catch((error: unknown) => console.error('[engine] 웹 도구·스킬·훅 변경 후 재시작 실패', (error as Error).message))
     })
     // 스킬 (이슈 #7) — 설정 > 기능의 스킬(위 features/changed)과 "Claude Code 스킬 함께 쓰기"(settings) 도 같은 길로 다시 띄운다
     ctx.on('settings/changed', () => {
-      if (!this.current || JSON.stringify(this.skills()) === this.launchedSkills) return
+      if (!this.outdated()) return
       void this.restart().catch((error: unknown) => console.error('[engine] 스킬 설정 변경 후 재시작 실패', (error as Error).message))
     })
     ctx.effect(() => () => this.stop())
@@ -642,7 +638,7 @@ export class EngineService extends Service {
    *  **실제로 달라졌을 때만** 다시 띄운다(진행 중 턴은 끊긴다 — 부르는 쪽 ctx.llm 이 도는 턴이 없을 때 부른다). 안 떠 있으면 다음 기동이 읽는다 */
   setGate(matchers: readonly string[]): void {
     this.gateMatchers = [...matchers]
-    if (!this.current || JSON.stringify(this.gate()) === this.launchedGate) return
+    if (!this.outdated()) return
     void this.restart().catch((error: unknown) => console.error('[engine] 도구 실행 전 게이트 변경 후 재시작 실패', (error as Error).message))
   }
 
@@ -651,11 +647,28 @@ export class EngineService extends Service {
     return toolGate(this.ctx.get('features')?.isEnabled('hooks') === false ? [] : this.gateMatchers)
   }
 
+  /** 지금 설정으로 띄우면 opencode.json 에 들어갈 웹 도구·스킬·게이트 */
+  private wanted(): { webTools: boolean; skills: EngineSkills; gate: EngineGate } {
+    return { webTools: this.ctx.get('features')?.isEnabled('web') ?? false, skills: this.skills(), gate: this.gate() }
+  }
+
+  /** 떠 있는(띄우는 중인) 서버가 읽은 설정이 지금 설정과 다른가 — 다시 띄워야 한다. 안 떠 있거나 아직 읽기 전이면 아니다 (다음·그 기동이 읽는다) */
+  private outdated(): boolean {
+    return !!this.current && this.launched !== undefined && JSON.stringify(this.wanted()) !== this.launched
+  }
+
   /** 떠 있는 서버의 연결. 없거나 죽었으면 띄운다 (동시에 불러도 한 번만) */
   connection(): Promise<EngineConnection> {
     if (this.disposed) return Promise.reject(new Error(tr('error.appQuitting')))
     if (!this.current) {
-      const launching: Promise<RunningServer> = this.stopping.then(() => this.launch(() => this.forget(launching)))
+      this.launched = undefined
+      // 물러난 기동(restart 로 밀려난 것)이 뒤늦게 읽은 값은 적지 않는다 — 지금 띄우는 서버의 값이 아니다
+      const launching: Promise<RunningServer> = this.stopping.then(() =>
+        this.launch(
+          () => this.forget(launching),
+          (read) => void (this.current === launching && (this.launched = read)),
+        ),
+      )
       launching.catch(() => this.forget(launching))
       this.current = launching
     }
@@ -713,7 +726,7 @@ export class EngineService extends Service {
     return { ...base, [key]: mergePath(login, base[key]) }
   }
 
-  private async launch(onExit: () => void): Promise<RunningServer> {
+  private async launch(onExit: () => void, onRead: (config: string) => void): Promise<RunningServer> {
     const base = await this.baseEnv()
     const lookup = findOpencodeBinary(base, undefined, this.opts.bundled?.opencode)
     if (!lookup.path) throw new Error(notFoundMessage(lookup))
@@ -738,12 +751,10 @@ export class EngineService extends Service {
 
     fs.mkdirSync(this.opts.configDir, { recursive: true })
     removeAppPluginDirs(this.opts.configDir) // 여기 놓인 파일은 모든 프로젝트에서 엔진 안에 실린다 (#101, enginePlugins.ts)
-    this.launchedWebTools = this.ctx.get('features')?.isEnabled('web') ?? false
-    const skills = this.skills()
-    this.launchedSkills = JSON.stringify(skills)
-    const gate = this.gate()
-    this.launchedGate = JSON.stringify(gate)
-    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, webTools: this.launchedWebTools, skills, gate })
+    const wanted = this.wanted()
+    const { gate } = wanted
+    onRead(JSON.stringify(wanted)) // 읽자마자 적는다 (사이에 await 없음) — 이 뒤에 바뀐 값은 다시 띄워야 먹는다
+    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, ...wanted })
     fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(config, null, 2))
     prepareInstallMarkers(this.opts.configDir, env)
 
