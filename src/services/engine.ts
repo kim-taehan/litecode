@@ -11,6 +11,7 @@ import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
 import type { ProviderConfig } from './providers.ts'
 import type { Mode } from '../../shared/modes.ts'
+import { matchesTool } from '../../shared/hooks.ts'
 import { engineLimit } from '../../shared/outputLimit.ts'
 import { tr } from '../i18n.ts'
 import './providers.ts'
@@ -51,6 +52,8 @@ export interface EngineConnection {
   providerBaseURL(providerId: string): string
   /** 앱이 붙이는 MCP 서버의 opencode 설정 — 로컬 서버의 자식 env 에서 이 서버의 비밀(서버 비밀번호 등)을 빈 값으로 덮는다 (engineMcpConfig) */
   mcpConfig(def: EngineMcp): Record<string, unknown>
+  /** 이 서버의 설정에 그 권한 이름의 도구 실행 전 게이트(ask 규칙)를 얹었나 (toolGate) — 얹지 않은 권한의 승인 요청은 모드나 사용자 설정이 원래 묻는 것이다 */
+  gated(permission: string): boolean
 }
 
 export interface EngineOptions {
@@ -256,11 +259,145 @@ const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
   [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...SEND_TOOLS_DENY },
 }
 
+// 도구 실행 전 게이트 (이슈 #102 2단계, 실측 _workspace/01af_hooks.md §4 — 플러그인 없이 "실행 전에 막기"). 도구 실행 전 판정을 받을 도구의 권한에
+// `ask` 규칙을 얹으면 실행 직전에 permission.asked 가 오고(5/5), ctx.llm 이 판정('llm/pre-tool')을 물어 once / reject+message 로 답한다.
+// - 무엇에 거나: 매처(도구 이름의 `|` 나열·정규식, shared/hooks.ts matchesTool)가 맞는 내장 도구의 **권한 이름**(write·apply_patch → edit).
+//   내장 도구 이름의 나열이 아닌 매처(빈 매처 = 전부, 정규식, MCP 도구 이름)는 MCP 도구에도 건다 — 서버 이름을 미리 모르므로 와일드카드 `*_*`
+// - 어디에 거나: 에이전트마다 **맨 뒤에**(규칙은 뒤가 이긴다 — 전체 권한의 "*":allow 도 덮는다, 사용자 결정) — 네 모드 + 하위 에이전트
+//   general·explore·general-ask (자식은 부모 모드 권한을 안 물려받는다, #31). **그 에이전트에서 allow 인 것만 ask 로 바꾼다**: deny 는 그대로(계획의
+//   편집·명령, 끈 웹 도구·스킬 — ask 를 얹으면 도구가 되살아난다), 이미 ask 인 것도 그대로. 패턴별 규칙(task·skill)은 allow 인 패턴만 ask 로
+// - 에이전트의 "지금 규칙" 은 엔진이 합치는 순서로 본다 (바이너리 코드 판독 2026-10-05, 1.18.18): 기본 → 내장 에이전트 규칙 → 전역 permission →
+//   에이전트 permission, 마지막으로 맞는 규칙이 이긴다 (권한 이름도 와일드카드로 맞춘다). 기본·내장 규칙은 아래 두 표에 allow 가 아닌 것만 옮겨 적었다
+// - `*_*` 는 밑줄 있는 내장 권한에도 걸린다 (MCP_TOOL_RULES 와 같은 함정) → deny 였던 밑줄 이름(하위 작업의 보내기·결과물 도구, plan_exit 등)은
+//   와일드카드 뒤에 deny 를 다시 적는다. external_directory·doom_loop 는 ask 가 된다 (전체 권한에서도 — 판정 뒤 모드가 허용하면 ctx.llm 이 once)
+// - 게이트가 비면 설정은 한 글자도 달라지지 않는다 (general·explore 정의도 없다)
+// ⚠️ **glob·grep·webfetch 에는 걸지 않는다** (격리 실행 2026-10-05, 동봉 1.18.18 + 가짜 LLM, 각 1~2회): ask 를 얹으면 permission.asked 는 오지만
+//   정본 목록 `GET /permission` 이 응답 검증에 실패하고(로그 `schema rejection … [0]["metadata"]["path"]` — glob 에서 확인, grep·webfetch 는 증상만)
+//   ctx.llm 이 요청을 못 읽어 **턴이 멈춘다**. 그래서 이 도구들(과 레거시에 없는 websearch)의 훅은 돌지 않는다 — 이름은 알아서 MCP 로 번지지는 않는다.
+//   같은 실행에서 확인한 것(각 1회): bash·edit·write·read·task·todowrite·skill, 전체 권한에서도 묻는 것, 계획의 read, 자식 general·explore·general-ask 의 bash,
+//   reject+message 뒤 턴이 이어지는 것, general·explore 에 권한만 적은 정의. MCP 도구는 01af §4(개별 이름 ask)·#28(`*_*` ask), gpt- 모델의 apply_patch 는 미확인
+export interface EngineGate {
+  /** 게이트를 걸 내장 권한 이름 (정렬) */
+  permissions: string[]
+  /** MCP 도구(`<서버>_<도구>`) 전부에도 건다 */
+  mcp: boolean
+}
+
+/** 내장 도구 이름 → 권한 이름 (01af §7 함정 3) */
+const TOOL_PERMISSION: Record<string, string> = {
+  bash: 'bash',
+  edit: 'edit',
+  write: 'edit',
+  apply_patch: 'edit',
+  multiedit: 'edit',
+  read: 'read',
+  task: 'task',
+  skill: 'skill',
+  todowrite: 'todowrite',
+}
+/** 게이트를 걸 수 없는 내장 도구 (위 ⚠️) — 매처에 적혀 있어도 아무것도 걸지 않는다 */
+const UNGATED_TOOLS = ['glob', 'grep', 'webfetch', 'websearch']
+const MCP_WILDCARD = '*_*'
+/** opencode 기본 규칙 중 allow 가 아닌 것 */
+const DEFAULT_RULES: Permission = { question: 'deny', plan_enter: 'deny', plan_exit: 'deny', external_directory: 'ask', doom_loop: 'ask' }
+/** 내장 에이전트가 기본 위에 얹는 규칙 (앱 설정이 덮지 않는 것만) */
+const BUILTIN_AGENT_RULES: Record<string, Permission> = {
+  build: { question: 'allow', plan_enter: 'allow' },
+  plan: { question: 'allow', plan_exit: 'allow' },
+  general: { todowrite: 'deny' },
+  explore: { '*': 'deny', bash: 'allow', read: 'allow', external_directory: 'ask' }, // + grep·glob·webfetch·websearch allow (게이트를 걸지 않는 도구)
+}
+/** 앱이 정의하지 않지만 게이트는 걸어야 하는 내장 하위 에이전트 */
+const BUILTIN_SUBAGENTS = ['general', 'explore']
+
+/** 매처들 → 게이트. 잘못된 정규식은 아무것도 걸지 않는다 */
+export function toolGate(matchers: readonly string[]): EngineGate {
+  const permissions = new Set<string>()
+  let mcp = false
+  for (const matcher of matchers) {
+    const pattern = matcher.trim()
+    try {
+      new RegExp(pattern === '*' ? '' : pattern)
+    } catch {
+      continue
+    }
+    for (const [tool, permission] of Object.entries(TOOL_PERMISSION)) if (matchesTool(pattern, tool)) permissions.add(permission)
+    const builtin = (name: string): boolean => name in TOOL_PERMISSION || UNGATED_TOOLS.includes(name)
+    if (!pattern.split('|').every((name) => builtin(name.trim().toLowerCase()))) mcp = true
+  }
+  return { permissions: [...permissions].sort(), mcp }
+}
+
+/** 그 권한 이름에 게이트가 걸렸나 */
+export function isGated(gate: EngineGate, permission: string): boolean {
+  return gate.permissions.includes(permission) || (gate.mcp && permission.includes('_'))
+}
+
+/** 겹쳐 놓은 규칙(앞이 먼저)에서 그 권한에 맞는 규칙들 — 뒤(이기는 쪽)부터 */
+function rulesFor(name: string, layers: readonly Permission[]): (string | Record<string, string>)[] {
+  return [...layers].reverse().flatMap((layer) =>
+    Object.keys(layer)
+      .reverse()
+      .filter((rule) => rule === name || rule === '*' || (rule === MCP_WILDCARD && name.includes('_')))
+      .map((rule) => layer[rule]!),
+  )
+}
+
+/** 그 권한에 마지막으로 맞는 규칙 (없으면 엔진 기본 allow) */
+function ruleFor(name: string, layers: readonly Permission[]): string | Record<string, string> {
+  return rulesFor(name, layers)[0] ?? 'allow'
+}
+
+/** 그 권한의 규칙에서 allow 를 ask 로 바꾼 것 — 바뀌는 것이 없으면 undefined. 패턴별 규칙(task·skill)은 allow 인 패턴만 바꾸고, 어느 패턴에도
+ *  안 맞는 대상은 그 밑의 규칙을 따르므로(예: 전역 `task: {general-ask: deny}` 밑의 "*") 그것이 allow 일 때만 `"*": ask` 를 맨 앞에 둔다 */
+function askInstead(name: string, layers: readonly Permission[]): string | Record<string, string> | undefined {
+  const rules = rulesFor(name, layers)
+  const rule = rules[0] ?? 'allow'
+  if (typeof rule === 'string') return rule === 'allow' ? 'ask' : undefined
+  const rest = rules.find((entry) => typeof entry === 'string' || '*' in entry) ?? 'allow'
+  const others = '*' in rule ? undefined : typeof rest === 'string' ? rest : rest['*']
+  const patterns = Object.entries(rule)
+  if (others !== 'allow' && patterns.every(([, action]) => action !== 'allow')) return undefined
+  return { ...(others === 'allow' && { '*': 'ask' }), ...Object.fromEntries(patterns.map(([pattern, action]) => [pattern, action === 'allow' ? 'ask' : action])) }
+}
+
+/** 에이전트 권한 맨 뒤에 게이트를 얹는다. below 는 그 에이전트 규칙 밑에 깔리는 것들 (기본·내장 에이전트 규칙·전역) */
+function withGate(permission: Permission, below: readonly Permission[], gate: EngineGate): Permission {
+  const layers = [...below, permission]
+  let gated: Record<string, unknown> = permission
+  for (const name of gate.permissions) {
+    const rule = askInstead(name, layers)
+    if (rule !== undefined) gated = withLast(gated, name, rule)
+  }
+  if (gate.mcp) {
+    const any = ruleFor('_', layers) // 밑줄 이름 일반 — "*"·"*_*" 만 맞는다
+    if (any === 'allow') gated = withLast(gated, MCP_WILDCARD, 'ask')
+    const named = new Set(layers.flatMap((layer) => Object.keys(layer)).filter((name) => name.includes('_') && name !== MCP_WILDCARD))
+    for (const name of named) {
+      const rule = ruleFor(name, layers)
+      // 와일드카드를 얹었으면 deny 를 그 뒤에 다시, 안 얹었으면(이미 ask·deny) 개별로 허용된 도구만 ask 로
+      if (any === 'allow' ? rule === 'deny' : rule === 'allow') gated = withLast(gated, name, any === 'allow' ? 'deny' : 'ask')
+    }
+  }
+  return gated as Permission
+}
+
+/** 에이전트마다 게이트를 얹는다 — 앱이 정의하지 않은 내장 하위 에이전트(general·explore)는 얹을 것이 있을 때만 권한뿐인 정의를 더한다 */
+function gatedAgents(agents: Record<string, { permission: Permission }>, global: Permission, gate: EngineGate): Record<string, { permission: Permission }> {
+  const below = (name: string): Permission[] => [DEFAULT_RULES, BUILTIN_AGENT_RULES[name] ?? {}, global]
+  const gated = Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: withGate(def.permission, below(name), gate) }]))
+  for (const name of BUILTIN_SUBAGENTS) {
+    const permission = withGate({}, below(name), gate)
+    if (Object.keys(permission).length > 0) gated[name] = { permission }
+  }
+  return gated
+}
+
 /** 생성할 opencode.json — 모든 provider 가 키 프록시를 거친다. 진짜 키·저장된 baseURL 은 없다 */
 export function engineConfig(
   providers: ProviderConfig[],
   proxy: Pick<KeyProxy, 'token' | 'baseURLFor'>,
-  extra: { mcp?: Record<string, EngineMcp>; childEnv?: NodeJS.ProcessEnv; webTools?: boolean; skills?: EngineSkills } = {},
+  extra: { mcp?: Record<string, EngineMcp>; childEnv?: NodeJS.ProcessEnv; webTools?: boolean; skills?: EngineSkills; gate?: EngineGate } = {},
 ): Record<string, unknown> {
   const provider: Record<string, unknown> = {}
   for (const config of providers) {
@@ -293,12 +430,14 @@ export function engineConfig(
   // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
   const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
   const permission = { ...SUBAGENT_ASK_DENY, ...SEND_TOOLS_DENY, ...PRESENT_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
+  const ruled: Record<string, { permission: Permission }> = skillRule
+    ? Object.fromEntries(Object.entries(agent).map(([name, def]) => [name, { ...def, permission: withLast(def.permission, 'skill', skillRule) as Permission }]))
+    : agent
   return {
     $schema: 'https://opencode.ai/config.json',
     provider,
-    agent: skillRule
-      ? Object.fromEntries(Object.entries(agent).map(([name, def]) => [name, { ...def, permission: withLast(def.permission, 'skill', skillRule) }]))
-      : agent,
+    // 도구 실행 전 게이트는 모든 규칙 뒤에 (이슈 #102) — 게이트가 비면 아무것도 얹지 않는다
+    agent: extra.gate && (extra.gate.mcp || extra.gate.permissions.length > 0) ? gatedAgents(ruled, permission, extra.gate) : ruled,
     permission,
     ...(extra.skills?.enabled && { skills: { paths: [...PROJECT_SKILL_PATHS, ...(extra.skills.claude ? CLAUDE_SKILL_PATHS : [])] } }),
     // 레거시는 매 스텝 작업 폴더의 스냅샷을 사용자 데이터 폴더에 만든다(큰 저장소에서 비용). litecode 는 revert 를 안 쓴다 (01w 1절)
@@ -452,6 +591,10 @@ export class EngineService extends Service {
   private launchedWebTools = false
   /** 떠 있는(띄우는 중인) 서버에 넣은 스킬 설정 (JSON — 바뀌었는지만 본다) */
   private launchedSkills = ''
+  /** 도구 실행 전 판정을 받을 도구의 매처 (setGate) — 다음 기동이 읽는다 */
+  private gateMatchers: readonly string[] = []
+  /** 떠 있는(띄우는 중인) 서버에 넣은 게이트 (JSON) */
+  private launchedGate = JSON.stringify(toolGate([]))
 
   constructor(
     ctx: Context,
@@ -464,8 +607,9 @@ export class EngineService extends Service {
     // 웹 도구 켜기/끄기 (이슈 #14) — 설정은 재시작해야 먹는다. 떠 있는 서버와 값이 다르면 다시 띄운다(진행 중 턴은 중단됨).
     // 안 떠 있으면 다음 기동이 읽는다(launch). features 는 inject 하지 않는다 — 기능 레지스트리 없이 띄운 엔진(서비스 실물 테스트)은 꺼짐으로 돈다
     ctx.on('features/changed', (enabled) => {
-      if (!this.current || (enabled.includes('web') === this.launchedWebTools && JSON.stringify(this.skills()) === this.launchedSkills)) return
-      void this.restart().catch((error: unknown) => console.error('[engine] 웹 도구·스킬 변경 후 재시작 실패', (error as Error).message))
+      // 훅 기능(이슈 #102)을 끄면 도구 실행 전 게이트도 걷는다 — 판정할 쪽이 없는데 묻기만 하게 두지 않는다
+      if (!this.current || (enabled.includes('web') === this.launchedWebTools && JSON.stringify(this.skills()) === this.launchedSkills && JSON.stringify(this.gate()) === this.launchedGate)) return
+      void this.restart().catch((error: unknown) => console.error('[engine] 웹 도구·스킬·훅 변경 후 재시작 실패', (error as Error).message))
     })
     // 스킬 (이슈 #7) — 설정 > 기능의 스킬(위 features/changed)과 "Claude Code 스킬 함께 쓰기"(settings) 도 같은 길로 다시 띄운다
     ctx.on('settings/changed', () => {
@@ -478,6 +622,19 @@ export class EngineService extends Service {
   /** 지금 설정의 스킬 — 기능 레지스트리·설정 없이 띄운 엔진(서비스 실물 테스트)은 켬·Claude 꺼짐 */
   private skills(): EngineSkills {
     return { enabled: this.ctx.get('features')?.isEnabled('skills') ?? true, claude: this.ctx.get('settings')?.get().claudeSkills ?? false }
+  }
+
+  /** 도구 실행 전 판정을 받을 도구를 정한다 (이슈 #102 — toolGate). 매처는 도구 이름의 `|` 나열·정규식, 빈 글자는 전부. 떠 있는 서버의 게이트와
+   *  **실제로 달라졌을 때만** 다시 띄운다(진행 중 턴은 끊긴다 — 부르는 쪽 ctx.llm 이 도는 턴이 없을 때 부른다). 안 떠 있으면 다음 기동이 읽는다 */
+  setGate(matchers: readonly string[]): void {
+    this.gateMatchers = [...matchers]
+    if (!this.current || JSON.stringify(this.gate()) === this.launchedGate) return
+    void this.restart().catch((error: unknown) => console.error('[engine] 도구 실행 전 게이트 변경 후 재시작 실패', (error as Error).message))
+  }
+
+  /** 지금 걸 게이트 — 훅 기능이 꺼져 있으면 없다 (기능 레지스트리 없이 띄운 엔진은 받은 매처 그대로) */
+  private gate(): EngineGate {
+    return toolGate(this.ctx.get('features')?.isEnabled('hooks') === false ? [] : this.gateMatchers)
   }
 
   /** 떠 있는 서버의 연결. 없거나 죽었으면 띄운다 (동시에 불러도 한 번만) */
@@ -569,7 +726,9 @@ export class EngineService extends Service {
     this.launchedWebTools = this.ctx.get('features')?.isEnabled('web') ?? false
     const skills = this.skills()
     this.launchedSkills = JSON.stringify(skills)
-    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, webTools: this.launchedWebTools, skills })
+    const gate = this.gate()
+    this.launchedGate = JSON.stringify(gate)
+    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, webTools: this.launchedWebTools, skills, gate })
     fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(config, null, 2))
     prepareInstallMarkers(this.opts.configDir, env)
 
@@ -624,7 +783,7 @@ export class EngineService extends Service {
       throw new Error(`${(error as Error).message}\n${output.text().trim()}`.trimEnd())
     }
     const hidden = hiddenEnvNames(env)
-    return { url, headers, closed: closer.signal, providerBaseURL: (id) => proxy.baseURLFor(id), mcpConfig: (def) => engineMcpConfig(def, hidden), pid: child.pid!, stop }
+    return { url, headers, closed: closer.signal, providerBaseURL: (id) => proxy.baseURLFor(id), mcpConfig: (def) => engineMcpConfig(def, hidden), gated: (permission) => isGated(gate, permission), pid: child.pid!, stop }
   }
 }
 

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { Agent } from 'undici'
 import { normalizeBaseURL } from './providers.ts'
 import { MODE_AGENT, type EngineConnection, type EngineMcp } from './engine.ts'
-import { DEFAULT_MODE, MODES, type Mode } from '../../shared/modes.ts'
+import { DEFAULT_MODE, MODES, modePermission, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
 import { mcpToolOf, messageItems, sanitizeMcpName, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolRef, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
@@ -68,8 +68,32 @@ declare module 'cordis' {
     'llm/before-turn'(directory: string): Promise<void> | void
     /** 도는 턴의 도구 호출 하나가 끝났다 (성공·실패, 호출마다 한 번) — 하위 작업이 부른 도구도 온다 (이슈 #102, 듣는 쪽은 ctx.hooks) */
     'llm/tool-done'(info: ToolDone): void
+    /** 도는 턴의 도구 호출 하나가 실행되기 직전 — 엔진이 그 호출의 승인을 물었을 때만 온다 (모드가 원래 묻는 도구 + gateTools 로 정한 도구,
+     *  이슈 #102 2단계). ctx.serial 로 차례로 묻고 처음 나온 판정을 쓴다: 'allow'(통과) · { deny, reason }(막는다 — 사유가 모델에 가고 턴은 이어진다) ·
+     *  'ask'(사용자에게 묻는다 — 승인 카드). 답이 없으면(undefined) 판정한 쪽이 없는 것이다. 통과·무응답이어도 **모드가 원래 묻는 호출은 승인 카드가 뜬다** */
+    'llm/pre-tool'(info: PreTool): Promise<PreToolDecision | undefined> | PreToolDecision | undefined
   }
 }
+
+/** 실행 직전의 도구 호출 하나 (중립 모양) */
+export interface PreTool {
+  /** 그 턴의 엔진 세션 — 하위 작업의 도구여도 부모 턴의 세션이다 */
+  sessionId: string
+  /** 작업 폴더 (realpath) */
+  directory: string
+  /** 도구 이름 (bash·edit·write·read…, MCP 는 `<서버>_<도구>`) */
+  tool: string
+  /** 도구 인자 */
+  input: unknown
+  /** 파일 하나를 다루는 도구면 그 파일 (절대 경로) */
+  file?: string
+  /** 하위 작업이 불렀다 */
+  child: boolean
+  /** 턴이 끝나거나 멈추면 걸린다 — 판정을 기다릴 이유가 없어졌다 */
+  signal: AbortSignal
+}
+
+export type PreToolDecision = 'allow' | 'ask' | { deny: true; reason: string }
 
 /** 끝난 도구 호출 하나 (중립 모양) */
 export interface ToolDone {
@@ -177,6 +201,8 @@ export const AGENT_LIST_TIMEOUT_MS = 10_000
 export const MAX_COMPACTIONS_PER_TURN = 3
 /** MCP 호출 요청을 받고 그 running 도구 파트를 기다리는 한도 — 이벤트는 요청 1~3ms 뒤에 온다 (01z 1-2, 10/10) */
 export const CALLER_WAIT_MS = 2_000
+/** 승인 요청을 받고 그 running 도구 파트(도구 이름·인자)를 기다리는 한도 — 묻는 순간 이미 running 이다 (01z 1-3, 3/3). 넘기면 요청에 실린 것으로 */
+export const PRE_TOOL_WAIT_MS = 300
 /** 구독을 걸고 server.connected 를 기다리는 한도 — 헤더와 함께 바로 온다(01w) */
 const CONNECT_TIMEOUT_MS = 10_000
 /** 엔진 재시작·크래시로 끊긴 턴의 사유 — 지금 언어로 (그래서 상수가 아니다. 중단 판정은 문구가 아니라 interrupted 로 한다) */
@@ -217,6 +243,8 @@ export class LlmService extends Service {
   private running = new Set<{ tracker: TurnTracker; workdir: string; sessionId: string; calls: ToolCalls }>()
   /** 폴더(realpath) → 마지막으로 본 그 인스턴스의 MCP 서버 이름 — 도구 이름 `<서버>_<도구>` 를 가른다 (mcpTool) */
   private mcpServers = new Map<string, string[]>()
+  /** gateTools 로 받았지만 아직 엔진에 못 넘긴 매처 — 도는 턴이 없어지면 넘긴다 */
+  private gateWanted?: readonly string[]
 
   /** /event 를 여는 dispatcher. 전역 fetch(undici) 기본 bodyTimeout·headersTimeout 은 300초다 — 레거시 /event 는 heartbeat 가 10초마다 오므로
    *  무바이트 한도를 STREAM_IDLE_TIMEOUT_MS 로 줄여 죽은 연결을 30초 안에 알아챈다(이슈 #20). 시험은 더 짧게 줄 수 있다 (01q).
@@ -327,7 +355,23 @@ export class LlmService extends Service {
       if (admitted.busy) this.busy.delete(admitted.busy)
       this.turns--
       this.purgeIfIdle()
+      this.gateIfIdle()
     }
+  }
+
+  /** 실행 전에 판정('llm/pre-tool')을 받을 도구를 정한다 (이슈 #102 2단계). matchers 는 도구 이름의 `|` 나열·정규식(shared/hooks.ts matchesTool),
+   *  빈 글자는 모든 도구, 빈 배열은 "없음". 엔진은 그 도구들의 실행 전에 승인을 묻게 되고(ctx.engine.setGate), 묻는 호출마다 'llm/pre-tool' 이 나간다.
+   *  대상이 실제로 달라지면 엔진을 다시 띄워야 한다 — **도는 턴이 있으면 다 끝난 뒤로 미룬다**(재시작은 도는 턴을 끊는다). 그 사이의 턴은 옛 대상으로 돈다 */
+  gateTools(matchers: readonly string[]): void {
+    this.gateWanted = [...matchers]
+    this.gateIfIdle()
+  }
+
+  private gateIfIdle(): void {
+    if (this.turns > 0 || !this.gateWanted) return
+    const matchers = this.gateWanted
+    this.gateWanted = undefined
+    this.ctx.engine.setGate(matchers)
   }
 
   /** 세션을 쓸 준비 — 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 보고, 모드를 주면 그 에이전트가 있는지 보고, 세션이 없으면 만든다.
@@ -440,7 +484,7 @@ export class LlmService extends Service {
       const calls = new ToolCalls()
       const live = { tracker, workdir, sessionId: id, calls }
       this.running.add(live)
-      const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention, calls)
+      const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention, calls, mode)
       const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop, calls)
       try {
         await events.connected
@@ -928,9 +972,21 @@ export class LlmService extends Service {
     tracker: TurnTracker,
     onAttention: ((requests: Attention[]) => void) | undefined,
     calls?: ToolCalls,
+    mode: Mode = DEFAULT_MODE,
   ): { refresh(): void; stop(): void } {
     let pending: Attention[] = []
     let stopped = false
+    // 도구 실행 전 판정 (이슈 #102 2단계, 01af §6-1). 권한 요청마다 **한 번** 'llm/pre-tool' 을 묻고, 판정이 나올 때까지 그 요청은 카드로 내지 않는다:
+    // - 막기 → `reject` + `message`(사유) — 모델이 사유를 받고 턴이 이어진다. message 없는 reject 는 턴을 끝낸다(01af §4) — 늘 싣는다
+    // - 묻기 → 승인 카드
+    // - 통과·판정 없음 → 게이트 때문에 온 요청(그 권한에 게이트가 걸려 있고 모드는 원래 묻지 않는다 — shared/modes.ts)이면 `once`, 아니면 승인 카드.
+    //   게이트가 안 걸린 권한의 요청은 모드나 사용자 설정이 원래 묻는 것이라 늘 카드다
+    // 여기서 보낸 once 는 **사용자 승인이 아니다** — 호출 장부의 허용 기록(calls.approve)에 적지 않는다 (앱 MCP 의 세션 도구가 그 기록만 받는다, #55).
+    // 판정·답이 실패하면 카드로 내려앉는다 (사람이 정한다)
+    const verdicts = new Map<string, 'judging' | 'card' | 'answered'>()
+    /** 도구 호출 id → 그 호출의 판정 */
+    const decisions = new Map<string, Promise<PreToolDecision | undefined>>()
+    const judging = new AbortController()
     /** 목록을 바꾸고 알린다 — 새 요청마다 attention, 다 풀리면 resolved */
     const publish = (next: Attention[]): void => {
       const before = new Set(pending.map((entry) => entry.id))
@@ -959,13 +1015,56 @@ export class LlmService extends Service {
       const subtask = tracker.subtaskOf(entry.sessionID)
       return { sessionId: entry.sessionID, ...(subtask && { subtask: { agent: subtask.agent, description: subtask.description } }) }
     }
+    type PermissionRequest = Request & { permission: string; patterns?: string[]; metadata?: Record<string, unknown> }
+    const judge = async (entry: PermissionRequest): Promise<void> => {
+      let verdict: 'card' | 'answered' = 'card'
+      try {
+        const child = entry.sessionID !== undefined && entry.sessionID !== sessionId
+        // 한 호출이 승인을 두 번 물을 수 있다 (폴더 밖 경로의 external_directory → 그 도구 자신의 권한) — 판정은 호출마다 한 번이다
+        const callId = entry.tool?.callID
+        const decide = async (): Promise<PreToolDecision | undefined> => {
+          const call = await runningCall(calls, callId, judging.signal)
+          const input = call?.input ?? requestInput(entry.permission, entry.metadata)
+          const file = toolFile(input, workdir)
+          return this.ctx.serial('llm/pre-tool', { sessionId, directory: workdir, tool: call?.tool || entry.permission, input, ...(file && { file }), child, signal: judging.signal })
+        }
+        const deciding = (callId && decisions.get(callId)) || decide()
+        if (callId) decisions.set(callId, deciding)
+        const decision = await deciding
+        if (stopped) return
+        const answer =
+          typeof decision === 'object'
+            ? { reply: 'reject', message: decision.reason.trim() || 'Blocked before running.' }
+            : decision !== 'ask' && conn.gated(entry.permission) && modePermission(mode, entry.permission, { resources: entry.patterns, child }) === 'allow'
+              ? { reply: 'once' }
+              : undefined
+        if (answer) {
+          const res = await fetch(`${conn.url}/permission/${entry.id}/reply?${at(workdir)}`, {
+            method: 'POST',
+            headers: { ...conn.headers, 'content-type': 'application/json' },
+            body: JSON.stringify(answer),
+            signal: conn.closed,
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          verdict = 'answered'
+        }
+      } catch (error) {
+        console.error('[llm] 도구 실행 전 판정 실패 — 승인 카드로 묻는다', (error as Error).message)
+      }
+      if (stopped) return
+      verdicts.set(entry.id, verdict)
+      if (verdict === 'card') refresh()
+    }
     const read = async (): Promise<void> => {
       if (stopped) return
-      const [permissions, questions] = await Promise.all([
-        list<Request & { permission: string; patterns?: string[] }>('permission'),
-        list<Request & { questions: AttentionQuestion[] }>('question'),
-      ])
+      const [asked, questions] = await Promise.all([list<PermissionRequest>('permission'), list<Request & { questions: AttentionQuestion[] }>('question')])
       if (stopped) return
+      for (const entry of asked) {
+        if (verdicts.has(entry.id)) continue
+        verdicts.set(entry.id, 'judging')
+        void judge(entry)
+      }
+      const permissions = asked.filter((entry) => verdicts.get(entry.id) === 'card')
       const mcp = this.mcpTool(workdir)
       const next: Attention[] = [
         ...permissions.map((entry): Attention => {
@@ -990,12 +1089,14 @@ export class LlmService extends Service {
     }
     // 답한 요청은 목록 읽기를 기다리지 않고 바로 뺀다 — 카드가 곧장 사라지고, 답 직후 턴이 끝나도(stop) resolved 를 놓치지 않는다
     this.watchers.set(sessionId, { answered: (requestId) => !stopped && publish(pending.filter((entry) => entry.id !== requestId)) })
+    const refresh = (): void => {
+      chain = chain.then(read).catch(() => {}) // 못 읽으면 다음 신호에 다시 — 턴 끝은 idle 이 정한다
+    }
     return {
-      refresh: () => {
-        chain = chain.then(read).catch(() => {}) // 못 읽으면 다음 신호에 다시 — 턴 끝은 idle 이 정한다
-      },
+      refresh,
       stop: () => {
         stopped = true
+        judging.abort()
         this.watchers.delete(sessionId)
         for (const [id, request] of this.requests) if (request.turn === sessionId) this.requests.delete(id)
       },
@@ -1057,6 +1158,30 @@ export function finishedTool(part: EnginePart | undefined, workdir: string): Pic
     ...(state.status === 'error' && { error: state.error ?? '' }),
     ...(file && { file: path.resolve(workdir, file) }),
   }
+}
+
+/** 파일 하나를 다루는 도구의 인자면 그 파일 (절대 경로) — read·write·edit 의 `filePath` */
+function toolFile(input: unknown, workdir: string): string | undefined {
+  const file = (input as { filePath?: unknown } | undefined)?.filePath
+  return typeof file === 'string' && file ? path.resolve(workdir, file) : undefined
+}
+
+/** 승인을 묻는 호출의 도구 이름·인자 — 묻는 순간 그 callID 의 파트가 running + input 이다 (01z 1-3). 이벤트가 조금 늦을 수 있어 잠깐 기다린다 */
+async function runningCall(calls: ToolCalls | undefined, callId: string | undefined, signal: AbortSignal): Promise<{ tool: string; input: unknown } | undefined> {
+  if (!calls || !callId) return undefined
+  const deadline = Date.now() + PRE_TOOL_WAIT_MS
+  while (true) {
+    const call = calls.callOf(callId)
+    if (call || signal.aborted || Date.now() >= deadline) return call
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+/** running 파트를 못 봤을 때 요청에 실린 것으로 만드는 인자 — bash 는 `metadata.command`, edit·write 는 `metadata.filepath` (01af §4) */
+function requestInput(permission: string, metadata: Record<string, unknown> | undefined): unknown {
+  if (permission === 'bash' && typeof metadata?.['command'] === 'string') return { command: metadata['command'] }
+  if (permission === 'edit' && typeof metadata?.['filepath'] === 'string') return { filePath: metadata['filepath'] }
+  return {}
 }
 
 /** 'llm/attention' 의 짧은 설명 — 명령·파일(권한) 또는 첫 질문 */

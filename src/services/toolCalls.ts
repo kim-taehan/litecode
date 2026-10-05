@@ -46,6 +46,11 @@ export class ToolCalls {
     } else if (status !== 'pending') this.running.delete(part.callID)
   }
 
+  /** 그 호출 (running 일 때만) — 도구 실행 전 판정이 도구 이름·인자를 읽는다 */
+  callOf(callId: string): RunningCall | undefined {
+    return this.running.get(callId)
+  }
+
   /** 그 호출의 인자 (running 일 때만) — 승인 카드가 대상·보낼 글을 그린다 */
   inputOf(callId: string): unknown {
     return this.running.get(callId)?.input

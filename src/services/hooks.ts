@@ -6,7 +6,7 @@ import './sessions.ts'
 import { realDirectory } from './llm.ts'
 import type { ExecHandle } from './exec.ts'
 import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
-import { entriesFor, lenientReader, parseHooks, parseProjects, serializeHooks, serializeProjects } from './hooks/config.ts'
+import { entriesFor, gateMatchers, lenientReader, parseHooks, parseProjects, serializeHooks, serializeProjects } from './hooks/config.ts'
 import { runHook, type HookInput, type HookRun } from './hooks/run.ts'
 import { tr } from '../i18n.ts'
 import { fromPerson } from '../../shared/chat.ts'
@@ -31,7 +31,13 @@ import type { Conversation } from '../../shared/contract.ts'
 //   · 도구 실행 후(PostToolUse) — 'llm/tool-done', 성공한 호출만·하위 작업의 도구 포함, 관찰만(막기·피드백 없음). 대화마다 차례로 돌고
 //     턴 끝 훅은 그것들이 끝난 뒤에 돈다
 //   · 알림(Notification) — 'llm/attention'(답 필요)·'llm/turn-ended'(완료·실패), 관찰만. 대화에 줄을 남기지 않는다(기록·로그만)
-//   · 도구 실행 전(PreToolUse) — 정의만 읽는다. 실행은 2단계(권한 게이트)
+//   · 도구 실행 전(PreToolUse, 2단계) — 'llm/pre-tool'. 엔진이 그 도구의 실행 전에 승인을 물을 때 온다 — 묻게 하려고 켜진 훅의 매처를
+//     ctx.llm.gateTools 로 알린다 (어느 프로젝트에서든 켜진 훅의 합집합 — 서비스가 뜰 때·턴을 보내기 전·저장할 때 다시 계산하고, 대상이 달라지면
+//     ctx.llm 이 도는 턴이 없을 때 엔진을 다시 띄운다. 파일을 손으로 고친 것은 **다음에 보내는 턴부터** 걸린다). 막으면 { deny, reason } —
+//     사유가 모델에 가고 턴은 이어진다. `permissionDecision: "ask"` 는 'ask'(승인 카드), 통과는 'allow', 맞는 훅이 없으면 답하지 않는다.
+//     실패·기한 초과는 통과다(훅 버그가 작업을 세우지 않게). 하위 작업의 도구에도 걸리고 줄은 부모 턴에 남는다. 계획 모드처럼 도구가 빠진
+//     곳에서는 요청이 없어 돌지 않는다. **통과는 사용자 승인이 아니다** — 모드가 원래 묻는 호출은 ctx.llm 이 승인 카드를 그대로 띄운다.
+//     엔진이 실행 전에 묻게 할 수 없는 도구(glob·grep·webfetch — engine.ts 의 ⚠️)에는 돌지 않는다 (도구 실행 후 훅은 돈다)
 // - 표시: 훅이 끝날 때마다 그 대화의 도는 턴에 진행 줄 하나(ctx.chat.note — kind 'hook'). 최근 실행은 메모리(recent)와 main.log 한 줄
 
 declare module 'cordis' {
@@ -56,6 +62,8 @@ export interface HookResult {
   reason?: string
   /** 통과한 훅들이 낸 맥락 글 (돈 순서) */
   context: string[]
+  /** 통과한 훅 가운데 사용자에게 묻게 한 것이 있다 (도구 실행 전) */
+  ask?: boolean
   runs: HookRun[]
 }
 
@@ -75,7 +83,7 @@ export function stopFeedback(reason: string): string {
 }
 
 export class HooksService extends Service {
-  static readonly inject = ['chat', 'sessions']
+  static readonly inject = ['chat', 'sessions', 'llm']
 
   private read = lenientReader()
   private running = new Set<ExecHandle>()
@@ -96,7 +104,20 @@ export class HooksService extends Service {
       this.disposed = true
       for (const handle of this.running) handle.stop('stopped')
     })
+    void this.syncGate()
+    ctx.on('llm/pre-tool', async (info) => {
+      const conversation = await this.conversation((entry) => entry.engineSessionId === info.sessionId)
+      if (!conversation) return undefined
+      const result = await this.run(
+        { event: 'PreToolUse', directory: info.directory, conversationId: conversation.id, mode: conversation.mode, tool: { name: info.tool, input: info.input, file: info.file } },
+        { signal: info.signal, onRun: (run) => this.show(conversation.id, run) },
+      )
+      if (result.outcome === 'blocked') return { deny: true as const, reason: result.reason ?? '' }
+      if (result.runs.length === 0) return undefined // 맞는 훅이 없다
+      return result.ask ? ('ask' as const) : ('allow' as const)
+    })
     ctx.on('chat/before-send', async (send) => {
+      await this.syncGate() // 손으로 고친 훅 파일을 이 턴부터 — 엔진을 다시 띄워야 하면 이 턴이 새 엔진에 붙는다
       const directory = await realDirectory(send.project)
       if (!directory) return
       const base = { directory, conversationId: send.cid, mode: send.mode }
@@ -160,14 +181,22 @@ export class HooksService extends Service {
     const valid = parseHooks(serializeHooks(hooks))
     if (!directory) {
       readJsonFileSync(this.opts.file, 'object') // 덮어쓰기 전에 깨진 파일은 옆으로 옮겨 둔다 (jsonFile.ts)
-      return writeJsonFileSync(this.opts.file, serializeHooks(valid))
-    }
-    this.updateProject(directory, (entry) => ({ ...entry, hooks: valid }))
+      writeJsonFileSync(this.opts.file, serializeHooks(valid))
+    } else this.updateProject(directory, (entry) => ({ ...entry, hooks: valid }))
+    void this.syncGate()
   }
 
   /** 그 프로젝트에서만 훅 하나를 켜거나 끈다 (key 는 HookEntry.key) — 모든 프로젝트 훅도 이 프로젝트에서만 바뀐다 */
   setEnabled(directory: string, key: string, enabled: boolean): void {
     this.updateProject(directory, (entry) => ({ ...entry, enabled: { ...entry.enabled, [key]: enabled } }))
+    void this.syncGate()
+  }
+
+  /** 켜진 도구 실행 전 훅의 매처를 ctx.llm 에 알린다 — 그 도구들의 실행 전에 엔진이 승인을 묻게 된다 (hooks/config.ts gateMatchers).
+   *  달라진 것이 없으면 아무 일도 없다(ctx.engine 이 떠 있는 게이트와 비교한다). 던지지 않는다 */
+  async syncGate(): Promise<void> {
+    const matchers = gateMatchers(parseHooks(await this.read(this.opts.file)), parseProjects(await this.read(this.opts.projectsFile)))
+    if (!this.disposed) this.ctx.llm.gateTools(matchers)
   }
 
   /** 그 이벤트에 걸린 켜진 훅을 차례로 돌린다 — 던지지 않는다. 막는 훅이 나오면 거기서 멈춘다. input.directory 는 realpath.
@@ -193,6 +222,7 @@ export class HooksService extends Service {
       opts.onRun?.(run)
       if (run.outcome === 'blocked') return { ...result, outcome: 'blocked', reason: run.reason }
       if (run.outcome === 'passed' && run.context) result.context.push(run.context)
+      if (run.outcome === 'passed' && run.ask) result.ask = true
     }
     return result
   }

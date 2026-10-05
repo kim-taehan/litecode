@@ -83,6 +83,15 @@ export function entriesFor(all: readonly HookDef[], project: ProjectHooks | unde
   return [...all.map((hook) => entry(hook, 'all')), ...(project?.hooks ?? []).map((hook) => entry(hook, 'project'))]
 }
 
+/** 어느 프로젝트에서든 켜져 있는 도구 실행 전 훅의 매처 (겹치지 않게, 정렬) — 엔진의 도구 실행 전 게이트 대상이다 (이슈 #102 2단계).
+ *  엔진 설정은 프로젝트를 가리지 않고 하나라 **합집합**으로 건다: 모든 프로젝트 훅은 기본 켜기 값이나 어느 한 프로젝트의 켜기 값으로 켜져 있으면,
+ *  이 프로젝트만의 훅은 그 프로젝트에서 켜져 있으면 들어간다. 그 훅이 없는 프로젝트에서는 승인 요청이 와도 맞는 훅이 없어 그대로 통과한다 */
+export function gateMatchers(all: readonly HookDef[], projects: Record<string, ProjectHooks>): string[] {
+  const views = [entriesFor(all, undefined), ...Object.values(projects).map((project) => entriesFor(all, project))]
+  const matchers = views.flatMap((view) => view.filter((hook) => hook.on && hook.event === 'PreToolUse').map((hook) => hook.matcher.trim()))
+  return [...new Set(matchers)].sort()
+}
+
 /** 파일을 읽어 JSON 으로 — 없으면 undefined, 못 읽거나 깨졌으면 경고 한 줄(같은 내용엔 한 번)과 undefined. 파일은 건드리지 않는다 */
 export function lenientReader(): (file: string) => Promise<unknown> {
   const warned = new Map<string, string>()

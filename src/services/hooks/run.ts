@@ -10,7 +10,9 @@ import { BLOCKING_HOOK_EVENTS, hookTimeout, type HookDef, type HookEvent, type H
 //   막을 것이 없는 이벤트(도구 실행 후·세션 시작·알림)의 "막기" 는 실패로 적는다
 //   통과한 훅의 stdout 은 맥락(context) — 맥락을 받는 이벤트(프롬프트 제출·세션 시작)에서만 쓰인다. stdout 이 JSON 객체면
 //   `additionalContext`(맨 위 또는 hookSpecificOutput 안)만 맥락으로 읽고, `"decision":"block"` 은 막기(`reason` 이 사유)다.
-//   `updatedInput`·`permissionDecision` 은 읽지 않는다 (인자 고쳐 쓰기는 안 됨, 실행 전 판정은 2단계)
+//   도구 실행 전(PreToolUse)에 한해 `permissionDecision`(맨 위 또는 hookSpecificOutput 안)도 읽는다: `deny` = 막기(사유 `permissionDecisionReason`),
+//   `ask` = 사용자에게 묻기(승인 카드), `allow` = 통과 — **통과는 사전 승인이 아니다**(모드가 원래 묻는 호출은 그대로 묻는다, 01af §6-5).
+//   `updatedInput` 은 지원하지 않는다 (인자 고쳐 쓰기는 안 됨 — 경고만 남기고 원래 인자로 돈다)
 // - 실행 규칙(로그인 셸·프로세스 그룹·기한)은 exec.ts — `!명령` 과 같다. env 는 앱 자신의 것이라 엔진의 서버 비밀번호·프록시 토큰이 없다
 
 /** 훅에 넘기는 사건 하나 (중립) */
@@ -40,6 +42,8 @@ export interface HookRun {
   reason?: string
   /** 통과한 훅이 낸 맥락 글 */
   context?: string
+  /** 통과했지만 사용자에게 묻게 했다 (도구 실행 전 훅의 `permissionDecision: "ask"`) */
+  ask?: boolean
   exitCode: number | null
 }
 
@@ -74,8 +78,8 @@ export function hookSpawn(hook: Pick<HookDef, 'command'>, input: HookInput): { c
   return { command: hook.command, env: hookEnv(input), stdin: JSON.stringify(hookStdin(input)) }
 }
 
-/** 끝난 실행 → 결과. seconds 는 기한(초) — 시간 초과 사유에 쓴다 */
-export function decodeHook(end: ExecEnd, stdout: string, stderr: string, seconds: number): Pick<HookRun, 'outcome' | 'reason' | 'context'> {
+/** 끝난 실행 → 결과. seconds 는 기한(초) — 시간 초과 사유에 쓴다. event 가 도구 실행 전이면 stdout JSON 의 `permissionDecision` 도 읽는다 */
+export function decodeHook(end: ExecEnd, stdout: string, stderr: string, seconds: number, event?: HookEvent): Pick<HookRun, 'outcome' | 'reason' | 'context' | 'ask'> {
   if (end.status === 'timeout') return { outcome: 'failed', reason: tr('hooks.timeout', { seconds }) }
   if (end.status === 'stopped') return { outcome: 'failed', reason: tr('hooks.stopped') }
   if (end.status === 'error' || end.exitCode === null) return { outcome: 'failed', reason: end.error || tr('hooks.notRun') }
@@ -86,7 +90,16 @@ export function decodeHook(end: ExecEnd, stdout: string, stderr: string, seconds
   if (!json) return { outcome: 'passed', ...(text && { context: text }) }
   if (json['decision'] === 'block') return { outcome: 'blocked', reason: typeof json['reason'] === 'string' && json['reason'].trim() ? json['reason'].trim() : tr('hooks.blockedDefault') }
   const specific = json['hookSpecificOutput'] as Record<string, unknown> | undefined
-  const context = [json['additionalContext'], specific?.['additionalContext']].find((value): value is string => typeof value === 'string' && !!value.trim())
+  if (event === 'PreToolUse') {
+    const decision = [specific?.['permissionDecision'], json['permissionDecision']].find((value) => typeof value === 'string')
+    if (decision === 'deny') {
+      const reason = [specific?.['permissionDecisionReason'], json['permissionDecisionReason'], json['reason']].find((value): value is string => typeof value === 'string' && !!value.trim())
+      return { outcome: 'blocked', reason: reason?.trim() ?? tr('hooks.blockedDefault') }
+    }
+    if (decision === 'ask') return { outcome: 'passed', ask: true }
+    if (specific?.['updatedInput'] !== undefined || json['updatedInput'] !== undefined) console.warn('[hooks] updatedInput 은 지원하지 않는다 — 도구는 원래 인자로 돈다')
+  }
+  const context =[json['additionalContext'], specific?.['additionalContext']].find((value): value is string => typeof value === 'string' && !!value.trim())
   return { outcome: 'passed', ...(context && { context: context.trim() }) }
 }
 
@@ -113,7 +126,7 @@ export async function runHook(hook: HookDef, input: HookInput, opts: { onStart?(
   })
   opts.onStart?.(handle)
   const end = await handle.done
-  const decoded = decodeHook(end, stdout.head() + stdout.tail(), stderr.text(), seconds)
+  const decoded = decodeHook(end, stdout.head() + stdout.tail(), stderr.text(), seconds, hook.event)
   return {
     event: hook.event,
     command: hook.command,

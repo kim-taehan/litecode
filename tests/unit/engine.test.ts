@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isOurServer, MODE_AGENT, plantInstallMarkers, SUBAGENT_ASK } from '../../src/services/engine.ts'
+import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isGated, isOurServer, MODE_AGENT, plantInstallMarkers, SUBAGENT_ASK, toolGate } from '../../src/services/engine.ts'
 import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
@@ -304,6 +304,163 @@ describe('engineConfig — 결과물 선언(litecode_present)의 모드별 권�
       expect(order(SUBAGENT_ASK).indexOf('litecode_present')).toBeGreaterThan(order(SUBAGENT_ASK).indexOf('*_*'))
     })
   }
+})
+
+// 도구 실행 전 게이트 (이슈 #102 2단계, 01af §4·§6-1) — 훅이 걸린 도구의 권한에 에이전트마다 맨 뒤 ask
+describe('toolGate — 매처 → 게이트 대상', () => {
+  it('내장 도구 이름의 나열은 그 권한 이름만 — write·apply_patch 는 edit, 대소문자(Claude Code 이름)는 가리지 않는다', () => {
+    expect(toolGate(['bash'])).toEqual({ permissions: ['bash'], mcp: false })
+    expect(toolGate(['Edit|Write'])).toEqual({ permissions: ['edit'], mcp: false })
+    expect(toolGate(['apply_patch'])).toEqual({ permissions: ['edit'], mcp: false })
+    expect(toolGate(['Bash', ' read|Skill ', 'TodoWrite|Task'])).toEqual({ permissions: ['bash', 'read', 'skill', 'task', 'todowrite'], mcp: false })
+  })
+
+  // 격리 실행 2026-10-05 (동봉 1.18.18): 이 도구들에 ask 를 얹으면 엔진의 승인 목록 읽기가 실패해 턴이 멈춘다 — 걸지 않는다
+  it('glob·grep·webfetch·websearch 에는 걸지 않는다 — 이름은 아는 내장 도구라 MCP 로 번지지도 않는다', () => {
+    expect(toolGate(['glob', 'Grep|WebFetch', 'websearch'])).toEqual({ permissions: [], mcp: false })
+    expect(toolGate(['read|glob|grep'])).toEqual({ permissions: ['read'], mcp: false })
+  })
+
+  it('빈 매처·* 는 전부 — 걸 수 있는 내장 권한 전부 + MCP 도구', () => {
+    const all = { permissions: ['bash', 'edit', 'read', 'skill', 'task', 'todowrite'], mcp: true }
+    expect(toolGate([''])).toEqual(all)
+    expect(toolGate(['  '])).toEqual(all)
+    expect(toolGate(['*'])).toEqual(all)
+  })
+
+  it('내장 도구 이름의 나열이 아니면(정규식·MCP 도구 이름) MCP 도구에도 건다 — 맞는 내장 도구는 그대로 더한다', () => {
+    expect(toolGate(['github_create_issue'])).toEqual({ permissions: [], mcp: true })
+    expect(toolGate(['mcp_.*'])).toEqual({ permissions: [], mcp: true })
+    expect(toolGate(['bash|github_.*'])).toEqual({ permissions: ['bash'], mcp: true })
+    expect(toolGate(['(edit|write)'])).toEqual({ permissions: ['edit'], mcp: true })
+  })
+
+  it('잘못된 정규식은 아무것도 걸지 않는다, 매처가 없으면 게이트도 없다', () => {
+    expect(toolGate(['(', 'bash('])).toEqual({ permissions: [], mcp: false })
+    expect(toolGate([])).toEqual({ permissions: [], mcp: false })
+  })
+
+  it('isGated: 건 권한 이름, MCP 를 걸었으면 밑줄 있는 이름 전부', () => {
+    expect(isGated(toolGate(['bash']), 'bash')).toBe(true)
+    expect(isGated(toolGate(['bash']), 'edit')).toBe(false)
+    expect(isGated(toolGate(['bash']), 'github_search')).toBe(false)
+    expect(isGated(toolGate(['github_.*']), 'github_search')).toBe(true)
+    expect(isGated(toolGate(['github_.*']), 'external_directory')).toBe(true)
+    expect(isGated(toolGate(['github_.*']), 'bash')).toBe(false)
+  })
+})
+
+describe('engineConfig — 도구 실행 전 게이트 (#102)', () => {
+  const proxy = { token: 'T', baseURLFor: (id: string) => `http://127.0.0.1:1/${id}` }
+  const variants = [
+    { webTools: false, skills: { enabled: true, claude: false } },
+    { webTools: true, skills: { enabled: true, claude: true } },
+    { webTools: true, skills: { enabled: false, claude: false } },
+    { webTools: false },
+  ]
+  type Agents = Record<string, { permission: Record<string, unknown> } | undefined>
+  const agents = (matchers: string[], extra: Parameters<typeof engineConfig>[2] = { webTools: true, skills: { enabled: true, claude: false } }) =>
+    engineConfig([provider('gw')], proxy, { ...extra, gate: toolGate(matchers) }).agent as Agents
+  const last = (permission: Record<string, unknown>, count: number) => Object.entries(permission).slice(-count)
+
+  it('게이트가 없으면(훅 기능 꺼짐·도구 실행 전 훅 0개) 설정이 한 글자도 달라지지 않는다 — 웹 도구·스킬 조합마다', () => {
+    for (const extra of variants) {
+      const plain = JSON.stringify(engineConfig([provider('gw')], proxy, extra), null, 2)
+      expect(JSON.stringify(engineConfig([provider('gw')], proxy, { ...extra, gate: toolGate([]) }), null, 2)).toBe(plain)
+      expect(JSON.stringify(engineConfig([provider('gw')], proxy, { ...extra, gate: toolGate(['(']) }), null, 2)).toBe(plain)
+    }
+  })
+
+  it('게이트를 걸어도 에이전트 정의 밖(전역 permission·provider·그 밖)은 그대로다', () => {
+    for (const extra of variants) {
+      const { agent: _plain, ...plain } = engineConfig([provider('gw')], proxy, extra)
+      const { agent: _gated, ...gated } = engineConfig([provider('gw')], proxy, { ...extra, gate: toolGate(['']) })
+      expect(gated).toEqual(plain)
+    }
+  })
+
+  it('bash|edit: 기본·전체 권한은 맨 뒤에 ask (전체 권한의 "*":allow 도 덮는다), 하위 에이전트 general·explore 에도 — explore 는 원래 편집이 없어 bash 만', () => {
+    const agent = agents(['bash|edit'])
+    expect(last(agent[MODE_AGENT.build]!.permission, 2)).toEqual([['bash', 'ask'], ['edit', 'ask']])
+    expect(last(agent[MODE_AGENT.full]!.permission, 2)).toEqual([['bash', 'ask'], ['edit', 'ask']])
+    expect(Object.keys(agent[MODE_AGENT.full]!.permission)[0]).toBe('*')
+    expect(agent['general']).toEqual({ permission: { bash: 'ask', edit: 'ask' } })
+    expect(agent['explore']).toEqual({ permission: { bash: 'ask' } })
+  })
+
+  it('bash|edit: 계획은 그대로다(deny 인 도구에 ask 를 얹으면 되살아난다 — 훅도 돌지 않는다), 이미 묻는 매번 묻기와 그 하위 에이전트도 그대로', () => {
+    const plain = agents([])
+    const agent = agents(['bash|edit'])
+    for (const name of ['plan', MODE_AGENT.ask, SUBAGENT_ASK]) expect(JSON.stringify(agent[name])).toBe(JSON.stringify(plain[name]))
+    expect(agent['plan']!.permission).toMatchObject({ edit: 'deny', bash: 'deny' })
+  })
+
+  it('읽기(read)는 계획에서도 걸린다 — 계획은 그 도구를 쓴다. glob·grep 에는 어디에도 얹지 않는다', () => {
+    const agent = agents(['read|glob|grep'])
+    for (const name of ['plan', MODE_AGENT.build, MODE_AGENT.ask, MODE_AGENT.full, SUBAGENT_ASK, 'general', 'explore']) {
+      expect(agent[name]!.permission, name).toMatchObject({ read: 'ask' })
+      expect(agent[name]!.permission, name).not.toHaveProperty('glob')
+      expect(agent[name]!.permission, name).not.toHaveProperty('grep')
+    }
+    expect(agent['plan']!.permission).toMatchObject({ edit: 'deny', bash: 'deny' })
+  })
+
+  it('끈 스킬에는 얹지 않는다 (deny 그대로), 켠 스킬에는 얹는다 — 숨긴 내장 스킬은 숨긴 채. 웹 도구 규칙은 건드리지 않는다', () => {
+    const plain = agents([])
+    const off = agents(['webfetch|websearch|skill'], { webTools: false, skills: { enabled: false, claude: false } })
+    expect(off[MODE_AGENT.full]!.permission).toMatchObject({ webfetch: 'deny', websearch: 'deny', skill: 'deny' })
+    expect(off['general']).toBeUndefined()
+    const on = agents(['webfetch|websearch|skill'])
+    for (const name of ['plan', MODE_AGENT.build, MODE_AGENT.ask, MODE_AGENT.full]) {
+      expect(on[name]!.permission['skill'], name).toEqual({ '*': 'ask', 'customize-opencode': 'deny' })
+      expect(on[name]!.permission['webfetch'], name).toEqual(plain[name]!.permission['webfetch'])
+    }
+    expect(on['general']!.permission).toEqual({ skill: { '*': 'ask', 'customize-opencode': 'deny' } })
+  })
+
+  it('task: 허용된 하위 에이전트만 묻게 한다 — 막은 하위 에이전트(다른 모드의 general-ask, 매번 묻기의 나머지)는 막힌 채, 계획은 그대로', () => {
+    const agent = agents(['task'])
+    expect(agent[MODE_AGENT.build]!.permission['task']).toEqual({ '*': 'ask', [SUBAGENT_ASK]: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission['task']).toEqual({ '*': 'ask', [SUBAGENT_ASK]: 'deny' })
+    expect(agent[MODE_AGENT.ask]!.permission['task']).toEqual({ '*': 'deny', [SUBAGENT_ASK]: 'ask' })
+    expect(agent['plan']!.permission['task']).toBe('deny')
+    expect(Object.keys(agent[MODE_AGENT.build]!.permission).at(-1)).toBe('task')
+  })
+
+  it('MCP 도구(와일드카드): 기본·전체 권한·general 은 맨 뒤에 *_* ask — 그 뒤에 막혀 있던 밑줄 이름을 다시 막는다', () => {
+    const agent = agents(['github_.*'])
+    const build = Object.entries(agent[MODE_AGENT.build]!.permission)
+    // 기본 모드에서 막혀 있던 밑줄 이름은 엔진 기본의 plan_exit 뿐이다 (plan_enter 는 내장 build 가 허용, 보내기 도구는 원래 ask)
+    expect(build.slice(build.findIndex(([name]) => name === '*_*'))).toEqual([['*_*', 'ask'], ['plan_exit', 'deny']])
+    expect(agent[MODE_AGENT.build]!.permission).toMatchObject({ litecode_send_to_session: 'ask', litecode_present: 'allow' })
+    const full = Object.entries(agent[MODE_AGENT.full]!.permission)
+    expect(full.at(-1)).toEqual(['*_*', 'ask'])
+    const general = Object.entries(agent['general']!.permission)
+    expect(general[0]).toEqual(['*_*', 'ask'])
+    expect(Object.fromEntries(general.slice(1))).toEqual({ plan_enter: 'deny', plan_exit: 'deny', litecode_send_to_session: 'deny', litecode_start_session: 'deny', litecode_present: 'deny' })
+    expect(agent['explore']).toBeUndefined() // explore 는 MCP 도구가 없다 ("*": deny)
+  })
+
+  it('MCP 도구(와일드카드): 계획은 와일드카드 deny 그대로 — 따로 허용한 앱 도구만 ask. 매번 묻기도 따로 허용한 앱 도구만 ask 로', () => {
+    const agent = agents(['github_.*'])
+    const plan = agent['plan']!.permission
+    expect(plan['*_*']).toBe('deny')
+    expect(plan).toMatchObject({ litecode_open_file: 'ask', litecode_list_sessions: 'ask', litecode_read_session: 'ask', litecode_present: 'ask', external_directory: 'ask', doom_loop: 'ask' })
+    expect(Object.keys(plan).indexOf('litecode_open_file')).toBeGreaterThan(Object.keys(plan).indexOf('*_*'))
+    const ask = agent[MODE_AGENT.ask]!.permission
+    expect(ask).toMatchObject({ '*_*': 'ask', litecode_open_file: 'ask', litecode_open_terminal: 'ask', litecode_present: 'ask', plan_enter: 'deny', plan_exit: 'deny' })
+    expect(agent[SUBAGENT_ASK]!.permission).toMatchObject({ '*_*': 'ask', litecode_present: 'deny', litecode_send_to_session: 'deny', plan_enter: 'deny' })
+  })
+
+  it('빈 매처(전부): 모드마다 스냅숏 — 계획·기본·매번 묻기·전체 권한 + 하위 에이전트', () => {
+    // 규칙은 뒤가 이긴다 — 순서가 보이게 줄로 편다
+    const lines = Object.fromEntries(Object.entries(agents([''])).map(([name, def]) => [name, Object.entries(def!.permission).map(([rule, action]) => `${rule}: ${JSON.stringify(action)}`)]))
+    expect(lines).toMatchSnapshot()
+  })
+
+  it('explore 는 원래 가진 도구에만 얹는다 — task·skill·편집·MCP 가 되살아나지 않는다', () => {
+    expect(agents([''])['explore']).toEqual({ permission: { bash: 'ask', read: 'ask' } })
+  })
 })
 
 describe('engineConfig — 컨텍스트 길이', () => {
