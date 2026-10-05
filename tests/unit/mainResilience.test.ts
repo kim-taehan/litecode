@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from '../../electron/resilience.ts'
-import { restorableBounds } from '../../electron/windowBounds.ts'
+import { restorableBounds, windowMode } from '../../electron/windowBounds.ts'
 import { readJsonFile, readJsonFileSync, writeJsonFileSync } from '../../src/services/jsonFile.ts'
 import { captureConsole, createLogFile, redactSecrets } from '../../src/services/logFile.ts'
 import { keepEnds, keepTail, streamText } from '../../src/services/outputBuffer.ts'
@@ -321,5 +321,20 @@ describe('창 크기·위치 되돌리기', () => {
     for (const saved of [undefined, null, 'x', {}, { x: 0, y: 0, width: '1200', height: 700 }, { x: 0, y: 0, width: Number.NaN, height: 700 }, { x: 0, y: 30, width: 120, height: 90 }]) {
       expect(restorableBounds(saved, screens), JSON.stringify(saved)).toBeUndefined()
     }
+  })
+})
+
+describe('windowMode — 닫을 때의 창 상태를 다음 창이 잇는다', () => {
+  it('최대화·전체 화면으로 닫았으면 그 상태, 둘 다면 전체 화면', () => {
+    expect(windowMode({ x: 0, y: 0, width: 1280, height: 800, maximized: true, fullScreen: false })).toBe('maximized')
+    expect(windowMode({ maximized: false, fullScreen: true })).toBe('fullscreen')
+    expect(windowMode({ maximized: true, fullScreen: true })).toBe('fullscreen')
+  })
+
+  it('보통 창·옛 파일(상태 없음)·틀린 모양은 보통 창', () => {
+    expect(windowMode({ x: 0, y: 0, width: 1280, height: 800, maximized: false, fullScreen: false })).toBeUndefined()
+    expect(windowMode({ x: 0, y: 0, width: 1280, height: 800 })).toBeUndefined()
+    expect(windowMode({ maximized: 'yes', fullScreen: 1 })).toBeUndefined()
+    expect(windowMode(undefined)).toBeUndefined()
   })
 })
