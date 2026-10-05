@@ -577,7 +577,7 @@ const features: FeatureDefinition[] = [
     // 모바일 연결 — 기본 꺼짐. 켜도 설정 > 모바일의 스위치를 켜기 전에는 포트를 열지 않는다. 끄면 서버·IPC·설정 메뉴가 함께 내려간다
     id: 'remote',
     plugin: (ctx) => {
-      ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
+      ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion(), alwaysOn: true })
       // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 지금은 HTTP(127.0.0.1:47600) 하나. 블루투스 운반이 이 옆에 올라온다
       ctx.plugin(RemoteHttp)
       ctx.plugin(remoteBridge)

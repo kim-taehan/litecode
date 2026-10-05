@@ -82,16 +82,6 @@ export function MobilePage() {
             </div>
           )}
         </div>
-        <button
-          type="button"
-          role="switch"
-          className="settings-switch"
-          aria-checked={status.enabled}
-          aria-label={t('remote.enable')}
-          onClick={() => run(() => window.litecode.setRemoteEnabled(!status.enabled))}
-        >
-          <span className="settings-switch__thumb" />
-        </button>
       </div>
 
       <div className="settings-row">
