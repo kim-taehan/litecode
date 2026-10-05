@@ -112,8 +112,13 @@ function parseObject(text: string): Record<string, unknown> | undefined {
   }
 }
 
-/** 훅 하나를 돌린다 — 던지지 않는다. onStart 로 실행 손잡이를 준다(멈추기·정리용). timeoutMs 는 테스트만 준다 (기본: 정의·이벤트의 기한) */
-export async function runHook(hook: HookDef, input: HookInput, opts: { onStart?(handle: ExecHandle): void; timeoutMs?: number } = {}): Promise<HookRun> {
+/** 훅 하나를 돌린다 — 던지지 않는다. onStart 로 실행 손잡이를 준다(멈추기·정리용). timeoutMs 는 테스트만 준다 (기본: 정의·이벤트의 기한).
+ *  onOutput 은 출력 조각을 그대로 (시험 실행이 전문을 보여 주려고 받는다) */
+export async function runHook(
+  hook: HookDef,
+  input: HookInput,
+  opts: { onStart?(handle: ExecHandle): void; timeoutMs?: number; onOutput?(stream: 'stdout' | 'stderr', text: string): void } = {},
+): Promise<HookRun> {
   const seconds = hookTimeout(hook.event, hook.timeout)
   const stdout = keepEnds(CONTEXT_LIMIT / 2, CONTEXT_LIMIT / 2)
   const stderr = keepTail(REASON_LIMIT)
@@ -122,7 +127,10 @@ export async function runHook(hook: HookDef, input: HookInput, opts: { onStart?(
     ...hookSpawn(hook, input),
     cwd: input.directory,
     timeoutMs: opts.timeoutMs ?? seconds * 1000,
-    onOutput: (stream, text) => (stream === 'stdout' ? stdout : stderr).push(text),
+    onOutput: (stream, text) => {
+      ;(stream === 'stdout' ? stdout : stderr).push(text)
+      opts.onOutput?.(stream, text)
+    },
   })
   opts.onStart?.(handle)
   const end = await handle.done

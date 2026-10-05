@@ -199,27 +199,7 @@ button.turn-row__line:disabled { cursor: default; }
 }
 .turn-subtask[data-status='error'] .turn-subtask__status { color: var(--danger); }
 
-/* 사용자 훅 줄 (이슈 #102) — 통과는 다른 작업 줄처럼 조용히, 막음은 붉게. 사유는 아래 한 줄 */
-.turn-hook__status {
-  flex: none;
-  margin-left: auto;
-  padding-left: 8px;
-  color: var(--text-caption);
-  font-variant-numeric: tabular-nums;
-}
-.turn-hook .turn-row__summary code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-}
-.turn-hook[data-outcome='blocked'] .turn-row__title,
-.turn-hook[data-outcome='blocked'] .turn-row__icon,
-.turn-hook[data-outcome='blocked'] .turn-hook__status,
-.turn-hook[data-outcome='blocked'] .turn-hook__reason { color: var(--danger); }
-.turn-hook__reason {
-  padding: 0 0 4px 22px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
+/* 사용자 훅 줄·훅이 막은 도구 줄 (이슈 #102) 은 hooks.css */
 .turn-subtask__body {
   display: flex;
   flex-direction: column;

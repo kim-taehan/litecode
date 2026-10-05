@@ -61,3 +61,139 @@ export function matchesTool(matcher: string, tool: string): boolean {
     return false
   }
 }
+
+// ── 화면(이슈 #102 3단계 — `+` 메뉴 > 훅 팝업·가져오기·시험 실행)이 쓰는 모양과 판정. 여기까지도 순수 함수뿐이다
+
+export type HookScope = HookEntry['scope']
+
+/** 엔진이 실행 전에 묻게 할 수 없는 내장 도구 — 도구 실행 전 훅이 걸리지 않는다 (ctx.engine 의 toolGate 와 같은 목록, engine.ts 의 ⚠️) */
+export const UNGATED_TOOLS: readonly string[] = ['glob', 'grep', 'webfetch', 'websearch']
+
+/** 도구 실행 전 훅의 매처가 걸리지 않는 도구만 가리키나 — 그 훅은 한 번도 돌지 않는다 (화면이 경고한다). 이름의 `|` 나열만 본다 */
+export function preToolUnreachable(matcher: string): boolean {
+  const names = matcher.split('|').map((name) => name.trim().toLowerCase())
+  return names.every((name) => UNGATED_TOOLS.includes(name))
+}
+
+/** 팝업의 줄 하나 — 훅 + 화면이 그릴 값 */
+export interface HookRow extends HookEntry {
+  /** 실제 기한(초) — 안 적었으면 이벤트 기본값 */
+  seconds: number
+  /** 도구 실행 전 훅인데 매처가 걸리지 않는 도구만 가리킨다 */
+  unreachable: boolean
+}
+
+export function hookRow(entry: HookEntry): HookRow {
+  return { ...entry, seconds: hookTimeout(entry.event, entry.timeout), unreachable: entry.event === 'PreToolUse' && preToolUnreachable(entry.matcher) }
+}
+
+/** 추가·편집 폼이 보내는 것 */
+export interface HookDraft {
+  /** 고치는 훅 (없으면 새 훅) */
+  original?: { scope: HookScope; key: string }
+  scope: HookScope
+  event: HookEvent
+  /** 도구 이벤트가 아니면 버린다 */
+  matcher: string
+  command: string
+  /** 기한(초, 1~HOOK_TIMEOUT_MAX 의 정수) — 없으면 이벤트 기본값 */
+  timeout?: number
+}
+
+export type HookDraftError = 'event' | 'scope' | 'command' | 'matcher' | 'timeout'
+
+/** 폼(또는 IPC 로 온 아무 값) → 다듬은 초안, 틀렸으면 무엇이 틀렸는지. 메인이 저장·시험 실행 전에, 화면이 버튼을 켜기 전에 같은 함수로 본다.
+ *  매처는 도구 이벤트에서만 남기고 정규식으로 읽혀야 한다 (못 읽는 매처는 어느 도구에도 안 맞는다 — matchesTool) */
+export function checkHookDraft(value: unknown): { draft: HookDraft } | { error: HookDraftError } {
+  const input = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
+  const event = input['event'] as HookEvent
+  if (!HOOK_EVENTS.includes(event)) return { error: 'event' }
+  const scope = input['scope']
+  if (scope !== 'all' && scope !== 'project') return { error: 'scope' }
+  const command = typeof input['command'] === 'string' ? input['command'].trim() : ''
+  if (!command) return { error: 'command' }
+  const matcher = TOOL_HOOK_EVENTS.includes(event) && typeof input['matcher'] === 'string' ? input['matcher'].trim() : ''
+  try {
+    new RegExp(matcher === '*' ? '' : matcher)
+  } catch {
+    return { error: 'matcher' }
+  }
+  const timeout = input['timeout']
+  if (timeout !== undefined && !(typeof timeout === 'number' && Number.isInteger(timeout) && timeout >= 1 && timeout <= HOOK_TIMEOUT_MAX)) return { error: 'timeout' }
+  const original = input['original'] as { scope?: unknown; key?: unknown } | null | undefined
+  if (original !== undefined && !(original && (original.scope === 'all' || original.scope === 'project') && typeof original.key === 'string')) return { error: 'scope' }
+  return {
+    draft: {
+      ...(original && { original: { scope: original.scope as HookScope, key: original.key as string } }),
+      scope,
+      event,
+      matcher,
+      command,
+      ...(timeout !== undefined && { timeout }),
+    },
+  }
+}
+
+/** 시험 실행 결과 — 견본 입력으로 한 번 돌린 것 (대화·실행 기록에는 남지 않는다) */
+export interface HookTestResult {
+  outcome: HookOutcome
+  exitCode: number | null
+  seconds: number
+  /** 막은 사유·실패 사유 */
+  reason?: string
+  stdout: string
+  stderr: string
+  /** 훅이 stdin 으로 받은 견본 JSON */
+  stdin: string
+}
+
+/** 프로젝트 폴더가 가진 훅 정의 파일 — 자동으로 실행하지 않고 가져오기 후보로만 읽는다 (사용자 결정) */
+export const PROJECT_HOOK_FILES: readonly string[] = ['.claude/settings.json', '.claude/settings.local.json']
+
+/** 가져오기 후보 하나 — 프로젝트 폴더의 파일에서 찾은 훅 (아직 이 PC 에 복사하지 않았다) */
+export interface HookCandidate {
+  key: string
+  event: HookEvent
+  matcher: string
+  command: string
+  timeout?: number
+  /** 실제 기한(초) */
+  seconds: number
+  /** 찾은 파일 (프로젝트 기준) */
+  file: string
+  /** 바깥으로 내용을 보낼 법한 명령이다 (sendsOutside) */
+  outbound: boolean
+}
+
+const OUTBOUND = /\b(?:curl|wget|nc|ncat|netcat|ssh|scp|sftp|rsync|ftp|telnet)\b|https?:\/\/|\/dev\/tcp\//i
+
+/** 바깥(네트워크)으로 내용을 보낼 법한 명령인가 — 가져오기 확인 창의 경고용. **단순 글자 판정**이다: 흔한 전송 도구 이름과 http(s) 주소만 본다.
+ *  스크립트 파일 안에서 보내는 것·다른 도구는 못 잡는다 (경고가 없다고 안전한 명령은 아니다) */
+export function sendsOutside(command: string): boolean {
+  return OUTBOUND.test(command)
+}
+
+/** 최근 실행 기록 하나 (화면용 — 메모리에만 있고 앱을 끄면 사라진다) */
+export interface HookRecent {
+  at: number
+  event: HookEvent
+  command: string
+  outcome: HookOutcome
+  seconds: number
+  reason?: string
+  exitCode: number | null
+}
+
+const STOP_FEEDBACK = 'Stop hook feedback:'
+
+/** 턴 끝 훅이 막았을 때 이어 보내는 글 — 모델이 읽는다 (Claude Code 와 같은 머리) */
+export function stopFeedback(reason: string): string {
+  return `${STOP_FEEDBACK}\n${reason}`
+}
+
+/** 그 user 글이 턴 끝 훅이 이어 보낸 것이면 그 사유 (아니면 undefined) — 화면이 내 말풍선 대신 구분되는 줄로 그리고 입력 기록(↑)에서 뺀다.
+ *  글의 머리로 가린다: 다시 연 대화(엔진 기록)에는 출처가 없다 */
+export function stopFeedbackReason(text: string): string | undefined {
+  const trimmed = text.trimStart()
+  return trimmed.startsWith(STOP_FEEDBACK) ? trimmed.slice(STOP_FEEDBACK.length).trim() : undefined
+}

@@ -1,0 +1,487 @@
+/* 훅 (이슈 #102 3단계, 시안 _workspace/mock-hooks) — `+` 메뉴의 훅 팝업·편집 판·가져오기 확인 창과 대화의 훅 줄.
+   판·묶음·줄 카드·버튼·스위치·입력은 plus.css·settings.css 것을 그대로 쓴다. 색은 토큰만 (다크는 styles.css 의 :root 미디어 쿼리) —
+   이벤트 배지의 옅은 바탕은 글자색을 섞어 만든다 (두 테마에서 같은 식) */
+
+/* ── 이벤트 배지 — 시안: 알약, 12px 굵게. 도구 실행 전 = 붉음, 후 = 파랑, 턴 끝 = 초록, 세션 시작 = 보라, 그 밖 = 중립 */
+.hook-badge {
+  --hook-tone: var(--text-secondary);
+  display: inline-flex;
+  justify-self: start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hook-tone) 14%, transparent);
+  color: var(--hook-tone);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hook-badge[data-event='PreToolUse'] { --hook-tone: var(--danger); }
+.hook-badge[data-event='PostToolUse'] { --hook-tone: var(--accent); }
+.hook-badge[data-event='Stop'] { --hook-tone: var(--ok); }
+.hook-badge[data-event='SessionStart'] { --hook-tone: #8b5cf6; }
+.hook-badge[data-event='Notification'] { --hook-tone: var(--warn); }
+
+/* ── 팝업: 설명 + [훅 추가] */
+.hooks-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.hooks-intro__text {
+  margin: 0;
+  max-width: 470px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+.hooks-intro .settings-button {
+  flex: none;
+}
+
+/* 가져오기 띠 — 시안: 옅은 파랑 바탕·12 모서리 */
+.hooks-candidates {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+.hooks-candidates__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hooks-candidates__title {
+  font-weight: 600;
+}
+.hooks-candidates__note {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.hooks-candidates .settings-button {
+  flex: none;
+}
+
+/* 줄 — 카드 하나에 선으로 가른다. 시안의 칸: 배지 112 · 매처 84 · 명령 · 기한 44 · 스위치 */
+.hook-list .hook-row + .hook-row {
+  border-top: 0.5px solid var(--border);
+}
+.hook-row__main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px 0 0;
+}
+.hook-row__open {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 112px 84px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 0 8px 14px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+}
+.hook-row__open:hover .hook-row__command,
+.hook-row__open:focus-visible .hook-row__command {
+  text-decoration: underline;
+}
+.hook-row__open:focus-visible {
+  outline: none;
+}
+.hook-row__matcher,
+.hook-row__command,
+.hook-editor__mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+.hook-row__matcher,
+.hook-row__command {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hook-row__matcher {
+  color: var(--text-strong-hover);
+}
+.hook-row__matcher[data-all] {
+  font-family: inherit;
+  color: var(--text-tertiary);
+}
+.hook-row__timeout {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  text-align: right;
+  white-space: nowrap;
+}
+.hook-row[data-on='false'] .hook-row__open {
+  color: var(--text-tertiary);
+}
+.hook-row__warn,
+.hook-editor__warn {
+  margin: 0;
+  padding: 0 14px 10px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--warn);
+}
+.hook-editor__warn {
+  padding: 0;
+}
+.hook-row__new {
+  padding: 12px 14px 0;
+  font-weight: 600;
+}
+
+/* ── 편집 판 — 줄 아래 폼 (MCP 편집 카드와 같은 부품) */
+.hook-editor {
+  margin: 0;
+  padding: 12px 14px 14px;
+  border-top: 0.5px solid var(--border);
+}
+.hook-row__new + .hook-editor {
+  border-top: none;
+}
+.hook-editor__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hook-editor__choices .settings-button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.hook-editor__command {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.hook-editor .settings-field:has(.hook-editor__command) {
+  align-items: start;
+}
+.hook-editor__pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+.hook-editor__timeout {
+  grid-template-columns: 110px 96px;
+}
+.hook-editor__notes {
+  margin: 0;
+  padding: 0 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+.hook-editor__test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hook-editor__test-row .settings-button {
+  flex: none;
+}
+.hook-editor__test-note {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+}
+.hook-editor__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hook-editor__spacer {
+  flex: 1;
+}
+
+/* 시험 실행 결과 */
+.hook-test {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--fill-selector);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+.hook-test__status {
+  font-weight: 600;
+  color: var(--ok);
+}
+.hook-test[data-outcome='blocked'] .hook-test__status { color: var(--danger); }
+.hook-test[data-outcome='failed'] .hook-test__status { color: var(--warn); }
+.hook-test__reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hook-test__label,
+.hook-test__stdin summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.hook-test__output {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 최근 실행 */
+.hook-recent__list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.hook-recent__item {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+.hook-recent__outcome {
+  font-weight: 600;
+  color: var(--ok);
+}
+.hook-recent__item[data-outcome='blocked'] .hook-recent__outcome { color: var(--danger); }
+.hook-recent__item[data-outcome='failed'] .hook-recent__outcome { color: var(--warn); }
+.hook-recent__reason {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 가져오기 확인 창 — 시안: 720 폭·28 안쪽 여백·18 간격. 후보가 많으면 목록만 스크롤 */
+.hooks-import {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 720px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  padding: 28px;
+  background: var(--surface-panel);
+  border-radius: 24px;
+  box-shadow: var(--shadow-prominent);
+  font-size: 14px;
+  color: var(--text);
+}
+.hooks-import__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hooks-import__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+.hooks-import__intro {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.hooks-import__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hooks-import > .settings-error {
+  margin: 0;
+}
+.hook-candidate {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+}
+.hook-candidate[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.hook-candidate input {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.hook-candidate__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hook-candidate__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hook-candidate__meta {
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hook-candidate__command {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hook-candidate__warn {
+  font-size: 12.5px;
+  color: var(--warn);
+}
+.hooks-import__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.hooks-import__note {
+  max-width: 380px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.hooks-import__actions {
+  flex: none;
+  display: flex;
+  gap: 8px;
+}
+
+/* ── 대화의 훅 줄 (시안 Chat.dc.html) — 통과는 조용한 줄(옅은 바탕), 막음은 붉은 줄 + 사유, 실패는 경고색. 오른쪽에 걸린 시간 */
+.turn-hook {
+  --hook-tone: var(--accent);
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--fill-selector);
+}
+.turn-hook[data-outcome='blocked'] {
+  --hook-tone: var(--danger);
+  background: var(--danger-bg);
+}
+.turn-hook[data-outcome='failed'] {
+  --hook-tone: var(--warn);
+  background: var(--warn-soft);
+}
+.turn-hook .turn-row__title,
+.turn-hook .turn-row__icon {
+  color: var(--hook-tone);
+  font-weight: 600;
+}
+.turn-hook .turn-row__summary code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+.turn-hook__outcome {
+  flex: none;
+  font-weight: 600;
+  color: var(--ok);
+}
+.turn-hook[data-outcome='blocked'] .turn-hook__outcome,
+.turn-hook[data-outcome='failed'] .turn-hook__outcome {
+  color: var(--hook-tone);
+}
+.turn-hook__seconds,
+.turn-blocked__status {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+.turn-hook__reason {
+  padding: 0 0 4px 22px;
+  color: var(--hook-tone);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 훅이 막은 도구 줄 — 하려던 일에 취소선, 오른쪽 "실행 안 됨", 아래에 "훅이 막음: 사유" */
+.turn-row[data-blocked] .turn-row__summary {
+  text-decoration: line-through;
+  color: var(--text-caption);
+}
+.turn-blocked__reason {
+  padding: 0 0 4px 20px;
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 턴 끝 훅이 이어 보낸 글 — 내 말풍선이 아니다. 열 전체의 구분되는 줄 */
+.hook-followup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--danger);
+  border-radius: 0 8px 8px 0;
+  background: var(--fill-selector);
+  font-size: calc(var(--chat-font-size, 14px) - 1px);
+}
+.hook-followup__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.hook-followup__reason {
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

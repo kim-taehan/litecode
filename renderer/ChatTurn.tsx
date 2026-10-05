@@ -18,7 +18,9 @@ import { ChangedFilesCard } from './ChangedFiles.tsx'
 import { changedFiles } from './changedFiles.ts'
 import { PresentedCard } from './Presented.tsx'
 import { isPresentTool, presentedFiles } from './presented.ts'
+import { stopFeedbackReason } from '../shared/hooks.ts'
 import './chat.css'
+import './hooks.css'
 
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
 // - 내 말: 오른쪽 연파랑 말풍선 + 아래 시각·복사 아이콘
@@ -33,6 +35,18 @@ import './chat.css'
 export const UserMessage = memo(function UserMessage({ text, at, attachments, origin }: { text: string; at?: number; attachments?: readonly Attachment[]; origin?: MessageOrigin }) {
   const t = useT()
   const [copied, setCopied] = useCopied()
+  // 턴 끝 훅이 막아서 앱이 이어 보낸 글 (이슈 #102) — 내가 친 글이 아니라 말풍선으로 그리지 않는다: 구분되는 줄 "턴 끝 훅이 이어서 보냄" + 사유
+  const hookReason = stopFeedbackReason(text)
+  if (hookReason !== undefined)
+    return (
+      <div className="hook-followup" data-kind="hook-followup" role="note">
+        <div className="hook-followup__head">
+          <HookIcon />
+          {t('hooks.chat.followUp')}
+        </div>
+        {hookReason && <div className="hook-followup__reason">{hookReason}</div>}
+      </div>
+    )
   return (
     <div className="user-turn">
       {/* 붙인 파일·이미지 칩 (이슈 #44) — 글 없이 첨부만 보냈으면 말풍선 없이 칩만 */}
@@ -236,13 +250,15 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
       <Markdown text={skillInstructions(item.result)} />
     </div>
   ) : (
-    (item.input || item.result || item.error) && (
+    (item.input || item.result || (item.error && !item.blocked)) && (
       <>
         {item.input && <pre className="turn-row__code">{item.input}</pre>}
-        {item.error ? <pre className="turn-row__code turn-row__code--error">{item.blocked ? t('hooks.blocked', { reason: item.error }) : item.error}</pre> : item.result && <pre className="turn-row__code">{item.result}</pre>}
+        {item.error && !item.blocked ? <pre className="turn-row__code turn-row__code--error">{item.error}</pre> : item.result && <pre className="turn-row__code">{item.result}</pre>}
       </>
     )
   )
+  // 사용자 훅이 실행 전에 막았다 (이슈 #102, 시안 Chat.dc.html) — 하려던 일에 취소선, 오른쪽 "실행 안 됨", 아래에 "훅이 막음: 사유" (펼치지 않아도 보인다)
+  const blocked = !think && item.blocked ? item.error ?? '' : undefined
 
   return (
     <div
@@ -252,6 +268,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
       data-status={think ? undefined : item.status}
       data-live={live || undefined}
       data-mcp={!think && item.mcp ? `${item.mcp.server}/${item.mcp.tool}` : undefined}
+      data-blocked={blocked !== undefined || undefined}
     >
       <button type="button" className="turn-row__line" aria-expanded={body ? open : undefined} disabled={!body} onClick={() => setOpen((now) => !now)}>
         {think ? <ThinkIcon /> : <ToolIcon name={item.mcp ? 'mcp' : item.name} />}
@@ -264,14 +281,16 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
         )}
         {skill && <SkillBadge source={skill.source} />}
         {!think && item.diffs && item.status === 'done' && <DiffStat diffs={item.diffs} />}
+        {blocked !== undefined && <span className="turn-blocked__status">{t('hooks.chat.notRun')}</span>}
       </button>
+      {blocked !== undefined && <div className="turn-blocked__reason">{t('hooks.blocked', { reason: blocked })}</div>}
       {bodyFold.mounted && body && <div className="turn-row__body" {...bodyFold.fold}>{body}</div>}
     </div>
   )
 }
 
-/** 사용자 훅 한 줄 (이슈 #102, 시안 _workspace/mock-hooks/Chat.dc.html) — "훅 · 이벤트 · 명령 … 통과/막음/실패 · N초". 통과는 조용한 줄,
- *  막음은 붉은 줄, 사유(막은 훅의 stderr·실패 사유)는 아래 한 줄로 */
+/** 사용자 훅 한 줄 (이슈 #102, 시안 _workspace/mock-hooks/Chat.dc.html) — "훅 · 이벤트 · 명령 통과/막음/실패 … N초". 통과는 조용한 줄,
+ *  막음은 붉은 줄, 실패는 경고색, 사유(막은 훅의 stderr·실패 사유)는 아래 한 줄로 (hooks.css) */
 function HookRow({ item }: { item: Extract<TurnItem, { kind: 'hook' }> }) {
   const t = useT()
   return (
@@ -283,9 +302,8 @@ function HookRow({ item }: { item: Extract<TurnItem, { kind: 'hook' }> }) {
         <span className="turn-row__summary">
           {t(`hooks.event.${item.event}`)} · <code>{item.command}</code>
         </span>
-        <span className="turn-hook__status">
-          {t(`hooks.outcome.${item.outcome}`)} · {t('chat.seconds', { s: item.seconds })}
-        </span>
+        <span className="turn-hook__outcome">{t(`hooks.outcome.${item.outcome}`)}</span>
+        <span className="turn-hook__seconds">{t('chat.seconds', { s: item.seconds })}</span>
       </div>
       {item.reason && <div className="turn-hook__reason">{item.outcome === 'blocked' ? t('hooks.blocked', { reason: item.reason }) : item.reason}</div>}
     </div>

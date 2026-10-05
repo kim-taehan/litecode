@@ -6,11 +6,29 @@ import './sessions.ts'
 import { realDirectory } from './llm.ts'
 import type { ExecHandle } from './exec.ts'
 import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
-import { entriesFor, gateMatchers, lenientReader, parseHooks, parseProjects, serializeHooks, serializeProjects } from './hooks/config.ts'
-import { runHook, type HookInput, type HookRun } from './hooks/run.ts'
+import path from 'node:path'
+import { dropHook, entriesFor, gateMatchers, importCandidates, lenientReader, parseHooks, parseProjects, putHook, serializeHooks, serializeProjects, type HookStore } from './hooks/config.ts'
+import { hookSpawn, runHook, type HookInput, type HookRun } from './hooks/run.ts'
+import { sampleHookInput } from './hooks/sample.ts'
+import { keepEnds } from './outputBuffer.ts'
 import { tr } from '../i18n.ts'
 import { fromPerson } from '../../shared/chat.ts'
-import { matchesTool, STOP_CHAIN_MAX, TOOL_HOOK_EVENTS, type HookDef, type HookEntry } from '../../shared/hooks.ts'
+import {
+  checkHookDraft,
+  HOOK_TIMEOUT_MAX,
+  matchesTool,
+  PROJECT_HOOK_FILES,
+  STOP_CHAIN_MAX,
+  stopFeedback,
+  TOOL_HOOK_EVENTS,
+  type HookCandidate,
+  type HookDef,
+  type HookDraft,
+  type HookEntry,
+  type HookRecent,
+  type HookScope,
+  type HookTestResult,
+} from '../../shared/hooks.ts'
 import type { Conversation } from '../../shared/contract.ts'
 
 // 훅 (ctx.hooks, 이슈 #102 1단계, 설계 _workspace/01af_hooks.md §6 — 방식 B) — 사용자가 이벤트에 걸어 둔 셸 명령을 **앱 메인 프로세스가**
@@ -38,7 +56,8 @@ import type { Conversation } from '../../shared/contract.ts'
 //     실패·기한 초과는 통과다(훅 버그가 작업을 세우지 않게). 하위 작업의 도구에도 걸리고 줄은 부모 턴에 남는다. 계획 모드처럼 도구가 빠진
 //     곳에서는 요청이 없어 돌지 않는다. **통과는 사용자 승인이 아니다** — 모드가 원래 묻는 호출은 ctx.llm 이 승인 카드를 그대로 띄운다.
 //     엔진이 실행 전에 묻게 할 수 없는 도구(glob·grep·webfetch — engine.ts 의 ⚠️)에는 돌지 않는다 (도구 실행 후 훅은 돈다)
-// - 표시: 훅이 끝날 때마다 그 대화의 도는 턴에 진행 줄 하나(ctx.chat.note — kind 'hook'). 최근 실행은 메모리(recent)와 main.log 한 줄
+// - 표시: 훅이 끝날 때마다 그 대화의 도는 턴에 진행 줄 하나(ctx.chat.note — kind 'hook'). 최근 실행은 메모리(recent), 막음·실패만 main.log 한 줄
+// - 화면(3단계): 입력창 `+` 메뉴의 훅 팝업 — saveHook·removeHook·setEnabled·test·candidates·importHooks·recentIn (다리는 hooks/bridge.ts)
 
 declare module 'cordis' {
   interface Context {
@@ -77,9 +96,18 @@ export interface HookRecord extends HookRun {
 const RECENT_MAX = 200
 const COMMAND_SHOWN = 120
 
-/** 턴 끝 훅이 막았을 때 이어 보내는 글 — 모델이 읽는다 (Claude Code 와 같은 머리) */
-export function stopFeedback(reason: string): string {
-  return `Stop hook feedback:\n${reason}`
+const TEST_OUTPUT_LIMIT = 20_000
+const RECENT_SHOWN = 50
+
+export { stopFeedback }
+
+/** 프로젝트별 파일의 열쇠 — realpath, 없는 폴더는 준 경로 그대로 */
+function realKey(directory: string): string {
+  try {
+    return realpathSync(directory)
+  } catch {
+    return directory
+  }
 }
 
 export class HooksService extends Service {
@@ -94,6 +122,8 @@ export class HooksService extends Service {
   private afterTools = new Map<string, Promise<void>>()
   private disposed = false
   private seq = 0
+  /** 게이트 대상 알리기의 줄 (syncGate) */
+  private gateSync: Promise<void> = Promise.resolve()
 
   constructor(
     ctx: Context,
@@ -194,9 +224,12 @@ export class HooksService extends Service {
 
   /** 켜진 도구 실행 전 훅의 매처를 ctx.llm 에 알린다 — 그 도구들의 실행 전에 엔진이 승인을 묻게 된다 (hooks/config.ts gateMatchers).
    *  달라진 것이 없으면 아무 일도 없다(ctx.engine 이 떠 있는 게이트와 비교한다). 던지지 않는다 */
-  async syncGate(): Promise<void> {
-    const matchers = gateMatchers(parseHooks(await this.read(this.opts.file)), parseProjects(await this.read(this.opts.projectsFile)))
-    if (!this.disposed) this.ctx.llm.gateTools(matchers)
+  syncGate(): Promise<void> {
+    // 차례로 — 연달아 저장하면(팝업) 먼저 시작한 읽기가 나중에 끝나 옛 목록을 마지막으로 알릴 수 있다
+    return (this.gateSync = this.gateSync.then(async () => {
+      const matchers = gateMatchers(parseHooks(await this.read(this.opts.file)), parseProjects(await this.read(this.opts.projectsFile)))
+      if (!this.disposed) this.ctx.llm.gateTools(matchers)
+    }))
   }
 
   /** 그 이벤트에 걸린 켜진 훅을 차례로 돌린다 — 던지지 않는다. 막는 훅이 나오면 거기서 멈춘다. input.directory 는 realpath.
@@ -232,13 +265,97 @@ export class HooksService extends Service {
     return [...this.records]
   }
 
-  private updateProject(directory: string, change: (entry: { hooks: HookDef[]; enabled: Record<string, boolean> }) => { hooks: HookDef[]; enabled: Record<string, boolean> }): void {
-    let key = directory
-    try {
-      key = realpathSync(directory)
-    } catch {
-      // 없는 폴더 — 준 경로 그대로
+  // ── 화면(훅 팝업, 이슈 #102 3단계)이 부르는 것 — 다리(hooks/bridge.ts)가 그대로 잇는다. 틀린 입력은 사유와 함께 던진다
+
+  /** 그 프로젝트에서 돈 최근 실행 (오래된 것부터, RECENT_SHOWN 건) — 대화 id·폴더는 싣지 않는다 */
+  recentIn(directory: string): HookRecent[] {
+    const key = realKey(directory)
+    return this.records
+      .filter((record) => record.directory === key)
+      .slice(-RECENT_SHOWN)
+      .map(({ at, event, command, outcome, seconds, reason, exitCode }) => ({ at, event, command, outcome, seconds, ...(reason && { reason }), exitCode }))
+  }
+
+  /** 폼의 훅 하나를 저장한다 (새로·고침, 묶음 옮기기 포함 — hooks/config.ts putHook). 다음 턴부터 돈다 */
+  saveHook(input: unknown, directory: string): void {
+    const draft = this.draft(input)
+    this.change(directory, (store) => {
+      const error = putHook(store, draft)
+      if (error) throw new Error(tr(`hooks.error.${error}`))
+    })
+  }
+
+  /** 훅 하나를 지운다 — 없으면 아무 일도 없다 */
+  removeHook(scope: HookScope, key: string, directory: string): void {
+    this.change(directory, (store) => void dropHook(store, scope === 'all' ? 'all' : 'project', key))
+  }
+
+  /** 저장하지 않고 견본 입력으로 한 번 돌려 본다 — 대화·실행 기록에 아무것도 남기지 않는다. 기한은 그 훅의 기한 그대로 */
+  async test(input: unknown, directory: string): Promise<HookTestResult> {
+    const draft = this.draft(input)
+    const real = await realDirectory(directory)
+    if (!real) throw new Error(tr('hooks.error.noFolder'))
+    const hook: HookDef = { event: draft.event, matcher: draft.matcher, command: draft.command, ...(draft.timeout !== undefined && { timeout: draft.timeout }), enabled: true }
+    const sample = sampleHookInput(draft.event, draft.matcher, real)
+    const out = { stdout: keepEnds(TEST_OUTPUT_LIMIT / 2, TEST_OUTPUT_LIMIT / 2), stderr: keepEnds(TEST_OUTPUT_LIMIT / 2, TEST_OUTPUT_LIMIT / 2) }
+    let handle: ExecHandle | undefined
+    const run = await runHook(hook, sample, {
+      timeoutMs: this.opts.timeoutMs,
+      onStart: (started) => this.running.add((handle = started)),
+      onOutput: (stream, text) => out[stream].push(text),
+    })
+    if (handle) this.running.delete(handle)
+    const text = (buffer: (typeof out)['stdout']): string => (buffer.omitted() ? `${buffer.head()}\n…\n${buffer.tail()}` : buffer.head() + buffer.tail())
+    return {
+      outcome: run.outcome,
+      exitCode: run.exitCode,
+      seconds: run.seconds,
+      ...(run.reason && { reason: run.reason }),
+      stdout: text(out.stdout),
+      stderr: text(out.stderr),
+      stdin: JSON.stringify(JSON.parse(hookSpawn(hook, sample).stdin), null, 2),
     }
+  }
+
+  /** 프로젝트 폴더가 가진 훅 정의(PROJECT_HOOK_FILES) 가운데 아직 가져오지 않은 것 — **읽기만 한다, 실행하지 않는다** (사용자 결정).
+   *  못 읽는 파일·폴더 없음은 후보 0개 */
+  async candidates(directory: string): Promise<HookCandidate[]> {
+    const real = await realDirectory(directory)
+    if (!real) return []
+    const files = await Promise.all(PROJECT_HOOK_FILES.map(async (file) => ({ file, value: await this.read(path.join(real, file)) })))
+    return importCandidates(files, new Set((await this.list(real)).map((entry) => entry.key)))
+  }
+
+  /** 사용자가 고른 후보(열쇠)만 "이 프로젝트만" 묶음에 복사한다 — 켜진 훅으로. 파일을 지금 다시 읽어 그 열쇠(이벤트·매처·명령 전문)가
+   *  그대로 있는 것만 가져온다 (확인 창을 띄운 뒤 파일이 바뀌었으면 그 명령은 오지 않는다). 가져온 수를 돌려준다 */
+  async importHooks(directory: string, keys: readonly string[]): Promise<number> {
+    const chosen = (await this.candidates(directory)).filter((candidate) => keys.includes(candidate.key))
+    if (chosen.length === 0) return 0
+    this.change(directory, (store) => {
+      store.project.hooks.push(...chosen.map(({ event, matcher, command, timeout }) => ({ event, matcher, command, ...(timeout !== undefined && { timeout }), enabled: true })))
+    })
+    return chosen.length
+  }
+
+  private draft(input: unknown): HookDraft {
+    const checked = checkHookDraft(input)
+    if ('error' in checked) throw new Error(tr(`hooks.error.${checked.error}`, { max: HOOK_TIMEOUT_MAX }))
+    return checked.draft
+  }
+
+  /** 두 파일을 읽어 바꾸고 다시 쓴다 (apply 가 던지면 쓰지 않는다). 덮어쓰기 전에 깨진 파일은 옆으로 옮겨 둔다 (jsonFile.ts) */
+  private change(directory: string, apply: (store: HookStore) => void): void {
+    const all = parseHooks(readJsonFileSync(this.opts.file, 'object'))
+    const projects = parseProjects(readJsonFileSync(this.opts.projectsFile, 'object'))
+    const project = (projects[realKey(directory)] ??= { hooks: [], enabled: {} })
+    apply({ all, project, projects })
+    writeJsonFileSync(this.opts.file, serializeHooks(all))
+    writeJsonFileSync(this.opts.projectsFile, serializeProjects(projects))
+    void this.syncGate()
+  }
+
+  private updateProject(directory: string, change: (entry: { hooks: HookDef[]; enabled: Record<string, boolean> }) => { hooks: HookDef[]; enabled: Record<string, boolean> }): void {
+    const key = realKey(directory)
     const projects = parseProjects(readJsonFileSync(this.opts.projectsFile, 'object'))
     projects[key] = change(projects[key] ?? { hooks: [], enabled: {} })
     writeJsonFileSync(this.opts.projectsFile, serializeProjects(projects))
@@ -271,6 +388,7 @@ export class HooksService extends Service {
   private record(run: HookRun, input: HookInput): void {
     this.records.push({ ...run, at: Date.now(), conversationId: input.conversationId, directory: input.directory })
     if (this.records.length > RECENT_MAX) this.records.shift()
+    if (run.outcome === 'passed') return // 통과는 메모리 기록만 — main.log 에는 막음·실패만 남긴다 (통과까지 WARN 으로 쌓이면 로그가 훅 줄로 찬다)
     const reason = run.reason?.split('\n')[0]
     console.warn(`[hooks] ${run.event} ${run.outcome} ${run.seconds}s exit=${run.exitCode} — ${run.command.slice(0, COMMAND_SHOWN)}${reason ? ` — ${reason}` : ''}`)
   }
