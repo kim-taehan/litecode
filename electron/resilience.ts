@@ -33,8 +33,33 @@ export function withDeadline(work: Promise<unknown>, ms: number): Promise<'done'
   })
 }
 
-/** 화면(웹 내용)의 권한 요청을 허용할까 — 기본 거부. 앱 화면이 실제로 쓰는 것은 "복사" 버튼의 navigator.clipboard.writeText 하나다
- *  (Electron 권한 이름 clipboard-sanitized-write). 미리보기 iframe 같은 하위 프레임은 그것도 안 준다 */
-export function allowPermission(permission: string, isMainFrame: boolean): boolean {
-  return isMainFrame && permission === 'clipboard-sanitized-write'
+/** `media` 권한을 판단할 때 보는 것 — 음성 입력 기능이 켜졌는지와, 무엇을 달라는지.
+ *  요청 핸들러에는 details.mediaTypes(배열), 검사 핸들러에는 details.mediaType(하나)이 온다 — 검사 쪽은 하나짜리 배열로 넘긴다.
+ *  **getUserMedia 직전의 검사에는 mediaType 이 안 실려 온다**(실측 01ag §2.3 — undefined). 그 검사는 거절해도 요청 핸들러가 불린다 */
+export interface MediaAsk {
+  /** 기능 `voice` 가 켜져 있다 */
+  voice: boolean
+  mediaTypes?: readonly string[]
+}
+
+/** 화면(웹 내용)의 권한 요청을 허용할까 — 기본 거부. 앱 화면이 실제로 쓰는 것은 "복사" 버튼의 navigator.clipboard.writeText
+ *  (Electron 권한 이름 clipboard-sanitized-write)와, 음성 입력을 켰을 때의 마이크뿐이다 — `media` 는 달라는 것이 정확히 소리 하나일 때만
+ *  (카메라·화면이 끼거나 종류를 모르면 거절). 미리보기 iframe 같은 하위 프레임은 어느 것도 안 준다 */
+export function allowPermission(permission: string, isMainFrame: boolean, media?: MediaAsk): boolean {
+  if (!isMainFrame) return false
+  if (permission === 'clipboard-sanitized-write') return true
+  return permission === 'media' && media?.voice === true && media.mediaTypes?.length === 1 && media.mediaTypes[0] === 'audio'
+}
+
+/** 권한 요청 핸들러의 답 — allowPermission 을 통과한 마이크 요청은 macOS 에서 OS 허락(askForMediaAccess)까지 받아야 허용이다.
+ *  OS 가 이미 거절했으면 다시 묻지 않고 false 가 온다 (사용자가 시스템 설정에서 풀어야 한다). Windows 엔 그 창이 없다 */
+export async function grantPermission(
+  permission: string,
+  isMainFrame: boolean,
+  media: MediaAsk,
+  os: { platform: string; askMicrophone(): Promise<boolean> },
+): Promise<boolean> {
+  if (!allowPermission(permission, isMainFrame, media)) return false
+  if (permission !== 'media' || os.platform !== 'darwin') return true
+  return os.askMicrophone().catch(() => false)
 }

@@ -7,6 +7,7 @@ import { readJsonFileSync } from './jsonFile.ts'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../shared/fontSize.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import { isFeatureSwitches, type FeatureSwitches } from '../../shared/features.ts'
+import { isSpeechLanguage, type SpeechLanguage } from '../../shared/speech.ts'
 
 // 앱 설정(설정 > 일반) — 언어·테마·대화 글자 크기·코딩 뷰. 정본은 이 서비스, 앱에서는 userData 의 settings.json 하나
 // ("설정 파일 열기" 가 여는 파일 — dsh 처럼 사용자가 텍스트로 고칠 수 있다). 손으로 고친 값은 다음 실행 때 읽는다(파일 감시 없음).
@@ -36,6 +37,8 @@ export interface Settings {
   keepRunning?: boolean
   /** 처음 창을 숨길 때의 "트레이에서 계속 실행됩니다" 안내를 이미 띄웠다 — 다시 안 띄운다 (ctx.quit 이 적는다) */
   trayNoticeShown?: boolean
+  /** 받아쓰기(음성 입력, ctx.speech) 언어 힌트 — 없으면 화면 언어를 따른다 (shared/speech.ts speechLanguage) */
+  speechLanguage?: SpeechLanguage
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 코딩 뷰는 지금 화면 그대로(켬). 알림 기본 켬(Q9). 새 대화는 기본 모드(01k §6) */
@@ -69,6 +72,7 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   claudeSkills: (value): value is boolean => typeof value === 'boolean',
   keepRunning: (value): value is boolean => typeof value === 'boolean',
   trayNoticeShown: (value): value is boolean => typeof value === 'boolean',
+  speechLanguage: isSpeechLanguage,
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

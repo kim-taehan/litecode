@@ -21,6 +21,7 @@ import type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
 import type { HookCandidate, HookDraft, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 import type { RemoteStatus } from '../src/services/remote.ts'
+import type { SpeechLanguage, SpeechReply, SpeechStatus } from './speech.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -48,6 +49,7 @@ export type { McpTool } from '../src/services/mcpClient.ts'
 export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 export type { McpToolRef } from '../src/services/turnProgress.ts'
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
+export type { SpeechErrorCode, SpeechLanguage, SpeechReply, SpeechState, SpeechStatus, SpeechTranscript, SpeechUnavailable } from './speech.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -164,6 +166,14 @@ export const Channel = {
   REMOTE_REVOKE: 'remote:revoke',
   /** 메인 → 화면 (RemoteStatus) — 모바일 연결 상태·짝짓기 요청·기기 목록이 바뀌었다 (이슈 #56) */
   REMOTE_CHANGED: 'remote:changed',
+  /** 음성 입력(ctx.speech) — 기능 `voice` 가 켜졌을 때만 있다 */
+  SPEECH_STATUS: 'speech:status',
+  /** 화면 → 메인 ({ pcm: Int16Array(16kHz mono), language? }) → SpeechReply. 메인이 타입·길이를 다시 본다 */
+  SPEECH_TRANSCRIBE: 'speech:transcribe',
+  /** 화면 → 메인 — 보내 둔 받아쓰기를 전부 취소한다 */
+  SPEECH_CANCEL: 'speech:cancel',
+  /** 메인 → 화면 (SpeechStatus) */
+  SPEECH_CHANGED: 'speech:changed',
 } as const
 
 export interface LitecodeBridge {
@@ -353,6 +363,15 @@ export interface LitecodeBridge {
   /** 기기 해제 — 그 기기의 토큰은 곧바로 못 쓰고 붙어 있던 연결은 끊긴다 */
   revokeRemoteDevice(deviceId: string): Promise<RemoteStatus>
   onRemoteChanged(listener: (status: RemoteStatus) => void): () => void
+  /** 음성 입력(ctx.speech)의 지금 상태 — 준비 안 됨(사유)·준비됨·엔진 뜨는 중, 기본 언어 힌트.
+   *  기능 `voice` 가 켜졌을 때만 있다 (꺼져 있으면 이 채널들은 거절된다 — 마이크 권한도 거절된다) */
+  speechStatus(): Promise<SpeechStatus>
+  /** 녹음을 글로 — pcm 은 16kHz mono PCM16 (최대 120초 = shared/speech.ts SPEECH_MAX_SAMPLES), language 를 빼면 설정 값(없으면 화면 언어).
+   *  던지지 않는다: 실패는 { ok: false, code, message }. 말이 없었으면 ok 에 빈 글. 글은 돌려주기만 한다 (대화에 넣거나 보내지 않는다) */
+  transcribeSpeech(pcm: Int16Array, language?: SpeechLanguage): Promise<SpeechReply>
+  /** 보내 둔 받아쓰기를 취소한다 — 그 transcribeSpeech 는 code 'cancelled' 로 끝난다 */
+  cancelSpeech(): Promise<void>
+  onSpeechChanged(listener: (status: SpeechStatus) => void): () => void
 }
 
 declare global {

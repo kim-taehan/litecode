@@ -98,6 +98,10 @@ const Channel = {
   REMOTE_ANSWER_PAIR: 'remote:answer-pair',
   REMOTE_REVOKE: 'remote:revoke',
   REMOTE_CHANGED: 'remote:changed',
+  SPEECH_STATUS: 'speech:status',
+  SPEECH_TRANSCRIBE: 'speech:transcribe',
+  SPEECH_CANCEL: 'speech:cancel',
+  SPEECH_CHANGED: 'speech:changed',
 } as const
 
 /** 경로 없는 이미지(붙여넣은 스크린숏)를 읽어 메인에 넘길 상한 — shared/attachments.ts 의 imageBytes 와 같아야 한다 (메인이 다시 본다) */
@@ -237,6 +241,10 @@ const bridge: LitecodeBridge = {
   answerRemotePair: (requestId, allow) => ipcRenderer.invoke(Channel.REMOTE_ANSWER_PAIR, requestId, allow),
   revokeRemoteDevice: (deviceId) => ipcRenderer.invoke(Channel.REMOTE_REVOKE, deviceId),
   onRemoteChanged: (listener) => listen(Channel.REMOTE_CHANGED, listener),
+  speechStatus: () => ipcRenderer.invoke(Channel.SPEECH_STATUS),
+  transcribeSpeech: (pcm, language) => ipcRenderer.invoke(Channel.SPEECH_TRANSCRIBE, { pcm, language }),
+  cancelSpeech: () => ipcRenderer.invoke(Channel.SPEECH_CANCEL),
+  onSpeechChanged: (listener) => listen(Channel.SPEECH_CHANGED, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)
