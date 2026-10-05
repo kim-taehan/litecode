@@ -9,7 +9,8 @@ import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
 import { addTurn, type ChatUsage } from '../../shared/usage.ts'
 import { upsertItem } from '../../shared/chatReducer.ts'
-import { chipsOf, queueLabel, titleFrom, TITLE_MAX, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult } from '../../shared/chat.ts'
+import { chipsOf, queueLabel, titleFrom, TITLE_MAX, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
+import type { Mode } from '../../shared/modes.ts'
 import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
 // 대화별 "턴 소유" (ctx.chat, 이슈 #52) — 보내기·대기열·턴 끝 처리(제목·저장·통계 합산·대기열의 다음 것 보내기)·중지를 메인이 쥔다.
@@ -24,6 +25,9 @@ import type { Attention, AttentionAnswer, AttentionTarget, Conversation, History
 // - 다른 대화가 보낸 지시 (이슈 #55, 세션 도구 appMcp/tools/sessions.ts 가 send 로 넣는다): origin 이 `session:<보낸 대화>` 이고 from 에 보낸 대화의
 //   id·제목이 있다. 사람 글과 합치지 않고(sendQueue), 그 말풍선에 출처를 적어 둔다(ctx.sessions.noteOrigin). 도는 턴은 자기 출처와 그 턴에서
 //   보낸 지시 수를 쥔다 — 지시를 받아 도는 턴은 다시 지시하지 못하고(깊이 1), 한 턴에 보낼 수 있는 수에 상한이 있다
+// - 턴 앞뒤 확장점 (이슈 #102 — 지금 듣는 것은 ctx.hooks 뿐이고, 듣는 쪽이 없으면 아무 일도 없다): 엔진에 보내기 직전 'chat/before-send'
+//   (맥락을 더하거나 막는다 — 막힌 사람 글은 대기열 맨 앞에 붙잡혀 입력창으로 돌아가고 그 턴은 사유와 함께 실패로 끝난다),
+//   엔진이 턴을 끝낸 직후 'chat/after-turn' (followUp 을 채우면 그 글을 출처 'hook' 의 다음 턴으로 곧바로 보낸다). 둘 다 차례로 기다린다
 
 declare module 'cordis' {
   interface Context {
@@ -38,7 +42,45 @@ declare module 'cordis' {
     'chat/conversations-changed'(data: ChatEventMap['conversations.changed']): void
     /** 보낼 첨부를 메인이 다 읽었다 (못 읽어 실패한 턴도) — 그 경로들. 화면에는 안 간다 */
     'chat/attachments-read'(paths: string[]): void
+    /** 턴을 엔진에 보내기 직전 (내 말은 이미 화면에 있다) — 듣는 쪽이 send 를 채운다. ctx.serial 로 차례로 기다린다 */
+    'chat/before-send'(send: BeforeSend): Promise<void> | void
+    /** 엔진이 턴을 끝낸 직후, 'chat/turn-ended' 를 내기 전 (턴은 아직 도는 것으로 보인다) — 듣는 쪽이 turn 을 채운다. 차례로 기다린다 */
+    'chat/after-turn'(turn: AfterTurn): Promise<void> | void
   }
+}
+
+/** 'chat/before-send' 에 실리는 것 — 읽기 전용 정보와, 듣는 쪽이 채우는 칸 */
+export interface BeforeSend {
+  readonly cid: string
+  readonly project: string
+  /** 엔진에 보낼 본문 (첨부를 풀기 전) */
+  readonly text: string
+  readonly mode?: Mode
+  readonly origin: ChatOrigin
+  /** 이 대화의 첫 턴이다 (엔진 세션이 아직 없다) */
+  readonly first: boolean
+  /** 사용자가 이 턴을 멈추면 걸린다 */
+  readonly signal: AbortSignal
+  /** 채우는 칸 — 이 턴에만 실을 맥락 글 (시스템 프롬프트 뒤에 붙는다) */
+  context: string[]
+  /** 채우는 칸 — 있으면 보내지 않는다. 그 턴의 실패 사유로 보인다 */
+  blocked?: string
+}
+
+/** 'chat/after-turn' 에 실리는 것 */
+export interface AfterTurn {
+  readonly cid: string
+  readonly project: string
+  readonly mode?: Mode
+  readonly origin: ChatOrigin
+  readonly outcome: TurnOutcome
+  /** 승인·질문을 거절해 끝났다 (outcome 은 done) */
+  readonly declined: boolean
+  /** 답 글 (실패·중단이면 빈 글) */
+  readonly text: string
+  readonly signal: AbortSignal
+  /** 채우는 칸 — 이 글을 다음 턴으로 곧바로 보낸다 (출처 'hook', 앞서 쌓인 대기열보다 먼저) */
+  followUp?: string
 }
 
 /** 도는 턴 하나 — 메인이 진행 줄·승인 카드를 쥔다 (보고 있지 않은 대화도, 화면이 없어도) */
@@ -179,6 +221,15 @@ export class ChatService extends Service {
     return this.ctx.llm.stopSubtask(subtaskId)
   }
 
+  /** 그 대화의 도는 턴에 진행 줄 하나를 더한다 (같은 id 면 바꾼다) — 엔진 밖에서 생긴 줄 (훅, 이슈 #102). 도는 턴이 없으면 버리고 false */
+  note(cid: string, item: TurnItem): boolean {
+    const turn = this.turns.get(cid)
+    if (!turn?.message) return false
+    turn.progress = upsertItem(turn.progress, item)
+    this.ctx.emit('chat/turn-progress', { cid, item })
+    return true
+  }
+
   /** 지금 도는 턴(내 말·진행 줄·승인 카드)과 대기열 — 화면이 다시 뜨면 이것으로 이어 그리고, 그 뒤는 이벤트로 */
   snapshot(): ChatSnapshot {
     const state: ChatSnapshot = {}
@@ -273,6 +324,18 @@ export class ChatService extends Service {
   /** 턴 하나를 엔진에 돌리고 끝을 처리한다 — 시각·엔진 세션·통계 합계를 저장하고 답과 함께 턴 끝을 알린 뒤, 대기열의 다음 것으로 간다 */
   private async run(cid: string, item: QueuedSend, turn: LiveTurn, conversation: Conversation): Promise<void> {
     const result = await this.ask(cid, item, turn, conversation).catch((error: unknown): ChatResult => ({ ok: false, error: (error as Error).message }))
+    const outcome: TurnOutcome = result.ok ? 'done' : result.interrupted ? 'interrupted' : 'failed'
+    const after: AfterTurn = {
+      cid,
+      project: conversation.project,
+      ...(conversation.mode && { mode: conversation.mode }),
+      origin: turn.origin,
+      outcome,
+      declined: !!result.declined,
+      text: result.ok ? (result.text ?? '') : '',
+      signal: turn.stop.signal,
+    }
+    await this.ctx.serial('chat/after-turn', after).catch((error: unknown) => console.error('[chat] after-turn 실패', (error as Error).message))
     const stored = await this.ctx.sessions
       .patch(cid, (entry) => ({
         updatedAt: Date.now(),
@@ -294,9 +357,11 @@ export class ChatService extends Service {
       cid,
       message,
       ...(result.usage && { usage: result.usage }),
-      outcome: result.ok ? 'done' : result.interrupted ? 'interrupted' : 'failed',
+      outcome,
       ...(stored && { conversation: stored }),
     })
+    // 이어 보낼 글 — 사용자가 그사이 멈췄으면 보내지 않는다
+    if (after.followUp && !turn.stop.signal.aborted) this.queues.prepend(cid, { text: after.followUp, origin: 'hook' })
     this.advance(cid)
   }
 
@@ -305,6 +370,13 @@ export class ChatService extends Service {
     const { project, model, mode } = conversation
     const sessionId = conversation.engineSessionId
     const typed = item.text
+    // 보내기 직전 확장점 (이슈 #102) — 첨부를 읽기 전에 묻는다 (막히면 그 첨부째 입력창으로 되돌린다)
+    const before: BeforeSend = { cid, project, text: typed, ...(mode && { mode }), origin: turn.origin, first: !sessionId, signal: turn.stop.signal, context: [] }
+    await this.ctx.serial('chat/before-send', before).catch((error: unknown) => console.error('[chat] before-send 실패', (error as Error).message))
+    if (before.blocked !== undefined) {
+      this.queues.restore(cid, item)
+      return { ok: false, sessionId, error: before.blocked }
+    }
     // 첨부 (이슈 #44) — 메인이 읽는다. 글 파일은 본문에 `@경로`·코드 블록으로 풀고, 이미지는 ctx.llm 이 file 파트로 싣는다.
     // 못 붙이는 것이 있으면 보내지 않고 그 사유로 끝낸다 (화면은 실패한 턴으로 보인다)
     const attached = item.attachments ?? []
@@ -353,6 +425,7 @@ export class ChatService extends Service {
       },
       turn.stop.signal, // 답변 중지 — 첫 턴은 아직 엔진 세션이 없어 대화 id 로 쥔다
       images,
+      before.context.join('\n\n') || undefined,
     )
   }
 }

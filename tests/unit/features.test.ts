@@ -42,8 +42,8 @@ let ipc: FakeIpc
 let tmp: string
 let file: string
 
-/** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56) */
-const DEFAULT_ON = FEATURES.filter((feature) => feature !== 'web' && feature !== 'notifications' && feature !== 'remote')
+/** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)·훅(hooks, 이슈 #102)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56) */
+const DEFAULT_ON = FEATURES.filter((feature) => feature !== 'web' && feature !== 'notifications' && feature !== 'remote' && feature !== 'hooks')
 /** 묶음이 있는 기능 (web 은 없다) */
 const BUNDLED = FEATURES.filter((feature) => feature !== 'web')
 
@@ -199,7 +199,9 @@ describe('featureOn', () => {
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'appMcp'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'appMcp', 'hooks'])
+    expect(featureOn(undefined, 'hooks')).toBe(false) // 훅은 기본 꺼짐 (이슈 #102)
+    expect(featureOn({ hooks: true }, 'hooks')).toBe(true)
     expect(featureOn(undefined, 'remote')).toBe(false)
     expect(featureOn({ remote: true }, 'remote')).toBe(true)
   })

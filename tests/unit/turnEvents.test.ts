@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import { ascendingId, interruptedError, LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type TurnInfo } from '../../src/services/llm.ts'
+import { ascendingId, finishedTool, interruptedError, LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
@@ -221,7 +221,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 }
 
-async function start(url: string, config?: ConstructorParameters<typeof LlmService>[1]): Promise<{ llm: LlmService; seen: string[] }> {
+async function start(url: string, config?: ConstructorParameters<typeof LlmService>[1]): Promise<{ llm: LlmService; seen: string[]; ctx: Context }> {
   closer = new AbortController()
   prompts = []
   class FakeProviders extends Service {
@@ -251,7 +251,7 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
   ctx.plugin(FakeProviders)
   ctx.plugin(FakeEngine)
   ctx.plugin(LlmService, config)
-  return new Promise((resolve) => ctx.inject(['llm'], (ready) => resolve({ llm: ready.llm, seen })))
+  return new Promise((resolve) => ctx.inject(['llm'], (ready) => resolve({ llm: ready.llm, seen, ctx })))
 }
 
 describe("ctx.llm 턴 수명 이벤트", () => {
@@ -405,6 +405,33 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     }
   })
 
+  // 이슈 #102 — 그 턴에만 실을 맥락(훅의 stdout)은 지시문 뒤에 붙어 system 으로 간다
+  it('chat 의 context 는 그 턴의 system 에 실린다 — 지시문이 있으면 그 뒤에, 다음 턴에는 남지 않는다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    const turn = (context?: string) => llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', undefined, undefined, [], context)
+    await turn('branch: main')
+    expect(prompts[0]!['system']).toBe('branch: main')
+    fs.writeFileSync(path.join(directory, 'AGENTS.md'), 'rules\n')
+    try {
+      await turn('branch: main')
+      await turn()
+      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\nbranch: main`)
+      expect(prompts[2]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n`)
+    } finally {
+      fs.rmSync(path.join(directory, 'AGENTS.md'))
+    }
+  })
+
+  it('finishedTool: 끝난 도구 파트만 — 파일 도구는 인자 filePath(상대면 세션 폴더 기준), apply_patch 는 결과의 첫 파일', () => {
+    const part = (state: object, tool = 'edit') => ({ type: 'tool', tool, callID: 'c', state })
+    expect(finishedTool(part({ status: 'running', input: {} }), '/w')).toBeUndefined()
+    expect(finishedTool({ type: 'text', text: 'x' }, '/w')).toBeUndefined()
+    expect(finishedTool(part({ status: 'completed', input: { filePath: 'src/a.ts' }, output: 'ok' }), '/w')).toEqual({ tool: 'edit', input: { filePath: 'src/a.ts' }, output: 'ok', file: '/w/src/a.ts' })
+    expect(finishedTool(part({ status: 'completed', input: { filePath: '/abs/a.ts' }, output: '' }, 'write'), '/w')?.file).toBe('/abs/a.ts')
+    expect(finishedTool(part({ status: 'completed', input: { patchText: '…' }, output: '', metadata: { files: [{ filePath: '/w/b.ts' }] } }, 'apply_patch'), '/w')?.file).toBe('/w/b.ts')
+    expect(finishedTool(part({ status: 'error', input: { command: 'x' }, error: 'boom' }, 'bash'), '/w')).toEqual({ tool: 'bash', input: { command: 'x' }, error: 'boom' })
+  })
+
   it('새 메시지 id 는 opencode 형식으로 시간 순 정렬된다 — 같은 ms 안에서도 순번으로', () => {
     const ids = [ascendingId('msg', 1_790_919_809_202), ascendingId('msg', 1_790_919_809_202), ascendingId('msg', 1_790_919_809_203)]
     expect(ids[0]!.slice(0, 16)).toBe('msg_0fb2398b2001') // opencode 가 만든 msg_0fb2398b20010dJ8a8bQ1z0neE 와 같은 머리 (01w 기록)
@@ -456,6 +483,25 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
       `resolved ses_1@${directory}`,
       `ended ses_1@${directory} done`,
     ])
+  })
+
+  // 이슈 #102 — 끝난 도구 호출마다 중립 이벤트 하나 (ctx.hooks 의 "도구 실행 후" 가 듣는다)
+  it("도구 호출이 끝나면 'llm/tool-done' 을 호출마다 한 번 낸다 — 도구 이름·인자·결과, 폴더는 realpath", async () => {
+    const { llm, ctx } = await start(await fakeOpencode('permission'))
+    const done: ToolDone[] = []
+    ctx.on('llm/tool-done', (info) => void done.push(info))
+    const { onAttention } = answering(llm, 'once')
+    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)
+    expect(done).toEqual([{ sessionId: 'ses_1', directory, tool: 'bash', input: {}, output: 'ok', child: false }])
+  })
+
+  it("거절돼 실패한 도구도 'llm/tool-done' 으로 온다 — output 없이 error", async () => {
+    const { llm, ctx } = await start(await fakeOpencode('permission'))
+    const done: ToolDone[] = []
+    ctx.on('llm/tool-done', (info) => void done.push(info))
+    const { onAttention } = answering(llm, 'reject')
+    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)
+    expect(done).toEqual([{ sessionId: 'ses_1', directory, tool: 'bash', input: {}, error: 'The user rejected permission to use this specific tool call.', child: false }])
   })
 
   it('권한 거절 → 도구 error 뒤 idle 로 끝나는 턴을 실패가 아닌 "거절함" 으로 끝낸다', async () => {
