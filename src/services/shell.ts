@@ -53,7 +53,7 @@ export class ShellService extends Service {
   /** 프로젝트 폴더에서 돌리고 끝나면 결과를 준다. 출력 조각은 'shell/data' 로 흘린다 */
   async run(runId: string, directory: string, command: string): Promise<ShellResult> {
     const cwd = await realDirectory(directory)
-    if (!cwd) return { command, output: '', exitCode: null, status: 'error', truncated: false, error: `작업 디렉터리가 없다: ${directory}` }
+    if (!cwd) return { command, output: '', exitCode: null, status: 'error', truncated: false, error: tr('error.noWorkdir', { dir: directory }) }
     const kept = keepEnds(OUTPUT_LIMIT / 2, OUTPUT_LIMIT / 2)
     let emitted = 0
     const run = execShell({
@@ -84,17 +84,18 @@ export class ShellService extends Service {
 }
 
 /** 카드를 AI 에게 넣을 때의 본문 — 모델은 이 명령을 본 적이 없으니 무엇을 어디서 돌렸는지부터 (closed-code ChatPane 형식).
+ *  모델이 읽는 글이라 화면 언어와 무관하게 영어다 — tr() 을 타지 않는다 (appMcp/tools/present.ts 와 같은 규칙).
  *  출력은 마크다운으로 해석되지 않게 코드 블록으로 감싼다 (출력에 ``` 가 있으면 더 긴 울타리) */
 export function shellContext(result: Pick<ShellResult, 'command' | 'output' | 'exitCode' | 'status' | 'truncated'>, directory: string): string {
   const output = stripAnsi(result.output) // 색 코드는 모델에게도 잡음이다 — 카드에 보이는 글과 같게
   const fence = '`'.repeat(Math.max(3, ...[...output.matchAll(/`{3,}/g)].map((match) => match[0].length + 1)))
   const ending =
-    result.status === 'stopped' ? '사용자가 중단함'
-    : result.status === 'timeout' ? `${TIMEOUT_MS / 1000}초를 넘겨 중단됨`
-    : result.exitCode === null ? '실행되지 않음'
-    : `종료 코드 ${result.exitCode}`
+    result.status === 'stopped' ? 'stopped by the user'
+    : result.status === 'timeout' ? `stopped after exceeding ${TIMEOUT_MS / 1000} seconds`
+    : result.exitCode === null ? 'did not run'
+    : `exit code ${result.exitCode}`
   return [
-    `사용자가 프로젝트 폴더(${directory})에서 직접 실행한 셸 명령과 그 출력입니다.`,
+    `Shell command the user ran directly in the project folder (${directory}), with its output.`,
     '',
     `$ ${result.command}`,
     `(${ending})`,
@@ -102,6 +103,6 @@ export function shellContext(result: Pick<ShellResult, 'command' | 'output' | 'e
     fence,
     output.trimEnd(),
     fence,
-    ...(result.truncated ? ['', `(출력이 ${OUTPUT_LIMIT / 1024}KB 를 넘어 가운데가 생략됐습니다 — 앞과 끝만 실었습니다)`] : []),
+    ...(result.truncated ? ['', `(output exceeded ${OUTPUT_LIMIT / 1024}KB; the middle was omitted, only the start and the end are shown)`] : []),
   ].join('\n')
 }

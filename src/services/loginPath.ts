@@ -19,11 +19,15 @@ export function mergePath(login: string | undefined, current: string | undefined
   return [...new Set(entries)].join(delimiter)
 }
 
+// `"${PATH}"` 로 찍지 않는다 — fish 는 `${…}` 가 문법 오류다 (이슈 #126). printenv 는 sh·zsh·bash·fish 어디서나 같은 env 값을 찍는다
+// (끝의 줄바꿈은 parseLoginPath 가 뗀다). 진짜 fish 로 돌려 보지는 않았다
+const COMMAND = `printf %s ${MARK}; printenv PATH; printf %s ${MARK}`
+
 /** 로그인 셸의 PATH. 못 읽으면(시간 초과·셸 없음·Windows) undefined — 부르는 쪽은 원래 PATH 로 간다 */
 export function readLoginPath(env: NodeJS.ProcessEnv = process.env, platform = process.platform): Promise<string | undefined> {
   if (platform === 'win32') return Promise.resolve(undefined)
   return new Promise((resolve) => {
-    execFile(env['SHELL'] || '/bin/sh', ['-lc', `printf '%s' "${MARK}\${PATH}${MARK}"`], { env, timeout: TIMEOUT_MS }, (error, stdout) => {
+    execFile(env['SHELL'] || '/bin/sh', ['-lc', COMMAND], { env, timeout: TIMEOUT_MS }, (error, stdout) => {
       if (error) console.warn('[engine] 로그인 셸의 PATH 를 못 읽었다', error.message)
       resolve(error ? undefined : parseLoginPath(String(stdout)))
     })

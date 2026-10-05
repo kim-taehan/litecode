@@ -580,7 +580,6 @@ export const ko = {
   'mcp.status.needs_auth': '인증 필요',
   'mcp.status.needs_client_registration': '인증 필요',
   'mcp.status.pending': '연결 전',
-  'mcp.toolCount': '도구 {count}',
   'mcp.shadowed': '앱 서버와 이름이 같아 붙이지 않습니다',
   'mcp.readOnly': '읽기 전용',
   'mcp.enabled': '{name} 켜기',
