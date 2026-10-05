@@ -56,7 +56,7 @@ import { speechBridgeStreams } from '../src/services/speech/bridge.ts'
 import { SpeechService, speechReply } from '../src/services/speech.ts'
 import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
 import { systemSpeechHost } from './speechHost.ts'
-import { restorableBounds } from './windowBounds.ts'
+import { restorableBounds, windowMode } from './windowBounds.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -623,7 +623,8 @@ function sendFullScreen(win: BrowserWindow): void {
 const windowFile = path.join(userData, 'window.json')
 
 function createWindow(): BrowserWindow {
-  const saved = restorableBounds(readJsonFileSync(windowFile, 'object'), screen.getAllDisplays().map((display) => display.workArea))
+  const stored = readJsonFileSync(windowFile, 'object')
+  const saved = restorableBounds(stored, screen.getAllDisplays().map((display) => display.workArea))
   const win = new BrowserWindow({
     ...(saved ?? { width: 1280, height: 800 }),
     // 제목 표시줄 없이 화면이 창 맨 위까지 (이슈 #25). macOS 는 창 버튼을 사이드바 맨 위 줄(52px) 안 왼쪽에 — dsh 데스크톱과 같은
@@ -645,6 +646,11 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   })
+
+  // 최대화·전체 화면으로 닫았으면 그 상태로 뜬다. 숨긴 테스트 창은 건드리지 않는다(maximize 는 숨긴 창을 보이게 한다)
+  const mode = hiddenForTests ? undefined : windowMode(stored)
+  if (mode === 'maximized') win.maximize()
+  if (mode === 'fullscreen') win.setFullScreen(true)
 
   // 앱 창은 앱 화면에서 벗어나지 않는다 — 링크가 새 창(Shift·가운데 클릭)이나 다른 주소로 이동하는 길을 막는다.
   // 답의 링크는 OPEN_EXTERNAL 로 OS 브라우저에서 연다. 같은 출처 이동(개발 서버 새로고침)은 그대로 둔다
@@ -683,7 +689,8 @@ function createWindow(): BrowserWindow {
 
   win.on('close', (event) => {
     try {
-      writeJsonFileSync(windowFile, win.getNormalBounds()) // 최대화·전체 화면이면 그 전의 크기
+      // 크기는 최대화·전체 화면 전의 것 — 상태는 따로 적는다 (다시 켜면 같은 상태로, 풀면 원래 크기로)
+      writeJsonFileSync(windowFile, { ...win.getNormalBounds(), maximized: win.isMaximized(), fullScreen: win.isFullScreen() })
     } catch (error) {
       console.warn('[window] 창 자리를 못 적었다', (error as Error).message)
     }
