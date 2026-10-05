@@ -294,7 +294,7 @@ export function App() {
   const featuresRef = useRef(features)
   featuresRef.current = features
   /** Trajectory 탭 — 설정 > 일반의 코딩 뷰와 설정 > 기능의 추론 과정이 둘 다 켜져야 보인다 */
-  const trajectoryOn = settings.codingView && features.has('trajectory')
+  const trajectoryOn = features.has('trajectory')
   const terminalOn = features.has('terminal')
   /** 새 대화는 제목 없이 두고 보일 때 번역한다 — 언어를 바꾸면 같이 바뀐다 (첫 메시지가 제목이 된다) */
   const titleOf = (session: Session) => session.title || t('sidebar.untitled')

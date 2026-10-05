@@ -21,9 +21,9 @@ export interface Settings {
   appearance: Appearance
   /** 대화 본문 글자 크기(px) — FONT_SIZE_MIN~MAX 정수 (dsh ui-theme 와 같은 범위) */
   fontSize: number
-  /** 본문의 추론 과정(Trajectory) 탭을 보인다 (dsh "Coding Tools") */
+  /** 더 쓰지 않는다 (2026-10-06 — 설정 > 일반의 스위치를 없앴다, 추론 과정 탭은 기능 `trajectory` 만 본다). 저장된 파일과의 호환으로 남긴다 */
   codingView: boolean
-  /** PC 알림(OS 알림)을 띄운다 — 끄면 PC 알림만 없고 앱 안 토스트·점은 그대로 (ctx.notifications, 결정 Q9) */
+  /** 더 쓰지 않는다 (2026-10-06 — 설정 > 일반의 스위치를 없앴다, PC 알림은 기능 `notifications` 만 본다). 저장된 파일과의 호환으로 남긴다 */
   notifications: boolean
   /** 새 대화가 시작하는 모드 (입력창 칩의 처음 값). 대화마다의 모드는 ctx.sessions 에 */
   defaultMode: Mode

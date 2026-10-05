@@ -185,7 +185,7 @@ export class NotificationsService extends Service {
       this.ctx.emit('notifications/toast', { conversationId: conversation.id, project: conversation.project, projectName, title: conversation.title, kind })
       return
     }
-    if (kind === 'interrupted' || !this.ctx.settings.get().notifications) return
+    if (kind === 'interrupted') return
     const target: OpenTarget = { conversationId: conversation.id, project: conversation.project }
     const note = this.host.show(
       { title: conversation.title || tr('sidebar.untitled'), body: tr('notify.body', { project: projectName, status: tr(`notify.${kind}`) }) },
