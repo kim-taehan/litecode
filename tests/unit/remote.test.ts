@@ -60,57 +60,64 @@ describe('이벤트 링', () => {
   })
 })
 
-describe('켜고 끄기', () => {
-  // 사용자 2026-10-06: 설정 > 모바일의 스위치가 기능 카드와 겹쳤다 — 앱은 alwaysOn 으로 띄워 기능 스위치 하나로 켜고 끈다
-  it('alwaysOn 이면 저장된 꺼짐 값과 무관하게 운반이 올라오는 대로 듣는다 — 서비스가 내려가면 닫힌다', async () => {
-    const { remote } = await start({ alwaysOn: true }, false)
-    await until(() => remote.status().addresses.length === 1)
+// 켜짐은 하나다 — ctx.remote 가 떠 있음 = 켜짐 (기능 `remote`, #124·#126). 서비스 안의 스위치는 없다
+describe('떠 있음 = 켜짐', () => {
+  it('서비스가 뜨면 운반이 올라오는 대로 127.0.0.1 에서 듣는다 — 운반이 내려가면 포트를 닫는다', async () => {
+    const { remote, httpDown } = await start()
     const status = remote.status()
-    expect(status.enabled).toBe(true)
+    expect(status.addresses).toHaveLength(1)
+    expect(status.addresses[0]).toMatch(/^127\.0\.0\.1:\d+$/)
     expect(await reachable(status.port)).toBe(true)
+    await httpDown()
+    expect(remote.status().addresses).toEqual([])
+    expect(await reachable(status.port)).toBe(false)
   })
 
-  it('기본은 꺼짐 — 포트를 열지 않는다. 켜면 127.0.0.1 에서 듣고, 끄면 닫는다', async () => {
-    const { remote } = await start({}, false)
-    expect(remote.status()).toMatchObject({ enabled: false, addresses: [] })
-    const on = await remote.setEnabled(true)
-    expect(on.addresses).toHaveLength(1)
-    expect(on.addresses[0]).toMatch(/^127\.0\.0\.1:\d+$/)
-    const port = on.port
-    expect(await reachable(port)).toBe(true)
-    expect((await remote.setEnabled(false)).addresses).toEqual([])
-    expect(await reachable(port)).toBe(false)
-  })
-
-  it('켠 값은 파일에 남아 다시 올라오면 듣는다. 서비스가 내려가면 포트를 닫는다', async () => {
+  it('서비스가 내려가면 포트를 닫는다. 기기 파일은 남아 다시 올라오면 그 기기를 안다', async () => {
     const first = await start()
+    await first.pair()
     const stored = JSON.parse(await fs.readFile(path.join(root, 'remote-devices.json'), 'utf8'))
-    expect(stored).toMatchObject({ version: 1, enabled: true, devices: [] })
+    expect(stored).toMatchObject({ version: 1, devices: [{ name: 'Pixel 8' }] })
+    expect(stored).not.toHaveProperty('enabled')
     expect(stored.desktopId).toMatch(/^[0-9a-f]{16}$/)
     const port = first.remote.status().port
     await cleanups.pop()!()
     expect(await reachable(port)).toBe(false)
-    const second = await start({}, false)
-    expect(second.remote.status().enabled).toBe(true)
+    const second = await start()
     expect(second.remote.status().addresses).toHaveLength(1)
+    expect(second.remote.status().devices).toHaveLength(1)
     expect((await second.api<Hello>('GET', '/v1/hello')).status).toBe(401)
   })
 
-  it('포트를 다른 프로그램이 쓰고 있으면 사유(EADDRINUSE)를 남기고, 끄면 사유가 지워진다', async () => {
+  // 옛 파일에는 설정 > 모바일 스위치의 값(enabled)이 남아 있다 — 꺼짐이었어도 듣고, 기기·데스크탑 id 는 그대로 읽는다
+  it('옛 기기 파일의 enabled 필드는 보지 않는다 — 기기는 그대로 붙고, 다음 쓰기 때 필드가 사라진다', async () => {
+    const file = path.join(root, 'remote-devices.json')
+    const device = { id: 'dev_old', name: 'Old Phone', platform: 'android', tokenHash: hashToken('old-token'), pairedAt: 1 }
+    await fs.writeFile(file, JSON.stringify({ version: 1, desktopId: '0123456789abcdef', enabled: false, devices: [device] }))
+    const { remote, api, pair } = await start()
+    expect(remote.status().addresses).toHaveLength(1)
+    expect(remote.status().devices.map((entry) => entry.id)).toEqual(['dev_old'])
+    expect((await api<Hello>('GET', '/v1/hello', { token: 'old-token' })).status).toBe(200)
+    await pair()
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'))
+    expect(stored).not.toHaveProperty('enabled')
+    expect(stored.desktopId).toBe('0123456789abcdef')
+    expect(stored.devices).toHaveLength(2)
+  })
+
+  it('포트를 다른 프로그램이 쓰고 있으면 사유(EADDRINUSE)를 남기고 짝짓기를 시작할 수 없다', async () => {
     const blocker = net.createServer()
     await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve))
     cleanups.push(() => new Promise((resolve) => blocker.close(resolve)))
-    const { remote } = await start({ port: (blocker.address() as net.AddressInfo).port }, false)
-    const status = await remote.setEnabled(true)
-    expect(status).toMatchObject({ enabled: true, addresses: [], error: { code: 'EADDRINUSE' } })
+    const { remote } = await start({ port: (blocker.address() as net.AddressInfo).port })
+    expect(remote.status()).toMatchObject({ addresses: [], error: { code: 'EADDRINUSE' } })
     expect(() => remote.startPairing()).toThrow()
-    expect((await remote.setEnabled(false)).error).toBeUndefined()
   })
 
   it('평문 리스너는 루프백 주소만 연다 — 0.0.0.0·사내망 주소는 열지 않는다', async () => {
     for (const host of ['0.0.0.0', '192.168.0.10', '::']) {
-      const { remote } = await start({ listeners: [{ host: '127.0.0.1' }, { host }] }, false)
-      const status = await remote.setEnabled(true)
+      const { remote } = await start({ listeners: [{ host: '127.0.0.1' }, { host }] })
+      const status = remote.status()
       expect(status.addresses).toEqual([])
       expect(status.error?.code).toBe('ENOTLOOPBACK')
     }
@@ -598,14 +605,14 @@ describe('이벤트 스트림', () => {
     expect(parseFrames(stream.raw())[1]).toEqual({ event: 'notices.changed', data: { c1: { project, status: 'running' } }, seq: 1 })
   })
 
-  it('껐다 켜면 새 실행이다 — 붙어 있던 스트림은 끊기고, 옛 run 으로 이으면 reset', async () => {
-    const { remote, api, pair, events } = await start()
+  it('운반이 내려갔다 올라오면 새 실행이다 — 붙어 있던 스트림은 끊기고, 옛 run 으로 이으면 reset', async () => {
+    const { api, pair, events, httpDown, httpUp } = await start()
     const { token } = await pair()
     const before = (await api<Hello>('GET', '/v1/hello', { token })).body
     const stream = await events(token)
-    await remote.setEnabled(false)
+    await httpDown()
     await until(() => stream.ended(), '끊김')
-    await remote.setEnabled(true)
+    await httpUp()
     const after = (await api<Hello>('GET', '/v1/hello', { token })).body // 기기는 그대로 짝지어져 있다
     expect(after.runId).not.toBe(before.runId)
     const resumed = await events(token, `?run=${before.runId}&after=0`)

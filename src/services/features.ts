@@ -21,6 +21,8 @@ export interface FeatureDefinition {
   id: FeatureId
   /** 이 기능의 묶음 — 서비스와 그 연결을 올리는 플러그인 */
   plugin: (ctx: Context) => void
+  /** 묶음이 올리는 서비스의 ctx 키 (있으면) — 부팅 진단이 켜진 기능의 서비스가 떴는지 본다 */
+  service?: string
 }
 
 export class FeaturesService extends Service {
@@ -49,6 +51,11 @@ export class FeaturesService extends Service {
     return FEATURES.filter((feature) => this.isEnabled(feature))
   }
 
+  /** 켜진 묶음이 올리는 서비스 키 — 떴는지는 모른다 (부팅 진단이 ctx.get 으로 본다) */
+  services(): string[] {
+    return this.definitions.flatMap(({ id, service }) => (service && this.isEnabled(id) ? [service] : []))
+  }
+
   /** 밀린 올리고 내리기가 다 끝날 때까지 (테스트용) */
   idle(): Promise<void> {
     return this.queue
@@ -58,14 +65,19 @@ export class FeaturesService extends Service {
     this.queue = this.queue
       .then(async () => {
         for (const { id, plugin } of this.definitions) {
-          const fiber = this.fibers.get(id)
-          if (this.isEnabled(id) && !fiber) {
-            const mounted = this.ctx.plugin(plugin)
-            this.fibers.set(id, mounted)
-            await mounted
-          } else if (!this.isEnabled(id) && fiber) {
-            this.fibers.delete(id)
-            await fiber.dispose()
+          // 묶음 하나가 못 떠도 나머지 묶음과 features/changed(ctx.engine 이 듣는다)는 간다
+          try {
+            const fiber = this.fibers.get(id)
+            if (this.isEnabled(id) && !fiber) {
+              const mounted = this.ctx.plugin(plugin)
+              this.fibers.set(id, mounted)
+              await mounted
+            } else if (!this.isEnabled(id) && fiber) {
+              this.fibers.delete(id)
+              await fiber.dispose()
+            }
+          } catch (error) {
+            console.error(`[features] ${id} 올리고 내리기 실패`, error)
           }
         }
         const enabled = this.enabled()

@@ -136,8 +136,9 @@ export interface Answer<T = any> {
   headers: http.IncomingHttpHeaders
 }
 
-/** http: false 면 HTTP 운반을 올리지 않는다 (운반 없는 ctx.remote — 테스트가 자기 운반을 올린다). listeners·port 는 HTTP 운반의 것 */
-export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpOptions & { http?: boolean } = {}, enabled = true) {
+/** http: false 면 HTTP 운반을 올리지 않는다 (운반 없는 ctx.remote — 테스트가 자기 운반을 올린다). listeners·port 는 HTTP 운반의 것.
+ *  ctx.remote 는 떠 있으면 켜진 것이다 — 운반은 올라오는 대로 뜬다 */
+export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpOptions & { http?: boolean } = {}) {
   const { root, project, cleanups } = box
   const { http: withHttp = true, listeners, port = 0, ...service } = options
   const ctx = new Context()
@@ -150,19 +151,20 @@ export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpO
     ctx.plugin(ChatService),
     ctx.plugin(RemoteService, { file: path.join(root, 'remote-devices.json'), name: 'test-pc', appVersion: '1.2.3', now: () => Date.now() + box.offset, ...service }),
   ]
-  // 운반은 ctx.remote 밑의 플러그인이다 — 올라와 자신을 올릴(carrier) 때까지 기다린 뒤 켠다
-  let mounted: Promise<void> = Promise.resolve()
-  if (withHttp) {
-    mounted = new Promise((resolve) => {
+  // 운반은 ctx.remote 밑의 플러그인이다 — 올라와 자신을 올릴(carrier) 때까지 기다린다
+  let httpFiber: { dispose(): Promise<void> } | undefined
+  const plugHttp = (): Promise<void> =>
+    new Promise((resolve) => {
       const carrier = (inner: Context): void => {
         RemoteHttp(inner, { listeners, port })
         resolve()
       }
       carrier.inject = RemoteHttp.inject
-      fibers.push(ctx.plugin(carrier))
+      httpFiber = ctx.plugin(carrier)
     })
-  }
+  const mounted = withHttp ? plugHttp() : Promise.resolve()
   cleanups.push(async () => {
+    await httpFiber?.dispose()
     for (const fiber of fibers.reverse()) await fiber.dispose()
   })
   const ready = await new Promise<Context>((resolve) => ctx.inject(['remote', 'chat', 'sessions', 'projects', 'llm', 'settings'], resolve))
@@ -170,11 +172,21 @@ export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpO
   await mounted
   await remote.ready()
   await ready.projects.open(project)
-  if (enabled) await remote.setEnabled(true)
   const llm = ready.llm as unknown as FakeLlm
   const chatEvents: { [K in keyof ChatEventMap]: [K, ChatEventMap[K]] }[keyof ChatEventMap][] = []
   ready.on('chat/turn-started', (data) => void chatEvents.push(['turn.started', data]))
   ready.on('chat/turn-ended', (data) => void chatEvents.push(['turn.ended', data]))
+
+  /** HTTP 운반을 내린다 — 포트가 닫히고 붙어 있던 폰이 끊긴다. 다시 올리면(httpUp) 새 실행이다 */
+  const httpDown = async (): Promise<void> => {
+    await httpFiber?.dispose()
+    httpFiber = undefined
+    await remote.ready()
+  }
+  const httpUp = async (): Promise<void> => {
+    await plugHttp()
+    await remote.ready()
+  }
 
   const base = () => `http://${remote.status().addresses[0]}`
 
@@ -261,7 +273,7 @@ export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpO
     llm.seed(`ses_${id}`, messages)
     await save(id, { engineSessionId: `ses_${id}` })
   }
-  return { ctx: ready, remote, llm, api, requestPair, pair, events, save, turn, chatEvents, base, attach, pipeCarrier, seed }
+  return { ctx: ready, remote, llm, api, requestPair, pair, events, save, turn, chatEvents, base, attach, pipeCarrier, seed, httpDown, httpUp }
 }
 
 /** 받은 글에서 완성된 프레임만 (`: ping` 주석은 프레임이 아니다) */

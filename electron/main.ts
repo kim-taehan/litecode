@@ -53,7 +53,7 @@ import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
 import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from './resilience.ts'
 import { speechBridgeStreams } from '../src/services/speech/bridge.ts'
-import { SpeechService, speechReply } from '../src/services/speech.ts'
+import { SpeechService } from '../src/services/speech.ts'
 import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
 import { systemSpeechHost } from './speechHost.ts'
 import { restorableBounds, windowMode } from './windowBounds.ts'
@@ -256,7 +256,7 @@ function bootstrap(ctx: Context): void {
   ctx.on('features/changed', (enabled) => broadcast(Channel.FEATURES_CHANGED, enabled))
 }
 // 바탕 연결 — 대화·엔진·설정·provider·프로젝트·대화 저장·트리거 등록소. 끌 수 없다. 기능마다의 연결은 아래 기능 묶음에 있어
-// 기능 하나를 빼도(끄거나 서비스가 못 떠도) 이 연결은 그대로 뜬다
+// 기능 하나를 빼도(끄거나 서비스가 못 떠도) 이 연결은 그대로 뜬다. 'llm' 은 본문이 안 쓰지만 둔다 — 부팅 진단(checkBoot)이 이 목록으로 ctx.llm 을 본다
 bootstrap.inject = ['providers', 'llm', 'projects', 'engine', 'sessions', 'triggers', 'settings', 'features']
 mounted.push(ctx.plugin(bootstrap))
 
@@ -412,7 +412,7 @@ if (notifyTest) Object.assign(globalThis, { __litecodeNotifyTest: { record: noti
 app.on('second-instance', () => notifyHost.reveal())
 
 // 종료 확인 · 창 닫기 = 숨기기 (ctx.quit, 이슈 #92) — 판정은 서비스가, 확인 창·트레이는 host 가. 실물 테스트는 묻지도 숨기지도 않는다(automatic).
-// 종료 때 가장 먼저 내려가 트레이를 거둔다
+// 종료 때 기능 묶음(아래 FeaturesService) 다음으로 내려가 트레이를 거둔다
 mounted.push(ctx.plugin(QuitService, { host: systemQuitHost(windows), automatic: hiddenForTests }))
 
 // 다른 앱에서 열기 (대화 머리 분할 버튼) — 실물 테스트는 실행을 기록만 한다(globalThis.__litecodeOpenInTest). 제품은 이 길이 없다
@@ -465,7 +465,6 @@ appMcpBridge.inject = ['appMcp']
 // 모바일 연결 (이슈 #56) — 설정 > 모바일과 짝짓기 [허용] 확인의 IPC. 상태가 바뀌면(요청이 왔다·기기가 붙었다) 모든 창에
 function remoteBridge(ctx: Context): void {
   handle(ctx, Channel.REMOTE_STATUS, async () => ctx.remote.status())
-  handle(ctx, Channel.REMOTE_SET_ENABLED, async (_event, enabled: boolean) => ctx.remote.setEnabled(enabled === true))
   handle(ctx, Channel.REMOTE_START_PAIRING, async () => ctx.remote.startPairing())
   handle(ctx, Channel.REMOTE_CANCEL_PAIRING, async () => ctx.remote.cancelPairing())
   handle(ctx, Channel.REMOTE_ANSWER_PAIR, async (_event, requestId: string, allow: boolean) => ctx.remote.answerPair(String(requestId), allow === true))
@@ -474,18 +473,9 @@ function remoteBridge(ctx: Context): void {
 }
 remoteBridge.inject = ['remote']
 
-// 음성 입력 (ctx.speech) — 화면이 녹음을 16kHz PCM16 으로 줄여 보내면 글로 돌려준다. 모양·길이는 서비스가 다시 본다. 취소는 보내 둔 것 전부
+// 음성 입력 (ctx.speech) — 화면이 녹음을 16kHz PCM16 조각으로 흘리면 글로 돌려준다. 모양·길이는 서비스가 다시 본다
 function speechBridge(ctx: Context): void {
-  const flights = new Set<AbortController>()
   handle(ctx, Channel.SPEECH_STATUS, async () => ctx.speech.status())
-  handle(ctx, Channel.SPEECH_TRANSCRIBE, async (_event, input: { pcm?: unknown; language?: unknown } | undefined) => {
-    const flight = new AbortController()
-    flights.add(flight)
-    return speechReply(ctx.speech.transcribe(input?.pcm, { language: input?.language }, flight.signal)).finally(() => flights.delete(flight))
-  })
-  handle(ctx, Channel.SPEECH_CANCEL, async () => {
-    for (const flight of flights) flight.abort()
-  })
   ctx.on('speech/changed', (status) => broadcast(Channel.SPEECH_CHANGED, status))
   // 실시간 받아쓰기 — 화면이 녹음 조각을 흘리고 메인이 확정·임시 글을 돌려준다. 스트림은 한 번에 하나 (speech/bridge.ts)
   const streams = speechBridgeStreams(ctx.speech, (event) => broadcast(Channel.SPEECH_PARTIAL, event))
@@ -497,13 +487,15 @@ function speechBridge(ctx: Context): void {
 }
 speechBridge.inject = ['speech']
 
-/** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게 */
+/** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게
+ *  (web 만 묶음이 없다). service 는 묶음이 올리는 서비스 키 — 부팅 진단이 켜진 기능의 서비스가 떴는지 본다 */
 const features: FeatureDefinition[] = [
   { id: 'at', plugin: AtTrigger },
   { id: 'slash', plugin: SlashTrigger },
   { id: 'bang', plugin: BangTrigger }, // `!명령`(shell) 이 꺼지면 같이 꺼진다 (FEATURE_REQUIRES)
   {
     id: 'shell',
+    service: 'shell',
     plugin: (ctx) => {
       ctx.plugin(ShellService)
       ctx.plugin(shellBridge)
@@ -511,6 +503,7 @@ const features: FeatureDefinition[] = [
   },
   {
     id: 'terminal',
+    service: 'terminals',
     plugin: (ctx) => {
       ctx.plugin(TerminalsService)
       ctx.plugin(terminalsBridge)
@@ -519,6 +512,7 @@ const features: FeatureDefinition[] = [
   },
   {
     id: 'trajectory',
+    service: 'trajectory',
     plugin: (ctx) => {
       ctx.plugin(TrajectoryService)
       ctx.plugin(trajectoryBridge)
@@ -526,6 +520,7 @@ const features: FeatureDefinition[] = [
   },
   {
     id: 'notifications',
+    service: 'notifications',
     plugin: (ctx) => {
       ctx.plugin(NotificationsService, notifyHost)
       ctx.plugin(notificationsBridge)
@@ -533,6 +528,7 @@ const features: FeatureDefinition[] = [
   },
   {
     id: 'openIn',
+    service: 'openIn',
     plugin: (ctx) => {
       ctx.plugin(OpenInService, { host: openInHost })
       ctx.plugin(openInBridge)
@@ -541,6 +537,7 @@ const features: FeatureDefinition[] = [
   {
     // 끄면 엔진도 skill 도구를 뺀다 — ctx.engine 이 features/changed 를 듣고 재시작한다
     id: 'skills',
+    service: 'skills',
     plugin: (ctx) => {
       ctx.plugin(SkillsService, { appDir: path.join(userData, 'opencode', 'skills') }) // 앱 설정 폴더(ctx.engine 의 configDir)의 skills
       ctx.plugin(skillsBridge)
@@ -549,6 +546,7 @@ const features: FeatureDefinition[] = [
   // 웹 도구(web)는 묶음이 없다 — ctx.engine 이 features/changed 를 듣고 opencode.json 을 다시 써 재시작한다 (이슈 #14)
   {
     id: 'mcp',
+    service: 'mcp',
     plugin: (ctx) => {
       // 비밀(env·헤더 값)은 provider 키와 같은 safeStorage — 렌더러엔 설정 여부만
       ctx.plugin(McpService, {
@@ -562,9 +560,21 @@ const features: FeatureDefinition[] = [
     },
   },
   {
+    // 모바일 연결 — 기본 꺼짐. 스위치는 이 기능 하나다(#124): 켜면 바로 포트를 열고, 끄면 서버·IPC·설정 메뉴가 함께 내려간다
+    id: 'remote',
+    service: 'remote',
+    plugin: (ctx) => {
+      ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
+      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 지금은 HTTP(127.0.0.1:47600) 하나. 블루투스 운반이 이 옆에 올라온다
+      ctx.plugin(RemoteHttp)
+      ctx.plugin(remoteBridge)
+    },
+  },
+  {
     // 데스크탑 MCP — 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰). ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다.
     // 설정 > 기능에서 끄면(이슈 #99) 서버·도구·IPC 가 함께 내려가고 다음 턴의 붙이기가 엔진에서 끊는다. open_terminal 은 터미널 묶음에 있다
     id: 'appMcp',
+    service: 'appMcp',
     plugin: (ctx) => {
       ctx.plugin(AppMcpService)
       ctx.plugin(OpenFileTool)
@@ -574,19 +584,10 @@ const features: FeatureDefinition[] = [
     },
   },
   {
-    // 모바일 연결 — 기본 꺼짐. 켜도 설정 > 모바일의 스위치를 켜기 전에는 포트를 열지 않는다. 끄면 서버·IPC·설정 메뉴가 함께 내려간다
-    id: 'remote',
-    plugin: (ctx) => {
-      ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion(), alwaysOn: true })
-      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 지금은 HTTP(127.0.0.1:47600) 하나. 블루투스 운반이 이 옆에 올라온다
-      ctx.plugin(RemoteHttp)
-      ctx.plugin(remoteBridge)
-    },
-  },
-  {
     // 훅 (이슈 #102) — 기본 꺼짐. 사용자가 이벤트에 건 셸 명령을 메인이 프로젝트 폴더에서 돌린다 (엔진 플러그인 아님). 화면은 입력창 `+` 메뉴의
     // 훅 팝업 — 다리는 hooks/bridge.ts (userData 의 두 파일을 직접 고쳐도 된다)
     id: 'hooks',
+    service: 'hooks',
     plugin: (ctx) => {
       ctx.plugin(HooksService, { file: path.join(userData, 'hooks.json'), projectsFile: path.join(userData, 'hooks-projects.json') })
       ctx.plugin(hooksBridge(handle))
@@ -596,6 +597,7 @@ const features: FeatureDefinition[] = [
     // 음성 입력 — 기본 꺼짐. 엔진·모델은 설치본에 실려 있고(extraResources `speech`), 개발 실행은 `node scripts/fetch-speech.mjs` 로 받아 둔
     // build/vendor 를 쓴다(없으면 "준비 안 됨"). 엔진 프로세스는 처음 받아쓸 때 뜬다. 꺼져 있으면 마이크 권한도 거절된다 (아래 권한 핸들러)
     id: 'voice',
+    service: 'speech',
     plugin: (ctx) => {
       ctx.plugin(SpeechService, {
         host: systemSpeechHost(path.join(__dirname, 'speechWorker.js')),
@@ -714,10 +716,11 @@ function createWindow(): BrowserWindow {
 }
 
 // 부팅 진단 (참고 레포 검토 02x A) — 바탕 서비스 하나라도 안 뜨면 그것을 inject 한 bootstrap·chatBridge·attachmentsBridge 가 말없이 기다리기만 하고
-// 창은 IPC 핸들러 없이 뜬다. 기한 뒤에도 안 뜬 서비스의 이름을 로그에 남기고 사용자에게 한 줄로 알린다
+// 창은 IPC 핸들러 없이 뜬다. 기한 뒤에도 안 뜬 서비스의 이름을 로그에 남기고 사용자에게 한 줄로 알린다.
+// 켜진 기능 묶음의 서비스도 같이 본다 — 못 뜨면 화면은 켜진 줄 알고 그 채널을 부른다 ("No handler registered")
 const BOOT_DEADLINE_MS = 15_000
 function checkBoot(): void {
-  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject], (name) => ctx.get(name))
+  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject, ...(ctx.get('features')?.services() ?? [])], (name) => ctx.get(name))
   if (!missing.length) return
   console.error(`[boot] ${BOOT_DEADLINE_MS / 1000}초 안에 안 뜬 서비스: ${missing.join(', ')}`)
   if (hiddenForTests) return // 실물 테스트는 대화상자를 띄우지 않는다 — 기록만

@@ -4,7 +4,8 @@ import path from 'node:path'
 import { readJsonFile } from '../jsonFile.ts'
 
 // 짝지은 기기 (userData/remote-devices.json) — 토큰은 **해시(SHA-256)만** 둔다. 파일이 새도 토큰을 되살릴 수 없다.
-// 연결 켜기 값과 데스크탑 id(폰이 "어느 PC 인가" 를 가리는 값 — 비밀이 아니다)도 같은 파일에 있다.
+// 데스크탑 id(폰이 "어느 PC 인가" 를 가리는 값 — 비밀이 아니다)도 같은 파일에 있다. 옛 파일의 `enabled`(설정 > 모바일의 스위치, #124 로 없어졌다)는
+// 읽지 않고 다음 쓰기 때 사라진다 — 켜짐은 기능 `remote` 하나다.
 // 파일은 올라올 때 한 번 읽고, 그 뒤 정본은 메모리다. 쓰기는 한 줄로 세운다(임시 파일 + rename).
 
 export type DevicePlatform = 'android' | 'ios'
@@ -22,8 +23,6 @@ export interface StoredDevice {
 interface Stored {
   version: 1
   desktopId: string
-  /** 모바일 연결 켜기 (설정 > 모바일) — 기본 꺼짐 */
-  enabled: boolean
   devices: StoredDevice[]
 }
 
@@ -35,7 +34,7 @@ export function hashToken(token: string): string {
 }
 
 export class DeviceStore {
-  private stored: Stored = { version: 1, desktopId: randomBytes(8).toString('hex'), enabled: false, devices: [] }
+  private stored: Stored = { version: 1, desktopId: randomBytes(8).toString('hex'), devices: [] }
   private queue: Promise<unknown> = Promise.resolve()
   private seenWritten = new Map<string, number>()
 
@@ -44,7 +43,7 @@ export class DeviceStore {
     private now: () => number = Date.now,
   ) {}
 
-  /** 파일이 없거나 손상됐으면 빈 목록·꺼짐 — 앱 시작을 막지 않는다 (기기는 다시 짝지으면 된다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts) */
+  /** 파일이 없거나 손상됐으면 빈 목록 — 앱 시작을 막지 않는다 (기기는 다시 짝지으면 된다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts) */
   async load(): Promise<void> {
     try {
       const parsed = (await readJsonFile(this.file, 'object')) as Partial<Stored> | undefined
@@ -52,7 +51,6 @@ export class DeviceStore {
       this.stored = {
         version: 1,
         desktopId: typeof parsed?.desktopId === 'string' && parsed.desktopId ? parsed.desktopId : this.stored.desktopId,
-        enabled: parsed?.enabled === true,
         devices: Array.isArray(parsed?.devices) ? parsed.devices.filter(isDevice) : [],
       }
     } catch {
@@ -64,17 +62,8 @@ export class DeviceStore {
     return this.stored.desktopId
   }
 
-  get enabled(): boolean {
-    return this.stored.enabled
-  }
-
   list(): StoredDevice[] {
     return this.stored.devices
-  }
-
-  setEnabled(enabled: boolean): Promise<void> {
-    this.stored = { ...this.stored, enabled }
-    return this.write()
   }
 
   /** 새 기기 — 256bit 토큰을 만들어 해시만 저장하고, 토큰은 이 한 번만 돌려준다 */
