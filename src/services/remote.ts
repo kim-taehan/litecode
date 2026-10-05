@@ -77,6 +77,9 @@ const DRAFT_LIMIT = 20
 const DEVICE_NAME_MAX = 64
 
 export interface RemoteServiceOptions {
+  /** 서비스가 떠 있으면 늘 연결을 켠 것으로 본다 — 앱은 기능 스위치(설정 > 기능의 "모바일 연결") 하나로 켜고 끈다 (사용자 2026-10-06:
+   *  설정 > 모바일의 스위치가 기능 카드와 겹쳤다). 저장된 `enabled` 값은 보지 않는다. 안 주면 예전처럼 `setEnabled` 를 따른다(단위 테스트) */
+  alwaysOn?: boolean
   /** 기기 목록 JSON 파일 (앱에서는 userData/remote-devices.json) */
   file: string
   /** hello.name — 기본은 PC 이름 */
@@ -209,7 +212,7 @@ export class RemoteService extends Service {
     const carriers = [...this.carriers].map((carrier) => carrier.status())
     const error = carriers.find((carrier) => carrier.error)?.error
     return {
-      enabled: this.store.enabled,
+      enabled: this.enabled,
       port: carriers.find((carrier) => carrier.port !== undefined)?.port ?? REMOTE_DEFAULT_PORT,
       addresses: this.listening(),
       ...(error && { error }),
@@ -233,6 +236,10 @@ export class RemoteService extends Service {
         })
         .catch((error: unknown) => console.error('[remote] 운반 내리기 실패', (error as Error).message))
     }
+  }
+
+  private get enabled(): boolean {
+    return this.opts.alwaysOn === true || this.store.enabled
   }
 
   /** 모바일 연결 켜기·끄기 — 켜면 올라온 운반을 띄우고(못 뜨면 status().error), 끄면 닫고 붙어 있던 폰을 끊는다 */
@@ -277,7 +284,7 @@ export class RemoteService extends Service {
   private sync(): Promise<void> {
     this.queue = this.queue
       .then(async () => {
-        if (!this.store.enabled || this.disposed) {
+        if (!this.enabled || this.disposed) {
           if (this.started.size > 0) await this.close()
           return
         }

@@ -61,6 +61,15 @@ describe('이벤트 링', () => {
 })
 
 describe('켜고 끄기', () => {
+  // 사용자 2026-10-06: 설정 > 모바일의 스위치가 기능 카드와 겹쳤다 — 앱은 alwaysOn 으로 띄워 기능 스위치 하나로 켜고 끈다
+  it('alwaysOn 이면 저장된 꺼짐 값과 무관하게 운반이 올라오는 대로 듣는다 — 서비스가 내려가면 닫힌다', async () => {
+    const { remote } = await start({ alwaysOn: true }, false)
+    await until(() => remote.status().addresses.length === 1)
+    const status = remote.status()
+    expect(status.enabled).toBe(true)
+    expect(await reachable(status.port)).toBe(true)
+  })
+
   it('기본은 꺼짐 — 포트를 열지 않는다. 켜면 127.0.0.1 에서 듣고, 끄면 닫는다', async () => {
     const { remote } = await start({}, false)
     expect(remote.status()).toMatchObject({ enabled: false, addresses: [] })
