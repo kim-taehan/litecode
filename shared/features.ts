@@ -8,17 +8,18 @@ export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 카드가 없다.
- *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP. 웹 도구(opencode 내장 webfetch·websearch, 이슈 #14)는 늘 꺼짐 —
- *  폐쇄망에서 멈추거나(외부 주소 대기) 검색어가 밖으로 나간다 */
-export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true, web: false }
+ *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP */
+export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true }
 
 /** 사용자가 켜고 끄는 기능 (설정 > 기능의 카드) */
 export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
 
-/** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다).
+/** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다),
+ *  웹 가져오기(web — opencode 내장 webfetch, 이슈 #14·#103: 2026-10-03 에 늘 꺼짐으로 고정했다가 2026-10-05 사용자 결정으로 다시 고르게.
+ *  폐쇄망에선 바깥 주소에 멈추므로 사내 주소용이다. 레거시 경로엔 websearch 가 없다).
  *  나머지(터미널 칸·추론 과정·다른 앱에서 열기·데스크탑 MCP)는 기본 켜짐.
  *  데스크탑 MCP(appMcp, 이슈 #99)는 앱 내장 MCP 서버(ctx.appMcp)와 그 도구 — 끄면 서버가 내려가고 다음 턴부터 엔진에서 `litecode_*` 도구가 빠진다 */
-export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote']
+export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web']
 
 /** 저장된 값이 없을 때의 켜짐 */
 export function featureDefault(feature: FeatureId): boolean {
