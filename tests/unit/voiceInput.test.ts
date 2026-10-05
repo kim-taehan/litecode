@@ -5,7 +5,7 @@ import { translate } from '../../shared/i18n/index.ts'
 import { VoiceButton, VoiceStrip, type VoiceInput } from '../../renderer/VoiceInput.tsx'
 import { en } from '../../shared/i18n/en.ts'
 import { ko } from '../../shared/i18n/ko.ts'
-import { SPEECH_MAX_SAMPLES, SPEECH_SAMPLE_RATE, type SpeechErrorCode } from '../../shared/speech.ts'
+import { SPEECH_CHUNK_SAMPLES, SPEECH_MAX_SAMPLES, SPEECH_SAMPLE_RATE, type SpeechErrorCode } from '../../shared/speech.ts'
 import { changeDraft, draftOf, type Drafts } from '../../renderer/drafts.ts'
 import {
   barLevel,
@@ -16,7 +16,6 @@ import {
   pushLevel,
   RECORDING_FAILED,
   replyFailure,
-  resampledLength,
   rms,
   toPcm16,
   VOICE_IDLE,
@@ -28,7 +27,7 @@ import {
 } from '../../renderer/voiceView.ts'
 
 // 음성 입력 화면 (이슈 #109 2단계)의 순수 규칙. 마이크·오디오 API(voiceRecorder.ts)와 그림(VoiceInput.tsx)은 단위로 못 잡는다 —
-// 여기서 고정하는 것: 녹음 상태 기계(취소된 녹음의 늦은 사건을 버린다) / PCM 변환과 길이 상한 / 받아쓴 글을 넣는 자리 / 실패 문구 / 경과 초
+// 여기서 고정하는 것: 녹음 상태 기계(취소된 녹음의 늦은 사건을 버린다) / 말하는 동안의 글 / PCM 변환과 길이 상한 / 워크렛의 조각 모으기 / 받아쓴 글을 넣는 자리 / 실패 문구 / 경과 초
 
 // 화면 설정 저장소는 메인에서 값을 받아야 해서 여기선 한국어 사전으로 바로 번역한다
 vi.mock('../../renderer/settingsStore.ts', () => ({ useT: () => (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('ko', key, vars) }))
@@ -121,19 +120,51 @@ describe('녹음 상태 기계', () => {
   })
 })
 
+describe('말하는 동안의 글 (실시간 받아쓰기)', () => {
+  const recording = run([
+    { type: 'start', run: 1, sessionId: 'a' },
+    { type: 'granted', run: 1 },
+  ])
+
+  it('녹음 중에 온 확정·임시 글을 쥔다 — 새 글이 앞의 것을 통째로 바꾼다', () => {
+    const first = voiceReducer(recording, { type: 'partial', run: 1, live: { final: '', tentative: '로그인 버' } })
+    expect(first).toEqual({ phase: 'recording', run: 1, sessionId: 'a', live: { final: '', tentative: '로그인 버' } })
+    const second = voiceReducer(first, { type: 'partial', run: 1, live: { final: '로그인 버튼을 눌렀을 때.', tentative: '' } })
+    expect(second.live).toEqual({ final: '로그인 버튼을 눌렀을 때.', tentative: '' })
+  })
+
+  it('메인이 실어 보낸 다른 필드(스트림 번호)는 상태에 넣지 않고, 같은 글이면 다시 그리지 않는다', () => {
+    const event = { type: 'partial', run: 1, live: { final: '하나', tentative: '둘', stream: 7 } } as const
+    const next = voiceReducer(recording, event)
+    expect(next.live).toEqual({ final: '하나', tentative: '둘' })
+    expect(voiceReducer(next, event)).toBe(next)
+  })
+
+  it('정지한 뒤에도(받아쓰는 중) 글은 남아 있고, 정지 직전 조각의 답도 받는다', () => {
+    const live = voiceReducer(recording, { type: 'partial', run: 1, live: { final: '하나', tentative: '둘' } })
+    const stopped = voiceReducer(live, { type: 'stop', run: 1 })
+    expect(stopped).toMatchObject({ phase: 'transcribing', live: { final: '하나', tentative: '둘' } })
+    expect(voiceReducer(stopped, { type: 'partial', run: 1, live: { final: '하나 둘', tentative: '' } }).live).toEqual({ final: '하나 둘', tentative: '' })
+  })
+
+  it('끝나면(넣음·실패·취소) 지운다 — 입력창에 들어간 글과 두 번 보이지 않는다', () => {
+    const live = run([{ type: 'partial', run: 1, live: { final: '하나', tentative: '' } }], recording)
+    expect(run([{ type: 'stop', run: 1 }, { type: 'done', run: 1 }], live).live).toBeUndefined()
+    expect(voiceReducer(live, { type: 'failed', run: 1, notice: FAILED }).live).toBeUndefined()
+    expect(voiceReducer(live, { type: 'cancel' })).toEqual({ phase: 'idle', run: 1 })
+  })
+
+  it('다른 녹음의 글·대기 중·마이크를 여는 중에 온 글은 버린다', () => {
+    const stale = { type: 'partial', run: 1, live: { final: '옛', tentative: '' } } as const
+    expect(voiceReducer(VOICE_IDLE, stale)).toBe(VOICE_IDLE)
+    const requesting = run([{ type: 'start', run: 2, sessionId: 'a' }])
+    expect(voiceReducer(requesting, { ...stale, run: 2 })).toBe(requesting)
+    const next = run([{ type: 'granted', run: 2 }], requesting)
+    expect(voiceReducer(next, stale)).toBe(next)
+  })
+})
+
 describe('PCM 변환', () => {
-  it('재표본 길이는 16kHz 기준이고 120초에서 잘린다', () => {
-    expect(resampledLength(4.86)).toBe(77_760) // 실측 01ag §2.3 — 4.9초 녹음이 77,760 샘플
-    expect(resampledLength(120)).toBe(SPEECH_MAX_SAMPLES)
-    expect(resampledLength(120.4)).toBe(SPEECH_MAX_SAMPLES) // 상한 타이머가 조금 늦게 멈춘 녹음
-    expect(resampledLength(600)).toBe(SPEECH_MAX_SAMPLES)
-  })
-
-  it('빈 녹음·깨진 길이는 0', () => {
-    for (const seconds of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(resampledLength(seconds)).toBe(0)
-    expect(resampledLength(0.00001)).toBe(0)
-  })
-
   it('-1..1 을 PCM16 끝값까지 편다', () => {
     expect([...toPcm16(new Float32Array([0, 1, -1, 0.5, -0.5]))]).toEqual([0, 32767, -32768, 16384, -16384])
   })
@@ -154,6 +185,71 @@ describe('PCM 변환', () => {
 
   it('빈 입력은 빈 PCM', () => {
     expect(toPcm16(new Float32Array(0)).length).toBe(0)
+  })
+})
+
+describe('마이크 캡처 워크렛 (voiceWorklet.js) — 128 표본씩 오는 소리를 0.1초 조각으로', () => {
+  /** 워크렛 파일을 가짜 AudioWorkletGlobalScope 에서 읽어 등록된 프로세서를 하나 만든다 */
+  async function capture(): Promise<{ process(inputs: Float32Array[][]): boolean; posted: (Float32Array | null)[]; flush(): void }> {
+    const posted: (Float32Array | null)[] = []
+    let registered: (new (options: unknown) => { process(inputs: Float32Array[][]): boolean; port: { onmessage?: (event: unknown) => void } }) | undefined
+    vi.stubGlobal(
+      'AudioWorkletProcessor',
+      class {
+        port = { postMessage: (data: Float32Array | null) => void posted.push(data) }
+      },
+    )
+    vi.stubGlobal('registerProcessor', (_name: string, processor: typeof registered) => void (registered = processor))
+    vi.resetModules()
+    const file = '../../renderer/voiceWorklet.js'
+    await import(/* @vite-ignore */ file)
+    vi.unstubAllGlobals()
+    const processor = new registered!({ processorOptions: { chunk: SPEECH_CHUNK_SAMPLES } })
+    return { process: (inputs) => processor.process(inputs), posted, flush: () => processor.port.onmessage!({ data: 'flush' }) }
+  }
+  const block = (value: number, length = 128): Float32Array[][] => [[new Float32Array(length).fill(value)]]
+
+  it('조각 크기는 0.1초(1600 표본)', () => {
+    expect(SPEECH_CHUNK_SAMPLES).toBe(SPEECH_SAMPLE_RATE / 10)
+  })
+
+  it('1600 표본이 찰 때마다 한 조각 — 블록 경계에 걸친 소리는 다음 조각으로 넘어간다', async () => {
+    const worklet = await capture()
+    for (let index = 0; index < 12; index++) expect(worklet.process(block(index + 1))).toBe(true) // 1536 표본
+    expect(worklet.posted).toHaveLength(0)
+    worklet.process(block(13)) // 1664 — 64 표본이 넘친다
+    expect(worklet.posted).toHaveLength(1)
+    const first = worklet.posted[0]!
+    expect(first).toHaveLength(1600)
+    expect([first[0], first[127], first[128], first[1535], first[1536], first[1599]]).toEqual([1, 1, 2, 12, 13, 13])
+    for (let index = 0; index < 12; index++) worklet.process(block(20))
+    expect(worklet.posted).toHaveLength(2)
+    expect(worklet.posted[1]![0]).toBe(13) // 앞 블록에서 넘친 64 표본부터
+    expect(worklet.posted[1]![64]).toBe(20)
+    expect(worklet.posted[0]![0]).toBe(1) // 보낸 조각은 복사본 — 다음 조각이 덮어쓰지 않는다
+  })
+
+  it('입력이 아직 없으면(이어지기 전) 기다린다', async () => {
+    const worklet = await capture()
+    expect(worklet.process([])).toBe(true)
+    expect(worklet.process([[]])).toBe(true)
+    expect(worklet.posted).toHaveLength(0)
+  })
+
+  it('정지(flush) — 남은 소리를 보내고 null 로 끝을 알린 뒤 멈춘다. 남은 것이 없으면 null 만', async () => {
+    const worklet = await capture()
+    worklet.process(block(0.5))
+    worklet.flush()
+    expect(worklet.posted).toHaveLength(2)
+    expect(worklet.posted[0]).toHaveLength(128)
+    expect(worklet.posted[1]).toBeNull()
+    expect(worklet.process(block(1))).toBe(false)
+    worklet.flush() // 두 번 불러도 한 번만
+    expect(worklet.posted).toHaveLength(2)
+
+    const empty = await capture()
+    empty.flush()
+    expect(empty.posted).toEqual([null])
   })
 })
 
@@ -343,6 +439,20 @@ describe('마이크 버튼·녹음 띠의 그림 (정적 렌더)', () => {
     expect(band).toContain('받아쓰는 중')
     expect(band).toContain('data-voice-action="cancel"')
     expect(band).not.toContain('data-voice-action="stop"')
+  })
+
+  it('말하는 동안 받아쓴 글 — 띠 아래에 확정 글과 임시 글(흐리게)을 잇는다. 받아쓰는 중에도 남아 있다', () => {
+    const band = strip({ ...recording, live: { final: '로그인 버튼을 눌렀을 때.', tentative: '서버에서 <오백>' } })
+    expect(band).toMatch(/<\/div><div class="voice-live" data-voice-live="true">/) // 띠 다음에
+    expect(band).toContain('<span data-voice-final="true">로그인 버튼을 눌렀을 때.</span> <span class="voice-live__tentative" data-voice-tentative="true">서버에서 &lt;오백&gt;</span>')
+    const onlyTentative = strip({ ...recording, live: { final: '', tentative: '로그' } })
+    expect(onlyTentative).toContain('data-voice-live="true"><span class="voice-live__tentative"')
+    expect(strip({ phase: 'transcribing', run: 1, sessionId: 'a', live: { final: '하나.', tentative: '' } })).toContain('<span data-voice-final="true">하나.</span></div>')
+  })
+
+  it('아직 받아쓴 글이 없으면 그 칸이 없다', () => {
+    expect(strip(recording)).not.toContain('voice-live')
+    expect(strip({ ...recording, live: { final: '', tentative: '' } })).not.toContain('voice-live')
   })
 
   it('끝난 뒤의 한 줄 — 말소리 없음은 안내, 실패는 오류 모양이고 닫기가 있다', () => {

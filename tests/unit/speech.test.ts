@@ -16,7 +16,8 @@ import { setMainLanguage } from '../../src/i18n.ts'
 // 진짜 엔진(utilityProcess + sherpa-onnx-node)이 글을 내는지는 여기서 안 본다 — 그 확인은 받아 둔 build/vendor 로 수동이다.
 
 class FakeWorker implements SpeechWorkerHandle {
-  posts: WorkerRequest[] = []
+  /** 종류와 상관없이 pcm·language 를 읽을 수 있게 */
+  posts: (WorkerRequest & { pcm?: Int16Array; language?: string })[] = []
   killed = false
   constructor(private on: { message(reply: WorkerReply): void; exit(): void }) {}
   post(request: WorkerRequest): void {
@@ -34,6 +35,10 @@ class FakeWorker implements SpeechWorkerHandle {
   /** 마지막으로 받은 요청에 답한다 */
   answer(text: string, inferMs = 100): void {
     this.on.message({ type: 'result', id: this.posts.at(-1)!.id, text, inferMs })
+  }
+  /** 마지막으로 받은 조각(stream-feed)에 답한다 */
+  partial(final: string, tentative: string, inferMs = 10): void {
+    this.on.message({ type: 'partial', id: this.posts.at(-1)!.id, final, tentative, inferMs })
   }
   exit(): void {
     this.on.exit()
@@ -352,6 +357,228 @@ describe('받아쓰기', () => {
   })
 })
 
+describe('실시간 받아쓰기 (openStream)', () => {
+  /** 0.1초 조각 — 표본 값으로 어느 조각인지 가린다 */
+  const chunk = (mark = 0, samples = 1600): Int16Array => new Int16Array(samples).fill(mark)
+
+  it('엔진이 뜨는 동안 온 조각은 쥐고 있다가, 뜨면 stream-start 뒤에 하나로 합쳐 보낸다', async () => {
+    const { speech, host } = await start()
+    const stream = speech.openStream({}, () => {})
+    stream.write(chunk(1))
+    stream.write(chunk(2))
+    await tick()
+    expect(host.last.posts).toHaveLength(0)
+    expect(speech.status().state).toBe('starting')
+    host.last.ready()
+    await tick()
+    expect(host.last.posts.map((post) => post.type)).toEqual(['stream-start', 'stream-feed'])
+    expect(host.last.posts[0]).toMatchObject({ language: 'ko' })
+    const fed = host.last.posts[1]!.pcm!
+    expect(fed).toHaveLength(3200)
+    expect([fed[0], fed[1599], fed[1600], fed[3199]]).toEqual([1, 1, 2, 2])
+    stream.cancel()
+  })
+
+  it('앞 조각의 답을 받은 뒤에만 다음을 보낸다 — 그사이 밀린 조각은 가장 최근 것까지 하나로. 답마다 확정·임시 글을 알린다', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    const seen: unknown[] = []
+    const stream = speech.openStream({ language: 'en' }, (partial) => void seen.push(partial))
+    await tick()
+    const base = worker.posts.length // warm 의 transcribe + stream-start
+    expect(worker.posts.at(-1)).toMatchObject({ type: 'stream-start', language: 'en' })
+    stream.write(chunk(1))
+    expect(worker.posts).toHaveLength(base + 1) // 떠 있는 엔진엔 곧바로
+    stream.write(chunk(2))
+    stream.write(chunk(3))
+    stream.write(chunk(4))
+    expect(worker.posts).toHaveLength(base + 1) // 답이 오기 전엔 더 안 보낸다
+    worker.partial('', '안녕')
+    expect(seen).toEqual([{ final: '', tentative: '안녕' }])
+    expect(worker.posts).toHaveLength(base + 2)
+    expect(worker.posts.at(-1)!.pcm).toHaveLength(4800)
+    worker.partial('안녕하세요.', '')
+    expect(seen.at(-1)).toEqual({ final: '안녕하세요.', tentative: '' })
+    expect(worker.posts).toHaveLength(base + 2) // 밀린 것이 없으면 안 보낸다
+    stream.cancel()
+  })
+
+  it('정지 — 남은 조각을 실어 stop 을 보내고, 그 답이 최종 글이다 (길이·걸린 시간은 스트림 전체)', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    const stream = speech.openStream({}, () => {})
+    await tick()
+    stream.write(chunk(1))
+    stream.write(chunk(2))
+    const done = stream.stop()
+    expect(worker.posts.at(-1)!.type).toBe('stream-feed') // 앞 조각의 답을 아직 기다린다
+    stream.write(chunk(9)) // 정지 뒤의 조각은 버린다
+    worker.partial('하나', '', 40)
+    expect(worker.posts.at(-1)).toMatchObject({ type: 'stream-stop' })
+    expect(worker.posts.at(-1)!.pcm).toHaveLength(1600)
+    expect(worker.posts.at(-1)!.pcm![0]).toBe(2)
+    worker.answer('하나 둘', 60)
+    expect(await done).toEqual({ text: '하나 둘', audioSeconds: 0.2, inferSeconds: 0.1 })
+    expect(await stream.done).toMatchObject({ text: '하나 둘' })
+    expect(worker.killed).toBe(false)
+  })
+
+  it('조각 없이 정지해도 끝난다 (말이 없으면 빈 글)', async () => {
+    const { speech, host } = await start()
+    const stream = speech.openStream({}, () => {})
+    const done = stream.stop()
+    await tick()
+    host.last.ready()
+    await tick()
+    expect(host.last.posts.map((post) => post.type)).toEqual(['stream-start', 'stream-stop'])
+    expect(host.last.posts[1]!.pcm).toBeUndefined()
+    host.last.answer('')
+    expect((await done).text).toBe('')
+  })
+
+  it('한 번에 하나 — 스트림 중의 다른 요청은 busy, 다른 것이 돌거나 기다리면 스트림도 busy', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    const stream = speech.openStream({}, () => {})
+    expect(() => speech.openStream({}, () => {})).toThrowError(expect.objectContaining({ code: 'busy' }))
+    expect(await speechReply(speech.transcribe(pcm()))).toMatchObject({ ok: false, code: 'busy' })
+    stream.cancel()
+    const running = speech.transcribe(pcm())
+    expect(() => speech.openStream({}, () => {})).toThrowError(expect.objectContaining({ code: 'busy' }))
+    await tick()
+    worker.answer('끝')
+    await running
+    expect(() => speech.openStream({ language: 'ja' }, () => {})).toThrowError(expect.objectContaining({ code: 'invalid' }))
+    speech.openStream({}, () => {}).cancel() // 끝난 뒤엔 열린다
+  })
+
+  it('취소 — 버리고 cancelled 로 끝난다. 엔진은 살려 두고(stream-cancel) 다음 녹음이 그대로 쓴다', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    const seen: unknown[] = []
+    const stream = speech.openStream({}, (partial) => void seen.push(partial))
+    await tick()
+    stream.write(chunk(1))
+    stream.cancel()
+    await expect(stream.done).rejects.toMatchObject({ code: 'cancelled' })
+    expect(worker.posts.at(-1)!.type).toBe('stream-cancel')
+    expect(worker.killed).toBe(false)
+    worker.partial('늦은 답', '') // 버린 스트림의 답은 알리지 않는다
+    expect(seen).toEqual([])
+    stream.write(chunk(2)) // 끝난 스트림에 쓴 조각도 버린다
+    const next = speech.openStream({}, () => {})
+    await tick()
+    expect(host.workers).toHaveLength(1)
+    expect(worker.posts.at(-1)!.type).toBe('stream-start')
+    next.cancel()
+  })
+
+  it('엔진이 뜨기 전에 취소하면 워커에 아무것도 안 보낸다', async () => {
+    const { speech, host } = await start()
+    const stream = speech.openStream({}, () => {})
+    stream.write(chunk())
+    await tick()
+    stream.cancel()
+    host.last.ready()
+    await tick()
+    expect(host.last.posts).toHaveLength(0)
+  })
+
+  it('상한 120초 — 넘는 조각은 잘라 버린다. 조각 하나는 1초까지, 모양이 틀리면 invalid', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    const stream = speech.openStream({}, () => {})
+    await tick()
+    for (let second = 0; second < 119; second++) stream.write(chunk(0, 16_000))
+    stream.write(chunk(0, 12_000))
+    stream.write(chunk(7, 16_000)) // 4000 표본만 남았다
+    stream.write(chunk(8)) // 꽉 찼다
+    worker.partial('', '')
+    const fed = worker.posts.at(-1)!.pcm!
+    expect(fed).toHaveLength(SPEECH_MAX_SAMPLES - 16_000) // 첫 1초는 먼저 갔다
+    expect(fed.at(-1)).toBe(7)
+    const done = stream.stop()
+    worker.partial('', '')
+    expect(worker.posts.at(-1)!.pcm).toBeUndefined()
+    worker.answer('끝')
+    expect((await done).audioSeconds).toBe(120)
+    const other = speech.openStream({}, () => {})
+    for (const bad of [new Int16Array(0), new Int16Array(16_001), new Float32Array(1600), [1, 2], undefined]) {
+      expect(() => other.write(bad)).toThrowError(expect.objectContaining({ code: 'invalid' }))
+    }
+    other.cancel()
+  })
+
+  it('기한 — 정지를 안 부른 스트림은 연 때부터 180초에, 정지 뒤엔 60초에 timeout 으로 끝내고 엔진을 죽인다', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    const left = speech.openStream({}, () => {})
+    await vi.advanceTimersByTimeAsync(179_999)
+    expect(worker.killed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(left.done).rejects.toMatchObject({ code: 'timeout' })
+    expect(worker.killed).toBe(true)
+
+    const stream = speech.openStream({}, () => {})
+    await tick()
+    host.last.ready()
+    await tick()
+    await vi.advanceTimersByTimeAsync(100_000)
+    const stopped = speechReply(stream.stop())
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(host.last.killed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await stopped).toMatchObject({ ok: false, code: 'timeout' })
+    expect(host.last.killed).toBe(true)
+  })
+
+  it('도는 동안엔 쉬는 시계가 안 돌고, 끝난 뒤 5분 쉬면 엔진을 내린다', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    await vi.advanceTimersByTimeAsync(4 * 60_000)
+    const stream = speech.openStream({}, () => {})
+    await vi.advanceTimersByTimeAsync(2 * 60_000) // 쉰 지 6분이지만 스트림이 열려 있다
+    expect(worker.killed).toBe(false)
+    const done = stream.stop()
+    worker.answer('끝')
+    await done
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1)
+    expect(worker.killed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(worker.killed).toBe(true)
+  })
+
+  it('스트림 중에 엔진이 죽거나 오류를 내면 failed 로 끝난다', async () => {
+    const { speech, host } = await start()
+    const worker = await warm(speech, host)
+    const stream = speech.openStream({}, () => {})
+    await tick()
+    stream.write(chunk())
+    worker.exit()
+    await expect(stream.done).rejects.toMatchObject({ code: 'failed' })
+
+    const next = speech.openStream({}, () => {})
+    await tick()
+    host.last.ready()
+    await tick()
+    next.write(chunk())
+    host.last['on'].message({ type: 'error', id: host.last.posts.at(-1)!.id, message: 'onnx' })
+    await expect(next.done).rejects.toMatchObject({ code: 'failed' })
+  })
+
+  it('내리면(dispose) 열려 있던 스트림은 unavailable 로 끝나고 엔진을 거둔다', async () => {
+    const { speech, host, fiber } = await start()
+    const worker = await warm(speech, host)
+    const stream = speech.openStream({}, () => {})
+    await tick()
+    vi.useRealTimers()
+    await fiber.dispose()
+    await expect(stream.done).rejects.toMatchObject({ code: 'unavailable' })
+    expect(worker.killed).toBe(true)
+    expect(() => speech.openStream({}, () => {})).toThrowError(expect.objectContaining({ code: 'unavailable' }))
+  })
+})
+
 describe('PCM 검증 — 화면이 보낸 것을 메인이 다시 본다', () => {
   it('Int16Array 이고 0 < 길이 ≤ 120초일 때만', () => {
     const code = (value: unknown): string => {
@@ -486,6 +713,7 @@ describe('워커의 순수한 부분', () => {
         if (fed.length === 2) queue.push(new Float32Array([1])) // 둘째 창 뒤에 구간 하나
       },
       isEmpty: () => queue.length === 0,
+      isDetected: () => false,
       front(external) {
         fronts.push(external)
         return { samples: queue[0]! }
@@ -501,7 +729,7 @@ describe('워커의 순수한 부분', () => {
   })
 
   it('말이 없으면 빈 글', () => {
-    const silent: VadLike = { reset() {}, acceptWaveform() {}, isEmpty: () => true, front: () => ({ samples: new Float32Array() }), pop() {}, flush() {} }
+    const silent: VadLike = { reset() {}, acceptWaveform() {}, isEmpty: () => true, isDetected: () => false, front: () => ({ samples: new Float32Array() }), pop() {}, flush() {} }
     expect(transcribeSamples(silent, () => 'x', new Float32Array(5000))).toBe('')
   })
 })

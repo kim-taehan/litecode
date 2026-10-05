@@ -31,8 +31,10 @@ export interface VadLike {
   reset(): void
   acceptWaveform(samples: Float32Array): void
   isEmpty(): boolean
-  /** false = 복사본으로 받는다 — Electron 의 V8 메모리 케이지는 외부 버퍼를 못 받는다 (dsh·실측) */
-  front(enableExternalBuffer: boolean): { samples: Float32Array }
+  /** 지금 말소리 구간 안인가 (아직 안 끝난 구간) — 실시간 받아쓰기(stream.ts)가 임시 글을 낼지 정한다 */
+  isDetected(): boolean
+  /** false = 복사본으로 받는다 — Electron 의 V8 메모리 케이지는 외부 버퍼를 못 받는다 (dsh·실측). start = reset 뒤 넣은 표본 기준 구간의 시작 */
+  front(enableExternalBuffer: boolean): { samples: Float32Array; start?: number }
   pop(): void
   flush(): void
 }
@@ -56,17 +58,20 @@ export function transcribeSamples(vad: VadLike, decode: (samples: Float32Array) 
   return joinPieces(texts)
 }
 
-/** 메인 → 워커 */
-export interface WorkerRequest {
-  type: 'transcribe'
-  id: number
-  pcm: Int16Array
-  language: SpeechLanguage
-}
+/** 메인 → 워커. transcribe: 녹음 하나를 한 번에. stream-*: 실시간 받아쓰기(stream.ts) — start 뒤 feed 를 **답(partial)을 받은 다음에만** 다음 것을
+ *  보내고(밀린 조각은 메인이 합친다), stop(남은 조각을 실어도 된다)의 답은 result, cancel 은 답이 없다 */
+export type WorkerRequest =
+  | { type: 'transcribe'; id: number; pcm: Int16Array; language: SpeechLanguage }
+  | { type: 'stream-start'; id: number; language: SpeechLanguage }
+  | { type: 'stream-feed'; id: number; pcm: Int16Array }
+  | { type: 'stream-stop'; id: number; pcm?: Int16Array }
+  | { type: 'stream-cancel'; id: number }
 
-/** 워커 → 메인. ready: 엔진·모델을 읽었다 · fatal: 못 읽었다(워커는 곧 끝난다) · result/error: 그 id 의 답 */
+/** 워커 → 메인. ready: 엔진·모델을 읽었다 · fatal: 못 읽었다(워커는 곧 끝난다) · result/error: 그 id 의 답 ·
+ *  partial: stream-feed 의 답 — 지금까지 확정된 글 전부와 말하고 있는 구간의 임시 글 */
 export type WorkerReply =
   | { type: 'ready'; loadMs: number }
   | { type: 'fatal'; message: string }
   | { type: 'result'; id: number; text: string; inferMs: number }
+  | { type: 'partial'; id: number; final: string; tentative: string; inferMs: number }
   | { type: 'error'; id: number; message: string }
