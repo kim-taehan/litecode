@@ -178,41 +178,6 @@ export function GeneralPage() {
         </div>
       </div>
 
-      <div className="settings-row">
-        <div className="settings-row__text">
-          <div className="settings-row__title">{t('settings.codingView')}</div>
-          <div className="settings-row__description">{t('settings.codingView.description')}</div>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          className="settings-switch"
-          aria-checked={settings.codingView}
-          aria-label={t('settings.codingView')}
-          onClick={() => save({ codingView: !settings.codingView })}
-        >
-          <span className="settings-switch__thumb" />
-        </button>
-      </div>
-
-      {/* PC 알림만 끈다 — 앱 안 토스트·점은 그대로 (ctx.notifications, 결정 Q9) */}
-      <div className="settings-row">
-        <div className="settings-row__text">
-          <div className="settings-row__title">{t('settings.notifications')}</div>
-          <div className="settings-row__description">{t('settings.notifications.description')}</div>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          className="settings-switch"
-          aria-checked={settings.notifications}
-          aria-label={t('settings.notifications')}
-          onClick={() => save({ notifications: !settings.notifications })}
-        >
-          <span className="settings-switch__thumb" />
-        </button>
-      </div>
-
       {/* 창 닫기 = 숨기기 (ctx.quit, 이슈 #92) — Windows·Linux 만. macOS 는 창을 닫아도 원래 앱이 남는다 (플랫폼 표시는 preload 가 html 에 적는다) */}
       {document.documentElement.dataset.platform !== 'darwin' && (
         <div className="settings-row">
