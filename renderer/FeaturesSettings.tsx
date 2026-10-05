@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CHOOSABLE_FEATURES, FEATURE_REQUIRES, featureDefault, featureOn, type FeatureId } from '../shared/features.ts'
+import { FEATURE_GROUPS, FEATURE_REQUIRES, featureDefault, featureOn, type FeatureId } from '../shared/features.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 
 // 설정 > 기능 (이슈 #8) — 끌 수 있는 기능마다 카드 하나: 이름 + 스위치, 아래 회색 한 줄 설명. 치수·모양은 dsh "Built-in plugins"
@@ -7,6 +7,7 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 // 두 줄까지. 읽기 전용 목록인 dsh 와 달리 카드에 켜기 스위치(일반 페이지와 같은 36×20)를 둔다.
 // 바꾸면 곧바로 메인(ctx.settings)에 저장하고, 메인(ctx.features)이 재시작 없이 그 기능 묶음을 올리거나 내린다.
 // 필요한 기능이 꺼진 카드(`!` 입력 ← `!명령 실행`)는 스위치를 막고 사유를 적는다.
+// 카드는 중분류(FEATURE_GROUPS — 작업 화면 / AI 도구 / 자동화 / 입력·연결·알림)로 나눠 묶음마다 제목 + 한 줄 설명 아래에 둔다 (사용자 결정 2026-10-06).
 // 고정된 기능(shared/features.ts FEATURE_FIXED — 필수인 입력 트리거·스킬·MCP, 늘 꺼진 웹 도구)은 카드가 없다 (사용자 결정 2026-10-03).
 
 export function FeaturesPage() {
@@ -34,8 +35,16 @@ export function FeaturesPage() {
         </p>
       )}
       <p className="features-page__intro">{t('settings.features.intro')}</p>
-      <ul className="feature-cards">
-        {CHOOSABLE_FEATURES.map((feature) => {
+      {FEATURE_GROUPS.map((group) => (
+        <section key={group.id} className="feature-group" data-feature-group={group.id} aria-labelledby={`feature-group-${group.id}`}>
+          <div className="feature-group__head">
+            <h3 className="feature-group__title" id={`feature-group-${group.id}`}>
+              {t(`settings.features.group.${group.id}`)}
+            </h3>
+            <span className="feature-group__hint">{t(`settings.features.group.${group.id}.hint`)}</span>
+          </div>
+          <ul className="feature-cards">
+            {group.features.map((feature) => {
           const missing = (FEATURE_REQUIRES[feature] ?? []).find((needed) => !featureOn(stored, needed))
           const on = featureOn(stored, feature)
           return (
@@ -58,8 +67,10 @@ export function FeaturesPage() {
               {missing && <p className="feature-card__requires">{t('settings.features.requires', { name: t(`feature.${missing}`) })}</p>}
             </li>
           )
-        })}
-      </ul>
+            })}
+          </ul>
+        </section>
+      ))}
     </div>
   )
 }

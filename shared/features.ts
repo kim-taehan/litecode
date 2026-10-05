@@ -14,6 +14,14 @@ export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = { at: true, sl
 /** 사용자가 켜고 끄는 기능 (설정 > 기능의 카드) */
 export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
 
+/** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
+export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly FeatureId[] }[] = [
+  { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
+  { id: 'ai', features: ['appMcp', 'web'] },
+  { id: 'automation', features: ['hooks'] },
+  { id: 'devices', features: ['voice', 'remote', 'notifications'] },
+]
+
 /** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다),
  *  웹 가져오기(web — opencode 내장 webfetch, 이슈 #14·#103: 2026-10-03 에 늘 꺼짐으로 고정했다가 2026-10-05 사용자 결정으로 다시 고르게.
  *  폐쇄망에선 바깥 주소에 멈추므로 사내 주소용이다. 레거시 경로엔 websearch 가 없다).
