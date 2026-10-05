@@ -1,9 +1,10 @@
 import type { MessageKey } from '../shared/i18n/index.ts'
-import { SPEECH_MAX_SAMPLES, SPEECH_MAX_SECONDS, SPEECH_SAMPLE_RATE, type SpeechErrorCode, type SpeechStatus } from '../shared/speech.ts'
+import { SPEECH_MAX_SAMPLES, SPEECH_MAX_SECONDS, type SpeechErrorCode, type SpeechPartial, type SpeechStatus } from '../shared/speech.ts'
 
 // 음성 입력 화면(이슈 #109 2단계)의 순수 규칙 — 녹음 상태 기계 · PCM 변환 · 받아쓴 글을 초안에 넣는 자리 · 실패 문구 · 경과 초 · 음량 막대.
 // 마이크·오디오 API 는 voiceRecorder.ts, 그림은 VoiceInput.tsx. 동작은 dsh client-ui-voice-input 참조(토글 녹음, 녹음 뒤 한 번에 인식,
 // 결과는 입력창에 넣기만). dsh 와 다른 점: 초안이 바뀌었으면 "넣기" 버튼 대신 지금 커서 자리에, 대화를 바꿨으면 버리지 않고 시작한 대화의 초안에.
+// 3단계(실시간 받아쓰기): 말하는 동안 받아쓴 글(확정 + 임시)을 상태에 쥐고 띠 아래에 보인다 — 입력창에는 정지 뒤에 한 번에 넣는다 (말하는 중에 커서가 튀지 않게).
 
 // ── 상태 기계 ────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,8 @@ export interface VoiceState {
   /** 녹음을 시작한 대화 — 결과는 이 대화의 초안에 들어간다 (대화를 바꿔도) */
   sessionId?: string
   notice?: VoiceNotice
+  /** 말하는 동안 받아쓴 글 — 녹음 중·받아쓰는 중에만. 보여 주기만 한다 (입력창에 넣는 글은 정지의 답) */
+  live?: SpeechPartial
 }
 
 export type VoiceEvent =
@@ -30,6 +33,8 @@ export type VoiceEvent =
   | { type: 'start'; run: number; sessionId: string }
   /** 마이크가 열렸다 */
   | { type: 'granted'; run: number }
+  /** 말하는 동안의 글이 바뀌었다 — 녹음 중·받아쓰는 중(정지 직전에 보낸 조각의 답)일 때만 */
+  | { type: 'partial'; run: number; live: SpeechPartial }
   /** 정지(버튼·상한) — 녹음 중일 때만 */
   | { type: 'stop'; run: number }
   /** 인식이 끝났다 — notice 는 "말소리 없음"·"다른 대화에 넣음" */
@@ -51,6 +56,10 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       return { phase: 'requesting', run: event.run, sessionId: event.sessionId }
     case 'granted':
       return state.phase === 'requesting' && event.run === state.run ? { ...state, phase: 'recording' } : state
+    case 'partial':
+      if ((state.phase !== 'recording' && state.phase !== 'transcribing') || event.run !== state.run) return state
+      if (state.live?.final === event.live.final && state.live.tentative === event.live.tentative) return state
+      return { ...state, live: { final: event.live.final, tentative: event.live.tentative } }
     case 'stop':
       return state.phase === 'recording' && event.run === state.run ? { ...state, phase: 'transcribing' } : state
     case 'done':
@@ -64,7 +73,7 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
     case 'notify':
       return state.phase === 'idle' ? { phase: 'idle', run: state.run, notice: event.notice } : state
     case 'dismiss':
-      return state.notice ? { phase: state.phase, run: state.run, ...(state.sessionId !== undefined && { sessionId: state.sessionId }) } : state
+      return state.notice ? { phase: state.phase, run: state.run, ...(state.sessionId !== undefined && { sessionId: state.sessionId }), ...(state.live && { live: state.live }) } : state
   }
 }
 
@@ -77,12 +86,6 @@ export function voiceBusy(state: VoiceState): boolean {
 export const VOICE_NOTICE_MS = 4000
 
 // ── PCM ──────────────────────────────────────────────────────────────────────
-
-/** 디코드한 녹음(초)을 16kHz 로 다시 그릴 때의 샘플 수 — 상한(120초)에서 자른다. 0 이면 녹음이 비었다 */
-export function resampledLength(seconds: number): number {
-  if (!Number.isFinite(seconds) || seconds <= 0) return 0
-  return Math.min(SPEECH_MAX_SAMPLES, Math.floor(seconds * SPEECH_SAMPLE_RATE))
-}
 
 /** -1..1 샘플 → PCM16. 범위를 넘는 값은 자르고(NaN 은 0), 상한을 넘는 길이는 앞에서부터 상한까지만 */
 export function toPcm16(samples: Float32Array): Int16Array {
@@ -175,7 +178,7 @@ const REPLY_FAILURE: Record<Exclude<SpeechErrorCode, 'cancelled'>, MessageKey> =
   failed: 'voice.error.failed',
 }
 
-/** `speech:transcribe` 의 실패 코드 → 문구. 취소는 알리지 않는다 */
+/** 받아쓰기(`speech:stream-*`)의 실패 코드 → 문구. 취소는 알리지 않는다 */
 export function replyFailure(code: SpeechErrorCode): MessageKey | undefined {
   return code === 'cancelled' ? undefined : REPLY_FAILURE[code]
 }

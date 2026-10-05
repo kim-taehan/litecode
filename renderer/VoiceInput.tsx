@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import type { MessageKey } from '../shared/i18n/index.ts'
-import type { SpeechReply, SpeechStatus } from '../shared/ipc.ts'
+import type { SpeechReply, SpeechStatus, SpeechStreamOpened } from '../shared/ipc.ts'
 import { SPEECH_MAX_SECONDS } from '../shared/speech.ts'
 import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
@@ -26,7 +26,9 @@ import {
 import './voice.css'
 
 // 음성 입력 (이슈 #109 2단계) — 입력 카드의 마이크 버튼(모델 선택과 보내기 사이)과 녹음 띠. dsh client-ui-voice-input 의 동작을 따른다:
-// 누르면 녹음(토글), 다시 누르면 정지 → 받아쓰기, 결과는 **입력창에 넣기만 하고 보내지 않는다**. 누르고 있는 동안만 녹음·단축키·말하는 동안 글 보이기는 없다.
+// 누르면 녹음(토글), 다시 누르면 정지 → 받아쓰기, 결과는 **입력창에 넣기만 하고 보내지 않는다**. 누르고 있는 동안만 녹음·단축키는 없다.
+// **말하는 동안 받아쓴 글이 띠 아래에 보인다** (3단계, 실시간 받아쓰기) — 녹음 조각(0.1초)을 메인에 흘리면 끝난 말소리 구간은 확정 글로, 말하고 있는
+// 구간은 흐린 임시 글로 돌아온다(`speech:partial`). 입력창은 말하는 동안 건드리지 않고 정지의 답을 한 번에 넣는다 — 글이 바뀌며 커서가 튀지 않게.
 // 녹음을 시작할 때의 커서 자리에 넣고, 그사이 글을 고쳤으면 지금 커서 자리에, 대화를 바꿨으면 녹음을 시작한 대화의 초안에 넣는다 (voiceView insertTranscript).
 // 120초에 스스로 멈추고 받아쓴다. 녹음 중 Esc 는 취소다 — 먼저 써서(preventDefault) 답변 중지의 "Esc 두 번" 에 세어지지 않는다.
 // 턴이 도는 중에도 녹음된다(초안은 쓸 수 있다). 창이 뒤로 가도 녹음은 이어진다(dsh 는 취소한다 — 다른 창을 보며 말할 수 있게 두었다).
@@ -65,8 +67,10 @@ interface Flight {
   since?: number
   timer?: ReturnType<typeof setTimeout>
   stopping?: boolean
-  /** 메인에 보냈다 — 취소하면 메인의 받아쓰기도 멈춘다 */
-  sent?: boolean
+  /** 메인의 받아쓰기 스트림 번호 — 마이크가 열린 뒤에 연다 */
+  stream?: number
+  /** 스트림 번호를 받기 전에 나온 조각 */
+  held: Int16Array[]
 }
 
 const EMPTY: VoiceNotice = { tone: 'info', key: 'voice.empty' }
@@ -84,23 +88,33 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
   const latest = useRef(options)
   latest.current = options
 
+  /** 마이크와 메인의 스트림을 놓는다 (끝난 스트림을 버려도 된다) */
+  function release(active: Flight): void {
+    clearTimeout(active.timer)
+    active.recording.dispose()
+    if (active.stream !== undefined) void window.litecode.cancelSpeechStream(active.stream).catch(() => {})
+  }
+
   function cancel(): void {
     const active = flight.current
     flight.current = undefined
-    if (active) {
-      clearTimeout(active.timer)
-      active.recording.dispose()
-      if (active.sent) void window.litecode.cancelSpeech().catch(() => {})
-    }
+    if (active) release(active)
     dispatch({ type: 'cancel' })
   }
 
   function fail(active: Flight, key: MessageKey): void {
     if (flight.current !== active) return
     flight.current = undefined
-    clearTimeout(active.timer)
-    active.recording.dispose()
+    release(active)
     dispatch({ type: 'failed', run: active.run, notice: { tone: 'error', key } })
+  }
+
+  /** 메인이 준 실패 코드로 끝낸다 — 취소는 조용히 */
+  function failWith(active: Flight, code: Parameters<typeof replyFailure>[0]): void {
+    if (flight.current !== active) return
+    const key = replyFailure(code)
+    if (key) fail(active, key)
+    else cancel()
   }
 
   function done(active: Flight, notice?: VoiceNotice): void {
@@ -119,15 +133,37 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
       sessionId,
       recording: new VoiceRecording(),
       anchor: input ? { text: input.value, at: input.selectionEnd } : undefined,
+      held: [],
     }
     flight.current = active
     dispatch({ type: 'start', run: active.run, sessionId })
     try {
-      await active.recording.start(() => fail(active, 'voice.error.recording'))
+      await active.recording.start(
+        () => fail(active, 'voice.error.recording'),
+        (pcm) => {
+          if (flight.current !== active) return
+          if (active.stream === undefined) active.held.push(pcm)
+          else window.litecode.sendSpeechChunk(active.stream, pcm)
+        },
+      )
     } catch (error) {
       return fail(active, captureFailure(error, platform()))
     }
     if (flight.current !== active) return // 권한 창을 기다리는 사이 취소됐다 — 마이크는 녹음기가 놓았다
+    // 마이크가 열린 뒤에 메인의 스트림을 연다 (권한이 거절되면 엔진을 띄우지 않는다). 언어는 메인이 설정에서 읽는다 (settings.speechLanguage, 없으면 화면 언어)
+    let opened: SpeechStreamOpened
+    try {
+      opened = await window.litecode.startSpeechStream()
+    } catch {
+      return fail(active, 'voice.error.failed')
+    }
+    if (flight.current !== active) {
+      if (opened.ok) void window.litecode.cancelSpeechStream(opened.stream).catch(() => {})
+      return
+    }
+    if (!opened.ok) return failWith(active, opened.code)
+    active.stream = opened.stream
+    for (const pcm of active.held.splice(0)) window.litecode.sendSpeechChunk(opened.stream, pcm)
     active.since = performance.now()
     active.timer = setTimeout(() => void finish(active), SPEECH_MAX_SECONDS * 1000)
     dispatch({ type: 'granted', run: active.run })
@@ -138,26 +174,16 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     active.stopping = true
     clearTimeout(active.timer)
     dispatch({ type: 'stop', run: active.run })
-    let pcm: Int16Array
-    try {
-      pcm = await active.recording.stop()
-    } catch (error) {
-      return fail(active, captureFailure(error, platform()))
-    }
-    if (flight.current !== active) return
-    if (pcm.length === 0) return done(active, EMPTY)
-    active.sent = true
+    await active.recording.stop() // 남은 조각까지 흘리고 마이크를 놓는다
+    if (flight.current !== active || active.stream === undefined) return
     let reply: SpeechReply
     try {
-      reply = await window.litecode.transcribeSpeech(pcm) // 언어는 메인이 설정에서 읽는다 (settings.speechLanguage, 없으면 화면 언어)
+      reply = await window.litecode.stopSpeechStream(active.stream) // 남은 말소리 구간까지 확정한 글
     } catch {
       return fail(active, 'voice.error.failed')
     }
     if (flight.current !== active) return
-    if (!reply.ok) {
-      const key = replyFailure(reply.code)
-      return key ? fail(active, key) : done(active)
-    }
+    if (!reply.ok) return failWith(active, reply.code)
     const said = reply.text
     if (said.trim() === '') return done(active, EMPTY)
     const { sessionId: showing, inputRef, edit } = latest.current
@@ -202,6 +228,17 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     }
   }, [on])
 
+  // 말하는 동안의 글 — 지금 녹음의 스트림 것만. 스트림이 죽었으면(엔진 종료·기한) 녹음을 멈추고 알린다
+  useEffect(() => {
+    if (!on) return
+    return window.litecode.onSpeechPartial((event) => {
+      const active = flight.current
+      if (!active || active.stream !== event.stream) return
+      if (event.error) failWith(active, event.error)
+      else dispatch({ type: 'partial', run: active.run, live: event })
+    })
+  }, [on])
+
   // 기능을 끄거나 화면이 내려가면 놓는다
   useEffect(() => {
     if (!on) cancel()
@@ -212,7 +249,7 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
   useEffect(() => {
     const active = flight.current
     if (!active) return
-    if (!latest.current.hasSession(active.sessionId) || (latest.current.sessionId === undefined && !active.sent)) cancel()
+    if (!latest.current.hasSession(active.sessionId) || (latest.current.sessionId === undefined && !active.stopping)) cancel()
   })
 
   // Esc = 취소. 메뉴·대화상자가 먼저 쓴 Esc 와 입력기 조합 중인 Esc 는 건드리지 않는다. window 의 "Esc 두 번" 보다 먼저 돈다(document 가 안쪽)
@@ -279,44 +316,68 @@ export function VoiceButton({ voice }: { voice: VoiceInput }) {
   )
 }
 
-/** 녹음 띠 — 입력칸과 아래 줄 사이. 마이크를 여는 중·녹음 중(취소 · 음량 · 경과 · 정지)·받아쓰는 중, 끝난 뒤의 한 줄(말소리 없음·실패 사유) */
+/** 녹음 띠 — 입력칸과 아래 줄 사이. 마이크를 여는 중·녹음 중(취소 · 음량 · 경과 · 정지)·받아쓰는 중, 끝난 뒤의 한 줄(말소리 없음·실패 사유).
+ *  녹음 중·받아쓰는 중엔 띠 아래에 말하는 동안 받아쓴 글이 붙는다 */
 export function VoiceStrip({ voice }: { voice: VoiceInput }) {
   const t = useT()
-  const { phase, notice } = voice.state
+  const { phase, notice, live } = voice.state
   if (!voice.on || (phase === 'idle' && !notice)) return null
   const text = phase === 'requesting' ? t('voice.requesting') : phase === 'recording' ? t('voice.recording') : phase === 'transcribing' ? t('voice.transcribing') : notice ? t(notice.key) : ''
   return (
-    <div className="voice-strip" data-voice={phase} data-tone={phase === 'idle' ? notice?.tone : undefined}>
-      {phase !== 'idle' && (
-        <button type="button" className="voice-strip__button" data-voice-action="cancel" aria-label={t('voice.cancel')} title={t('voice.cancel')} onClick={voice.cancel}>
-          <CloseIcon />
-        </button>
-      )}
-      <span className="voice-strip__text" role="status">
-        {phase !== 'idle' && <span className="voice-strip__dot" aria-hidden="true" />}
-        {text}
-      </span>
-      {phase === 'recording' && (
-        <>
-          <VoiceMeter level={voice.level} />
-          <Elapsed since={voice.since} />
-          <button
-            type="button"
-            className="voice-strip__button voice-strip__stop"
-            data-voice-action="stop"
-            aria-label={t('voice.stop')}
-            title={t('voice.stop')}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={voice.toggle}
-          >
-            <StopIcon size={14} />
+    <>
+      <div className="voice-strip" data-voice={phase} data-tone={phase === 'idle' ? notice?.tone : undefined}>
+        {phase !== 'idle' && (
+          <button type="button" className="voice-strip__button" data-voice-action="cancel" aria-label={t('voice.cancel')} title={t('voice.cancel')} onClick={voice.cancel}>
+            <CloseIcon />
           </button>
-        </>
-      )}
-      {phase === 'idle' && (
-        <button type="button" className="voice-strip__button" data-voice-action="dismiss" aria-label={t('voice.dismiss')} title={t('voice.dismiss')} onClick={voice.dismiss}>
-          <CloseIcon />
-        </button>
+        )}
+        <span className="voice-strip__text" role="status">
+          {phase !== 'idle' && <span className="voice-strip__dot" aria-hidden="true" />}
+          {text}
+        </span>
+        {phase === 'recording' && (
+          <>
+            <VoiceMeter level={voice.level} />
+            <Elapsed since={voice.since} />
+            <button
+              type="button"
+              className="voice-strip__button voice-strip__stop"
+              data-voice-action="stop"
+              aria-label={t('voice.stop')}
+              title={t('voice.stop')}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={voice.toggle}
+            >
+              <StopIcon size={14} />
+            </button>
+          </>
+        )}
+        {phase === 'idle' && (
+          <button type="button" className="voice-strip__button" data-voice-action="dismiss" aria-label={t('voice.dismiss')} title={t('voice.dismiss')} onClick={voice.dismiss}>
+            <CloseIcon />
+          </button>
+        )}
+      </div>
+      {live && (live.final || live.tentative) && <VoiceLive final={live.final} tentative={live.tentative} />}
+    </>
+  )
+}
+
+/** 말하는 동안 받아쓴 글 — 확정된 글 뒤에 말하고 있는 구간의 임시 글(흐리게, 다음에 통째로 바뀔 수 있다). 길어지면 끝(가장 최근 글)이 보이게 흘린다.
+ *  읽어 주지 않는다(aria-live 없음) — 1초에 한두 번 바뀐다. 입력창에 들어가는 글은 정지 뒤의 것이다 */
+function VoiceLive({ final, tentative }: { final: string; tentative: string }) {
+  const root = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (root.current) root.current.scrollTop = root.current.scrollHeight
+  }, [final, tentative])
+  return (
+    <div className="voice-live" data-voice-live ref={root}>
+      {final && <span data-voice-final>{final}</span>}
+      {final && tentative && ' '}
+      {tentative && (
+        <span className="voice-live__tentative" data-voice-tentative>
+          {tentative}
+        </span>
       )}
     </div>
   )

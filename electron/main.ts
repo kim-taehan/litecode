@@ -52,6 +52,7 @@ import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
 import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from './resilience.ts'
+import { speechBridgeStreams } from '../src/services/speech/bridge.ts'
 import { SpeechService, speechReply } from '../src/services/speech.ts'
 import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
 import { systemSpeechHost } from './speechHost.ts'
@@ -486,6 +487,13 @@ function speechBridge(ctx: Context): void {
     for (const flight of flights) flight.abort()
   })
   ctx.on('speech/changed', (status) => broadcast(Channel.SPEECH_CHANGED, status))
+  // 실시간 받아쓰기 — 화면이 녹음 조각을 흘리고 메인이 확정·임시 글을 돌려준다. 스트림은 한 번에 하나 (speech/bridge.ts)
+  const streams = speechBridgeStreams(ctx.speech, (event) => broadcast(Channel.SPEECH_PARTIAL, event))
+  handle(ctx, Channel.SPEECH_STREAM_START, async (_event, language: unknown) => streams.start(language))
+  handle(ctx, Channel.SPEECH_STREAM_CHUNK, async (_event, stream: unknown, pcm: unknown) => streams.chunk(stream, pcm))
+  handle(ctx, Channel.SPEECH_STREAM_STOP, async (_event, stream: unknown) => streams.stop(stream))
+  handle(ctx, Channel.SPEECH_STREAM_CANCEL, async (_event, stream: unknown) => streams.cancel(stream))
+  ctx.effect(() => () => streams.cancel())
 }
 speechBridge.inject = ['speech']
 

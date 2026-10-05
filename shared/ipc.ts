@@ -21,7 +21,7 @@ import type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
 import type { HookCandidate, HookDraft, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 import type { RemoteStatus } from '../src/services/remote.ts'
-import type { SpeechLanguage, SpeechReply, SpeechStatus } from './speech.ts'
+import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
@@ -49,7 +49,7 @@ export type { McpTool } from '../src/services/mcpClient.ts'
 export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 export type { McpToolRef } from '../src/services/turnProgress.ts'
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
-export type { SpeechErrorCode, SpeechLanguage, SpeechReply, SpeechState, SpeechStatus, SpeechTranscript, SpeechUnavailable } from './speech.ts'
+export type { SpeechErrorCode, SpeechLanguage, SpeechPartial, SpeechReply, SpeechState, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened, SpeechTranscript, SpeechUnavailable } from './speech.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -174,6 +174,16 @@ export const Channel = {
   SPEECH_CANCEL: 'speech:cancel',
   /** 메인 → 화면 (SpeechStatus) */
   SPEECH_CHANGED: 'speech:changed',
+  /** 실시간 받아쓰기 — 화면 → 메인 (language?) → SpeechStreamOpened. 열려 있던 스트림은 버리고 새로 연다 (화면은 한 번에 하나만 녹음한다) */
+  SPEECH_STREAM_START: 'speech:stream-start',
+  /** 화면 → 메인 (stream, Int16Array 16kHz mono — 0.1초쯤, 최대 1초). 번호가 다르거나 모양이 틀린 조각은 버린다 */
+  SPEECH_STREAM_CHUNK: 'speech:stream-chunk',
+  /** 화면 → 메인 (stream) → SpeechReply — 남은 구간까지 확정한 글 */
+  SPEECH_STREAM_STOP: 'speech:stream-stop',
+  /** 화면 → 메인 (stream) — 버린다 */
+  SPEECH_STREAM_CANCEL: 'speech:stream-cancel',
+  /** 메인 → 화면 (SpeechStreamEvent) — 지금까지 확정된 글·임시 글, 또는 그 스트림이 죽었다(error) */
+  SPEECH_PARTIAL: 'speech:partial',
 } as const
 
 export interface LitecodeBridge {
@@ -372,6 +382,15 @@ export interface LitecodeBridge {
   /** 보내 둔 받아쓰기를 취소한다 — 그 transcribeSpeech 는 code 'cancelled' 로 끝난다 */
   cancelSpeech(): Promise<void>
   onSpeechChanged(listener: (status: SpeechStatus) => void): () => void
+  /** 실시간 받아쓰기를 연다 — 녹음 조각을 sendSpeechChunk 로 흘리면 onSpeechPartial 로 확정 글·임시 글이 오고, stopSpeechStream 이 최종 글을 준다.
+   *  한 번에 하나: 다른 받아쓰기가 돌면 { ok: false, code: 'busy' }. 녹음 상한(120초)을 넘는 조각은 메인이 버린다 */
+  startSpeechStream(language?: SpeechLanguage): Promise<SpeechStreamOpened>
+  /** 녹음 조각 — 16kHz mono PCM16 (shared/speech.ts SPEECH_CHUNK_SAMPLES, 최대 1초). 답을 기다리지 않는다 */
+  sendSpeechChunk(stream: number, pcm: Int16Array): void
+  /** 녹음이 끝났다 — 남은 구간까지 받아쓴 글. 던지지 않는다 (실패는 { ok: false, code, message }), 모르는 번호는 cancelled */
+  stopSpeechStream(stream: number): Promise<SpeechReply>
+  cancelSpeechStream(stream: number): Promise<void>
+  onSpeechPartial(listener: (event: SpeechStreamEvent) => void): () => void
 }
 
 declare global {

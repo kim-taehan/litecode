@@ -2,6 +2,7 @@ import { Context, Service } from 'cordis'
 import './settings.ts'
 import { tr } from '../i18n.ts'
 import {
+  SPEECH_CHUNK_MAX_SAMPLES,
   SPEECH_MAX_SAMPLES,
   SPEECH_MAX_SECONDS,
   SPEECH_SAMPLE_RATE,
@@ -9,6 +10,7 @@ import {
   speechLanguage,
   type SpeechErrorCode,
   type SpeechLanguage,
+  type SpeechPartial,
   type SpeechReply,
   type SpeechStatus,
   type SpeechTranscript,
@@ -18,11 +20,16 @@ import type { WorkerReply, WorkerRequest } from './speech/audio.ts'
 
 // 음성 입력 — 받아쓰기 (ctx.speech, 기능 `voice` · 기본 꺼짐). 실측·설계 _workspace/01ag_voice_input.md, dsh speech-to-text-sensevoice 를
 // 참조했다(코드는 새로 썼다). 화면이 녹음을 16kHz mono PCM16 으로 줄여 보내면, 동봉한 엔진(sherpa-onnx-node + SenseVoiceSmall int8 +
-// Silero VAD)으로 글을 돌려준다. 녹음이 끝난 뒤 한 번에 인식한다 (스트리밍 아님). 글은 돌려주기만 한다 — 대화 기록·엔진(opencode)을 모른다.
+// Silero VAD)으로 글을 돌려준다. 글은 돌려주기만 한다 — 대화 기록·엔진(opencode)을 모른다.
+// 길은 둘이다: transcribe(녹음이 끝난 뒤 한 번에)와 openStream(**실시간** — 녹음하는 동안 조각을 받아 확정 글·임시 글을 돌려준다, speech/stream.ts).
 //
 // - 엔진은 따로 뜬 프로세스(워커)에 있다 — 네이티브 추론이 죽어도 메인이 살고, 중간에 멈출 길이 프로세스를 죽이는 것뿐이라서다.
 //   **처음 쓸 때 띄우고, 5분 쉬면 내린다** (엔진 프로세스 메모리 0.7~1.0GB — 실측). 취소·기한 초과는 워커를 죽이고 다음 요청 때 다시 띄운다
 // - 한 번에 하나, 대기 2개까지 (넘으면 busy). 기한은 차례가 온 때부터 60초 (엔진 뜨는 시간 포함)
+// - 실시간 받아쓰기는 줄을 서지 않는다 — 다른 것이 돌거나 기다리면 busy, 도는 동안 온 다른 요청도 busy. 워커에는 **앞 조각의 답을 받은 뒤에만**
+//   다음을 보내고 그사이 온 조각은 하나로 합친다 (인식이 밀려도 워커 앞에 조각이 쌓이지 않고, 임시 글은 늘 가장 최근 소리까지 본다).
+//   녹음 상한 120초를 넘는 조각은 버린다. 기한은 연 때부터 상한 + 60초(정지를 안 부른 스트림을 거둔다), 정지 뒤 60초. 취소는 워커를 죽이지 않는다
+//   (조각 하나의 인식은 짧다 — 워커가 멈췄으면 다음 요청의 기한이 죽인다)
 // - Electron 을 모른다: 워커 띄우기·묻기·죽이기는 host 로 받는다 (electron/speechHost.ts 가 utilityProcess 로, 단위 테스트는 가짜로)
 // - 생성자는 던지지 않는다. 파일 대조(239MB 를 읽는다)는 뜰 때 한 번 뒤에서 돌고, 그 사이 온 요청은 대조를 기다린다
 
@@ -60,6 +67,8 @@ declare module 'cordis' {
 /** 차례를 기다리는 요청 (지금 도는 것 말고) */
 const MAX_WAITING = 2
 const DEADLINE_MS = 60_000
+/** 실시간 받아쓰기를 연 때부터의 기한 — 녹음 상한 + 마지막 인식 */
+const STREAM_DEADLINE_MS = SPEECH_MAX_SECONDS * 1000 + DEADLINE_MS
 const IDLE_MS = 5 * 60_000
 
 /** 받아쓰기 실패 — code 로 화면이 문구·다음 행동을 고른다 */
@@ -104,7 +113,35 @@ export function speechReply(work: Promise<SpeechTranscript>): Promise<SpeechRepl
   )
 }
 
+/** 실시간 받아쓰기 한 번 (openStream) */
+export interface SpeechStream {
+  /** 녹음 조각 (16kHz mono PCM16, 0 < 길이 ≤ 1초) — 모양이 틀리면 SpeechError(invalid). 끝난 스트림·상한을 넘은 조각은 조용히 버린다 */
+  write(pcm: unknown): void
+  /** 녹음이 끝났다 — 남은 구간까지 확정한 글. done 과 같은 약속이다 */
+  stop(): Promise<SpeechTranscript>
+  /** 버린다 — done 은 cancelled 로 끝난다 */
+  cancel(): void
+  /** 어느 길로든 끝나면 — 글, 또는 SpeechError(엔진이 죽음·기한·취소·서비스가 내려감) */
+  readonly done: Promise<SpeechTranscript>
+}
+
+interface StreamState {
+  /** 워커에 아직 안 보낸 조각 */
+  pending: Int16Array[]
+  /** 받은 표본 수 (상한까지) */
+  total: number
+  /** 워커에 stream-start 를 보냈다 */
+  open: boolean
+  /** 보낸 조각의 답을 기다리는 중 */
+  awaiting: boolean
+  stopping: boolean
+  inferMs: number
+  partial(partial: SpeechPartial): void
+}
+
 interface Job {
+  /** 실시간 받아쓰기면 — pcm 은 비어 있다 */
+  stream?: StreamState
   pcm: Int16Array
   language: SpeechLanguage
   resolve(transcript: SpeechTranscript): void
@@ -171,7 +208,7 @@ export class SpeechService extends Service {
       if (opts.language !== undefined && !isSpeechLanguage(opts.language)) throw fail('invalid')
       if (this.disposed) throw fail('unavailable')
       if (signal?.aborted) throw fail('cancelled')
-      if (this.waiting.length >= MAX_WAITING) throw fail('busy')
+      if (this.running?.stream || this.waiting.length >= MAX_WAITING) throw fail('busy')
       const onAbort = (): void => this.cancel(job)
       const job: Job = {
         pcm: samples,
@@ -186,6 +223,76 @@ export class SpeechService extends Service {
     })
   }
 
+  /** 실시간 받아쓰기를 연다 — 조각은 write 로, 확정·임시 글은 onPartial 로, 끝은 stop(). 다른 받아쓰기가 돌거나 기다리면 busy 로 던진다.
+   *  엔진이 뜨는 동안 온 조각은 쥐고 있다가 뜬 뒤에 보낸다 */
+  openStream(opts: { language?: unknown }, onPartial: (partial: SpeechPartial) => void): SpeechStream {
+    if (opts.language !== undefined && !isSpeechLanguage(opts.language)) throw fail('invalid')
+    if (this.disposed) throw fail('unavailable')
+    if (this.running || this.waiting.length) throw fail('busy')
+    let job!: Job
+    const done = new Promise<SpeechTranscript>((resolve, reject) => {
+      job = {
+        stream: { pending: [], total: 0, open: false, awaiting: false, stopping: false, inferMs: 0, partial: onPartial },
+        pcm: new Int16Array(0),
+        language: (opts.language as SpeechLanguage | undefined) ?? speechLanguage(this.ctx.settings.get()),
+        resolve,
+        reject,
+        unlisten: () => {},
+      }
+    })
+    done.catch(() => {}) // 끝을 안 듣는 쪽(취소만 하는 화면)이 있어도 처리 안 된 거절이 되지 않게
+    this.waiting.push(job)
+    this.pump()
+    return {
+      done,
+      write: (pcm) => this.write(job, pcm),
+      stop: () => {
+        this.stopStream(job)
+        return done
+      },
+      cancel: () => this.cancel(job),
+    }
+  }
+
+  private write(job: Job, pcm: unknown): void {
+    if (!(pcm instanceof Int16Array) || pcm.length === 0 || pcm.length > SPEECH_CHUNK_MAX_SAMPLES) throw fail('invalid')
+    const stream = job.stream!
+    const room = SPEECH_MAX_SAMPLES - stream.total
+    if (this.running !== job || stream.stopping || room <= 0) return
+    const chunk = pcm.length > room ? pcm.slice(0, room) : pcm
+    stream.pending.push(chunk)
+    stream.total += chunk.length
+    this.flush(job)
+  }
+
+  private stopStream(job: Job): void {
+    if (this.running !== job || job.stream!.stopping) return
+    job.stream!.stopping = true
+    clearTimeout(job.deadline)
+    job.deadline = setTimeout(() => this.finish(job, fail('timeout'), true), DEADLINE_MS)
+    this.flush(job)
+  }
+
+  /** 쥐고 있는 조각을 워커에 보낸다 — 앞 조각의 답을 기다리는 중이면 두고(답이 오면 다시 불린다), 여럿이면 하나로 합친다. 정지면 남은 것과 함께 stop */
+  private flush(job: Job): void {
+    const stream = job.stream!
+    if (!stream.open || stream.awaiting || !this.worker) return
+    if (!stream.stopping && !stream.pending.length) return
+    const chunks = stream.pending.splice(0)
+    let pcm = chunks[0]
+    if (chunks.length > 1) {
+      pcm = new Int16Array(chunks.reduce((length, chunk) => length + chunk.length, 0))
+      let at = 0
+      for (const chunk of chunks) {
+        pcm.set(chunk, at)
+        at += chunk.length
+      }
+    }
+    stream.awaiting = true
+    if (stream.stopping) this.worker.handle.post({ type: 'stream-stop', id: job.id!, ...(pcm && { pcm }) })
+    else this.worker.handle.post({ type: 'stream-feed', id: job.id!, pcm: pcm! })
+  }
+
   /** 다음 차례를 돌린다 — 한 번에 하나 */
   private pump(): void {
     if (this.running) return
@@ -193,7 +300,7 @@ export class SpeechService extends Service {
     if (!job) return
     this.running = job
     clearTimeout(this.idle)
-    job.deadline = setTimeout(() => this.finish(job, fail('timeout'), true), DEADLINE_MS)
+    job.deadline = setTimeout(() => this.finish(job, fail('timeout'), true), job.stream ? STREAM_DEADLINE_MS : DEADLINE_MS)
     void this.work(job)
   }
 
@@ -205,7 +312,10 @@ export class SpeechService extends Service {
     if (this.running !== job) return
     if (failure !== undefined || !this.worker) return this.finish(job, fail('failed', failure))
     job.id = ++this.seq
-    this.worker.handle.post({ type: 'transcribe', id: job.id, pcm: job.pcm, language: job.language })
+    if (!job.stream) return this.worker.handle.post({ type: 'transcribe', id: job.id, pcm: job.pcm, language: job.language })
+    this.worker.handle.post({ type: 'stream-start', id: job.id, language: job.language })
+    job.stream.open = true
+    this.flush(job)
   }
 
   /** 워커가 떠 있게 한다 — 못 떴으면 사유 */
@@ -238,8 +348,16 @@ export class SpeechService extends Service {
       this.dropWorker(reply.message)
     } else if (this.running && this.running.id === reply.id) {
       const job = this.running
+      const stream = job.stream
       if (reply.type === 'error') return this.finish(job, fail('failed', reply.message))
-      job.resolve({ text: reply.text, audioSeconds: job.pcm.length / SPEECH_SAMPLE_RATE, inferSeconds: reply.inferMs / 1000 })
+      if (reply.type === 'partial') {
+        if (!stream) return
+        stream.awaiting = false
+        stream.inferMs += reply.inferMs
+        stream.partial({ final: reply.final, tentative: reply.tentative })
+        return this.flush(job)
+      }
+      job.resolve({ text: reply.text, audioSeconds: (stream?.total ?? job.pcm.length) / SPEECH_SAMPLE_RATE, inferSeconds: ((stream?.inferMs ?? 0) + reply.inferMs) / 1000 })
       this.finish(job)
     }
   }
@@ -280,6 +398,10 @@ export class SpeechService extends Service {
       this.waiting.splice(at, 1)
       job.unlisten()
       job.reject(fail('cancelled'))
+    } else if (job.stream) {
+      // 실시간 받아쓰기는 워커를 살려 둔다 — 조각 하나의 인식은 짧고, 다음 녹음이 엔진을 다시 띄우지 않아도 된다
+      if (this.running === job && job.stream.open) this.worker?.handle.post({ type: 'stream-cancel', id: job.id! })
+      this.finish(job, fail('cancelled'))
     } else {
       this.finish(job, fail('cancelled'), true)
     }

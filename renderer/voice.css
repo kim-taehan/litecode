@@ -153,6 +153,22 @@
   opacity: 0.85;
 }
 
+/* 말하는 동안 받아쓴 글 — 띠 바로 아래. 확정 글은 본문 색, 말하고 있는 구간(임시)은 흐리게. 네 줄을 넘으면 끝이 보이게 흘린다 */
+.voice-live {
+  max-height: 80px;
+  margin: 4px 8px 0;
+  padding: 0 6px; /* 입력칸의 글과 같은 줄 (8 + 6 = 14px) */
+  overflow-y: auto;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.voice-live__tentative {
+  color: var(--text-tertiary);
+}
+
 @keyframes voice-pulse {
   0%,
   100% {
