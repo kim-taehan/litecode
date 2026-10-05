@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { Attention, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
+import type { Attention, AttentionAnswer, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
 import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
 import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
 import type { AppSession } from '../session.ts'
 import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
-import { attentionTitle, composerBottomMargin, outcomeLabel, runningSubtasks, turnHead, turnLines, turnStartedAt, turnTexts } from '../view.ts'
+import type { QuestionView } from '../view.ts'
+import { attentionTitle, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, turnHead, turnLines, turnStartedAt, turnTexts, userMessageView } from '../view.ts'
 
 // 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
 // 답은 글자 그대로 그린다 — 마크다운은 다음 라운드. 모드 칩·"작업 N" 은 모양만.
@@ -84,7 +85,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
       </View>
 
       <ScrollView ref={scroll} style={styles.body} contentContainerStyle={styles.bodyContent} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
-        {view?.messages.map((message, index) => (message.role === 'user' ? <UserBubble key={index} text={message.text} /> : <Answer key={index} message={message} />))}
+        {view?.messages.map((message, index) => (message.role === 'user' ? <UserMessage key={index} message={message} /> : <Answer key={index} message={message} />))}
         {view?.running && (
           <Turn head={turnHead(S.running, startedAt === undefined ? undefined : now - startedAt, view.progress)} items={view.progress} initiallyOpen />
         )}
@@ -141,10 +142,25 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
   )
 }
 
-function UserBubble({ text }: { text: string }) {
+/** 내 말 — 모양은 view.ts userMessageView 가 정한다: 훅이 이어 보낸 글은 줄로, 첨부만 보냈으면 이름만, 다른 대화의 지시는 딱지 */
+function UserMessage({ message }: { message: HistoryMessage }) {
+  const shape = userMessageView(message)
+  if (shape.kind === 'hook')
+    return (
+      <View style={styles.hook}>
+        <Text style={styles.hookHead}>{S.hookFollowUp}</Text>
+        {shape.reason !== '' && <Text style={styles.hookReason}>{shape.reason}</Text>}
+      </View>
+    )
   return (
-    <View style={styles.bubble}>
-      <Text style={styles.bubbleText}>{text}</Text>
+    <View style={styles.userTurn}>
+      {shape.attachments.length > 0 && <Text style={styles.userMeta}>{shape.attachments.join(' · ')}</Text>}
+      {shape.origin !== undefined && <Text style={styles.userMeta}>{S.delegatedFrom(shape.origin)}</Text>}
+      {shape.text !== '' && (
+        <View style={styles.bubble}>
+          <Text style={styles.bubbleText}>{shape.text}</Text>
+        </View>
+      )}
     </View>
   )
 }
@@ -184,7 +200,7 @@ function Turn({ head, items, initiallyOpen = false, error }: { head: string; ite
   )
 }
 
-function AttentionCard({ request, onAnswer }: { request: Attention; onAnswer(answer: 'once' | 'reject' | string[][]): void }) {
+function AttentionCard({ request, onAnswer }: { request: Attention; onAnswer(answer: AttentionAnswer): void }) {
   return (
     <View style={styles.card}>
       <View style={styles.cardTitle}>
@@ -204,16 +220,34 @@ function AttentionCard({ request, onAnswer }: { request: Attention; onAnswer(ans
           </View>
         </>
       ) : (
-        <>
-          <Text style={styles.answer}>{request.questions[0]?.question}</Text>
-          {request.questions[0]?.options.map((option) => (
-            <Pressable key={option.label} accessibilityRole="button" style={[styles.cardButton, styles.reject]} onPress={() => onAnswer([[option.label]])}>
-              <Text style={styles.rejectText}>{option.label}</Text>
-            </Pressable>
-          ))}
-        </>
+        <QuestionBody shape={questionView(request)} onAnswer={onAnswer} />
       )}
     </View>
+  )
+}
+
+/** 질문 카드의 몸 — 폰에서 답할 수 있는 것(pick)만 보기를 그린다. 거절은 언제나 된다 (턴이 폰 앞에서 마냥 기다리지 않게) */
+function QuestionBody({ shape, onAnswer }: { shape: QuestionView; onAnswer(answer: AttentionAnswer): void }) {
+  return (
+    <>
+      {(shape.kind === 'pick' ? [shape.question] : shape.questions).map((question, index) => (
+        <Text key={index} style={styles.answer}>
+          {question}
+        </Text>
+      ))}
+      {shape.kind === 'pick' ? (
+        shape.options.map((label) => (
+          <Pressable key={label} accessibilityRole="button" style={[styles.cardButton, styles.reject]} onPress={() => onAnswer([[label]])}>
+            <Text style={styles.rejectText}>{label}</Text>
+          </Pressable>
+        ))
+      ) : (
+        <Text style={styles.cardHint}>{S.answerOnDesktop}</Text>
+      )}
+      <Pressable accessibilityRole="button" style={styles.questionReject} onPress={() => onAnswer('reject')}>
+        <Text style={styles.questionRejectText}>{S.reject}</Text>
+      </Pressable>
+    </>
   )
 }
 
@@ -230,7 +264,12 @@ const styles = StyleSheet.create({
   status: { paddingTop: 8 },
   body: { flex: 1 },
   bodyContent: { padding: 16, gap: 14 },
-  bubble: { alignSelf: 'flex-end', maxWidth: 290, backgroundColor: C.surface2, borderRadius: 16, paddingVertical: 10, paddingHorizontal: 14 },
+  userTurn: { alignItems: 'flex-end', gap: 4 },
+  userMeta: { fontSize: 12, color: C.sub },
+  hook: { gap: 2, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: 'rgba(0,0,0,0.08)' },
+  hookHead: { fontSize: 13, color: C.sub },
+  hookReason: { fontSize: 13, color: C.text2 },
+  bubble: { maxWidth: 290, backgroundColor: C.surface2, borderRadius: 16, paddingVertical: 10, paddingHorizontal: 14 },
   bubbleText: { fontSize: 15, lineHeight: 22, color: C.text },
   turn: { gap: 8 },
   turnHead: { alignSelf: 'flex-start', minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 6, paddingRight: 10 },
@@ -246,6 +285,9 @@ const styles = StyleSheet.create({
   command: { fontFamily: MONO, fontSize: 13, color: C.text, backgroundColor: C.white, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12 },
   cardButtons: { flexDirection: 'row', gap: 8 },
   cardButton: { flex: 1, minHeight: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  cardHint: { fontSize: 13, lineHeight: 18, color: C.amberText },
+  questionReject: { alignSelf: 'flex-end', minHeight: 44, paddingHorizontal: 12, justifyContent: 'center' },
+  questionRejectText: { fontSize: 15, fontWeight: '500', color: C.amberText },
   reject: { borderWidth: 1, borderColor: C.borderStrong, backgroundColor: C.white },
   rejectText: { fontSize: 15, fontWeight: '500', color: C.text },
   allow: { backgroundColor: C.text },
