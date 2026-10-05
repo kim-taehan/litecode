@@ -1,5 +1,17 @@
 import fs from 'node:fs/promises'
-import { HOOK_EVENTS, hookKey, type HookDef, type HookEntry, type HookEvent } from '../../../shared/hooks.ts'
+import {
+  HOOK_EVENTS,
+  hookKey,
+  hookTimeout,
+  sendsOutside,
+  TOOL_HOOK_EVENTS,
+  type HookCandidate,
+  type HookDef,
+  type HookDraft,
+  type HookEntry,
+  type HookEvent,
+  type HookScope,
+} from '../../../shared/hooks.ts'
 
 // 훅 정의 파일 (이슈 #102, 01af §6-2) — Claude Code `hooks` 형식의 부분집합:
 //   { "hooks": { "<이벤트>": [ { "matcher": "edit|write", "hooks": [ { "type": "command", "command": "…", "timeout": 10 } ] } ] } }
@@ -90,6 +102,91 @@ export function gateMatchers(all: readonly HookDef[], projects: Record<string, P
   const views = [entriesFor(all, undefined), ...Object.values(projects).map((project) => entriesFor(all, project))]
   const matchers = views.flatMap((view) => view.filter((hook) => hook.on && hook.event === 'PreToolUse').map((hook) => hook.matcher.trim()))
   return [...new Set(matchers)].sort()
+}
+
+// ── 화면이 하는 편집 (이슈 #102 3단계) — 두 파일을 읽은 것(HookStore)을 제자리에서 바꾼다. 읽고 쓰기는 HooksService
+
+/** 두 파일의 내용 — project 는 projects 안의 지금 프로젝트 것(같은 객체) */
+export interface HookStore {
+  all: HookDef[]
+  project: ProjectHooks
+  projects: Record<string, ProjectHooks>
+}
+
+/** missing: 고치려는 훅이 없다(그사이 파일이 바뀌었다), duplicate: 같은 내용(열쇠)의 훅이 이 프로젝트에서 이미 보인다 */
+export type HookEditError = 'missing' | 'duplicate'
+
+/** 그 열쇠의 프로젝트별 켜기 값을 새 열쇠로 옮긴다 (next 가 없으면 지운다) */
+function rekey(projects: readonly ProjectHooks[], key: string, next?: string): void {
+  for (const project of projects) {
+    const value = project.enabled[key]
+    if (value === undefined) continue
+    delete project.enabled[key]
+    if (next !== undefined) project.enabled[next] = value
+  }
+}
+
+/** 초안(checkHookDraft 를 거친 것)을 넣는다 — 새 훅은 그 묶음의 맨 뒤에, 고친 훅은 제자리에(묶음을 바꿨으면 새 묶음의 맨 뒤로).
+ *  꺼 둔 훅을 고쳐도 꺼진 채다. 내용이 바뀌면 열쇠도 바뀌므로 프로젝트별 켜기 값을 따라 옮긴다 */
+export function putHook(store: HookStore, draft: HookDraft): HookEditError | undefined {
+  const list = (scope: HookScope): HookDef[] => (scope === 'all' ? store.all : store.project.hooks)
+  const from = draft.original && list(draft.original.scope)
+  const at = from ? from.findIndex((hook) => hookKey(hook) === draft.original!.key) : -1
+  if (draft.original && at < 0) return 'missing'
+  const before = from?.[at]
+  const next: HookDef = { event: draft.event, matcher: draft.matcher, command: draft.command, ...(draft.timeout !== undefined && { timeout: draft.timeout }), enabled: before?.enabled ?? true }
+  const key = hookKey(next)
+  if ([...store.all, ...store.project.hooks].some((hook) => hook !== before && hookKey(hook) === key)) return 'duplicate'
+  if (!before) list(draft.scope).push(next)
+  else if (draft.original!.scope === draft.scope) from![at] = next
+  else {
+    from!.splice(at, 1)
+    list(draft.scope).push(next)
+  }
+  if (before) {
+    const others = Object.values(store.projects).filter((project) => project !== store.project)
+    rekey([store.project], draft.original!.key, key)
+    // 모든 프로젝트 훅이었다 — 다른 프로젝트의 켜기 값도 따라간다. 이 프로젝트만의 것이 됐으면 다른 프로젝트에선 지운다
+    if (draft.original!.scope === 'all') rekey(others, draft.original!.key, draft.scope === 'all' ? key : undefined)
+  }
+  return undefined
+}
+
+/** 훅 하나를 지운다 — 그 열쇠의 켜기 값도 (다시 같은 훅을 만들었을 때 예전 값이 되살아나지 않게). 없으면 false */
+export function dropHook(store: HookStore, scope: HookScope, key: string): boolean {
+  const list = scope === 'all' ? store.all : store.project.hooks
+  const at = list.findIndex((hook) => hookKey(hook) === key)
+  if (at < 0) return false
+  list.splice(at, 1)
+  rekey(scope === 'all' ? Object.values(store.projects) : [store.project], key)
+  return true
+}
+
+/** 프로젝트 폴더의 파일들(읽은 JSON — 못 읽었으면 undefined)에서 가져오기 후보를 뽑는다. Claude Code `hooks` 형식 그대로라 parseHooks 가 읽는다
+ *  (command 가 아닌 핸들러·모르는 이벤트·빈 명령은 빠진다). 이미 이 프로젝트에서 보이는 훅(같은 열쇠)과 앞 파일에서 나온 것은 뺀다.
+ *  파일에 꺼짐으로 적혀 있어도 후보다 — 가져오면 켜진 훅이 된다 (사용자가 고른 것만 오니까) */
+export function importCandidates(files: readonly { file: string; value: unknown }[], existing: ReadonlySet<string>): HookCandidate[] {
+  const seen = new Set(existing)
+  const found: HookCandidate[] = []
+  for (const { file, value } of files) {
+    for (const hook of parseHooks(value)) {
+      const matcher = TOOL_HOOK_EVENTS.includes(hook.event) ? hook.matcher : '' // 도구 이벤트가 아니면 매처를 보지 않는다
+      const key = hookKey({ ...hook, matcher })
+      if (seen.has(key)) continue
+      seen.add(key)
+      found.push({
+        key,
+        event: hook.event,
+        matcher,
+        command: hook.command,
+        ...(hook.timeout !== undefined && { timeout: hook.timeout }),
+        seconds: hookTimeout(hook.event, hook.timeout),
+        file,
+        outbound: sendsOutside(hook.command),
+      })
+    }
+  }
+  return found
 }
 
 /** 파일을 읽어 JSON 으로 — 없으면 undefined, 못 읽거나 깨졌으면 경고 한 줄(같은 내용엔 한 번)과 undefined. 파일은 건드리지 않는다 */

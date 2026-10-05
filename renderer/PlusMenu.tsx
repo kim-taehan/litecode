@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { AttachmentKind, Project } from '../shared/ipc.ts'
 import { FILE_ICON_PATHS } from './Attachments.tsx'
+import { useFeatures } from './featuresStore.ts'
+import { HooksPopup } from './HooksPopup.tsx'
+import { hooksOn } from './hooksView.ts'
 import { McpPopup } from './McpPopup.tsx'
 import { mcpCounts } from './plusView.ts'
 import { SKILL_ICON_PATH } from './SkillBadge.tsx'
@@ -14,9 +17,10 @@ import './plus.css'
 // 지금 고른 모델이 이미지를 못 받으면(설정 > 모델의 "이미지 입력" — 01y: 그 표시 없이는 이미지가 ERROR 글로 바뀐다) "이미지 추가" 는 못 누르고
 // 사유 한 줄을 보인다. disabled 가 아니라 aria-disabled 다 — 화살표로 닿아 사유가 읽힌다.
 // 메뉴 동작은 모드 칩 메뉴(ModeChip — dsh ui-primitives Menu)와 같다: Esc·바깥 누르기로 닫힘, 화살표로 이동, 닫히면 버튼으로 포커스.
+// 훅(이슈 #102) 줄은 기능 `hooks` 가 켜져 있을 때만 있다 — 오른쪽에 "켜짐 N"(이 프로젝트에서 도는 훅), 고르면 훅 팝업(HooksPopup). 꺼져 있으면 채널도 부르지 않는다.
 // 개수·요약은 메뉴를 열 때마다 묻는다(스킬 파일·서버 상태는 앱 밖에서 바뀐다). 프로젝트가 없으면 버튼을 못 누른다.
 
-type Popup = 'skills' | 'mcp'
+type Popup = 'skills' | 'mcp' | 'hooks'
 
 export function PlusMenu({ project, imageInput, onAttach }: { project?: Project; imageInput: boolean; onAttach(kind: AttachmentKind): void }) {
   const t = useT()
@@ -24,6 +28,8 @@ export function PlusMenu({ project, imageInput, onAttach }: { project?: Project;
   const [popup, setPopup] = useState<Popup>()
   const [skillCount, setSkillCount] = useState<number>()
   const [mcp, setMcp] = useState<{ connected: number; failed: number }>()
+  const [hookCount, setHookCount] = useState<number>()
+  const hooksFeature = useFeatures().has('hooks')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const directory = project?.path
@@ -45,14 +51,16 @@ export function PlusMenu({ project, imageInput, onAttach }: { project?: Project;
     let current = true
     setSkillCount(undefined)
     setMcp(undefined)
+    setHookCount(undefined)
     // 못 읽으면(서비스가 못 떴다 등) 오른쪽 글자 없이 — 팝업을 열면 사유가 보인다
     window.litecode.listSkills(directory).then((list) => current && setSkillCount(list.length), () => {})
     // 내장 서버(앱 자신의 것, 이슈 #51)는 세지 않는다 — 사용자가 붙인 서버의 수다
     window.litecode.listMcp(directory).then((list) => current && setMcp(mcpCounts(list.filter((server) => server.source !== 'builtin'))), () => {})
+    if (hooksFeature) window.litecode.listHooks(directory).then((list) => current && setHookCount(hooksOn(list)), () => {})
     return () => {
       current = false
     }
-  }, [open, directory])
+  }, [open, directory, hooksFeature])
 
   // 프로젝트가 바뀌면 열린 것을 닫는다 — 메뉴·팝업은 그 프로젝트의 것이다
   useEffect(() => {
@@ -154,10 +162,21 @@ export function PlusMenu({ project, imageInput, onAttach }: { project?: Project;
             <span className="plus-menu__name">{t('plus.menu.mcp')}</span>
             {mcp && <span className="plus-menu__meta">{t('plus.menu.mcp.summary', mcp)}</span>}
           </button>
+          {hooksFeature && (
+            <button type="button" role="menuitem" className="plus-menu__item" data-plus="hooks" onClick={() => show('hooks')}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9.5 4.25V10A3 3 0 0 1 3.5 10V8.75" />
+                <circle cx="9.5" cy="3" r="1.25" />
+              </svg>
+              <span className="plus-menu__name">{t('plus.menu.hooks')}</span>
+              {hookCount !== undefined && <span className="plus-menu__meta">{t('plus.menu.hooks.on', { count: hookCount })}</span>}
+            </button>
+          )}
         </div>
       )}
       {popup === 'skills' && project && <SkillsPopup project={project} onClose={closePopup} />}
       {popup === 'mcp' && project && <McpPopup project={project} onClose={closePopup} />}
+      {popup === 'hooks' && project && hooksFeature && <HooksPopup project={project} onClose={closePopup} />}
     </>
   )
 }

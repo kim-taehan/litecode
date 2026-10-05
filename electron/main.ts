@@ -37,6 +37,7 @@ import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
 import { HooksService } from '../src/services/hooks.ts'
+import { hooksBridge } from '../src/services/hooks/bridge.ts'
 import { SkillsService, type SkillScope } from '../src/services/skills.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 import { McpService, type McpServerInput } from '../src/services/mcp.ts'
@@ -556,11 +557,12 @@ const features: FeatureDefinition[] = [
     },
   },
   {
-    // 훅 (이슈 #102) — 기본 꺼짐. 사용자가 이벤트에 건 셸 명령을 메인이 프로젝트 폴더에서 돌린다 (엔진 플러그인 아님). 화면(편집)은 아직 없다 —
-    // userData 의 두 파일을 직접 고친다
+    // 훅 (이슈 #102) — 기본 꺼짐. 사용자가 이벤트에 건 셸 명령을 메인이 프로젝트 폴더에서 돌린다 (엔진 플러그인 아님). 화면은 입력창 `+` 메뉴의
+    // 훅 팝업 — 다리는 hooks/bridge.ts (userData 의 두 파일을 직접 고쳐도 된다)
     id: 'hooks',
     plugin: (ctx) => {
       ctx.plugin(HooksService, { file: path.join(userData, 'hooks.json'), projectsFile: path.join(userData, 'hooks-projects.json') })
+      ctx.plugin(hooksBridge(handle))
     },
   },
 ]

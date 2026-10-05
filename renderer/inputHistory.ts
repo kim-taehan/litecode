@@ -1,15 +1,16 @@
+import { stopFeedbackReason } from '../shared/hooks.ts'
 import type { HistoryMessage } from '../shared/ipc.ts'
 
 // 입력 기록 ↑/↓ (closed-code useInputHistory 의 동작, 셸의 기록처럼) — 빈 입력창에서 ↑ 로 그 대화에 내가 보낸 이전 글을 불러오고
 // ↓ 로 되돌아온다. 끼어들지 않는 때: 쓰던 글이 있다 · 불러온 글을 고쳤다 · 글을 골라 뒀다 · 여러 줄 글 안에서 커서가 옮겨 갈 줄이 남았다
 // (첫 줄에서만 ↑, 마지막 줄에서만 ↓). 한글 조합 중·후보 팝업(@ · /)은 입력창의 키 처리가 먼저 거른다. 순수 함수다
 
-/** 그 대화에서 내가 친 글 (오래된 것부터) — 다른 대화가 보낸 지시·글 없이 첨부만 보낸 것·바로 앞과 같은 글은 뺀다 */
+/** 그 대화에서 내가 친 글 (오래된 것부터) — 다른 대화가 보낸 지시·턴 끝 훅이 이어 보낸 글(이슈 #102)·글 없이 첨부만 보낸 것·바로 앞과 같은 글은 뺀다 */
 export function sentTexts(messages: readonly Pick<HistoryMessage, 'role' | 'text' | 'origin'>[]): string[] {
   const texts: string[] = []
   for (const message of messages) {
     const text = message.text.trim()
-    if (message.role === 'user' && !message.origin && text && texts.at(-1) !== text) texts.push(text)
+    if (message.role === 'user' && !message.origin && text && stopFeedbackReason(text) === undefined && texts.at(-1) !== text) texts.push(text)
   }
   return texts
 }

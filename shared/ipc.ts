@@ -19,6 +19,7 @@ import type { DirectoryListing } from '../src/services/fileTree.ts'
 import type { FeatureId } from './features.ts'
 import type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
+import type { HookCandidate, HookDraft, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 import type { RemoteStatus } from '../src/services/remote.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -44,6 +45,7 @@ export type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 export type { SkillSource } from './skills.ts'
 export type { McpScope, McpServerInput, McpServerSummary, McpTestResult, McpVarSummary } from '../src/services/mcp.ts'
 export type { McpTool } from '../src/services/mcpClient.ts'
+export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 export type { McpToolRef } from '../src/services/turnProgress.ts'
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
 
@@ -139,6 +141,15 @@ export const Channel = {
   REMOVE_MCP: 'mcp:remove',
   SET_MCP_ENABLED: 'mcp:set-enabled',
   TEST_MCP: 'mcp:test',
+  /** 훅 팝업 (이슈 #102 — `+` 메뉴 > 훅). 기능 `hooks` 가 켜져 있을 때만 걸려 있다. directory 는 지금 프로젝트(등록된 프로젝트만) */
+  LIST_HOOKS: 'hooks:list',
+  SAVE_HOOK: 'hooks:save',
+  REMOVE_HOOK: 'hooks:remove',
+  SET_HOOK_ENABLED: 'hooks:set-enabled',
+  TEST_HOOK: 'hooks:test',
+  HOOK_CANDIDATES: 'hooks:candidates',
+  IMPORT_HOOKS: 'hooks:import',
+  RECENT_HOOKS: 'hooks:recent',
   /** 화면 → 메인 (directory?) — 화면이 지금 보여 주는 프로젝트 (앱 MCP 서버의 화면 도구가 본다, 이슈 #51) */
   APP_MCP_VIEW: 'appMcp:view',
   /** 메인 → 화면 (directory, path, line?) — AI 가 open_file 을 불렀다 */
@@ -307,6 +318,22 @@ export interface LitecodeBridge {
   setMcpEnabled(name: string, enabled: boolean, directory: string): Promise<void>
   /** 저장하지 않고 붙어 본다 — 도구 목록 또는 사유 */
   testMcp(input: McpServerInput, directory?: string): Promise<McpTestResult>
+  /** `+` 메뉴의 훅 팝업 (ctx.hooks, 이슈 #102) — **기능 `hooks` 가 켜져 있을 때만 부른다** (꺼져 있으면 채널이 없다).
+   *  그 프로젝트에서 본 훅: 모든 프로젝트 것 먼저 → 이 프로젝트만 (도는 순서) */
+  listHooks(directory: string): Promise<HookRow[]>
+  /** 훅 하나를 넣거나 고친다 (draft.original 이 있으면 고침). 메인이 검증한다 — 틀리면 사유와 함께 거절. 다음 턴부터 돈다 */
+  saveHook(draft: HookDraft, directory: string): Promise<void>
+  removeHook(scope: HookScope, key: string, directory: string): Promise<void>
+  /** 그 프로젝트에서만 켜고 끈다 — 모든 프로젝트 훅도 */
+  setHookEnabled(key: string, enabled: boolean, directory: string): Promise<void>
+  /** 저장하지 않고 견본 입력으로 한 번 돌려 본다 — 대화에는 아무것도 남지 않는다 */
+  testHook(draft: HookDraft, directory: string): Promise<HookTestResult>
+  /** 프로젝트 폴더의 `.claude/settings.json`·`.claude/settings.local.json` 에서 찾은, 아직 가져오지 않은 훅 (읽기만 — 실행하지 않는다) */
+  hookCandidates(directory: string): Promise<HookCandidate[]>
+  /** 고른 후보(열쇠)만 "이 프로젝트만" 에 복사한다 — 가져온 수 */
+  importHooks(keys: string[], directory: string): Promise<number>
+  /** 그 프로젝트에서 돈 최근 실행 (오래된 것부터 — 앱을 끄면 사라진다) */
+  recentHooks(directory: string): Promise<HookRecent[]>
   /** 화면이 지금 보여 주는 프로젝트를 알린다 (없으면 undefined) — 앱 MCP 서버의 화면 도구(open_file·open_terminal)는 보고 있는 프로젝트에만 닿는다 */
   viewProject(directory?: string): Promise<void>
   /** AI 가 그 프로젝트의 파일을 열라고 했다 — path 는 프로젝트 기준 상대 경로(메인이 프로젝트 안의 파일임을 확인했다), line 은 1부터 */
