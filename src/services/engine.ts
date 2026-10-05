@@ -14,6 +14,7 @@ import type { Mode } from '../../shared/modes.ts'
 import { matchesTool } from '../../shared/hooks.ts'
 import { engineLimit } from '../../shared/outputLimit.ts'
 import { tr } from '../i18n.ts'
+import { removeAppPluginDirs } from './enginePlugins.ts'
 import './providers.ts'
 import type {} from './features.ts' // ctx.features·'features/changed' 타입
 import type {} from './settings.ts' // ctx.settings·'settings/changed' 타입
@@ -555,7 +556,8 @@ export function engineEnv(
     OPENCODE_DISABLE_EXTERNAL_SKILLS: '1', // .claude·.agents 스킬 탐색 전부 (설정의 skills.paths 는 그대로 읽힌다 — 코드상)
   }
   if (opts.blockProjectConfig) {
-    // 프로젝트 opencode.json·.opencode/ 를 안 읽는다 — 레거시는 그 안의 MCP 를 묻지 않고 띄우고 .opencode 에 npm 설치를 한다 (01w 3-1,
+    // **레거시가** 프로젝트 opencode.json·.opencode/ 를 안 읽는다 (신규 세대 런타임은 이 플래그를 안 본다 — 프로젝트 설정을 읽고 그 플러그인 파일을
+    // 실행한다. 먹는 스위치가 없어 ctx.llm 이 그런 폴더를 걸러 낸다: enginePlugins.ts, 01ah #101). 레거시는 그 안의 MCP 를 묻지 않고 띄우고 .opencode 에 npm 설치를 한다 (01w 3-1,
     // 사용자 결정 00_next_legacy 2). 대가로 프로젝트 AGENTS.md/CLAUDE.md 도 안 읽힌다 — 신규 세대 경로에서도 그렇다(trajectory.live 의
     // AGENTS.md 줄이 깨진다, 2026-10-02). 그래서 ctx.llm 이 AGENTS.md 를 prompt system 으로 넣는 L1 과 같이 켠다
     env['OPENCODE_DISABLE_PROJECT_CONFIG'] = '1'
@@ -622,6 +624,11 @@ export class EngineService extends Service {
   /** 지금 설정의 스킬 — 기능 레지스트리·설정 없이 띄운 엔진(서비스 실물 테스트)은 켬·Claude 꺼짐 */
   private skills(): EngineSkills {
     return { enabled: this.ctx.get('features')?.isEnabled('skills') ?? true, claude: this.ctx.get('settings')?.get().claudeSkills ?? false }
+  }
+
+  /** 앱 CONFIG_DIR — ctx.llm 이 엔진이 실행할 플러그인 파일을 찾을 때 이 폴더도 본다 (enginePlugins.ts, #101) */
+  get configDir(): string {
+    return this.opts.configDir
   }
 
   /** 도구 실행 전 판정을 받을 도구를 정한다 (이슈 #102 — toolGate). 매처는 도구 이름의 `|` 나열·정규식, 빈 글자는 전부. 떠 있는 서버의 게이트와
@@ -723,6 +730,7 @@ export class EngineService extends Service {
     })
 
     fs.mkdirSync(this.opts.configDir, { recursive: true })
+    removeAppPluginDirs(this.opts.configDir) // 여기 놓인 파일은 모든 프로젝트에서 엔진 안에 실린다 (#101, enginePlugins.ts)
     this.launchedWebTools = this.ctx.get('features')?.isEnabled('web') ?? false
     const skills = this.skills()
     this.launchedSkills = JSON.stringify(skills)

@@ -13,6 +13,7 @@ import { awaitCaller, findCaller, ToolCalls, type ToolCaller } from './toolCalls
 import { projectInstructions } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
+import { describeEnginePlugins, findEnginePlugins } from './enginePlugins.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
 import type { Attachment, Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, AttentionTarget, HistoryMessage, History } from '../../shared/contract.ts'
@@ -386,8 +387,9 @@ export class LlmService extends Service {
     onSession?: (sessionId: string) => Promise<void>,
     mode?: Mode,
   ): Promise<{ id: string; workdir: string } | { error: string }> {
-    const workdir = await realDirectory(directory)
-    if (!workdir) return { error: tr('error.noWorkdir', { dir: directory }) }
+    const folder = await this.engineFolder(directory)
+    if ('error' in folder) return { error: folder.error }
+    const { workdir } = folder
     const model = await this.waitForModel(conn, providerId, modelId, workdir)
     if (!model) return { error: tr('error.noModel', { provider: providerId, model: modelId }) }
     // 세션 폴더의 opencode.json 은 우리 provider 의 baseURL 까지 덮는다 — 그러면 프롬프트(와 프록시 토큰)가 그 주소로 간다 (01_probe Q4, 신규 세대).
@@ -570,8 +572,7 @@ export class LlmService extends Service {
   /** 그 폴더에서 모델에게 보이는 스킬 (이슈 #7). 레거시 GET /skill?directory= — 채팅이 레거시라 LLM 요청의 `<available_skills>` 와 같은 출처다.
    *  신규 세대 /api/skill 은 프로젝트 설정 차단 플래그를 안 따라 레거시가 안 싣는 스킬까지 준다(실측) — 쓰지 않는다. 숨긴(deny) 내장 스킬도 목록엔 남는다 */
   async listSkills(directory: string): Promise<EngineSkill[]> {
-    const workdir = await realDirectory(directory)
-    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
+    const workdir = await this.openFolder(directory)
     const conn = await this.ctx.engine.connection()
     const res = await fetch(`${conn.url}/skill?${at(workdir)}`, { headers: conn.headers })
     if (!res.ok) throw new Error(tr('error.engineRoute', { route: '/skill', status: res.status }))
@@ -580,14 +581,12 @@ export class LlmService extends Service {
 
   /** 그 폴더에서 셸 하나를 띄워 붙는다 (opencode pty — opencodePty.ts) */
   async openTerminal(directory: string, on: TerminalEvents): Promise<TerminalHandle> {
-    const workdir = await realDirectory(directory)
-    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
+    const workdir = await this.openFolder(directory)
     return openPty(await this.ctx.engine.connection(), workdir, on)
   }
 
   private async engineGet<T>(route: string, directory: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
-    const workdir = await realDirectory(directory)
-    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
+    const workdir = await this.openFolder(directory)
     const conn = await this.ctx.engine.connection()
     const query = new URLSearchParams({ 'location[directory]': workdir, ...params })
     const res = await fetch(`${conn.url}${route}?${query}`, { headers: conn.headers, signal })
@@ -600,8 +599,9 @@ export class LlmService extends Service {
    *  그대로 온다 — 이벤트 재생 대신 조립된 메시지 목록을 쓴다. 돌고 있는지는 GET /session/status (돌고 있는 세션만 실린다 — 01w).
    *  hidden 은 말풍선으로 안 그릴 엔진 메시지 id — addContext 로 넣은 `!` 카드 본문 (카드는 앱이 따로 그린다) */
   async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set()): Promise<History> {
-    const workdir = await realDirectory(directory)
-    if (!workdir) return { messages: [], missingFolder: true }
+    const folder = await this.engineFolder(directory)
+    if ('error' in folder) return folder.missing ? { messages: [], missingFolder: true } : { messages: [], error: folder.error }
+    const { workdir } = folder
     try {
       const conn = await this.ctx.engine.connection()
       const raw = await this.engineMessages(conn, sessionId, workdir)
@@ -627,12 +627,12 @@ export class LlmService extends Service {
 
   /** 레거시 기록 그대로 (오래된 것부터) — Trajectory 탭이 읽는다. workdir 는 realDirectory 를 거친 세션 폴더 (?directory= 에 쓴다) */
   async readMessages(workdir: string, sessionId: string): Promise<EngineMessage[]> {
-    return this.engineMessages(await this.ctx.engine.connection(), sessionId, workdir)
+    return this.engineMessages(await this.ctx.engine.connection(), sessionId, await this.openFolder(workdir))
   }
 
   /** 기록(readMessages)의 task 파트가 띄운 하위 작업(자식 세션)의 기록 — 자식 id → 메시지. Trajectory 탭이 하위 작업 묶음을 그린다 */
   async readSubtasks(workdir: string, raw: readonly EngineMessage[]): Promise<Map<string, EngineMessage[]>> {
-    return this.subtaskMessages(await this.ctx.engine.connection(), raw, workdir)
+    return this.subtaskMessages(await this.ctx.engine.connection(), raw, await this.openFolder(workdir))
   }
 
   /** 자식 세션 기록을 이어 읽는다 (#31 — 부모 task 파트 metadata.sessionId). 자식 하나를 못 읽어도 대화는 연다 — 그 하위 작업 줄이 비어 보일 뿐 */
@@ -702,11 +702,33 @@ export class LlmService extends Service {
     return (name) => mcpToolOf(name, this.mcpServers.get(workdir))
   }
 
-  /** 지금 엔진과 그 폴더(realpath) — 없는 폴더는 opencode 에 넘기지 않는다 (realDirectory) */
+  /** 지금 엔진과 그 폴더(realpath) — 넘기면 안 되는 폴더는 opencode 에 넘기지 않는다 (engineFolder) */
   private async legacyTarget(directory: string): Promise<{ conn: EngineConnection; workdir: string }> {
-    const workdir = await realDirectory(directory)
-    if (!workdir) throw new Error(tr('error.noWorkdir', { dir: directory }))
+    const workdir = await this.openFolder(directory)
     return { conn: await this.ctx.engine.connection(), workdir }
+  }
+
+  /** 엔진에 넘길 폴더(realpath) — **폴더가 엔진에 닿는 유일한 문이다.** 이 클래스에서 폴더를 받아 엔진을 부르는 메서드는 전부 여기(또는
+   *  openFolder)를 먼저 지난다. 넘기지 않는 폴더:
+   *  - 없는 폴더 (realDirectory — 그 경로가 엔진 재시작 전까지 500 이 된다)
+   *  - 엔진이 그 폴더에서 플러그인 파일을 실행할 폴더 (이슈 #101, enginePlugins.ts — 그 폴더의 첫 `/api/*` 호출·첫 턴에 계획 모드·승인과 무관하게
+   *    엔진 프로세스 안에서 돈다). 로더를 안 돌리는 레거시 호출(`/skill`·`/mcp`·기록 읽기)까지 같이 막는다 — 문을 하나로 둔다.
+   *    **매 호출 본다(캐시 없음)**: 턴 중에 AI 가 만든 파일은 엔진을 다시 띄운 뒤 그 폴더의 첫 호출에 실행된다 — 그 첫 호출도 여기를 지난다.
+   *    비용은 상위 폴더마다 readdir 한 번 + 있으면 작은 설정 파일 읽기 (실측 2026-10-05, 이 기계: 깊이 9 폴더에서 중앙값 0.75ms·최대 1.7ms, 깊이 4 에서 0.4ms)
+   *  이미 받아들여진 턴이 쥔 workdir 로 하는 호출(구독·승인 답·중지·상태)은 다시 보지 않는다 */
+  private async engineFolder(directory: string): Promise<{ workdir: string } | { error: string; missing?: true }> {
+    const workdir = await realDirectory(directory)
+    if (!workdir) return { error: tr('error.noWorkdir', { dir: directory }), missing: true }
+    const plugins = await findEnginePlugins(workdir, this.ctx.engine.configDir)
+    if (plugins.length > 0) return { error: tr('error.enginePlugins', { files: describeEnginePlugins(plugins) }) }
+    return { workdir }
+  }
+
+  /** engineFolder 의 던지는 판 */
+  private async openFolder(directory: string): Promise<string> {
+    const folder = await this.engineFolder(directory)
+    if ('error' in folder) throw new Error(folder.error)
+    return folder.workdir
   }
 
   /** 지운 대화의 본문을 DB 파일에서 걷어낸다 (ctx.engine.purgeDeleted). 답을 기다리는 턴이 있으면 다 끝난 뒤로 미룬다 */

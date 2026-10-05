@@ -463,6 +463,7 @@ export const en = {
   'error.attentionAnswer': 'The answer is empty or invalid',
   'error.attentionReply': 'Could not send the answer ({status})',
   'error.noWorkdir': 'Working directory not found: {dir}',
+  'error.enginePlugins': 'The AI engine cannot be used with this folder — these files would run inside the engine without asking: {files}. Remove them or open another folder',
   'error.noModel': 'Model {provider}/{model} not found in opencode',
   'error.baseUrlOverridden': "This project's opencode.json changes the provider address ({url}) — not sent, because the conversation could go to that address",
   'error.contextBusy': 'Cannot add to the context while waiting for a reply',
