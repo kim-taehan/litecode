@@ -139,15 +139,15 @@ describe('FeaturesService', () => {
     expect(channels()).toEqual(ALL)
   })
 
-  // 사용자 결정 2026-10-03 — 입력 트리거(@ · / · !)·!명령 실행·스킬·MCP 는 필수, 웹 도구는 늘 꺼짐
-  it('고정된 기능은 저장된 값과 무관하다 — 필수는 꺼도 켜져 있고, 웹 도구는 켜도 꺼져 있다', async () => {
+  // 사용자 결정 2026-10-03 — 입력 트리거(@ · / · !)·!명령 실행·스킬·MCP 는 필수. 웹 가져오기는 고르는 기능(기본 꺼짐, #103) — 묶음은 없다
+  it('고정된 기능은 저장된 값과 무관하다 — 필수는 꺼도 켜져 있다. 웹 가져오기는 켜면 켜진다(묶음 없이 목록만)', async () => {
     const { settings, features, seen } = await start()
     settings.set({ features: { at: false, shell: false, skills: false, mcp: false, web: true } })
     await features.idle()
     expect(channels()).toEqual(ALL)
-    expect(features.enabled()).toEqual(DEFAULT_ON)
-    expect(features.isEnabled('web')).toBe(false)
-    expect(seen).toHaveLength(1)
+    expect(features.isEnabled('web')).toBe(true)
+    expect(features.enabled().filter((feature) => feature !== 'web')).toEqual(DEFAULT_ON)
+    expect(seen).toHaveLength(2)
   })
 
   it('끈 값은 파일에 남아 다시 띄워도 꺼진 채로 뜬다', async () => {
@@ -191,14 +191,15 @@ describe('FeaturesService', () => {
 
 describe('featureOn', () => {
   it('고정된 기능은 고정 값, 고르는 기능은 없는 키면 기본값(알림만 꺼짐)', () => {
-    expect(featureOn({ web: true }, 'web')).toBe(false)
+    expect(featureOn(undefined, 'web')).toBe(false)
+    expect(featureOn({ web: true }, 'web')).toBe(true)
     expect(featureOn({ at: false }, 'at')).toBe(true)
     expect(featureOn({ shell: false }, 'bang')).toBe(true)
     expect(featureOn(undefined, 'notifications')).toBe(false)
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'remote', 'appMcp'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'appMcp'])
     expect(featureOn(undefined, 'remote')).toBe(false)
     expect(featureOn({ remote: true }, 'remote')).toBe(true)
   })
