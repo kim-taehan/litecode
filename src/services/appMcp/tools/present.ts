@@ -1,7 +1,7 @@
 import type { Context } from 'cordis'
 import fs from 'node:fs/promises'
-import path from 'node:path'
 import { projectFile } from '../../fileMentions.ts'
+import { insideOf } from '../../projectPath.ts'
 import type { AppMcpTool } from '../rpc.ts'
 import '../../appMcp.ts'
 
@@ -33,7 +33,7 @@ export async function presentedPaths(directory: string, args: Record<string, unk
       continue
     }
     const file = await projectFile(directory, asked.trim())
-    if (file) accepted.push(path.relative(root, file).split(path.sep).join('/'))
+    if (file) accepted.push(insideOf(root, file)!) // projectFile 이 폴더 안의 파일만 준다
     else rejected.push(`${asked}: ${NOT_A_FILE}`)
   }
   if (rejected.length > 0) {

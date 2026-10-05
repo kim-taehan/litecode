@@ -4,7 +4,7 @@ import path from 'node:path'
 // userData 의 JSON 파일 읽기 — 깨진 파일을 "없음" 으로 읽으면 다음 쓰기가 원본을 덮어 되살릴 길이 없어진다.
 // 그래서 못 읽는 내용(JSON 이 아니다 · 맨 위 모양이 다르다)은 옆에 `<이름>.corrupt-<시각>` 으로 옮겨 두고 없는 것처럼 진행한다.
 // 파일이 없는 것(첫 실행)은 그냥 undefined. 읽기 자체가 실패하면(권한 등) 옮기지 않는다 — 내용이 깨진 것이 아니다.
-// 쓰기는 각 서비스가 이미 임시 파일 + rename 으로 한다 (형식·권한이 서비스마다 달라 그대로 둔다)
+// 쓰기도 임시 파일 + rename 이다 (writeJsonFileSync). providers·mcp 는 아직 자기 쓰기를 쓴다 (mcp 는 권한 0600 을 건다)
 
 export type JsonShape = 'object' | 'array'
 
@@ -70,10 +70,10 @@ export async function readJsonFile(file: string, shape: JsonShape, now: () => Da
   return undefined
 }
 
-/** 임시 파일에 쓰고 rename — 쓰다 죽어도 이전 파일이 남는다 */
-export function writeJsonFileSync(file: string, value: unknown): void {
+/** 임시 파일에 쓰고 rename — 쓰다 죽어도 이전 파일이 남는다. pretty: 사람이 열어 고치는 파일 — 들여 쓰고 줄바꿈으로 끝낸다 */
+export function writeJsonFileSync(file: string, value: unknown, { pretty = false }: { pretty?: boolean } = {}): void {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const temp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(temp, JSON.stringify(value))
+  fs.writeFileSync(temp, pretty ? `${JSON.stringify(value, null, 2)}\n` : JSON.stringify(value))
   fs.renameSync(temp, file)
 }

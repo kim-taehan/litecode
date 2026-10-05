@@ -26,8 +26,9 @@
 
 import path from 'node:path'
 import { toolDiffs } from './toolDiffs.ts'
+import { insideOf } from './projectPath.ts'
 import { skillSource } from '../../shared/skills.ts'
-import type { TurnItem, Subtask, ToolSkill, McpToolRef, TodoItem, PresentedFile } from '../../shared/contract.ts'
+import type { TurnItem, Subtask, McpToolRef, TodoItem, PresentedFile } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { TurnItem, Subtask, ToolSkill, McpToolRef } from '../../shared/contract.ts'
@@ -457,8 +458,7 @@ function presentedFiles(input: unknown, root: string): PresentedFile[] | undefin
 /** 세션 폴더 기준 상대 경로 (`/` 구분, `./`·`..` 를 푼다). 글자로는 폴더 밖이면(링크를 거친 절대 경로 등) 받은 그대로 */
 function projectRelative(root: string, file: string): string {
   if (!root) return file
-  const rel = path.relative(root, path.resolve(root, file))
-  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : file
+  return insideOf(root, path.resolve(root, file)) ?? file
 }
 
 /** 도구 줄의 한 줄 요약 — bash 는 description(필수 인자, 01g), 없으면 command. 그 밖의 도구는 흔한 인자 하나 */

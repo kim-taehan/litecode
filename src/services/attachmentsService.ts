@@ -96,8 +96,10 @@ export class AttachmentsService extends Service {
     return { picked, rejected: [...new Set([...dropped.rejected, ...fromBytes.rejected])] }
   }
 
-  /** 칩을 뺐다 — 그 경로들 중 이 서비스가 만든 임시 파일만 지운다 (고른·놓은 파일은 건드리지 않는다) */
+  /** 칩을 뺐다 — 그 경로들을 보내기 허용 목록에서 빼고(ctx.chat), 이 서비스가 만든 임시 파일만 지운다 (고른·놓은 파일은 건드리지 않는다) */
   async discard(paths: unknown): Promise<void> {
-    await this.pasted.discard(Array.isArray(paths) ? paths.filter((file): file is string => typeof file === 'string') : [])
+    const files = Array.isArray(paths) ? paths.filter((file): file is string => typeof file === 'string') : []
+    this.ctx.chat.revokeAttachments(files)
+    await this.pasted.discard(files)
   }
 }

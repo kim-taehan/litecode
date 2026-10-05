@@ -36,6 +36,15 @@ describe('jsonFile — userData JSON 읽기', () => {
     expect(fs.readdirSync(dir)).toEqual(['a.json'])
   })
 
+  it('쓰기: 기본은 한 줄, pretty 면 들여 쓰고 줄바꿈으로 끝낸다 (사람이 고치는 파일)', () => {
+    const file = path.join(folder(), 'nested', 'b.json')
+    writeJsonFileSync(file, { a: 1 })
+    expect(fs.readFileSync(file, 'utf8')).toBe('{"a":1}')
+    writeJsonFileSync(file, { a: 1 }, { pretty: true })
+    expect(fs.readFileSync(file, 'utf8')).toBe('{\n  "a": 1\n}\n')
+    expect(fs.readdirSync(path.dirname(file))).toEqual(['b.json'])
+  })
+
   it.each([
     ['JSON 이 아니다', '{ 깨짐', 'object' as const],
     ['빈 파일(쓰다 죽음)', '', 'object' as const],

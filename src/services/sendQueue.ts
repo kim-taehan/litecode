@@ -2,7 +2,7 @@ import { fromPerson as personOrigin, type ChatOrigin, type QueuedSend } from '..
 
 // 답하는 중에 보낸 메시지 — 대화별 대기열에 쌓고, 그 대화의 턴이 끝나는 순간 줄바꿈으로 이어 **한 번에** 보낸다 (closed-code
 // useSendQueue 방식, 사용자 2026-10-02). 엔진에는 늘 한 턴씩만 간다. opencode 의 delivery(queue) 는 쓰지 않는다.
-// 원래 화면(renderer/useSendQueue.ts)이 쥐던 것을 메인의 ctx.chat 이 쥔다 (이슈 #52) — 화면이 둘이어도(모바일) 대기열은 하나다.
+// 원래 화면(renderer/useSendQueue.ts — 지금은 없는 파일)이 쥐던 것을 메인의 ctx.chat 이 쥔다 (이슈 #52) — 화면이 둘이어도(모바일) 대기열은 하나다.
 //
 // - **대화별**이다(closed-code 는 프로젝트별 — litecode 는 대화마다 엔진 세션이 따로라 대화별이 맞다)
 // - 앱을 끄면 사라진다(메모리)

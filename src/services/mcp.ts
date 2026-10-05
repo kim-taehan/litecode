@@ -15,7 +15,7 @@ import './llm.ts'
 // opencode 와의 대화(상태·추가·끊기)는 ctx.llm 의 mcp* 를 거친다 (엔진 경계 — 여기서는 opencode 주소·이벤트를 모른다).
 //
 // 출처 셋 (사용자 결정 2026-10-02, _workspace/00_next_mcp.md):
-// - 앱: 설정 > MCP 에서 만든 서버. 정의는 userData mcp.json, 비밀 값(로컬 env·원격 헤더 중 "비밀" 로 표시한 것)은 safeStorage 로 mcp-secrets.json
+// - 앱: `+` 메뉴의 MCP 팝업(#43)에서 만든 서버. 정의는 userData mcp.json, 비밀 값(로컬 env·원격 헤더 중 "비밀" 로 표시한 것)은 safeStorage 로 mcp-secrets.json
 //   (providers 키와 같은 방식, 화면엔 설정 여부만). 비밀이 저장된 서버는 명령·주소를 바꾸면 비밀을 다시 넣어야 한다 (저장된 비밀이 다른 곳으로 안 가게)
 // - 프로젝트: 그 폴더의 `.mcp.json`(Claude Code 모양)·`opencode.json(c)`·`.opencode/opencode.json(c)` 의 mcp — **자동 실행**(사용자 결정, 그 폴더 코드를
 //   실행하는 위험을 받아들임). OPENCODE_DISABLE_PROJECT_CONFIG=1 은 그대로라(프로젝트 provider·플러그인 막기) 앱이 mcp 만 읽어 붙인다.

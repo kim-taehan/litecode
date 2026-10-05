@@ -16,7 +16,7 @@ import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { describeEnginePlugins, findEnginePlugins } from './enginePlugins.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
-import type { Attachment, Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, AttentionTarget, HistoryMessage, History } from '../../shared/contract.ts'
+import type { Attachment, Attention, AttentionSubtask, AttentionQuestion, AttentionAnswer, AttentionTarget, HistoryMessage, History } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
@@ -474,7 +474,6 @@ export class LlmService extends Service {
       this.busy.add(id) // addContext 가 이 세션을 막는다 (prompt 보내기 전부터 — 그 사이에 끼어들지 않게)
       admittedTurn.busy = id
       const declined = new Set<string>()
-      this.declined.set(id, declined)
       const userMessageId = messageId ?? this.newMessageId()
       const system = [await projectInstructions(workdir), context].filter(Boolean).join('\n\n')
       // 레거시 전환 전에 쌓인 대화면 옛 글을 이 입력 앞에 한 번 넣는다 (migrate.ts, #21). 새로 만든 세션은 옛 기록이 없다
@@ -486,6 +485,7 @@ export class LlmService extends Service {
       const calls = new ToolCalls()
       const live = { tracker, workdir, sessionId: id, calls }
       this.running.add(live)
+      this.declined.set(id, declined) // 아래 try 의 finally 가 거둔다 — 그 앞(지시문 읽기·옛 글 넣기)이 던져도 남지 않게 여기서 적는다
       const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention, calls, mode)
       const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.signal, stop, calls)
       try {

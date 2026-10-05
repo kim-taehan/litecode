@@ -28,9 +28,9 @@ afterEach(async () => {
 })
 
 describe('SettingsService', () => {
-  it('파일이 없으면 기본값 — 영어·라이트·14px·코딩 뷰 켬 (사용자 결정 2026-10-01)', async () => {
+  it('파일이 없으면 기본값 — 영어·라이트·14px (사용자 결정 2026-10-01)', async () => {
     const { settings } = await service({ file })
-    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
+    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, defaultMode: 'build' })
   })
 
   it('넘긴 기본값이 이긴다 (실물 테스트의 한국어 고정)', async () => {
@@ -42,12 +42,12 @@ describe('SettingsService', () => {
     const { ctx, settings } = await service({ file })
     const seen: unknown[] = []
     ctx.on('settings/changed', (next) => void seen.push(next))
-    expect(settings.set({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })
-    expect(seen).toEqual([{ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' }])
-    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })
+    expect(settings.set({ language: 'ko', appearance: 'dark', fontSize: 16, defaultMode: 'plan' })).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, defaultMode: 'plan' })
+    expect(seen).toEqual([{ language: 'ko', appearance: 'dark', fontSize: 16, defaultMode: 'plan' }])
+    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, defaultMode: 'plan' })
 
     const again = await service({ file })
-    expect(again.settings.get()).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' })
+    expect(again.settings.get()).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, defaultMode: 'plan' })
   })
 
   it('잘못된 값은 저장하지 않고 거절한다 — 글자 크기는 12~17 정수', async () => {
@@ -57,17 +57,28 @@ describe('SettingsService', () => {
     expect(() => settings.set({ fontSize: 13.5 })).toThrow()
     expect(() => settings.set({ language: 'fr' as never })).toThrow()
     expect(() => settings.set({ appearance: 'blue' as never })).toThrow()
-    expect(() => settings.set({ codingView: 'yes' as never })).toThrow()
     expect(() => settings.set({ defaultMode: 'yolo' as never })).toThrow()
-    expect(() => settings.set({ notifications: 'on' as never })).toThrow()
-    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
+    expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, defaultMode: 'build' })
     await expect(fs.stat(file)).rejects.toThrow()
   })
 
   it('손으로 고친 파일의 잘못된 값·모르는 키는 그 값만 기본값으로 돌린다', async () => {
     await fs.writeFile(file, JSON.stringify({ language: 'ko', appearance: 'purple', fontSize: 99, extra: 1 }))
     const { settings } = await service({ file })
-    expect(settings.get()).toEqual({ language: 'ko', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
+    expect(settings.get()).toEqual({ language: 'ko', appearance: 'light', fontSize: 14, defaultMode: 'build' })
+  })
+
+  // 전수 검사 #126: 없앤 스위치(코딩 뷰·알림)의 필드를 지웠다 — 그 키가 남은 옛 파일도 그대로 읽힌다
+  it('옛 파일에 남은 codingView·notifications 는 무시하고 나머지는 그대로 읽는다 — 다음 저장 때 파일에서도 빠진다', async () => {
+    await fs.writeFile(file, JSON.stringify({ language: 'ko', appearance: 'dark', fontSize: 16, codingView: false, notifications: false, defaultMode: 'plan' }))
+    const { settings } = await service({ file })
+    expect(settings.get()).toEqual({ language: 'ko', appearance: 'dark', fontSize: 16, defaultMode: 'plan' })
+    expect((await fs.readdir(path.dirname(file))).filter((name) => name.includes('.corrupt-'))).toEqual([])
+    expect(() => settings.set({ codingView: true } as never)).toThrow()
+    settings.set({ fontSize: 15 })
+    const raw = await fs.readFile(file, 'utf8')
+    expect(JSON.parse(raw)).toEqual({ language: 'ko', appearance: 'dark', fontSize: 15, defaultMode: 'plan' })
+    expect(raw).toBe(`${JSON.stringify(JSON.parse(raw), null, 2)}\n`) // 사람이 열어 고치는 파일 — 들여 쓴다
   })
 
   it('손상된 파일이면 기본값으로 뜬다', async () => {
@@ -91,7 +102,7 @@ describe('SettingsService', () => {
   it('설정 파일 열기 — 없으면 지금 값으로 만들어 경로를 준다', async () => {
     const { settings } = await service({ file })
     expect(await settings.ensureFile()).toBe(file)
-    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'en', appearance: 'light', fontSize: 14, codingView: true, notifications: true, defaultMode: 'build' })
+    expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ language: 'en', appearance: 'light', fontSize: 14, defaultMode: 'build' })
   })
 
   it('메인 프로세스 문구는 설정 언어를 따른다 — 올라올 때와 바꿀 때', async () => {

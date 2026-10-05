@@ -437,6 +437,29 @@ describe('ChatService — 대기열', () => {
   })
 })
 
+describe('ChatService — 지워진 대화의 도는 턴 (전수 검사 #126)', () => {
+  it('도는 턴의 대화가 지워지면 그 턴을 멈춘다 — "중단됨" 으로 끝나고 다시 저장되지 않는다', async () => {
+    const { chat, sessions, turn, ended, stored } = await start()
+    await chat.send('c1', input('처음'))
+    await turn(1)
+    await sessions.remove('c1')
+    expect((await ended(1)).outcome).toBe('interrupted')
+    expect(chat.running()).toBe(0)
+    expect(await stored('c1')).toBeUndefined()
+  })
+
+  it('다른 대화의 턴은 그대로 돈다', async () => {
+    const { chat, sessions, turn, of } = await start()
+    await chat.send('c1', input('하나'))
+    await chat.send('c2', input('둘'))
+    await turn(2)
+    await sessions.remove('c1')
+    await until(() => of('turn.ended').length >= 1)
+    expect(of('turn.ended').map((event) => event.cid)).toEqual(['c1'])
+    expect(chat.turnOf('c2')).toBeDefined()
+  })
+})
+
 describe('ChatService — 답변 중지 (이슈 #3)', () => {
   it('멈추면 그 턴은 "중단됨" 으로 끝나고, 대기열은 보내지 않고 붙잡는다 — 되돌리면(takeQueue) 풀리고 다음 보내기는 바로 간다', async () => {
     const { chat, llm, turn, ended, of } = await start()
@@ -548,6 +571,47 @@ describe('ChatService — 첨부 (이슈 #44)', () => {
     expect(second.prompt.indexOf('a.md')).toBeGreaterThan(-1)
     expect(second.prompt.indexOf('a.md')).toBeLessThan(second.prompt.indexOf('b.md'))
     expect(of('turn.started')[1]!.message).toMatchObject({ text: '둘 다 봐', attachments: [{ name: 'a.md' }, { name: 'b.md' }] })
+  })
+})
+
+describe('ChatService — 첨부 허용 목록에서 빼기 (전수 검사 #126)', () => {
+  const chip = (file: string) => ({ kind: 'file' as const, path: file, name: path.basename(file), size: 1 })
+
+  it('보낸 첨부는 허용 목록에서 빠진다 — 다시 고르지 않고 같은 경로를 실어 보내면 읽지 않는다', async () => {
+    const { chat, llm, turn, ended } = await start()
+    const file = path.join(root, 'once.md')
+    await fs.writeFile(file, 'A')
+    chat.allowAttachments([file])
+    await chat.send('c1', input('봐 줘', { project: root, attachments: [chip(file)] }))
+    ;(await turn(1)).finish()
+    await ended(1)
+    await chat.send('c1', input('또', { project: root, attachments: [chip(file)] }))
+    expect(await ended(2)).toMatchObject({ outcome: 'failed', message: { error: tr('attach.notPicked') } })
+    expect(llm.calls).toHaveLength(1)
+  })
+
+  it('칩을 뺀 경로(revokeAttachments)는 읽지 않는다', async () => {
+    const { chat, llm, ended } = await start()
+    const file = path.join(root, 'dropped.md')
+    await fs.writeFile(file, 'A')
+    chat.allowAttachments([file])
+    chat.revokeAttachments([file, path.join(root, 'never-picked.md')])
+    await chat.send('c1', input('봐 줘', { project: root, attachments: [chip(file)] }))
+    expect(await ended(1)).toMatchObject({ outcome: 'failed', message: { error: tr('attach.notPicked') } })
+    expect(llm.calls).toHaveLength(0)
+  })
+
+  it('같은 파일을 두 번 골랐으면(두 대화의 입력창) 한 번 보내도 다른 쪽은 그대로 보낼 수 있다', async () => {
+    const { chat, llm, turn } = await start()
+    const file = path.join(root, 'twice.md')
+    await fs.writeFile(file, 'A')
+    chat.allowAttachments([file])
+    chat.allowAttachments([file])
+    await chat.send('c1', input('하나', { project: root, attachments: [chip(file)] }))
+    await turn(1)
+    await chat.send('c2', input('둘', { project: root, attachments: [chip(file)] }))
+    await turn(2)
+    expect(llm.calls.map((call) => call.prompt.includes('twice.md'))).toEqual([true, true])
   })
 })
 

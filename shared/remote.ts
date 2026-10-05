@@ -3,7 +3,7 @@
 // 양쪽이 이 파일 하나를 import 한다 — 계약이 바뀌면 앱 빌드가 깨진다. 이 계약을 말하는 서버는 ctx.remote 와 개발용 mobile/dev/fake-desktop.mts 다.
 // Node·React Native 어느 쪽 API 도 쓰지 않는다 (타입 + 경로 문자열 + 상수).
 
-import type { Attention, AttentionAnswer, Conversation, ConversationStatus, History, HistoryMessage, NoticeState, Project, TurnItem, TurnUsage } from './contract.ts'
+import type { Attention, Conversation, ConversationStatus, History, HistoryMessage, NoticeState, Project, TurnItem, TurnUsage } from './contract.ts'
 import type { Mode } from './modes.ts'
 
 /** 경로의 `/v1` 과 hello.apiVersion */
@@ -119,10 +119,7 @@ export interface QueueTakeResponse {
   text: string
 }
 
-/** POST /v1/attention/{sessionId}/{requestId} */
-export interface AttentionReplyRequest {
-  answer: AttentionAnswer
-}
+/** POST /v1/attention/{sessionId}/{requestId} — 본문은 { answer: AttentionAnswer } */
 export interface AttentionReplyResponse {
   /** elsewhere: 다른 기기가 먼저 답했다 (오류가 아니다) */
   handled: 'ok' | 'elsewhere'
@@ -134,11 +131,6 @@ export interface RemoteModel {
   providerName: string
   modelId: string
   displayName: string
-}
-
-/** 2xx 가 아닌 응답의 본문 */
-export interface RemoteErrorBody {
-  error: string
 }
 
 // ── SSE (GET /v1/events?run=&after=) ──────────────────────────────────────────────────────────────

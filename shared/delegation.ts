@@ -49,11 +49,6 @@ export function originOfConversation(conversationId: string): ChatOrigin {
   return `session:${conversationId}`
 }
 
-/** 출처 → 보낸 대화 id (사람이 보낸 것이면 undefined) */
-export function senderOf(origin: string | undefined): string | undefined {
-  return origin?.startsWith('session:') ? origin.slice('session:'.length) : undefined
-}
-
 function attribute(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replace(/\s+/g, ' ')
 }

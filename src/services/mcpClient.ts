@@ -5,7 +5,7 @@ import { tr } from '../i18n.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
 
 // 앱이 MCP 서버에 직접 붙어 도구 목록만 묻는 최소 클라이언트 (이슈 #28). opencode 에는 MCP 도구 목록 API 가 없다 — /experimental/tool 에도
-// MCP 도구는 안 나온다(#28 실측, 1.18.18). 그래서 설정 > MCP 의 "도구 N"·도구 이름·설명과 "연결 테스트"(저장 없이)는 앱이 잠깐 붙어 본다:
+// MCP 도구는 안 나온다(#28 실측, 1.18.18). 그래서 `+` 메뉴 MCP 팝업(#43)의 "도구 N"·도구 이름·설명과 "연결 테스트"(저장 없이)는 앱이 잠깐 붙어 본다:
 // initialize → notifications/initialized → tools/list(커서 끝까지) → 끊는다. 대화에서 실제로 부르는 것은 opencode 다.
 // - 로컬(stdio): 줄 단위 JSON-RPC. env 는 dsh 식으로 걸러 낸다 — OPENCODE_*·LITECODE_*·KEY/PASSWORD/SECRET/TOKEN 이름을 지우고 정의의 env 를 얹는다
 // - 원격(streamable HTTP): POST 하나에 JSON 또는 SSE 로 답이 온다. Accept 에 둘 다 있어야 하고 세션 id 는 mcp-session-id 헤더 (closed-code
