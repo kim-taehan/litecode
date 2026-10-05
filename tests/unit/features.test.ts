@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SettingsService } from '../../src/services/settings.ts'
 import { FeaturesService, type FeatureDefinition } from '../../src/services/features.ts'
-import { CHOOSABLE_FEATURES, FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
+import { CHOOSABLE_FEATURES, FEATURE_GROUPS, FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
 
 // ctx.features — 기능 묶음을 settings 값으로 올리고 내린다 (이슈 #8). IPC 는 가짜 등록소로 흉내 낸다: ipcMain.handle 처럼
 // 같은 채널을 두 번 걸면 던진다 — 끄고 바로 켤 때 옛 핸들러가 다 걷힌 뒤 새로 거는지 본다.
@@ -223,5 +223,13 @@ describe('settings.features', () => {
     expect(settings.get().language).toBe('ko')
     expect(settings.get().features).toBeUndefined()
     expect(features.enabled()).toEqual(DEFAULT_ON)
+  })
+})
+
+describe('FEATURE_GROUPS — 설정 > 기능의 중분류', () => {
+  it('고르는 기능을 빠짐없이 한 번씩 담는다 — 새 기능을 더하면 묶음에도 넣어야 한다', () => {
+    const grouped = FEATURE_GROUPS.flatMap((group) => group.features)
+    expect([...grouped].sort()).toEqual([...CHOOSABLE_FEATURES].sort())
+    expect(new Set(grouped).size).toBe(grouped.length)
   })
 })

@@ -616,6 +616,30 @@
   list-style: none;
 }
 
+.feature-group + .feature-group {
+  margin-top: 4px;
+}
+
+.feature-group__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.feature-group__title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.feature-group__hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .feature-card {
   display: flex;
   flex-direction: column;
@@ -641,7 +665,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 20px;
   font-weight: 500;
   color: var(--text);
