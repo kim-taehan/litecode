@@ -12,8 +12,8 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "npm run typecheck && npm run build:renderer && npm run build:electron",
-    "dist:mac": "node scripts/fetch-opencode.mjs --check mac-arm64 mac-x64 && npm run build && electron-builder --mac",
-    "dist:win": "node scripts/fetch-opencode.mjs --check win-x64 && npm run build && electron-builder --win",
+    "dist:mac": "node scripts/fetch-opencode.mjs --check mac-arm64 mac-x64 && node scripts/fetch-speech.mjs --check mac-arm64 mac-x64 && npm run build && electron-builder --mac",
+    "dist:win": "node scripts/fetch-opencode.mjs --check win-x64 && node scripts/fetch-speech.mjs --check win-x64 && npm run build && electron-builder --win",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.ts",
     "test:dist": "vitest run --config vitest.dist.config.ts"

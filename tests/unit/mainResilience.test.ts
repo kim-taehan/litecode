@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { allowPermission, missingServices, reloadGuard, withDeadline } from '../../electron/resilience.ts'
+import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from '../../electron/resilience.ts'
 import { restorableBounds } from '../../electron/windowBounds.ts'
 import { readJsonFile, readJsonFileSync, writeJsonFileSync } from '../../src/services/jsonFile.ts'
 import { captureConsole, createLogFile, redactSecrets } from '../../src/services/logFile.ts'
@@ -241,6 +241,62 @@ describe('권한 요청 — 기본 거부', () => {
     for (const permission of ['clipboard-read', 'media', 'geolocation', 'notifications', 'midi', 'openExternal', 'fullscreen', 'display-capture', 'unknown']) {
       expect(allowPermission(permission, true), permission).toBe(false)
     }
+  })
+
+  // 음성 입력(기능 voice) — 요청·검사 핸들러에 오는 모양은 실측 _workspace/01ag_voice_input.md §2.3
+  it('마이크는 음성 입력이 켜져 있고 · 맨 위 프레임이고 · 달라는 것이 정확히 소리 하나일 때만', () => {
+    const voice = true
+    expect(allowPermission('media', true, { voice, mediaTypes: ['audio'] })).toBe(true)
+    const denied: [string, boolean, { voice: boolean; mediaTypes?: string[] } | undefined][] = [
+      ['media', true, { voice: false, mediaTypes: ['audio'] }], // 기능이 꺼져 있다
+      ['media', false, { voice, mediaTypes: ['audio'] }], // 미리보기 iframe
+      ['media', true, { voice, mediaTypes: ['video'] }], // 카메라
+      ['media', true, { voice, mediaTypes: ['audio', 'video'] }], // 카메라가 끼었다
+      ['media', true, { voice, mediaTypes: ['audio', 'audio'] }],
+      ['media', true, { voice, mediaTypes: [] }],
+      ['media', true, { voice }], // 종류를 모른다
+      ['media', true, undefined],
+      ['display-capture', true, { voice, mediaTypes: ['audio'] }],
+      ['speaker-selection', true, { voice, mediaTypes: ['audio'] }],
+      ['mediaKeySystem', true, { voice, mediaTypes: ['audio'] }],
+    ]
+    for (const [permission, isMainFrame, media] of denied) expect(allowPermission(permission, isMainFrame, media), JSON.stringify([permission, isMainFrame, media])).toBe(false)
+    // 기능이 켜져 있어도 나머지 규칙은 그대로다
+    expect(allowPermission('clipboard-sanitized-write', true, { voice })).toBe(true)
+    expect(allowPermission('clipboard-read', true, { voice, mediaTypes: ['audio'] })).toBe(false)
+  })
+
+  it('검사 핸들러 — 종류가 audio 로 온 검사만 허용하고, getUserMedia 직전처럼 종류 없이 온 검사는 거절한다 (거절해도 요청 핸들러가 불린다 — 실측)', () => {
+    /** main.ts 가 검사 핸들러의 details.mediaType(하나, 없을 수 있다)을 넘기는 방식 */
+    const check = (mediaType: string | undefined, voice = true): boolean => allowPermission('media', true, { voice, mediaTypes: mediaType ? [mediaType] : undefined })
+    expect(check('audio')).toBe(true)
+    expect(check(undefined)).toBe(false)
+    expect(check('video')).toBe(false)
+    expect(check('unknown')).toBe(false)
+    expect(check('audio', false)).toBe(false)
+  })
+
+  it('요청 핸들러 — macOS 는 OS 마이크 허락까지 받아야 허용이고, 규칙에서 거절된 요청은 OS 에 묻지도 않는다', async () => {
+    const asked: string[] = []
+    const os = (platform: string, answer: boolean | Error) => ({
+      platform,
+      askMicrophone: async () => {
+        asked.push(platform)
+        if (answer instanceof Error) throw answer
+        return answer
+      },
+    })
+    const mic = { voice: true, mediaTypes: ['audio'] }
+    expect(await grantPermission('media', true, mic, os('darwin', true))).toBe(true)
+    expect(await grantPermission('media', true, mic, os('darwin', false))).toBe(false) // 시스템 설정에서 거절됐다
+    expect(await grantPermission('media', true, mic, os('darwin', new Error('tcc')))).toBe(false)
+    expect(asked).toEqual(['darwin', 'darwin', 'darwin'])
+    expect(await grantPermission('media', true, mic, os('win32', false))).toBe(true) // Windows 엔 묻는 창이 없다
+    expect(await grantPermission('media', true, { voice: false, mediaTypes: ['audio'] }, os('darwin', true))).toBe(false)
+    expect(await grantPermission('media', false, mic, os('darwin', true))).toBe(false)
+    expect(await grantPermission('media', true, { voice: true, mediaTypes: ['audio', 'video'] }, os('darwin', true))).toBe(false)
+    expect(await grantPermission('clipboard-sanitized-write', true, { voice: false }, os('darwin', false))).toBe(true) // 복사는 마이크와 무관
+    expect(asked).toEqual(['darwin', 'darwin', 'darwin'])
   })
 })
 

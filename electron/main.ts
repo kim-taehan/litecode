@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, screen, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, screen, session, shell, systemPreferences } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -51,7 +51,10 @@ import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
-import { allowPermission, missingServices, reloadGuard, withDeadline } from './resilience.ts'
+import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from './resilience.ts'
+import { SpeechService, speechReply } from '../src/services/speech.ts'
+import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
+import { systemSpeechHost } from './speechHost.ts'
 import { restorableBounds } from './windowBounds.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -470,6 +473,22 @@ function remoteBridge(ctx: Context): void {
 }
 remoteBridge.inject = ['remote']
 
+// 음성 입력 (ctx.speech) — 화면이 녹음을 16kHz PCM16 으로 줄여 보내면 글로 돌려준다. 모양·길이는 서비스가 다시 본다. 취소는 보내 둔 것 전부
+function speechBridge(ctx: Context): void {
+  const flights = new Set<AbortController>()
+  handle(ctx, Channel.SPEECH_STATUS, async () => ctx.speech.status())
+  handle(ctx, Channel.SPEECH_TRANSCRIBE, async (_event, input: { pcm?: unknown; language?: unknown } | undefined) => {
+    const flight = new AbortController()
+    flights.add(flight)
+    return speechReply(ctx.speech.transcribe(input?.pcm, { language: input?.language }, flight.signal)).finally(() => flights.delete(flight))
+  })
+  handle(ctx, Channel.SPEECH_CANCEL, async () => {
+    for (const flight of flights) flight.abort()
+  })
+  ctx.on('speech/changed', (status) => broadcast(Channel.SPEECH_CHANGED, status))
+}
+speechBridge.inject = ['speech']
+
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게 */
 const features: FeatureDefinition[] = [
   { id: 'at', plugin: AtTrigger },
@@ -563,6 +582,18 @@ const features: FeatureDefinition[] = [
     plugin: (ctx) => {
       ctx.plugin(HooksService, { file: path.join(userData, 'hooks.json'), projectsFile: path.join(userData, 'hooks-projects.json') })
       ctx.plugin(hooksBridge(handle))
+    },
+  },
+  {
+    // 음성 입력 — 기본 꺼짐. 엔진·모델은 설치본에 실려 있고(extraResources `speech`), 개발 실행은 `node scripts/fetch-speech.mjs` 로 받아 둔
+    // build/vendor 를 쓴다(없으면 "준비 안 됨"). 엔진 프로세스는 처음 받아쓸 때 뜬다. 꺼져 있으면 마이크 권한도 거절된다 (아래 권한 핸들러)
+    id: 'voice',
+    plugin: (ctx) => {
+      ctx.plugin(SpeechService, {
+        host: systemSpeechHost(path.join(__dirname, 'speechWorker.js')),
+        root: app.isPackaged ? bundledSpeechDir(process.resourcesPath) : devSpeechDir(path.join(__dirname, '../..')),
+      })
+      ctx.plugin(speechBridge)
     },
   },
 ]
@@ -682,9 +713,17 @@ function checkBoot(): void {
 
 void app.whenReady().then(async () => {
   // 화면(웹 내용)의 권한 요청은 기본 거부 (참고 레포 검토 02x D) — 답·미리보기 iframe 의 글은 모델·프로젝트 파일에서 온다.
-  // 앱 화면이 쓰는 것은 "복사" 의 클립보드 쓰기뿐이다 (resilience.ts allowPermission)
-  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(allowPermission(permission, details.isMainFrame)))
-  session.defaultSession.setPermissionCheckHandler((_contents, permission, _origin, details) => allowPermission(permission, details.isMainFrame))
+  // 앱 화면이 쓰는 것은 "복사" 의 클립보드 쓰기와, 음성 입력(기능 voice)을 켰을 때의 마이크뿐이다 (resilience.ts allowPermission).
+  // 마이크는 macOS 에서 OS 허락까지 받는다. 검사 핸들러에는 종류가 하나(mediaType)로 오고, 안 올 때도 있다 — 그때는 거절한다
+  const voiceOn = (): boolean => ctx.get('features')?.isEnabled('voice') ?? false
+  const microphone = { platform: process.platform, askMicrophone: () => systemPreferences.askForMediaAccess('microphone') }
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    const mediaTypes = (details as { mediaTypes?: string[] }).mediaTypes
+    void grantPermission(permission, details.isMainFrame, { voice: voiceOn(), mediaTypes }, microphone).then(callback, () => callback(false))
+  })
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, _origin, details) =>
+    allowPermission(permission, details.isMainFrame, { voice: voiceOn(), mediaTypes: details.mediaType ? [details.mediaType] : undefined }),
+  )
   setTimeout(checkBoot, BOOT_DEADLINE_MS).unref()
   await settingsFiber // 설정 서비스가 올라온 뒤 — 테마를 창보다 먼저 정한다
   nativeTheme.themeSource = ctx.settings.get().appearance

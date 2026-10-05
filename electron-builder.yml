@@ -29,6 +29,13 @@ extraResources:
     to: opencode
   - from: build/vendor/rg/${os}-${arch}
     to: rg
+  # 음성 입력 엔진·모델 (scripts/fetch-speech.mjs, +약 170MB) — node_modules/sherpa-onnx-node · sherpa-onnx-<platform>-<arch> · models/.
+  # 런타임 자리는 src/services/speech/assets.ts bundledSpeechDir (Resources/speech). 폴더 이름을 바꾸지 않는다 — 본체가 네이티브 패키지를 이름으로 찾는다
+  - from: build/vendor/speech/${os}-${arch}
+    to: speech
+  # 동봉한 것의 출처·라이선스 (SenseVoice 모델은 표기 의무가 있다)
+  - from: THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
 
 mac:
   target:
@@ -37,6 +44,10 @@ mac:
   category: public.app-category.developer-tools
   # electron-builder 의 신원 서명은 건너뛴다 — afterPack 이 서명한다
   identity: null
+  # Electron 기본 문구("This app needs access to the microphone")를 우리 것으로 — 음성 입력(기능 voice)을 켜고 처음 녹음할 때 macOS 가 보여 준다.
+  # hardened runtime 이 아니라 entitlement 는 필요 없다 (공증으로 가면 device.audio-input + disable-library-validation — 실측 01ag §2.4)
+  extendInfo:
+    NSMicrophoneUsageDescription: litecode uses the microphone for voice input. Speech is transcribed on this computer.
 
 win:
   target:
