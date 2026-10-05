@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { OpenInApp } from '../shared/ipc.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
+import { reason } from './ipcError.ts'
 import './openIn.css'
 
 // "다른 앱에서 열기" 분할 버튼 — 대화 머리 오른쪽 끝 (dsh ui-open-in-app 참조: 모양·치수·동작만, 코드는 새로 씀).
@@ -74,7 +75,7 @@ export function OpenInButton({ directory, file }: { directory: string; file?: st
       await (file === undefined ? window.litecode.openIn(app.id, directory) : window.litecode.openFileIn(app.id, directory, file))
     } catch (failure) {
       // IPC 를 지난 오류는 "Error invoking remote method …: Error: <사유>" — 사유만
-      setError(String(failure instanceof Error ? failure.message : failure).replace(/^.*?Error: /, ''))
+      setError(reason(failure))
     } finally {
       setBusy(false)
     }

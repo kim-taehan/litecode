@@ -39,7 +39,7 @@ export function PlusDialog({ project, title, subtitle, onClose, children }: Plus
   useFocusTrap(dialogRef)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.isComposing) return // 한글 조합 중의 Esc 는 조합 취소다 — 쓰던 폼을 날리지 않는다
       event.preventDefault() // 입력창의 Esc 두 번(답변 중지)은 이미 쓰인 Esc 를 세지 않는다 (stopTurn.tsx)
       onClose()
     }

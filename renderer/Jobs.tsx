@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Subtask, TurnItem } from '../shared/ipc.ts'
-import { useNow } from './ChatTurn.tsx'
+import { useNow } from './useNow.ts'
 import { compactTokens, elapsed, jobList, lastLine, recentLines } from './jobsView.ts'
 import { useT } from './settingsStore.ts'
 import './jobs.css'

@@ -17,12 +17,15 @@ export interface PanelState {
   fullscreen: boolean
   /** 열 때마다 오른다 — 같은 칩을 다시 눌러도 패널이 포커스를 잡는다(Esc 로 닫히게) */
   focus: number
-  /** 줄 이동 (이슈 #51 — AI 의 open_file 이 줄을 줬다): 그 탭을 그 줄로 스크롤하고 강조한다. seq 는 그때의 focus — 같은 줄을 다시 열어도 다시 간다.
+  /** 마지막으로 연 것이 AI 다(open_file) — 패널이 포커스를 잡지 않는다. 치던 입력창의 글이 끊기지 않게 (터미널 칸의 quiet 와 같다) */
+  quiet?: boolean
+  /** 줄 이동 (이슈 #51 — AI 의 open_file 이 줄을 줬다): 그 탭을 그 줄로 스크롤하고 강조한다. seq 는 줄을 줄 때마다 오른다 — 같은 줄을 다시 열어도 다시 간다.
    *  줄 없이 그 탭을 다시 열면 지워진다 */
   jump?: { key: string; line: number; seq: number }
 }
 
 let current: PanelState | undefined
+let jumps = 0
 const listeners = new Set<() => void>()
 
 function set(next: PanelState | undefined): void {
@@ -53,25 +56,31 @@ export function tabKey(directory: string, token: string): string {
   return parts.length > 0 ? parts.join('/') : token
 }
 
-/** 파일 탭을 열고(이미 있으면 그 탭을) 고른다. line(1부터)을 주면 그 줄로 간다 */
-export function openFilePreview(directory: string, token: string, line?: number): void {
+/** 파일 탭을 열고(이미 있으면 그 탭을) 고른다. line(1부터)을 주면 그 줄로 간다.
+ *  quiet — 사용자가 누른 것이 아니다(AI 의 open_file): 탭만 열고 고른다. focus 를 올리지 않아 패널이 포커스를 가져가지 않는다 */
+export function openFilePreview(directory: string, token: string, line?: number, { quiet = false }: { quiet?: boolean } = {}): void {
   const state = base(directory)
   const key = tabKey(directory, token)
-  const focus = state.focus + 1
-  const jump = line !== undefined ? { key, line, seq: focus } : state.jump?.key === key ? undefined : state.jump
-  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, jump })
+  const focus = quiet ? state.focus : state.focus + 1
+  const jump = line !== undefined ? { key, line, seq: ++jumps } : state.jump?.key === key ? undefined : state.jump
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, quiet, jump })
+}
+
+/** 패널이 지금 포커스를 잡아도 되는가 — focus 가 오르거나 패널이 새로 뜰 때 묻는다. 조용히 연 것(AI)이 마지막이면 잡지 않는다 */
+export function panelTakesFocus(state: PanelState): boolean {
+  return !state.quiet
 }
 
 /** Files 탭으로 연다 ("+"·대화 머리 버튼) */
 export function openFilesTab(directory: string): void {
   const state = base(directory)
-  set({ ...state, open: true, active: undefined, focus: state.focus + 1 })
+  set({ ...state, open: true, active: undefined, focus: state.focus + 1, quiet: false })
 }
 
 /** 닫았던 패널을 그대로 다시 연다 — 처음이면 Files 탭 */
 export function revealPanel(directory: string): void {
   const state = base(directory)
-  set({ ...state, open: true, focus: state.focus + 1 })
+  set({ ...state, open: true, focus: state.focus + 1, quiet: false })
 }
 
 export function selectTab(key: string | undefined): void {

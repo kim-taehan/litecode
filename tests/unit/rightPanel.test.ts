@@ -4,6 +4,7 @@ import {
   closeTab,
   openFilePreview,
   openFilesTab,
+  panelTakesFocus,
   revealPanel,
   selectTab,
   tabKey,
@@ -60,14 +61,53 @@ describe('패널 탭 저장소', () => {
   })
 })
 
+// 감사 E4 — AI 의 open_file 은 탭만 열고 고른다. 치던 입력창의 포커스는 가져가지 않는다 (open_terminal 의 quiet 와 같게)
+describe('조용히 열기 (AI 의 open_file)', () => {
+  it('quiet 로 열면 탭은 열리고 골라지지만 focus 는 오르지 않고, 패널은 포커스를 잡지 않는다 — 닫혀 있던 패널이 새로 뜰 때도', () => {
+    openFilePreview('/quiet', 'a.ts', undefined, { quiet: true })
+    const opened = read()!
+    expect(opened).toMatchObject({ open: true, tabs: ['a.ts'], active: 'a.ts', focus: 0 })
+    expect(panelTakesFocus(opened)).toBe(false)
+    closeFilePreview()
+  })
+
+  it('사용자가 연 뒤(칩·Files 버튼·머리 버튼)에는 다시 포커스를 잡는다', () => {
+    openFilePreview('/quiet2', 'a.ts')
+    const byUser = read()!
+    expect(panelTakesFocus(byUser)).toBe(true)
+    openFilePreview('/quiet2', 'b.ts', undefined, { quiet: true })
+    expect(read()).toMatchObject({ active: 'b.ts', focus: byUser.focus })
+    expect(panelTakesFocus(read()!)).toBe(false)
+    openFilePreview('/quiet2', 'a.ts')
+    expect(read()!.focus).toBe(byUser.focus + 1)
+    expect(panelTakesFocus(read()!)).toBe(true)
+    openFilePreview('/quiet2', 'b.ts', undefined, { quiet: true })
+    openFilesTab('/quiet2')
+    expect(panelTakesFocus(read()!)).toBe(true)
+    openFilePreview('/quiet2', 'b.ts', undefined, { quiet: true })
+    closeFilePreview()
+    revealPanel('/quiet2')
+    expect(panelTakesFocus(read()!)).toBe(true)
+    closeFilePreview()
+  })
+
+  it('quiet 로 같은 줄을 다시 열어도 다시 간다 — 줄 이동의 seq 는 focus 와 따로 오른다', () => {
+    openFilePreview('/quiet3', 'a.ts', 7, { quiet: true })
+    const first = read()!.jump!
+    openFilePreview('/quiet3', 'a.ts', 7, { quiet: true })
+    expect(read()!.jump).toEqual({ key: 'a.ts', line: 7, seq: first.seq + 1 })
+    closeFilePreview()
+  })
+})
+
 // 이슈 #51 — AI 의 open_file 이 줄을 주면 그 탭을 그 줄로. 화면 계산은 순수 함수(lineJump)
 describe('줄 이동', () => {
   it('저장소: 줄을 주고 열면 그 탭에 jump 가 남고, 같은 줄을 다시 열어도 다시 간다(seq), 줄 없이 다시 열면 지워진다', () => {
     openFilePreview('/jump', 'a.ts', 12)
     const first = read()!
-    expect(first).toMatchObject({ active: 'a.ts', jump: { key: 'a.ts', line: 12, seq: first.focus } })
+    expect(first).toMatchObject({ active: 'a.ts', jump: { key: 'a.ts', line: 12 } })
     openFilePreview('/jump', './a.ts', 12)
-    expect(read()!.jump).toEqual({ key: 'a.ts', line: 12, seq: first.focus + 1 })
+    expect(read()!.jump).toEqual({ key: 'a.ts', line: 12, seq: first.jump!.seq + 1 })
     openFilePreview('/jump', 'b.ts')
     expect(read()).toMatchObject({ active: 'b.ts', tabs: ['a.ts', 'b.ts'], jump: { key: 'a.ts', line: 12 } }) // 다른 탭을 열어도 a.ts 의 줄은 남는다
     openFilePreview('/jump', 'a.ts')

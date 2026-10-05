@@ -9,6 +9,8 @@ import type { TriggerQuery, TriggerResult } from '../shared/ipc.ts'
 export interface TriggerOptions {
   /** 프로젝트 폴더 — 없으면 묻지 않는다 */
   directory?: string
+  /** 보고 있는 대화 — 바뀌면 캐럿 자리·닫은 메뉴 표시를 새로 잡는다 (초안이 대화별이라) */
+  conversation?: string
   draft: string
   setDraft(text: string): void
   /** `/` 명령: text 를 보내고 말풍선엔 display */
@@ -22,6 +24,8 @@ export interface Triggers {
   /** 입력창에 붙일 것 */
   inputProps: {
     onSelect(event: React.SyntheticEvent<HTMLTextAreaElement>): void
+    onFocus(event: React.FocusEvent<HTMLTextAreaElement>): void
+    onBlur(): void
     onCompositionStart(): void
     onCompositionEnd(event: React.CompositionEvent<HTMLTextAreaElement>): void
     'aria-activedescendant'?: string
@@ -42,7 +46,15 @@ export interface Triggers {
 
 export const optionId = (index: number) => `trigger-option-${index}`
 
-export function useTriggers({ directory, draft, setDraft, onSend, onShell }: TriggerOptions): Triggers {
+/** 닫은 메뉴의 표시 — 같은 자리·같은 질의 */
+const spanKey = (query: Pick<TriggerQuery, 'span'>): string => `${query.span.start}:${query.span.query}`
+
+/** 메뉴를 그리는가 — 후보가 있고, 그 자리·질의로 닫지 않았고, 입력창에 포커스가 있다 (초안이 `/he` 로 끝난 대화로 돌아오기만 해서는 뜨지 않는다) */
+export function triggerOpen(query: Pick<TriggerQuery, 'span' | 'candidates'> | null, dismissed: string | undefined, focused: boolean): boolean {
+  return !!query && focused && query.candidates.length > 0 && spanKey(query) !== dismissed
+}
+
+export function useTriggers({ directory, conversation, draft, setDraft, onSend, onShell }: TriggerOptions): Triggers {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [caret, setCaret] = useState(0)
   const [query, setQuery] = useState<TriggerQuery | null>(null)
@@ -50,9 +62,16 @@ export function useTriggers({ directory, draft, setDraft, onSend, onShell }: Tri
   const [notice, setNotice] = useState<string>()
   const [dismissed, setDismissed] = useState<string>()
   const [composing, setComposing] = useState(false)
+  const [focused, setFocused] = useState(false)
   const generation = useRef(0)
   /** 고른 뒤 놓을 캐럿 — 그린 다음에 입력창에 건다 */
   const nextCaret = useRef<number>(undefined)
+
+  // 대화(프로젝트)가 바뀌면 입력창의 글이 그 대화의 초안으로 바뀐다 — 앞 대화의 캐럿 자리·닫은 표시로 묻지 않는다
+  useLayoutEffect(() => {
+    setDismissed(undefined)
+    setCaret(inputRef.current?.selectionStart ?? 0)
+  }, [directory, conversation])
 
   useEffect(() => {
     setNotice(undefined)
@@ -77,8 +96,8 @@ export function useTriggers({ directory, draft, setDraft, onSend, onShell }: Tri
     nextCaret.current = undefined
   })
 
-  const key = query && `${query.span.start}:${query.span.query}`
-  const open = !!query && query.candidates.length > 0 && key !== dismissed
+  const key = query && spanKey(query)
+  const open = triggerOpen(query, dismissed, focused)
 
   function replaceSpan(text: string): void {
     if (!query) return
@@ -110,6 +129,11 @@ export function useTriggers({ directory, draft, setDraft, onSend, onShell }: Tri
     inputRef,
     inputProps: {
       onSelect: (event) => setCaret(event.currentTarget.selectionStart),
+      onFocus: (event) => {
+        setFocused(true)
+        setCaret(event.currentTarget.selectionStart)
+      },
+      onBlur: () => setFocused(false),
       onCompositionStart: () => setComposing(true),
       onCompositionEnd: (event) => {
         setComposing(false)
