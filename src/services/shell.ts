@@ -1,7 +1,7 @@
 import { Context, Service } from 'cordis'
-import { spawn, type ChildProcess } from 'node:child_process'
 import { realDirectory } from './llm.ts'
-import { keepEnds, streamText } from './outputBuffer.ts'
+import { execShell, type ExecHandle } from './exec.ts'
+import { keepEnds } from './outputBuffer.ts'
 import { tr } from '../i18n.ts'
 import type { ShellResult } from '../../shared/contract.ts'
 import { stripAnsi } from '../../shared/ansi.ts'
@@ -32,16 +32,12 @@ declare module 'cordis' {
 
 export const OUTPUT_LIMIT = 100 * 1024
 export const TIMEOUT_MS = 60_000
-const KILL_GRACE_MS = 2_000
 
-/** 띄울 셸과 인자 — 로그인 셸에 명령 하나. Windows 는 cmd */
-export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.env, platform = process.platform): [string, string[]] {
-  if (platform === 'win32') return [env['ComSpec'] || 'cmd.exe', ['/d', '/s', '/c', command]]
-  return [env['SHELL'] || '/bin/sh', ['-lc', command]]
-}
+// 띄우기·그룹 종료·기한은 exec.ts — 훅(ctx.hooks)과 같이 쓴다. 원래 자리의 이름은 다시 내보낸다
+export { shellCommand } from './exec.ts'
 
 export class ShellService extends Service {
-  private running = new Map<string, { child: ChildProcess; stop(reason: 'stopped' | 'timeout'): void }>()
+  private running = new Map<string, ExecHandle>()
 
   /** timeoutMs 는 테스트만 줄인다 (기본 TIMEOUT_MS) */
   constructor(
@@ -58,58 +54,25 @@ export class ShellService extends Service {
   async run(runId: string, directory: string, command: string): Promise<ShellResult> {
     const cwd = await realDirectory(directory)
     if (!cwd) return { command, output: '', exitCode: null, status: 'error', truncated: false, error: `작업 디렉터리가 없다: ${directory}` }
-    const [file, args] = shellCommand(command)
-    return new Promise((resolve) => {
-      // 그룹으로 띄워 ■·기한에 자식(파이프·백그라운드)까지 끈다. 서버 비밀번호는 메인 env 에 원래 없지만 혹시 몰라 지운다
-      const env = { ...process.env }
-      delete env['OPENCODE_SERVER_PASSWORD']
-      const child = spawn(file, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-      const kept = keepEnds(OUTPUT_LIMIT / 2, OUTPUT_LIMIT / 2)
-      let emitted = 0
-      let reason: 'stopped' | 'timeout' | undefined
-      let settled = false
-
-      const signal = (name: NodeJS.Signals): void => {
-        try {
-          if (child.pid && process.platform !== 'win32') process.kill(-child.pid, name)
-          else child.kill(name)
-        } catch {
-          // 이미 끝났다
-        }
-      }
-      const finish = (result: Omit<ShellResult, 'command' | 'output' | 'truncated'>): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        this.running.delete(runId)
-        for (const stream of streams) collect(stream.end()) // 끊긴 채 끝난 바이트
-        const omitted = kept.omitted()
-        const output = omitted ? `${kept.head()}\n${tr('shellCard.omitted', { count: omitted })}\n${kept.tail()}` : kept.head() + kept.tail()
-        resolve({ command, output, truncated: omitted > 0, ...result })
-      }
-      const collect = (text: string): void => {
+    const kept = keepEnds(OUTPUT_LIMIT / 2, OUTPUT_LIMIT / 2)
+    let emitted = 0
+    const run = execShell({
+      command,
+      cwd,
+      timeoutMs: this.opts.timeoutMs ?? TIMEOUT_MS,
+      onOutput: (_stream, text) => {
         kept.push(text)
         const chunk = text.slice(0, OUTPUT_LIMIT - emitted)
         emitted += chunk.length
         if (chunk) this.ctx.emit('shell/data', runId, chunk)
-      }
-      const streams = [child.stdout!, child.stderr!].map((stream) => {
-        const decoded = streamText()
-        stream.on('data', (data: Buffer) => collect(decoded.push(data)))
-        return decoded
-      })
-      const stop = (why: 'stopped' | 'timeout'): void => {
-        if (settled || reason) return
-        reason = why
-        signal('SIGTERM')
-        setTimeout(() => signal('SIGKILL'), KILL_GRACE_MS).unref()
-      }
-      const timer = setTimeout(() => stop('timeout'), this.opts.timeoutMs ?? TIMEOUT_MS)
-
-      child.on('error', (error) => finish({ exitCode: null, status: 'error', error: error.message }))
-      child.on('close', (code) => finish({ exitCode: code, status: reason ?? 'done' }))
-      this.running.set(runId, { child, stop })
+      },
     })
+    this.running.set(runId, run)
+    const end = await run.done
+    this.running.delete(runId)
+    const omitted = kept.omitted()
+    const output = omitted ? `${kept.head()}\n${tr('shellCard.omitted', { count: omitted })}\n${kept.tail()}` : kept.head() + kept.tail()
+    return { command, output, truncated: omitted > 0, ...end }
   }
 
   /** ■ — 돌고 있으면 멈춘다 (결과는 run 이 status 'stopped' 로 준다) */

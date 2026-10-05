@@ -233,3 +233,36 @@ describe('SendQueues — 다른 대화가 보낸 지시 (이슈 #55)', () => {
     expect(calls).toEqual(['c1'])
   })
 })
+
+// 턴 앞뒤 확장점 (이슈 #102) — 막힌 사람 글 되돌려 놓기(restore)와 턴 끝에 이어 보낼 글(prepend, 출처 'hook')
+describe('SendQueues 되돌려 놓기·맨 앞에 끼우기 (이슈 #102)', () => {
+  it('restore: 사람 글을 맨 앞에 놓고 붙잡는다 — 턴이 끝나도 보내지 않고, 되돌리면(take) 풀린다', () => {
+    const queues = new SendQueues()
+    queues.submit('c', { text: 'later' }, true)
+    expect(queues.restore('c', { text: 'blocked' })).toBe(true)
+    expect(queues.items('c').map((item) => item.text)).toEqual(['blocked', 'later'])
+    expect(queues.held('c')).toBe(true)
+    expect(queues.next('c')).toBeUndefined()
+    expect(queues.take('c')).toEqual({ text: 'blocked\nlater' })
+    expect(queues.held('c')).toBe(false)
+  })
+
+  it('restore: 사람 글이 아니면(다른 대화의 지시·앱이 이어 보낸 것) 놓지 않는다', () => {
+    const queues = new SendQueues()
+    expect(queues.restore('c', { text: 'x', origin: 'session:a' })).toBe(false)
+    expect(queues.restore('c', { text: 'x', origin: 'hook' })).toBe(false)
+    expect(queues.items('c')).toEqual([])
+    expect(queues.held('c')).toBe(false)
+  })
+
+  it("prepend: 앞서 쌓인 것보다 먼저 간다. 출처 'hook' 은 사람 글과 합쳐지지 않고, 붙잡기의 대상도 아니다", () => {
+    const queues = new SendQueues()
+    queues.submit('c', { text: 'typed' }, true)
+    queues.prepend('c', { text: 'feedback', origin: 'hook' })
+    expect(queues.next('c')).toEqual({ text: 'feedback', origin: 'hook' })
+    expect(queues.next('c')).toEqual({ text: 'typed' })
+    queues.prepend('c', { text: 'feedback', origin: 'hook' })
+    queues.hold('c') // 사람 글이 없다 — 붙잡지 않는다
+    expect(queues.held('c')).toBe(false)
+  })
+})

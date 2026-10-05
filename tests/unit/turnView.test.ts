@@ -36,6 +36,15 @@ describe('splitTurn·answerText', () => {
     expect(answerText([], 'fallback')).toBe('fallback')
     expect(answerText([text('a', 'part', false)], 'fallback')).toBe('fallback')
   })
+
+  // 턴 끝 훅(이슈 #102)의 줄은 답 글 뒤에 붙는다 — 그 줄 때문에 답이 작업으로 접히면 안 된다
+  it('답 뒤에 붙은 훅 줄은 작업이다 — 답은 그 앞의 글 그대로', () => {
+    const hook = (id: string): TurnItem => ({ kind: 'hook', id, event: 'Stop', command: 'npm test', outcome: 'passed', seconds: 1.2 })
+    const { work, answer } = splitTurn([tool('b'), hook('h1'), text('c', 'final'), hook('h2'), hook('h3')])
+    expect(work.map((item) => item.id)).toEqual(['b', 'h1', 'h2', 'h3'])
+    expect(answer.map((item) => item.id)).toEqual(['c'])
+    expect(answerText(answer, 'all')).toBe('final')
+  })
 })
 
 describe('thinkSummary', () => {

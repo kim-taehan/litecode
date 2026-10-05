@@ -175,6 +175,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   if (delegation) return <DelegationRow line={delegation} />
   // 성공한 할 일 목록 쓰기 (이슈 #83) — 도구 줄 대신 "할 일 · 완료 2/5" + 체크리스트
   if (item.kind === 'tool' && item.todos) return <TodoRow todos={item.todos} />
+  if (item.kind === 'hook') return <HookRow item={item} />
   if (item.kind === 'text') {
     if (!item.text.trim()) return null
     return (
@@ -265,6 +266,28 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
         {!think && item.diffs && item.status === 'done' && <DiffStat diffs={item.diffs} />}
       </button>
       {bodyFold.mounted && body && <div className="turn-row__body" {...bodyFold.fold}>{body}</div>}
+    </div>
+  )
+}
+
+/** 사용자 훅 한 줄 (이슈 #102, 시안 _workspace/mock-hooks/Chat.dc.html) — "훅 · 이벤트 · 명령 … 통과/막음/실패 · N초". 통과는 조용한 줄,
+ *  막음은 붉은 줄, 사유(막은 훅의 stderr·실패 사유)는 아래 한 줄로 */
+function HookRow({ item }: { item: Extract<TurnItem, { kind: 'hook' }> }) {
+  const t = useT()
+  return (
+    <div className="turn-row turn-hook" data-kind="hook" data-outcome={item.outcome}>
+      <div className="turn-row__line">
+        <HookIcon />
+        <span className="turn-row__title">{t('hooks.title')}</span>
+        <span className="turn-row__dot" aria-hidden="true" />
+        <span className="turn-row__summary">
+          {t(`hooks.event.${item.event}`)} · <code>{item.command}</code>
+        </span>
+        <span className="turn-hook__status">
+          {t(`hooks.outcome.${item.outcome}`)} · {t('chat.seconds', { s: item.seconds })}
+        </span>
+      </div>
+      {item.reason && <div className="turn-hook__reason">{item.outcome === 'blocked' ? t('hooks.blocked', { reason: item.reason }) : item.reason}</div>}
     </div>
   )
 }
@@ -373,6 +396,15 @@ function Icon({ children }: { children: ReactNode }) {
     <svg className="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {children}
     </svg>
+  )
+}
+
+function HookIcon() {
+  return (
+    <Icon>
+      <path d="M9.5 4.25V10A3 3 0 0 1 3.5 10V8.75" />
+      <circle cx="9.5" cy="3" r="1.25" />
+    </Icon>
   )
 }
 

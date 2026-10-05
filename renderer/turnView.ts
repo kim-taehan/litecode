@@ -7,11 +7,14 @@ import type { Translate } from './settingsStore.ts'
 // 진행 줄 끼워 넣기(upsertItem)는 shared/chatReducer.ts — 도는 턴의 진행 줄을 쥐는 메인(ctx.chat)과 같이 쓴다 (이슈 #52)
 export { upsertItem } from '../shared/chatReducer.ts'
 
-/** 끝난 턴을 작업과 답으로 가른다. 답 = 마지막 글이 아닌 줄 뒤에 이어지는 글 줄들 */
+/** 끝난 턴을 작업과 답으로 가른다. 답 = 마지막 글이 아닌 줄 뒤에 이어지는 글 줄들.
+ *  답 뒤에 붙은 훅 줄(턴 끝 훅 — 이슈 #102)은 작업이다: 답을 가를 때 건너뛴다 */
 export function splitTurn(items: readonly TurnItem[]): { work: TurnItem[]; answer: TurnItem[] } {
-  let cut = items.length
+  let end = items.length
+  while (end > 0 && items[end - 1]!.kind === 'hook') end--
+  let cut = end
   while (cut > 0 && items[cut - 1]!.kind === 'text') cut--
-  return { work: items.slice(0, cut), answer: items.slice(cut) }
+  return { work: [...items.slice(0, cut), ...items.slice(end)], answer: items.slice(cut, end) }
 }
 
 /** 답 글. 답 줄이 다 끝났으면 그 글, 아니면(줄을 못 받았거나 덜 받음) 엔진이 준 답 전체(fallback) */

@@ -66,7 +66,28 @@ declare module 'cordis' {
     'llm/attention-resolved'(info: TurnInfo): void
     /** 그 폴더(realpath)에 프롬프트를 보내기 직전 — ctx.mcp 가 그 폴더 인스턴스에 MCP 서버를 붙인다(이슈 #28). 실패해도 턴은 간다 */
     'llm/before-turn'(directory: string): Promise<void> | void
+    /** 도는 턴의 도구 호출 하나가 끝났다 (성공·실패, 호출마다 한 번) — 하위 작업이 부른 도구도 온다 (이슈 #102, 듣는 쪽은 ctx.hooks) */
+    'llm/tool-done'(info: ToolDone): void
   }
+}
+
+/** 끝난 도구 호출 하나 (중립 모양) */
+export interface ToolDone {
+  /** 그 턴의 엔진 세션 — 하위 작업의 도구여도 부모 턴의 세션이다 */
+  sessionId: string
+  /** 작업 폴더 (realpath) */
+  directory: string
+  /** 도구 이름 (bash·edit·write·read…, MCP 는 `<서버>_<도구>`) */
+  tool: string
+  /** 도구 인자 */
+  input: unknown
+  /** 결과 글 — 실패면 없다 */
+  output?: string
+  error?: string
+  /** 파일 하나를 다루는 도구면 그 파일 (절대 경로) */
+  file?: string
+  /** 하위 작업이 불렀다 */
+  child: boolean
 }
 
 /** opencode 의 MCP 서버 상태 (레거시 GET /mcp — connected·disabled·failed·needs_auth·needs_client_registration) */
@@ -270,7 +291,8 @@ export class LlmService extends Service {
    *  onAttention 은 턴이 기다리는 승인·질문 목록이 바뀔 때마다 (빈 목록 = 더 기다리는 것 없음) — 화면의 카드. 답은 reply.
    *  stop 이 걸리면 사용자가 멈춘 것이다 — 보내기 전이면 안 보내고, 받아들여진 뒤면 opencode 턴도 멈추고(abort) "중단됨" 으로 끝낸다.
    *  세션이 아직 없을 때(첫 턴)도 멈출 수 있게 세션 id 가 아니라 신호로 받는다.
-   *  images 는 이 입력에 붙일 이미지 — 글 뒤에 file 파트(data: URI)로 싣는다 (promptParts). 그 모델이 이미지를 받는지는 부르는 쪽이 본다 */
+   *  images 는 이 입력에 붙일 이미지 — 글 뒤에 file 파트(data: URI)로 싣는다 (promptParts). 그 모델이 이미지를 받는지는 부르는 쪽이 본다.
+   *  context 는 이 턴에만 실을 맥락 글 — 프로젝트 지시문 뒤에 붙여 system 으로 보낸다 (그 요청에만 실린다, 01w 3-1) */
   async chat(
     providerId: string,
     modelId: string,
@@ -284,12 +306,13 @@ export class LlmService extends Service {
     onAttention?: (requests: Attention[]) => void,
     stop?: AbortSignal,
     images: readonly ChatImage[] = [],
+    context?: string,
   ): Promise<ChatResult> {
     this.turns++
     /** busy: 이 턴이 쥔 세션(addContext 를 막는다), sessionId: 받아들여진 턴의 세션 — 그때만 turn-started/ended 를 낸다 */
     const admitted: { busy?: string; sessionId?: string } = {}
     try {
-      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention, stop, images)
+      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention, stop, images, context)
       const interrupted = !result.ok && !!result.interrupted
       if (admitted.sessionId) {
         this.ctx.emit('llm/turn-ended', {
@@ -387,6 +410,7 @@ export class LlmService extends Service {
     onAttention: ((requests: Attention[]) => void) | undefined,
     stop: AbortSignal | undefined,
     images: readonly ChatImage[],
+    context: string | undefined,
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
@@ -406,7 +430,7 @@ export class LlmService extends Service {
       const declined = new Set<string>()
       this.declined.set(id, declined)
       const userMessageId = messageId ?? this.newMessageId()
-      const system = await projectInstructions(workdir)
+      const system = [await projectInstructions(workdir), context].filter(Boolean).join('\n\n')
       // 레거시 전환 전에 쌓인 대화면 옛 글을 이 입력 앞에 한 번 넣는다 (migrate.ts, #21). 새로 만든 세션은 옛 기록이 없다
       if (sessionId) await carryOver(conn, id, workdir, { providerID: providerId, modelID: modelId }, userMessageId)
 
@@ -732,6 +756,15 @@ export class LlmService extends Service {
     let finish!: (outcome: TurnOutcome) => void
     const finished = new Promise<TurnOutcome>((resolve) => (finish = resolve))
     const outcome = (base: Omit<TurnOutcome, 'text' | 'usage'>): TurnOutcome => ({ text: tracker.text(), usage: meter.usage(), ...base })
+    /** 끝난 도구 호출을 호출마다 한 번 알린다 ('llm/tool-done') — 끝난 파트가 다시 와도(메타데이터 갱신) 한 번 */
+    const toolsDone = new Set<string>()
+    const toolDone = (part: EnginePart | undefined, child: boolean): void => {
+      const done = finishedTool(part, workdir)
+      const key = part?.callID ?? part?.id
+      if (!done || !key || toolsDone.has(key)) return
+      toolsDone.add(key)
+      this.ctx.emit('llm/tool-done', { sessionId, directory: workdir, ...done, child })
+    }
     /** 사용자가 멈췄다 — 프롬프트가 받아들여진 뒤에 opencode 턴을 멈춘다(먼저 보내면 뒤에 받아들여진 프롬프트가 그대로 돈다).
      *  idle 을 기다리지 않는다 — 승인 대기 중이어도 abort 응답 뒤 바로 끝낸다. 뒤따르는 idle 은 다음 턴이 자기 user 메시지 전이라 버린다 */
     const stopped = async (): Promise<TurnOutcome> => {
@@ -788,6 +821,7 @@ export class LlmService extends Service {
             if (item) onProgress?.(item)
             const part = props['part'] as EnginePart | undefined
             calls?.observe(part, false)
+            toolDone(part, false)
             if (part?.type === 'tool' && part.state?.status === 'error' && part.callID && declined.has(part.callID)) declinedEnd = true
           }
         }
@@ -798,7 +832,10 @@ export class LlmService extends Service {
       if (event.type === 'session.created' && seenUser && about?.parentID === sessionId) return tracker.adoptChild(about.id)
       if (tracker.isChild(props['sessionID'] ?? about?.sessionID)) {
         if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal()
-        if (event.type === 'message.part.updated') calls?.observe(props['part'] as EnginePart | undefined, true) // 하위 작업이 부른 도구
+        if (event.type === 'message.part.updated') {
+          calls?.observe(props['part'] as EnginePart | undefined, true) // 하위 작업이 부른 도구
+          toolDone(props['part'] as EnginePart | undefined, true)
+        }
         const item = tracker.child(event.type, props)
         if (item) onProgress?.(item)
         return
@@ -1002,6 +1039,23 @@ export class LlmService extends Service {
     }
     this.requests.delete(requestId)
     this.watchers.get(request.turn)?.answered(requestId)
+  }
+}
+
+/** 끝난(completed·error) 도구 파트 → 'llm/tool-done' 의 중립 모양. 아직 도는 파트·도구가 아닌 파트면 undefined.
+ *  file: read·write·edit 는 인자 `filePath`, apply_patch 는 결과 metadata 의 첫 파일 (toolDiffs.ts 와 같은 자리) — 세션 폴더 기준으로 푼다 */
+export function finishedTool(part: EnginePart | undefined, workdir: string): Pick<ToolDone, 'tool' | 'input' | 'output' | 'error' | 'file'> | undefined {
+  const state = part?.state
+  if (part?.type !== 'tool' || !part.tool || !state || (state.status !== 'completed' && state.status !== 'error')) return undefined
+  const input = state.input as { filePath?: unknown } | undefined
+  const patched = (state.metadata?.['files'] as { filePath?: unknown }[] | undefined)?.[0]?.filePath
+  const file = typeof input?.filePath === 'string' ? input.filePath : typeof patched === 'string' ? patched : undefined
+  return {
+    tool: part.tool,
+    input: state.input,
+    ...(state.status === 'completed' && typeof state.output === 'string' && { output: state.output }),
+    ...(state.status === 'error' && { error: state.error ?? '' }),
+    ...(file && { file: path.resolve(workdir, file) }),
   }
 }
 

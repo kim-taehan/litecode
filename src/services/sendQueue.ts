@@ -1,4 +1,4 @@
-import type { ChatOrigin, QueuedSend } from '../../shared/chat.ts'
+import { fromPerson as personOrigin, type ChatOrigin, type QueuedSend } from '../../shared/chat.ts'
 
 // 답하는 중에 보낸 메시지 — 대화별 대기열에 쌓고, 그 대화의 턴이 끝나는 순간 줄바꿈으로 이어 **한 번에** 보낸다 (closed-code
 // useSendQueue 방식, 사용자 2026-10-02). 엔진에는 늘 한 턴씩만 간다. opencode 의 delivery(queue) 는 쓰지 않는다.
@@ -16,8 +16,8 @@ import type { ChatOrigin, QueuedSend } from '../../shared/chat.ts'
 export type { QueuedSend } from '../../shared/chat.ts'
 
 const originOf = (item: QueuedSend): ChatOrigin => item.origin ?? 'user'
-/** 사람이 친 글인가 — 데스크탑 화면('user')과 짝지은 폰(`device:…`)은 사람, 다른 대화가 보낸 지시(`session:…`)만 아니다 */
-const fromPerson = (item: QueuedSend): boolean => !originOf(item).startsWith('session:')
+/** 사람이 친 글인가 — 데스크탑 화면('user')과 짝지은 폰(`device:…`)은 사람, 다른 대화가 보낸 지시(`session:…`)·앱이 이어 보낸 것('hook')은 아니다 */
+const fromPerson = (item: QueuedSend): boolean => personOrigin(originOf(item))
 
 /**
  * 쌓인 것을 하나로 — 본문(과 보일 글)을 줄바꿈으로 잇고(첨부만 보낸 빈 본문은 건너뛴다) 첨부를 순서대로 모은다.
@@ -66,6 +66,19 @@ export class SendQueues {
     if (!rest.some(fromPerson)) this.holds.delete(id)
     this.set(id, rest)
     return mergeQueued(mine)
+  }
+
+  /** 맨 앞에 끼운다 — 방금 끝난 턴에 바로 이어 갈 것 (앞서 쌓인 것보다 먼저 간다) */
+  prepend(id: string, item: QueuedSend): void {
+    this.set(id, [item, ...this.items(id)])
+  }
+
+  /** 보내지 못한 사람 글을 맨 앞에 되돌려 놓고 붙잡는다 — 화면이 입력창으로 되돌린다 (멈춘 턴의 대기열과 같은 길). 사람 글이 아니면 버리고 false */
+  restore(id: string, item: QueuedSend): boolean {
+    if (!fromPerson(item)) return false
+    this.prepend(id, item)
+    this.hold(id)
+    return true
   }
 
   /** 다른 대화가 보낸 줄 하나를 뺀다 (index 는 items 의 자리). 사람이 친 줄은 여기서 못 뺀다(되돌리기 = take) — 뺐으면 true */

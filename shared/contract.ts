@@ -3,6 +3,7 @@
 // 그 파일들은 node:fs·cordis·undici 를 import 해서 모바일 앱(Metro·앱 tsconfig)이 따라 들어갈 수 없다. 원래 자리는 re-export 로 남겼다.
 // **여기에 Node·Electron·opencode 를 아는 코드를 넣지 않는다** — 값을 만드는 쪽(opencode 형식 → 이 모양)은 서비스 파일에 그대로 있다.
 
+import type { HookEvent, HookOutcome } from './hooks.ts'
 import type { Mode } from './modes.ts'
 import type { SkillSource } from './skills.ts'
 
@@ -36,6 +37,9 @@ export type TurnItem =
   /** 하위 작업 (task 도구 — 엔진이 자식 세션에서 따로 돌린다). items 는 그 자식의 진행 줄(생각·도구·글), tokens 는 자식 스텝 토큰 합(입력+출력+생각+캐시).
    *  startedAt·endedAt 은 엔진 시각(ms) — 진행 중이면 화면이 startedAt 부터 초를 센다 */
   | Subtask
+  /** 사용자 훅 하나가 돌았다 (이슈 #102) — 끝난 뒤에만 온다. command 는 명령 앞부분, seconds 는 걸린 시간(0.1초 단위),
+   *  reason 은 막은 사유(stderr)나 실패 사유(종료 코드·시간 초과). 엔진 기록에는 없다 — 도는 턴과 방금 끝난 턴에만 보인다 */
+  | { kind: 'hook'; id: string; event: HookEvent; command: string; outcome: HookOutcome; seconds: number; reason?: string }
 
 export interface Subtask {
   kind: 'subtask'
