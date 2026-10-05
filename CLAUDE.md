@@ -123,8 +123,8 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 - 폴더 값은 realpath·끝 슬래시 정규화 없이 **문자열 그대로** 저장되고 `GET /api/session?directory=` 는 정확 일치다 —
   litecode 는 `fs.realpath` 한 값 하나로 통일한다.
 - **opencode 에 설정 넘기기** (실측 2026-09-30, 1.18.18 — 근거 `_workspace/01_probe.md`, 2단계 설계의 전제):
-  - 신규 세대가 읽는 설정은 **전역 폴더 하나**(`OPENCODE_CONFIG_DIR`, 없으면 `$XDG_CONFIG_HOME/opencode`) + 세션 폴더의
-    opencode.json 뿐이다. `OPENCODE_CONFIG_CONTENT`·`OPENCODE_CONFIG` 로 넣은 provider 는 레거시 `GET /config` 에만 보이고 턴은
+  - 신규 세대가 읽는 설정은 **전역 폴더 하나**(`OPENCODE_CONFIG_DIR`, 없으면 `$XDG_CONFIG_HOME/opencode`) + 세션 폴더**와 그 상위 폴더들**(프로젝트 최상위까지 — 아래 ⚠️ #101)의
+    opencode.json(c)·`.opencode/` 뿐이다. `OPENCODE_CONFIG_CONTENT`·`OPENCODE_CONFIG` 로 넣은 provider 는 레거시 `GET /config` 에만 보이고 턴은
     `prompted` 에서 **조용히 멈춘다**. → 앱은 `OPENCODE_CONFIG_DIR=<userData>/opencode` 에 opencode.json 을 생성해 넘긴다
     (opencode 가 그 폴더에 npm 설치를 백그라운드로 한다 — **폐쇄망에서 실패하면 어떻게 되는지 미확인**)
   - ⚠️ **opencode 는 자기 env 를 프로젝트 플러그인(`.opencode/plugin/*.js`)·bash 도구에 넘긴다** — env 로 넘긴 키·서버 비밀번호가
@@ -132,6 +132,14 @@ Electron 렌더러 (React)          Electron 메인 프로세스
     로컬 프록시가 붙인다** (opencode 엔 프록시 주소 + 랜덤 토큰만). **받아들인 잔여 위험:** 서버 비밀번호는 여전히 opencode env 에
     있어 폴더 코드가 토큰을 얻어 프록시를 **쓸** 수는 있다(키 값은 못 빼 감, 프록시는 저장된 주소로만). opencode 가 원래 그 폴더에서
     AI 에게 코드를 실행시키는 도구라 막을 수 없는 부분이다. 플러그인 로드는 /api/model 후 0.2~0.5초 비동기. 아래 env 방식은 "키를 넘기는 법" 실측으로만 남긴다
+  - ⚠️ **프로젝트 폴더의 플러그인 파일은 엔진 설정으로 못 막는다** (실측 2026-10-05, `_workspace/01ah_plugin_block.md`, #101): 신규 세대 런타임이 `--pure`·`OPENCODE_DISABLE_PROJECT_CONFIG` 와
+    무관하게(후보 21개 + 기준, 66/66) 세션 폴더에서 **프로젝트 최상위까지(git 아니면 `/` 까지, 빈 `.git/` 은 git 으로 안 친다)** 올라가며 `.opencode/{plugin,plugins}/*.{ts,js}`(숨김·심볼릭 링크·
+    대소문자 무시)와 `opencode.json(c)` 의 `plugin`·`plugins` 항목(아무 경로, npm 이름이면 레지스트리 요청)을 엔진 프로세스 안에서 import 한다 — 앱 CONFIG_DIR 의 `plugin/` 도. 시점은 그 폴더의
+    **첫 `/api/*` 호출과 첫 레거시 턴**(엔진 실행당 각 한 번, 그때 폴더를 다시 훑는다), 계획 모드·승인과 무관. 그래서 **`ctx.llm` 이 폴더를 엔진에 넘기는 문은 `engineFolder` 하나**이고, 거기서 매번
+    (캐시 없음, ~1ms) `findEnginePlugins`(`src/services/enginePlugins.ts` — **`/` 까지** + CONFIG_DIR, 엔진보다 넓게)로 보고 걸리면 엔진에 요청하지 않고 걸린 경로와 함께 거절한다. `ctx.engine` 은
+    기동 때 CONFIG_DIR 의 `plugin/`·`plugins/` 를 지운다. 대가: `.opencode/plugin` 을 가진 저장소와, 상위 폴더(예: `~/.opencode/plugin`, `~/opencode.json` 의 plugin)에 플러그인이 있는 사용자의 모든
+    프로젝트는 못 연다("신뢰하고 열기" 는 사용자 결정 대기). 남는 틈: 검사와 엔진의 glob 사이에 파일을 만드는 경쟁. `ctx.llm` 에 폴더를 받는 메서드를 더하면 이 문을 지나게 한다. 버전을 올리면
+    `probe-01ah/e1·e3·e7` 을 다시
   - **키**는 provider 의 `"env": ["LITECODE_KEY_n"]` + 자식 프로세스 env 로만. `{env:X}`·`{file:…}` 는 치환 안 되고 **문자 그대로
     헤더에 실린다**. `PUT /auth/{id}` 키는 안 쓰인다
   - 레거시 `GET /provider`·`/config/providers` 는 풀린 키를 돌려준다 → 앱이 띄우는 opencode 에는 **항상
@@ -185,11 +193,11 @@ Electron 렌더러 (React)          Electron 메인 프로세스
     `websearch` 는 레거시에 없다. 500 은 5번 재시도(~71초, `session.status {type:"retry", attempt, message, next}` → 진행 줄). `/event` heartbeat 10초 — 무바이트 30초면 끊긴 것.
     `noReply` 를 돌고 있는 턴에 넣으면 그 턴이 이어서 답한다(턴 중 막기 유지). prompt 의 `system` 은 user 메시지 `info.system` 에 남는다
   - **설정** (#12·#19): 레거시는 앱 CONFIG_DIR 외에 `~/.config/opencode`·`~/.opencode`·프로젝트 opencode.json·`.opencode/` 를 읽고 그 MCP 를 띄운다 →
-    `OPENCODE_DISABLE_PROJECT_CONFIG=1`(프로젝트 막기, AGENTS.md(없으면 CLAUDE.md)는 `ctx.llm` 이 매 턴 `system` 으로 — `instructions.ts`). 개인 설정은 읽되(사용자 결정)
+    `OPENCODE_DISABLE_PROJECT_CONFIG=1`(**레거시가** 프로젝트 설정을 안 읽게 — 신규 세대 런타임은 이 플래그를 안 본다, "opencode 에 설정 넘기기" 의 ⚠️ #101. AGENTS.md(없으면 CLAUDE.md)는 `ctx.llm` 이 매 턴 `system` 으로 — `instructions.ts`). 개인 설정은 읽되(사용자 결정)
     앱 CONFIG_DIR 값이 이긴다 — `model`·`enabled_providers`(개인 설정이 앱 provider 를 꺼 **모든 턴이 Model not found** 였다)·`share:"disabled"`·`autoupdate`·`lsp`·`formatter` false.
     `instructions` 배열은 합쳐져 못 지운다(원격 URL 은 막힌 망에서 요청마다 5초). Claude Code 자료(`~/.claude/CLAUDE.md`·스킬·프로젝트 `.claude/skills`)는 `OPENCODE_DISABLE_CLAUDE_CODE`·
     `_EXTERNAL_SKILLS` 로 끔(켜는 스위치는 #7). 물려받은 `OPENCODE_*`·`OTEL_*`·`EXA/PARALLEL_API_KEY` 는 지운다(`OPENCODE_EXPERIMENTAL` 하나로 도구가 바뀐다).
-    모델 없는 세션은 내장 무료 `opencode` provider(opencode.ai/zen)로 갔다 — `model` 로 막음. 지킴이 `egress-guard.live`(바깥 요청 0)
+    모델 없는 세션은 내장 무료 `opencode` provider(opencode.ai/zen)로 갔다 — `model` 로 막음. 지킴이 `egress-guard.live`(바깥 요청 0 — 단 프로젝트 `opencode.json` 의 npm `plugin` 항목은 레지스트리 요청을 낸다, #101 의 검사로 막는다)
   - **웹 도구** (#14): 끄려면 전역 `permission` deny **와** 에이전트마다 맨 뒤 deny — 하나만이면 litecode-ask(`webfetch:ask`)·litecode-full(`"*":"allow"`)에서 되살아난다.
     레거시 `task` 하위 에이전트는 상위 모드 deny 를 안 물려받는다(전역 deny 로 막힘)
   - **자동 요약** (#20·#27): 문턱 = context − (min(limit.output, 32000) || 32000)(`compaction.reserved` 안 쓰임). **limit.output 은 모든 요청(요약 포함)의 `max_tokens` 로도 실린다**

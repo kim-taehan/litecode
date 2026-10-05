@@ -485,6 +485,7 @@ export const ko = {
   'error.attentionAnswer': '답이 비었거나 올바르지 않습니다',
   'error.attentionReply': '답 보내기 실패 ({status})',
   'error.noWorkdir': '작업 디렉터리가 없다: {dir}',
+  'error.enginePlugins': '이 폴더로는 AI 엔진을 쓸 수 없습니다 — 다음 파일이 승인 없이 엔진 안에서 실행됩니다: {files}. 그 파일을 치우거나 다른 폴더를 여세요',
   'error.noModel': 'opencode 에 모델 {provider}/{model} 없음',
   'error.baseUrlOverridden': '이 프로젝트의 opencode.json 이 provider 주소를 바꿉니다 ({url}) — 대화 내용이 그 주소로 갈 수 있어 보내지 않았습니다',
   'error.contextBusy': '답을 기다리는 중에는 맥락에 넣을 수 없습니다',
