@@ -4,15 +4,19 @@ import { streamText } from './outputBuffer.ts'
 // 셸 명령 하나를 띄우는 공용 실행기 — `!명령`(ctx.shell)과 훅(ctx.hooks, 이슈 #102)이 같은 규칙으로 돈다 (원래 shell.ts 안에 있던 부분).
 // - 로그인 셸(`$SHELL -lc`)로 띄운다 — Finder 로 띄운 앱은 PATH 가 짧아 npm·node 를 못 찾는다 (01h §6a). Windows 는 cmd
 // - 프로세스 그룹으로 띄워 멈춤·기한에 자식(파이프·백그라운드)까지 끈다 (SIGTERM → KILL_GRACE_MS 뒤 SIGKILL)
+// - Windows 는 프로세스 그룹이 없다 — `taskkill /pid <pid> /T /F` 로 cmd 와 그 자식을 한 번에 끈다.
+//   **Windows 쪽은 인자 모양만 단위 테스트로 고정했고 실제 실행은 미검증이다** (이슈 #126 오류 3, tests/unit/exec.test.ts)
 // - env 는 앱 자신의 env(+ 부른 쪽이 더한 값). 서버 비밀번호는 메인 env 에 원래 없지만 혹시 몰라 지운다
 // - stdin 을 주면 그 글을 쓰고 닫는다. 안 주면 닫힌 채다 (입력이 필요한 명령은 곧 실패한다)
 // - 출력은 스트림마다 UTF-8 디코더로 풀어(조각 경계의 한글) onOutput 으로 넘긴다 — 얼마나 쥘지는 부른 쪽이 정한다 (outputBuffer.ts)
 
 const KILL_GRACE_MS = 2_000
 
-/** 띄울 셸과 인자 — 로그인 셸에 명령 하나. Windows 는 cmd */
+/** 띄울 셸과 인자 — 로그인 셸에 명령 하나. Windows 는 cmd.
+ *  cmd 는 `/s` 일 때 `/c` 뒤 글의 맨 앞·맨 뒤 큰따옴표만 떼고 그 사이는 그대로 읽는다 — 그래서 명령을 통째로 한 번 감싼다.
+ *  이 인자는 `windowsVerbatimArguments` 로 띄워야 한다 (안 그러면 Node 가 명령 안의 `"` 를 cmd 가 모르는 `\"` 로 바꾼다) */
 export function shellCommand(command: string, env: NodeJS.ProcessEnv = process.env, platform = process.platform): [string, string[]] {
-  if (platform === 'win32') return [env['ComSpec'] || 'cmd.exe', ['/d', '/s', '/c', command]]
+  if (platform === 'win32') return [env['ComSpec'] || 'cmd.exe', ['/d', '/s', '/c', `"${command}"`]]
   return [env['SHELL'] || '/bin/sh', ['-lc', command]]
 }
 
@@ -55,6 +59,7 @@ export function execShell(opts: ExecOptions): ExecHandle {
         detached: process.platform !== 'win32',
         stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
         windowsHide: true,
+        windowsVerbatimArguments: true, // Windows 에서만 뜻이 있다 (shellCommand 의 따옴표)
       })
     } catch (error) {
       return resolve({ exitCode: null, status: 'error', error: (error as Error).message }) // 띄우기부터 던졌다 (잘못된 인자 등)
@@ -68,6 +73,14 @@ export function execShell(opts: ExecOptions): ExecHandle {
         else child.kill(name)
       } catch {
         // 이미 끝났다
+      }
+    }
+    /** Windows — cmd 와 그 자식까지. taskkill 을 못 띄우면 cmd 만이라도 끈다 */
+    const killTree = (pid: number): void => {
+      try {
+        spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => child.kill())
+      } catch {
+        child.kill()
       }
     }
     const streams = (['stdout', 'stderr'] as const).map((name) => {
@@ -85,6 +98,7 @@ export function execShell(opts: ExecOptions): ExecHandle {
     stop = (why) => {
       if (settled || reason) return
       reason = why
+      if (process.platform === 'win32' && child.pid) return killTree(child.pid)
       signal('SIGTERM')
       setTimeout(() => signal('SIGKILL'), KILL_GRACE_MS).unref()
     }

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { Context } from 'cordis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { OUTPUT_LIMIT, ShellService, shellCommand, shellContext } from '../../src/services/shell.ts'
+import { setMainLanguage } from '../../src/i18n.ts'
 
 // `!명령` 실행 (ctx.shell) — 프로젝트 폴더·로그인 셸·출력 합치기·상한·■·기한 (closed-code shellRunner + 01h)
 
@@ -29,7 +30,7 @@ describe('shellCommand', () => {
   it('로그인 셸에 명령 하나 — SHELL 이 없으면 /bin/sh, Windows 는 cmd', () => {
     expect(shellCommand('ls', { SHELL: '/bin/zsh' }, 'darwin')).toEqual(['/bin/zsh', ['-lc', 'ls']])
     expect(shellCommand('ls', {}, 'linux')).toEqual(['/bin/sh', ['-lc', 'ls']])
-    expect(shellCommand('dir', {}, 'win32')).toEqual(['cmd.exe', ['/d', '/s', '/c', 'dir']])
+    expect(shellCommand('dir', {}, 'win32')).toEqual(['cmd.exe', ['/d', '/s', '/c', '"dir"']]) // 따옴표 규칙은 exec.test.ts
   })
 })
 
@@ -84,19 +85,41 @@ describe('ShellService', () => {
     const { shell } = await start()
     expect(await shell.run('r5', path.join(tmp, 'nope'), 'ls')).toMatchObject({ status: 'error', exitCode: null })
   })
+
+  // 카드에 보이는 오류다 — 화면 언어를 따른다 (이슈 #126 오류 6)
+  it('없는 폴더의 오류 문구는 지금 언어로 나간다', async () => {
+    const { shell } = await start()
+    const missing = path.join(tmp, 'nope')
+    setMainLanguage('en')
+    try {
+      expect((await shell.run('r6', missing, 'ls')).error).toBe(`Working directory not found: ${missing}`)
+    } finally {
+      setMainLanguage('ko')
+    }
+  })
 })
 
+// 모델이 읽는 글이다 — 화면 언어와 무관하게 영어 (present 도구와 같은 규칙, 이슈 #126 오류 6)
 describe('shellContext (AI 에 넣는 본문)', () => {
   it('어디서 무엇을 돌렸는지·끝난 사정·코드 블록 출력·잘림 표시', () => {
     const text = shellContext({ command: 'npm test', output: 'FAIL x\n', exitCode: 1, status: 'done', truncated: true }, '/p')
-    expect(text).toContain('/p')
-    expect(text).toContain('$ npm test\n(종료 코드 1)\n\n```\nFAIL x\n```')
-    expect(text).toContain('가운데가 생략됐습니다')
+    expect(text.split('\n')[0]).toBe('Shell command the user ran directly in the project folder (/p), with its output.')
+    expect(text).toContain('$ npm test\n(exit code 1)\n\n```\nFAIL x\n```')
+    expect(text).toContain(`(output exceeded ${OUTPUT_LIMIT / 1024}KB; the middle was omitted, only the start and the end are shown)`)
   })
 
   it('출력에 ``` 가 있으면 더 긴 울타리로 감싼다. 멈춘 것은 그 사정을', () => {
     const text = shellContext({ command: 'cat a.md', output: '```js\nx\n```', exitCode: null, status: 'stopped', truncated: false }, '/p')
-    expect(text).toContain('(사용자가 중단함)')
+    expect(text).toContain('(stopped by the user)')
     expect(text).toContain('````\n```js\nx\n```\n````')
+  })
+
+  it('기한 초과·실행 안 됨도 영어로 — 한글이 섞이지 않는다', () => {
+    const base = { command: 'x', output: '', truncated: true }
+    const timeout = shellContext({ ...base, exitCode: null, status: 'timeout' }, '/p')
+    const failed = shellContext({ ...base, exitCode: null, status: 'error' }, '/p')
+    expect(timeout).toContain('(stopped after exceeding 60 seconds)')
+    expect(failed).toContain('(did not run)')
+    expect(timeout + failed).not.toMatch(/[가-힣]/)
   })
 })

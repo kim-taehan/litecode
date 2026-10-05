@@ -12,6 +12,7 @@ import { SPEECH_SAMPLE_RATE, type SpeechLanguage } from '../shared/speech.ts'
 // 메시지마다 하는 일(한 번에 받아쓰기 · 실시간 받아쓰기의 조각)은 src/services/speech/stream.ts speechEngine 에 있다 — 여기는 sherpa 를 읽어 끼울 뿐이다.
 
 const THREADS = 2
+const FATAL_EXIT_DELAY_MS = 200
 
 interface OfflineStream {
   acceptWaveform(wave: { sampleRate: number; samples: Float32Array }): void
@@ -82,5 +83,7 @@ try {
   post({ type: 'ready', loadMs: Math.round(performance.now() - started) })
 } catch (error) {
   post({ type: 'fatal', message: (error as Error).message })
-  process.exit(1)
+  // 곧바로 exit 하면 메시지가 나가기 전에 끝나 사유 대신 'engine exited' 만 남을 수 있다 — 보낼 틈을 준다.
+  // (fatal 을 받은 ctx.speech 가 먼저 이 프로세스를 죽여도 된다)
+  setTimeout(() => process.exit(1), FATAL_EXIT_DELAY_MS)
 }

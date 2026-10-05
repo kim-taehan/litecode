@@ -556,7 +556,6 @@ export const en = {
   'mcp.status.needs_auth': 'Needs auth',
   'mcp.status.needs_client_registration': 'Needs auth',
   'mcp.status.pending': 'Not connected',
-  'mcp.toolCount': '{count} tools',
   'mcp.shadowed': 'Not attached — an app server has the same name',
   'mcp.readOnly': 'Read-only',
   'mcp.enabled': 'Turn on {name}',
