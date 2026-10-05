@@ -1,3 +1,5 @@
+import type { HistoryMessage } from '../shared/contract.ts'
+import { stopFeedbackReason } from '../shared/hooks.ts'
 import type { TurnItem } from '../shared/ipc.ts'
 import type { Translate } from './settingsStore.ts'
 
@@ -71,4 +73,12 @@ export function clockTime(at: number): string {
 export function looksLikePath(token: string): boolean {
   if (!token || token.length > 300 || /\s/.test(token)) return false
   return token.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(token)
+}
+
+/** 미니맵 줄의 이름표 — 대화 칸의 `.user-turn` 닻과 순서로 짝짓는다 (Minimap.tsx). 턴 끝 훅이 이어 보낸 글은 말풍선이 아니라
+ *  닻이 없으니 줄에서도 뺀다 (ChatTurn.tsx UserMessage). 글 없이 첨부만 보낸 턴은 파일 이름 */
+export function minimapTurns(messages: readonly HistoryMessage[]): string[] {
+  return messages
+    .filter((message) => message.role === 'user' && stopFeedbackReason(message.text) === undefined)
+    .map((message) => message.text || (message.attachments ?? []).map((item) => item.name).join(', '))
 }

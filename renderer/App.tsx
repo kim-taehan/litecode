@@ -6,6 +6,7 @@ import { ago } from './ago.ts'
 import { badgeColor, badgeLetters } from './badge.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap, useFollowBottom } from './Minimap.tsx'
+import { minimapTurns } from './turnView.ts'
 import { ScrollToBottom } from './ScrollToBottom.tsx'
 import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
 import { ModelSelect } from './ModelSelect.tsx'
@@ -293,7 +294,7 @@ export function App() {
   const features = useFeatures()
   const featuresRef = useRef(features)
   featuresRef.current = features
-  /** Trajectory 탭 — 설정 > 일반의 코딩 뷰와 설정 > 기능의 추론 과정이 둘 다 켜져야 보인다 */
+  /** Trajectory 탭 — 설정 > 기능의 추론 과정이 켜져야 보인다 */
   const trajectoryOn = features.has('trajectory')
   const terminalOn = features.has('terminal')
   /** 새 대화는 제목 없이 두고 보일 때 번역한다 — 언어를 바꾸면 같이 바뀐다 (첫 메시지가 제목이 된다) */
@@ -400,7 +401,8 @@ export function App() {
     const apply = (event: ChatEvent & { data: { cid: string } }) => updateSession(event.data.cid, (session) => applyChat(session, event))
     const offs = [
       window.litecode.onTurnStarted((data) => {
-        following.current = true
+        // 보는 대화의 턴일 때만 — 다른 대화의 턴이 지금 읽던 자리를 맨 아래로 끌고 가지 않게
+        if (data.cid === activeIdRef.current) following.current = true
         // 화면이 모르는 대화의 턴 — 다른 대화가 지시로 새로 만든 대화다 (start_session, 이슈 #55). 메인이 저장한 목록 정보로 목록에 넣는다.
         // 내용은 이 턴이 전부라 엔진에서 다시 부르지 않는다 (history 없음 = 이번 실행에 만든 대화)
         if (!sessionsRef.current.some((session) => session.id === data.cid)) {
@@ -436,6 +438,8 @@ export function App() {
   const project = projects?.find((candidate) => candidate.path === current)
   const visible = sessions.filter((session) => session.project === project?.path)
   const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
+  const activeIdRef = useRef<string>(undefined)
+  activeIdRef.current = active?.id
   /** 지금 대화의 초안 — 아래 함수들은 이 그리기의 대화에 묶인다 (기다린 뒤에 불려도 그때 보던 대화의 초안을 고친다) */
   const { text: draft, attached } = draftOf(drafts, active?.id)
   function changeDraftOf(id: string, change: (draft: Draft) => Draft): void {
@@ -460,8 +464,8 @@ export function App() {
   const mode = active?.mode ?? settings.defaultMode
   /** 알림 — 메인이 쥔 대화별 상태(점)와 앞일 때의 토스트. 지금 보는 대화를 메인에 알린다 */
   const notices = useNotices(active?.id, features.has('notifications'))
-  /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다 (정본은 알림 상태) */
-  const running = runningIn(notices.state, project?.path)
+  /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다. 알림 기능과 무관하다 — 대화별 pending 으로 센다 (backgroundView.ts) */
+  const running = runningIn(sessions, project?.path)
   const [runningOnly, setRunningOnly] = useState(false)
   /** 대화 목록 위 찾기 칸의 글 (이슈 #79) — 제목으로 거른다. "진행 중" 필터와 함께 걸린다. 고정한 대화가 위 */
   const [titleQuery, setTitleQuery] = useState('')
@@ -557,6 +561,10 @@ export function App() {
     function onKeyDown(event: KeyboardEvent): void {
       const command = navigator.platform.startsWith('Mac') ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
       if (!command || event.shiftKey || event.altKey || !drawerProject || !terminalOn) return
+      // 판(aria-modal)이 떠 있으면 물러난다 (⌘F 와 같다 — ChatFind.tsx). 입력창·터미널 칸이 아닌 글 칸에서는 ⌘↓/⌘↑ 이 그 칸의 커서 이동이다
+      if (document.querySelector('[aria-modal="true"]')) return
+      const target = event.target instanceof HTMLElement ? event.target : undefined
+      if (target?.matches('input, textarea, [contenteditable]') && !target.closest('.composer__input, .shell-drawer')) return
       if (event.key === 'ArrowDown') {
         setShellOpen((open) => ({ ...open, [drawerProject]: true }))
         setShellFocus((count) => count + 1)
@@ -827,7 +835,7 @@ export function App() {
       projects={projects ?? []}
       current={project?.path}
       statusOf={(dir) => projectStatus(notices.state, dir)}
-      runningOf={(dir) => runningIn(notices.state, dir).length}
+      runningOf={(dir) => runningIn(sessions, dir).length}
       busy={picking}
       error={openError}
       onPick={(picked) => void pickRecent(picked)}
@@ -913,8 +921,8 @@ export function App() {
               <StatusDot status={otherProjectsStatus(notices.state, project?.path)!} className="project-switch__notice" />
             )}
             <RunningCount
-              count={runningOutside(notices.state, project?.path)}
-              label={t('sidebar.runningElsewhere', { count: runningOutside(notices.state, project?.path) })}
+              count={runningOutside(sessions, project?.path)}
+              label={t('sidebar.runningElsewhere', { count: runningOutside(sessions, project?.path) })}
               className="project-switch__running"
             />
             <span className="project-switch__caret">▾</span>
@@ -1108,7 +1116,7 @@ export function App() {
               {features.has('openIn') && <OpenInButton directory={active.project} />}
               <RightPanelButton directory={active.project} />
             </div>
-            {/* 설정 > 일반의 코딩 뷰나 설정 > 기능의 추론 과정을 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
+            {/* 설정 > 기능의 추론 과정을 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
             {trajectoryOn && (
               <div className="main__tabs" role="tablist" aria-label={t('main.views')}>
                 {(['chat', 'trajectory'] as const).map((tab) => (
@@ -1195,7 +1203,7 @@ export function App() {
               </div>
             </div>
             </FindingProvider>
-            <Minimap scroller={listRef} turns={active.messages.filter((message) => message.role === 'user').map((message) => message.text || (message.attachments ?? []).map((item) => item.name).join(', '))} />
+            <Minimap scroller={listRef} turns={minimapTurns(active.messages)} />
             <ScrollToBottom scroller={listRef} following={following} />
             </div>
             )}
@@ -1239,6 +1247,7 @@ export function App() {
                     // 클립보드의 파일·이미지는 칩으로 (이슈 #80) — 글만 있으면 손대지 않는다 (dropPaste.ts)
                     const files = [...event.clipboardData.files]
                     if (pasteIntent(event.clipboardData.types, files.length) !== 'attach') return
+                    if (!canWrite(active)) return
                     event.preventDefault()
                     void attachFiles(files)
                   }}
@@ -1271,6 +1280,8 @@ export function App() {
                     }
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
+                      // 누르고 있는 Enter 는 한 번만 — 초안은 보낸 뒤에 비워져서, 반복 키가 같은 글을 또 보낸다
+                      if (event.repeat) return
                       submit()
                     }
                   }}

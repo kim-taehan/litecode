@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import type { HistoryMessage } from '../../shared/contract.ts'
+import { stopFeedback } from '../../shared/hooks.ts'
 import type { TurnItem } from '../../shared/ipc.ts'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
-import { answerText, clockTime, formatDuration, looksLikePath, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
+import { answerText, clockTime, formatDuration, looksLikePath, minimapTurns, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
 
 // 답 한 턴의 화면 모양 — 진행 줄 쌓기, 작업/답 가르기, 줄 글자
 
@@ -91,5 +93,23 @@ describe('글자', () => {
     expect(looksLikePath('package.json')).toBe(true)
     expect(looksLikePath('npm run dev')).toBe(false)
     expect(looksLikePath('useState')).toBe(false)
+  })
+})
+
+describe('minimapTurns', () => {
+  // 미니맵 줄은 대화 칸의 `.user-turn` 닻과 순서로 짝짓는다 (Minimap.tsx). 턴 끝 훅이 이어 보낸 글은 `.hook-followup` 으로 그려져 닻이 아니다 (ChatTurn.tsx UserMessage)
+  const messages: HistoryMessage[] = [
+    { role: 'user', text: '첫 질문' },
+    { role: 'assistant', text: '답 1' },
+    { role: 'user', text: stopFeedback('테스트를 돌리세요') },
+    { role: 'assistant', text: '답 2' },
+    { role: 'user', text: '둘째 질문' },
+    { role: 'assistant', text: '답 3' },
+  ]
+  it('턴 끝 훅이 이어 보낸 글은 줄이 아니다 — 줄 수가 닻 수와 같고 이름표에 훅 머리가 없다', () => {
+    expect(minimapTurns(messages)).toEqual(['첫 질문', '둘째 질문'])
+  })
+  it('글 없이 첨부만 보낸 턴은 파일 이름이 이름표다', () => {
+    expect(minimapTurns([{ role: 'user', text: '', attachments: [{ name: 'a.png' }, { name: 'b.txt' }] } as HistoryMessage])).toEqual(['a.png, b.txt'])
   })
 })
