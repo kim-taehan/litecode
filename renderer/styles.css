@@ -416,7 +416,7 @@ button {
   padding: 0 14px 12px;
 }
 
-/* dsh .newSession — 38px, 0.5px l3, 반경 12, elevated 바탕, 14/500/22 */
+/* dsh .newSession — 38px, 0.5px l3, 반경 12, elevated 바탕. 글자는 dsh 의 14/500/22 가 한글에서 커 보여 대화 행과 같은 13/500/20 (사용자 2026-10-06) */
 .new-chat {
   width: 100%;
   height: 38px;
@@ -425,9 +425,9 @@ button {
   border: 0.5px solid var(--border-ring);
   border-radius: 12px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 22px;
+  line-height: 20px;
 }
 
 /* dsh .sectionHeader — 36px 줄, 14/400/20 tertiary, 행 글자와 같은 세로선(12 + 4) */
@@ -591,7 +591,7 @@ button {
   padding: 0 12px 6px;
 }
 
-/* dsh ui-sidebar 설정 줄(.trigger) — 42px 줄, 16px 톱니, 본문 글자색, 열림 표시 없음. dsh 발치에는 구분선이 없다 */
+/* dsh ui-sidebar 설정 줄(.trigger) — 42px 줄, 16px 톱니, 본문 글자색, 열림 표시 없음. dsh 발치에는 구분선이 없다. 글자는 대화 행과 같은 13/20 (사용자 2026-10-06) */
 .settings-trigger {
   display: flex;
   align-items: center;
@@ -605,8 +605,8 @@ button {
   border-radius: 12px;
   background: none;
   text-align: left;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 20px;
   color: var(--text);
 }
 
