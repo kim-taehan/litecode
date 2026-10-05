@@ -487,7 +487,7 @@ export class LlmService extends Service {
       const live = { tracker, workdir, sessionId: id, calls }
       this.running.add(live)
       const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention, calls, mode)
-      const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.refresh, stop, calls)
+      const events = this.follow(conn, scope, tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, declined, attention.signal, stop, calls)
       try {
         await events.connected
         if (stop?.aborted) {
@@ -801,7 +801,7 @@ export class LlmService extends Service {
     admitted: Promise<boolean>,
     onProgress: ((item: TurnItem) => void) | undefined,
     declined: ReadonlySet<string>,
-    onAttentionSignal: () => void,
+    onAttentionSignal: (type: string, properties: Record<string, unknown>) => void,
     userStop?: AbortSignal,
     calls?: ToolCalls,
   ): { connected: Promise<void>; result: Promise<TurnOutcome>; stop: () => void } {
@@ -897,7 +897,7 @@ export class LlmService extends Service {
       const about = props['info'] as EngineMessageInfo | undefined
       if (event.type === 'session.created' && seenUser && about?.parentID === sessionId) return tracker.adoptChild(about.id)
       if (tracker.isChild(props['sessionID'] ?? about?.sessionID)) {
-        if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal()
+        if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal(event.type, props)
         if (event.type === 'message.part.updated') {
           calls?.observe(props['part'] as EnginePart | undefined, true) // 하위 작업이 부른 도구
           toolDone(props['part'] as EnginePart | undefined, true)
@@ -907,7 +907,7 @@ export class LlmService extends Service {
         return
       }
       if (props['sessionID'] !== sessionId) return
-      if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal()
+      if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal(event.type, props)
       if (event.type === 'session.status' && seenUser) {
         const item = tracker.status(props['status'] as Parameters<TurnTracker['status']>[0])
         if (item) onProgress?.(item)
@@ -984,7 +984,12 @@ export class LlmService extends Service {
 
   /** 승인·질문 대기 목록을 지켜본다. refresh 마다 정본 목록(GET /permission·/question?directory= — 그 폴더 전부)을 다시 읽어 이 턴 답 메시지의
    *  요청만 남기고, 바뀌었으면 onAttention 을 부르고 새 요청마다 'llm/attention', 다 풀렸으면 'llm/attention-resolved' 를 낸다.
-   *  중지한 턴의 요청이 목록에 남아 있어도(01w) 그 턴의 답 메시지가 아니라 안 보인다. 읽기는 한 줄로 세운다(뒤늦은 응답이 새 목록을 덮지 않게) */
+   *  중지한 턴의 요청이 목록에 남아 있어도(01w) 그 턴의 답 메시지가 아니라 안 보인다. 읽기는 한 줄로 세운다(뒤늦은 응답이 새 목록을 덮지 않게).
+   *  **권한 목록은 못 읽을 수 있다** (이슈 #107, 실측 01ai 2026-10-05, 1.18.18 각 3/3): 요청의 metadata 에 빠진 선택 인자가 있으면(webfetch 의 timeout,
+   *  glob·grep 의 path) GET /permission 이 400(`Expected JSON value, got undefined at [n]["metadata"][…]`)이다 — 그 요청 하나가 그 폴더 목록 전체를,
+   *  멈춘 턴이 남긴 요청이면 엔진을 다시 띄울 때까지 깨뜨린다. `permission.asked` 이벤트는 요청 전체를 싣고 오고 답(POST …/reply)은 정상이라,
+   *  signal 이 이 턴의 이벤트로 본 요청을 기억해 두고(풀림 `permission.replied`·답하면 지운다) 목록에 없거나 목록을 못 읽은 요청은 그것으로 만든다.
+   *  목록을 읽었으면 목록이 정본이다(같은 요청은 목록 것). 질문 목록(GET /question)은 같은 약점이 없었다(3/3) — 폴백 없이 못 읽으면 있던 카드를 둔다 */
   private watchAttention(
     conn: EngineConnection,
     sessionId: string,
@@ -995,7 +1000,7 @@ export class LlmService extends Service {
     onAttention: ((requests: Attention[]) => void) | undefined,
     calls?: ToolCalls,
     mode: Mode = DEFAULT_MODE,
-  ): { refresh(): void; stop(): void } {
+  ): { signal(type: string, properties: Record<string, unknown>): void; stop(): void } {
     let pending: Attention[] = []
     let stopped = false
     // 도구 실행 전 판정 (이슈 #102 2단계, 01af §6-1). 권한 요청마다 **한 번** 'llm/pre-tool' 을 묻고, 판정이 나올 때까지 그 요청은 카드로 내지 않는다:
@@ -1022,14 +1027,21 @@ export class LlmService extends Service {
     }
     let chain: Promise<void> = Promise.resolve()
     type Request = { id: string; sessionID?: string; tool?: { messageID?: string; callID?: string } }
-    const list = async <T extends Request>(kind: Attention['kind']): Promise<T[]> => {
-      const res = await fetch(`${conn.url}/${kind}?${at(workdir)}`, { headers: conn.headers, signal: conn.closed })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      // 이 턴 답 메시지의 요청 + 이 턴이 띄운 하위 작업(자식 세션)의 요청 — 자식은 이 턴에 생긴 세션이라 앞 턴의 남은 요청이 섞이지 않는다 (#31 실측:
-      // 자식의 permission.asked 는 sessionID = 자식, tool.messageID = 자식의 답 메시지. 매번 묻기 모드의 general-ask 가 bash 를 물을 때)
-      return ((await res.json()) as T[]).filter(
-        (entry) => (entry.sessionID === sessionId && scope.owns(entry.tool?.messageID)) || tracker.isChild(entry.sessionID),
-      )
+    // 이 턴 답 메시지의 요청 + 이 턴이 띄운 하위 작업(자식 세션)의 요청 — 자식은 이 턴에 생긴 세션이라 앞 턴의 남은 요청이 섞이지 않는다 (#31 실측:
+    // 자식의 permission.asked 는 sessionID = 자식, tool.messageID = 자식의 답 메시지. 매번 묻기 모드의 general-ask 가 bash 를 물을 때)
+    const mine = (entry: Request): boolean => (entry.sessionID === sessionId && scope.owns(entry.tool?.messageID)) || tracker.isChild(entry.sessionID)
+    const warned = new Set<Attention['kind']>()
+    /** 정본 목록에서 이 턴의 요청. 못 읽었으면 undefined — 삼키지 않고 적는다 (턴이 끝나며 끊긴 것은 빼고, 깨진 폴더는 신호마다 실패하니 턴마다 한 번) */
+    const list = async <T extends Request>(kind: Attention['kind']): Promise<T[] | undefined> => {
+      try {
+        const res = await fetch(`${conn.url}/${kind}?${at(workdir)}`, { headers: conn.headers, signal: conn.closed })
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`.trim())
+        return ((await res.json()) as T[]).filter(mine)
+      } catch (error) {
+        if (!stopped && !conn.closed.aborted && !warned.has(kind)) console.warn(`[llm] 승인 대기 목록(${kind})을 못 읽었다 — ${kind === 'permission' ? '이벤트로 본 요청으로 잇는다' : '다음 신호에 다시'}:`, (error as Error).message)
+        warned.add(kind)
+        return undefined
+      }
     }
     /** 요청한 세션과, 하위 작업이 물었으면 그 하위 작업 */
     const origin = (entry: Request): { sessionId: string; subtask?: AttentionSubtask } => {
@@ -1038,6 +1050,8 @@ export class LlmService extends Service {
       return { sessionId: entry.sessionID, ...(subtask && { subtask: { agent: subtask.agent, description: subtask.description } }) }
     }
     type PermissionRequest = Request & { permission: string; patterns?: string[]; metadata?: Record<string, unknown> }
+    /** permission.asked 이벤트로 본, 아직 안 풀린 요청 (요청 id → 이벤트 본문) — 정본 목록의 폴백 */
+    const seen = new Map<string, PermissionRequest>()
     const judge = async (entry: PermissionRequest): Promise<void> => {
       let verdict: 'card' | 'answered' = 'card'
       try {
@@ -1079,8 +1093,10 @@ export class LlmService extends Service {
     }
     const read = async (): Promise<void> => {
       if (stopped) return
-      const [asked, questions] = await Promise.all([list<PermissionRequest>('permission'), list<Request & { questions: AttentionQuestion[] }>('question')])
+      const [listed, questions] = await Promise.all([list<PermissionRequest>('permission'), list<Request & { questions: AttentionQuestion[] }>('question')])
       if (stopped) return
+      const known = new Set(listed?.map((entry) => entry.id))
+      const asked = [...(listed ?? []), ...[...seen.values()].filter((entry) => !known.has(entry.id) && mine(entry))]
       for (const entry of asked) {
         if (verdicts.has(entry.id)) continue
         verdicts.set(entry.id, 'judging')
@@ -1103,19 +1119,29 @@ export class LlmService extends Service {
             ...(input !== undefined && { input: JSON.stringify(input) }),
           }
         }),
-        ...questions.map((entry): Attention => ({ kind: 'question', id: entry.id, ...origin(entry), questions: entry.questions })),
+        ...(questions?.map((entry): Attention => ({ kind: 'question', id: entry.id, ...origin(entry), questions: entry.questions })) ?? pending.filter((entry) => entry.kind === 'question')),
       ]
       for (const entry of permissions) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID })
-      for (const entry of questions) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'question', callID: entry.tool?.callID })
+      for (const entry of questions ?? []) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'question', callID: entry.tool?.callID })
       publish(next)
     }
     // 답한 요청은 목록 읽기를 기다리지 않고 바로 뺀다 — 카드가 곧장 사라지고, 답 직후 턴이 끝나도(stop) resolved 를 놓치지 않는다
-    this.watchers.set(sessionId, { answered: (requestId) => !stopped && publish(pending.filter((entry) => entry.id !== requestId)) })
+    this.watchers.set(sessionId, {
+      answered: (requestId) => {
+        seen.delete(requestId)
+        if (!stopped) publish(pending.filter((entry) => entry.id !== requestId))
+      },
+    })
     const refresh = (): void => {
       chain = chain.then(read).catch(() => {}) // 못 읽으면 다음 신호에 다시 — 턴 끝은 idle 이 정한다
     }
     return {
-      refresh,
+      // 이 턴(과 그 하위 작업)의 permission.*·question.* 이벤트 — 권한 요청은 적어 두고(asked) 풀리면 지운 뒤(replied) 목록을 다시 읽는다
+      signal: (type, properties) => {
+        if (type === 'permission.asked' && typeof properties['id'] === 'string' && typeof properties['permission'] === 'string') seen.set(properties['id'], properties as PermissionRequest)
+        if (type === 'permission.replied' && typeof properties['requestID'] === 'string') seen.delete(properties['requestID'])
+        refresh()
+      },
       stop: () => {
         stopped = true
         judging.abort()
@@ -1199,10 +1225,12 @@ async function runningCall(calls: ToolCalls | undefined, callId: string | undefi
   }
 }
 
-/** running 파트를 못 봤을 때 요청에 실린 것으로 만드는 인자 — bash 는 `metadata.command`, edit·write 는 `metadata.filepath` (01af §4) */
+/** running 파트를 못 봤을 때 요청에 실린 것으로 만드는 인자 — bash 는 `metadata.command`, edit·write 는 `metadata.filepath` (01af §4),
+ *  webfetch 는 metadata 가 인자 그대로다 (`{url, format, timeout?}` — 01ai) */
 function requestInput(permission: string, metadata: Record<string, unknown> | undefined): unknown {
   if (permission === 'bash' && typeof metadata?.['command'] === 'string') return { command: metadata['command'] }
   if (permission === 'edit' && typeof metadata?.['filepath'] === 'string') return { filePath: metadata['filepath'] }
+  if (permission === 'webfetch' && typeof metadata?.['url'] === 'string') return { ...metadata }
   return {}
 }
 

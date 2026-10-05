@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { ascendingId, finishedTool, interruptedError, LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
@@ -15,12 +15,17 @@ import { translate } from '../../shared/i18n/index.ts'
 // {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
 // (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask' | 'mcpgate' | 'twoasks'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask' | 'mcpgate' | 'twoasks' | 'webask' | 'webchild'
 
 /** 'mcpask' 턴이 묻는 앱 MCP 도구 호출의 인자 (이슈 #55) */
 const MCP_ARGS = { session: 'c-1a2b3c4d', message: 'fix the tests' }
 /** 'mcpask' 에서 허용 뒤 도구가 끝나기까지 — 그 사이에 MCP 호출이 앱 서버에 닿는다 */
 const MCP_CALL_MS = 250
+
+/** 'webask'·'webchild' 턴이 가져오려는 주소 */
+const WEB_URL = 'http://127.0.0.1:9/doc'
+/** 정본 목록이 깨졌을 때의 응답 (01ai 실측 — 인자에 빠진 선택 항목이 있는 webfetch·glob·grep 요청이 하나라도 대기 중이면 그 폴더 목록 전체가 400) */
+const BROKEN_LIST = { name: 'BadRequest', data: { message: 'Expected JSON value, got undefined\n  at [0]["metadata"]["timeout"]', kind: 'Body' } }
 
 /** 'silent' 턴이 끝 이벤트까지 /event 에 아무것도 안 보내는 시간 */
 const SILENT_MS = 1_500
@@ -97,6 +102,8 @@ async function fakeOpencode(ending: Ending): Promise<string> {
     if (route === '/session/status') return void res.end(JSON.stringify(busy ? { ses_1: { type: 'busy' } } : {}))
     if (route === '/session/ses_1/message') return void res.end(JSON.stringify(legacy))
     if (route === '/api/session/ses_1/message') return void res.end(JSON.stringify({ data: previous, cursor: { next: null } }))
+    // 'webask'·'webchild': 정본 목록 GET /permission 이 응답 검증에 실패한다 — 답한 뒤에도(멈춘 턴의 요청이 남은 폴더처럼) 계속 (01ai)
+    if (route === '/permission' && (ending === 'webask' || ending === 'webchild')) return void res.writeHead(400).end(JSON.stringify(BROKEN_LIST))
     if (route === '/permission' || route === '/question') return void res.end(JSON.stringify(pending[route === '/permission' ? 'permission' : 'question']))
     // 답: once·답하기는 도구가 이어서 끝나고 턴이 끝난다. 거절은 도구 error 뒤 곧바로 idle (01w)
     const answered = /^\/(permission|question)\/(\w+)\/(reply|reject)$/.exec(route)
@@ -130,7 +137,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           answer('done')
           idle()
         }
-        if (ending === 'mcpask' || ending === 'mcpgate') setTimeout(finish, MCP_CALL_MS)
+        if (ending === 'mcpask' || ending === 'mcpgate' || ending === 'webask' || ending === 'webchild') setTimeout(finish, MCP_CALL_MS)
         else finish()
       })
     }
@@ -218,7 +225,8 @@ async function fakeOpencode(ending: Ending): Promise<string> {
             else pending.question = [{ id: 'que_1', sessionID: 'ses_1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'SQLite' }] }], tool }]
             emit(`${ending}.asked`, { id: ending === 'permission' ? 'per_1' : 'que_1' })
             // 아직 답이 없으면 같은 폴더의 승인 신호가 한 번 더 온다 (목록을 다시 읽게 한다)
-            if (ending === 'permission') setTimeout(() => pending.permission.length > 0 && emit('permission.asked', { id: 'per_1' }), 40)
+            // (실제 엔진처럼 요청 전체를 싣는다 — 목록과 이벤트 양쪽에 있어도 카드는 하나다, 이슈 #107)
+            if (ending === 'permission') setTimeout(() => pending.permission.length > 0 && emit('permission.asked', { id: 'per_1', permission: 'bash', patterns: ['ls'], metadata: {}, always: ['ls *'], tool }), 40)
           }
           // 한 bash 호출이 두 번 묻는다: 폴더 밖 경로(external_directory) → 허용하면 bash 자신의 권한 (이슈 #102 2단계)
           if (ending === 'twoasks') {
@@ -239,6 +247,20 @@ async function fakeOpencode(ending: Ending): Promise<string> {
             part({ type: 'tool', id: 'prt_b', tool: 'litecode_send_to_session', callID: 'call_1', state: { status: 'running', input: MCP_ARGS } })
             pending.permission = [{ id: 'per_1', sessionID: 'ses_1', permission: 'litecode_send_to_session', patterns: ['*'], metadata: {}, always: ['*'], tool: { messageID: A, callID: 'call_1' } }]
             emit('permission.asked', { id: 'per_1' })
+          }
+          // 매번 묻기의 웹 가져오기 (이슈 #107, 01ai): permission.asked 는 요청 전체를 싣고 오지만 정본 목록은 400 이다
+          if (ending === 'webask' || ending === 'webchild') {
+            const child = ending === 'webchild'
+            const request = { permission: 'webfetch', patterns: [WEB_URL], metadata: { url: WEB_URL, format: 'text' }, always: ['*'] }
+            // 같은 폴더의 다른 대화가 묻는 것 — 이 턴의 카드가 아니다
+            emit('permission.asked', { id: 'per_other', sessionID: 'ses_other', ...request, tool: { messageID: 'msg_x', callID: 'call_x' } })
+            if (child) {
+              emit('session.created', { info: { id: 'ses_c', parentID: 'ses_1' } })
+              emit('permission.asked', { id: 'per_c', sessionID: 'ses_c', ...request, tool: { messageID: 'msg_c1', callID: 'call_c' } })
+            } else {
+              part({ type: 'tool', id: 'prt_b', tool: 'webfetch', callID: 'call_1', state: { status: 'running', input: { url: WEB_URL, format: 'text' } } })
+              emit('permission.asked', { id: 'per_w', ...request, tool: { messageID: A, callID: 'call_1' } })
+            }
           }
           if (ending === 'cut') {
             closer.abort(new Error('engine exited')) // 엔진이 끝나면 closed 가 먼저 걸리고 소켓이 닫힌다
@@ -583,6 +605,98 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
     expect(await turn).toMatchObject({ ok: true, declined: true })
     expect(errors).toHaveLength(5)
     expect(calls.filter((call) => call.includes('/question/'))).toEqual(['/question/que_1/reject {}'])
+  })
+})
+
+// 이슈 #107 (실측 01ai, opencode 1.18.18): 승인 요청의 metadata 에 빠진 선택 인자(webfetch 의 timeout, glob·grep 의 path)가 있으면 정본 목록
+// GET /permission 이 400 이다 — 그 요청이 대기 중인 동안, 그리고 멈춘 턴이 남긴 요청이 있으면 엔진을 다시 띄울 때까지, 그 폴더의 모든 요청에.
+// permission.asked 이벤트는 요청 전체를 싣고 오고 답(POST …/reply)은 정상이다 → 목록을 못 읽으면 이벤트로 본 요청으로 카드를 만든다
+describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.asked 이벤트가 폴백)', () => {
+  const card = { kind: 'permission', id: 'per_w', sessionId: 'ses_1', action: 'webfetch', resources: [WEB_URL] }
+
+  it('목록이 400 이어도 이벤트의 요청으로 카드가 뜨고(이 턴 것만), 허용은 그 id 로 가고 턴이 끝까지 간다 — 못 읽은 것은 경고로 남긴다', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { llm, seen } = await start(await fakeOpencode('webask'))
+    const shown: Attention[][] = []
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+      shown.push(requests)
+      if (requests[0]) void llm.reply('ses_1', requests[0].id, 'once')
+    })
+    expect(result).toMatchObject({ ok: true, text: 'done' })
+    expect(shown).toEqual([[card], []])
+    expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_w/reply {"reply":"once"}'])
+    expect(seen).toEqual([`started ses_1@${directory}`, `attention ses_1@${directory} permission: webfetch ${WEB_URL}`, `resolved ses_1@${directory}`, `ended ses_1@${directory} done`])
+    expect(warn.mock.calls.some((args) => String(args[0]).includes('[llm]') && args.join(' ').includes('400'))).toBe(true)
+    warn.mockRestore()
+  })
+
+  it('다른 쪽이 답해 풀린 요청(permission.replied)은 기억에서 지운다 — 목록이 계속 깨져 있어도 카드가 사라진다', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const url = await fakeOpencode('webask')
+    const { llm, seen } = await start(url)
+    const shown: Attention[][] = []
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+      shown.push(requests)
+      if (requests[0]) void fetch(`${url}/permission/per_w/reply?directory=${encodeURIComponent(directory)}`, { method: 'POST', body: '{"reply":"once"}' })
+    })
+    expect(result.ok).toBe(true)
+    expect(shown).toEqual([[card], []])
+    expect(seen).toContain(`resolved ses_1@${directory}`)
+    vi.restoreAllMocks()
+  })
+
+  it('하위 작업(자식 세션)의 요청도 이벤트로 카드가 된다 — 답은 자식 세션의 요청으로 간다', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { llm } = await start(await fakeOpencode('webchild'))
+    const shown: Attention[][] = []
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+      shown.push(requests)
+      if (requests[0]) void llm.reply(requests[0].sessionId, requests[0].id, 'once')
+    })
+    expect(result.ok).toBe(true)
+    expect(shown).toEqual([[{ ...card, id: 'per_c', sessionId: 'ses_c' }], []])
+    expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_c/reply {"reply":"once"}'])
+    vi.restoreAllMocks()
+  })
+
+  it("도구 실행 전 판정('llm/pre-tool')도 이벤트의 요청으로 돈다 — 막으면 카드 없이 reject + 사유", async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { llm, ctx } = await start(await fakeOpencode('webask'))
+    const asked: PreTool[] = []
+    ctx.on('llm/pre-tool', (info) => (asked.push(info), { deny: true, reason: '사내망만' }))
+    const shown: Attention[][] = []
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => void shown.push(requests))
+    expect(result).toMatchObject({ ok: true, text: 'went on' })
+    expect(asked).toEqual([expect.objectContaining({ tool: 'webfetch', input: { url: WEB_URL, format: 'text' }, child: false })])
+    expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_w/reply {"reply":"reject","message":"사내망만"}'])
+    expect(shown).toEqual([])
+    vi.restoreAllMocks()
+  })
+
+  it('running 파트를 못 본 호출(하위 작업)의 판정 인자는 요청에 실린 것으로 만든다 — webfetch 는 주소·형식', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { llm, ctx } = await start(await fakeOpencode('webchild'))
+    const asked: PreTool[] = []
+    ctx.on('llm/pre-tool', (info) => void asked.push(info))
+    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+      if (requests[0]) void llm.reply(requests[0].sessionId, requests[0].id, 'once')
+    })
+    expect(asked).toEqual([expect.objectContaining({ tool: 'webfetch', input: { url: WEB_URL, format: 'text' }, child: true })])
+    vi.restoreAllMocks()
+  })
+
+  it('목록이 정상이면 목록이 정본이다 — 같은 요청이 목록과 이벤트 양쪽에 있어도 카드는 하나, 경고도 없다', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { llm } = await start(await fakeOpencode('permission'))
+    const shown: Attention[][] = []
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      shown.push(requests)
+      if (requests[0]) setTimeout(() => void llm.reply('ses_1', requests[0]!.id, 'once'), 120) // 그 사이 같은 요청의 이벤트가 한 번 더 온다
+    })
+    expect(result.ok).toBe(true)
+    expect(shown).toEqual([[{ kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'bash', resources: ['ls'] }], []])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 })
 
