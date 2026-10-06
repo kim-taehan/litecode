@@ -8,6 +8,7 @@
 //   직접 입력(http):  이 컴퓨터 안(에뮬레이터)만 — 평문. 확인 코드는 요청에서 만든 8자(shared/remotePairing.ts confirmCode)
 // 붙은 뒤에는 저장한 지문으로만 붙는다. 지문이 바뀌었으면 자동으로 믿지 않고 연결 화면으로 돌아가 다시 짝짓게 한다.
 
+import type { PairRejectReason } from '../../../shared/remote.ts'
 import { confirmCode, normalizePairCode, PAIR_ALPHABET, PAIR_CODE_LENGTH, pairDeviceName } from '../../../shared/remotePairing.ts'
 import type { Transport } from '../core/index.ts'
 import { fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type PinnedNet } from '../core/index.ts'
@@ -91,8 +92,14 @@ export function pairFailure(error: unknown): PairFailure {
   }
   if (error.status === 408) return 'timeout'
   if (error.status === 429) return 'blocked'
-  // 403 은 둘이다: [거절] 을 눌렀거나, 코드가 틀렸거나(없거나 만료). 본문 글로만 갈린다 — src/services/remote.ts 의 'denied on the desktop'
-  if (error.status === 403) return /denied/i.test(error.message) ? 'denied' : 'wrong-code'
+  // 403 은 둘이다: [거절] 을 눌렀거나, 코드가 틀렸거나(없거나 만료). 본문의 reason(shared/remote.ts PairRejectReason)으로 가른다 —
+  // reason 이 없는 옛 데스크탑이면 글('denied on the desktop')로
+  if (error.status === 403) {
+    const reason = error.reason as PairRejectReason | undefined
+    if (reason === 'denied') return 'denied'
+    if (reason === 'wrong-code' || reason === 'no-code') return 'wrong-code'
+    return /denied/i.test(error.message) ? 'denied' : 'wrong-code'
+  }
   return 'failed'
 }
 

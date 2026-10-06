@@ -9,7 +9,7 @@ import { EventLog } from '../../src/services/remote/eventLog.ts'
 import { confirmCode, newPairCode, normalizePairCode } from '../../src/services/remote/pairing.ts'
 import { tr } from '../../src/i18n.ts'
 import type { Attention, AttentionAnswer, TurnItem } from '../../shared/contract.ts'
-import type { ConversationSnapshot, Hello, RemoteConversation, RemoteModel } from '../../shared/remote.ts'
+import type { ConversationSnapshot, Hello, PairRejected, RemoteConversation, RemoteModel } from '../../shared/remote.ts'
 import { MODEL, box, parseFrames, setUp, start, tearDown, until } from './support/remoteHarness.ts'
 
 // ctx.remote — 모바일이 붙는 문 (이슈 #56, 설계 01t 2·3절). 서버는 진짜 HTTP(127.0.0.1 빈 포트)로 띄운다 (support/remoteHarness.ts).
@@ -169,7 +169,7 @@ describe('짝짓기', () => {
     const { remote, requestPair } = await start()
     const { answer, request } = await requestPair()
     remote.answerPair(request.id, false)
-    expect((await answer).status).toBe(403)
+    expect(await answer).toMatchObject({ status: 403, body: { reason: 'denied' } satisfies Partial<PairRejected> })
     expect(remote.status()).toMatchObject({ requests: [], devices: [] })
   })
 
@@ -198,29 +198,29 @@ describe('짝짓기', () => {
     const attempt = (given: string) => api('POST', '/v1/pair', { body: { code: given, deviceName: 'x', platform: 'ios' } })
     for (let count = 1; count <= 5; count++) {
       expect(remote.status().pairing).toBeDefined()
-      expect((await attempt('000000000000')).status).toBe(403)
+      expect(await attempt('000000000000')).toMatchObject({ status: 403, body: { reason: 'wrong-code' } })
     }
     expect(remote.status().pairing).toBeUndefined()
-    expect((await attempt(code)).status).toBe(403)
+    expect(await attempt(code)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
     expect(remote.status().requests).toEqual([])
   })
 
   it('코드는 2분 뒤 만료되고, 한 번 쓴 코드는 다시 못 쓴다. 짝짓기를 시작하지 않았으면 어떤 코드도 안 된다', async () => {
     const { remote, api, requestPair } = await start()
     const attempt = (code: string) => api('POST', '/v1/pair', { body: { code, deviceName: 'x', platform: 'android' } })
-    expect((await attempt('AAAAAAAAAAAA')).status).toBe(403)
+    expect(await attempt('AAAAAAAAAAAA')).toMatchObject({ status: 403, body: { reason: 'no-code' } })
 
     const expired = remote.startPairing().pairing!
     expect(expired.expiresAt - (Date.now() + box.offset)).toBeGreaterThan(115_000)
     box.offset += 2 * 60_000 + 1
     expect(remote.status().pairing).toBeUndefined()
-    expect((await attempt(expired.code)).status).toBe(403)
+    expect(await attempt(expired.code)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
 
     const used = remote.startPairing().pairing!.code
     const { answer, request } = await requestPair('Pixel', used)
     remote.answerPair(request.id, true)
     expect((await answer).status).toBe(200)
-    expect((await attempt(used)).status).toBe(403)
+    expect(await attempt(used)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
 
     remote.startPairing()
     expect(remote.cancelPairing().pairing).toBeUndefined()

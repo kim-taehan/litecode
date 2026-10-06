@@ -5,7 +5,7 @@
 //   스트림이 끝남·연결 실패 → reconnecting(attempt, retryAt) — 1초·2초·4초…30초 지수 백오프, 붙으면 connected
 //   30초 동안 아무 바이트도 안 옴(ping 도) → unresponsive ("데스크탑 응답 없음(잠자기?)") — 뒤에서 같은 백오프로 계속 붙어 본다
 //   `device.revoked` 이벤트 또는 401 → revoked — 다시 붙지 않는다 (다시 짝지어야 한다)
-//   어느 후보에도 닿지 못했는데 지문이 다른 서버가 있었다 → fingerprint-changed — 자동으로 믿지 않는다, 다시 붙지 않는다 (다시 짝지어야 한다)
+//   지금 주소의 서버 지문이 다르고 다른 후보에도 닿지 못했다 → fingerprint-changed (옛 후보의 다른 지문은 닿지 않음으로 — roaming.ts) — 자동으로 믿지 않는다, 다시 붙지 않는다 (다시 짝지어야 한다)
 // 다시 붙을 때: hello(runId 대조) → events?run=&after=<적용한 마지막 seq>. 이을 수 없으면 리듀서가 resync 를 올리고, 여기서 목록과
 // 열린 대화의 스냅샷을 다시 받는다.
 

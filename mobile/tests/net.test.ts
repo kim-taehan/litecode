@@ -220,4 +220,21 @@ describe('주소 배우기 (RoamingClient)', () => {
     plain.adopt(['192.168.0.12:47600'])
     expect(seen).toHaveLength(2)
   })
+
+  it('지문 불일치는 지금 주소의 것만 "지문이 달라졌다" — 옛 후보의 불일치는 닿지 않음으로 (W1)', async () => {
+    const failing = (byAddress: Record<string, NetError>): Transport => ({
+      request: async (request) => {
+        throw byAddress[new URL(request.url).host]!
+      },
+      stream: () => () => undefined,
+    })
+    const roaming = (byAddress: Record<string, NetError>) =>
+      new RoamingClient({ transport: failing(byAddress), baseUrl: 'https://10.8.0.3:47600', token: 't', addresses: Object.keys(byAddress) })
+
+    // 옛 후보에 다른 지문의 서버, 지금 주소는 꺼져 있다 → pin-mismatch 가 아니다
+    await expect(roaming({ '10.8.0.3:47600': new NetError('refused', 'x'), '10.8.0.9:47600': new NetError('pin-mismatch', 'x', 'zzz') }).hello()).rejects.toMatchObject({ kind: 'refused' })
+    await expect(roaming({ '10.8.0.3:47600': new NetError('timeout', 'x'), '10.8.0.9:47600': new NetError('pin-mismatch', 'x', 'zzz') }).hello()).rejects.not.toMatchObject({ kind: 'pin-mismatch' })
+    // 지금 주소에서 다른 지문 → 그대로 pin-mismatch
+    await expect(roaming({ '10.8.0.3:47600': new NetError('pin-mismatch', 'x', 'zzz'), '10.8.0.9:47600': new NetError('refused', 'x') }).hello()).rejects.toMatchObject({ kind: 'pin-mismatch' })
+  })
 })

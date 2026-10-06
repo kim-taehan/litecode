@@ -166,6 +166,14 @@ describe('짝짓기', () => {
     expect(pairFailure(new RemoteError(500, 'boom'))).toBe('failed')
     expect(pairFailure(new TypeError('fetch failed'))).toBe('unreachable')
   })
+
+  it('403 은 본문의 reason 으로 가른다 — 글이 바뀌어도. reason 이 없으면(옛 데스크탑) 글로', () => {
+    expect(pairFailure(new RemoteError(403, 'pairing denied: expired', 'no-code'))).toBe('wrong-code')
+    expect(pairFailure(new RemoteError(403, 'not denied, just wrong', 'wrong-code'))).toBe('wrong-code')
+    expect(pairFailure(new RemoteError(403, 'nope', 'denied'))).toBe('denied')
+    expect(pairFailure(new RemoteError(403, 'denied on the desktop'))).toBe('denied')
+    expect(pairFailure(new RemoteError(403, 'wrong pairing code'))).toBe('wrong-code')
+  })
 })
 
 describe('저장·복원·해제', () => {

@@ -1,6 +1,7 @@
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Attention } from '../../shared/contract.ts'
+import type { PairRejectReason } from '../../shared/remote.ts'
 import { DesktopLink, type DesktopStore, type SavedDesktop } from '../src/app/link.ts'
 import { Connection, RemoteClient, createFetchTransport, createNativePinnedNet, newClientMessageId, type StreamHandlers, type Transport } from '../src/core/index.ts'
 import { nodePinnedNative } from './nodePinned.ts'
@@ -262,6 +263,25 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
     await link.pair({ address, code, deviceName: 'Pixel 8' })
     off()
     expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
+  })
+
+  it('계약: 짝짓기 403 의 사유는 본문의 reason 이다 — 진짜 데스크탑이 내는 것을 폰의 클라이언트가 그대로 읽는다', async () => {
+    const { ctx, remote, base } = await start()
+    const client = new RemoteClient({ transport: createFetchTransport(), baseUrl: base() })
+    const reasonOf = (code: string) =>
+      client.pair({ code, deviceName: 'Pixel 8', platform: 'android' }).then(
+        () => 'paired',
+        (error: { reason?: string }) => error.reason,
+      )
+
+    expect(await reasonOf('ZZZZZZZZZZZZ')).toBe('no-code' satisfies PairRejectReason)
+    const code = remote.startPairing().pairing!.code
+    expect(await reasonOf('ZZZZZZZZZZZZ')).toBe('wrong-code' satisfies PairRejectReason)
+    const off = ctx.on('remote/changed', (status) => {
+      if (status.requests[0]) remote.answerPair(status.requests[0].id, false)
+    })
+    expect(await reasonOf(code)).toBe('denied' satisfies PairRejectReason)
+    off()
   })
 })
 

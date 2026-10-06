@@ -27,6 +27,7 @@ import {
   type ConversationSnapshot,
   type Hello,
   type ModelChoice,
+  type PairRejected,
   type PairResponse,
   type QueueTakeResponse,
   type RemoteConversation,
@@ -461,11 +462,11 @@ export class RemoteService extends Service {
       return { status: 400, body: { error: 'code, deviceName and platform are required' } }
     }
     const active = this.activeCode()
-    if (!active) return { status: 403, body: { error: 'no pairing in progress' } }
+    if (!active) return { status: 403, body: { error: 'no pairing in progress', reason: 'no-code' } satisfies PairRejected }
     if (!sameText(normalizePairCode(input.code), active.code)) {
       if (++active.failures >= PAIR_MAX_FAILURES) this.code = undefined // 5회째 — 코드를 버린다. 새로 [기기 연결] 을 눌러야 한다
       this.changed()
-      return { status: 403, body: { error: 'wrong pairing code' } }
+      return { status: 403, body: { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected }
     }
     this.code = undefined // 1회용
 
@@ -485,7 +486,7 @@ export class RemoteService extends Service {
           settled = true
           clearTimeout(timer)
           this.pending.delete(id)
-          if (result === 'deny') resolve({ status: 403, body: { error: 'denied on the desktop' } })
+          if (result === 'deny') resolve({ status: 403, body: { error: 'denied on the desktop', reason: 'denied' } satisfies PairRejected })
           else if (result === 'timeout') resolve({ status: 408, body: { error: 'nobody answered on the desktop' } })
           // 받을 상대가 없다 (폰이 떠났거나, 연결을 꺼서 운반이 곧 닫힌다)
           else if (result === 'gone') resolve({ status: 503, body: { error: 'pairing was abandoned' } })

@@ -31,6 +31,7 @@ import {
   type CreateConversationRequest,
   type Hello,
   type PairRequest,
+  type PairRejected,
   type PairResponse,
   type QueueTakeResponse,
   type RemoteConversation,
@@ -393,12 +394,12 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/pair') {
-      // 진짜 데스크탑(src/services/remote.ts)과 같은 답: 틀린 코드 403 'wrong pairing code', 거절 403 'denied on the desktop', 시간 초과 408.
+      // 진짜 데스크탑(src/services/remote.ts)과 같은 답: 틀린 코드 403 reason 'wrong-code', 거절 403 reason 'denied', 시간 초과 408.
       // 다른 점: 코드가 고정이고 몇 번이든 쓸 수 있다(진짜는 2분·1회용·5회 폐기), 여러 번 틀려도 막지 않는다(진짜는 429)
       const pair = body as PairRequest | undefined
       const deviceName = typeof pair?.deviceName === 'string' ? pairDeviceName(pair.deviceName) : ''
       if (typeof pair?.code !== 'string' || !deviceName || (pair.platform !== 'android' && pair.platform !== 'ios')) return reply(400, { error: 'code, deviceName and platform are required' })
-      if (normalizePairCode(pair.code) !== FAKE_PAIR_CODE) return reply(403, { error: 'wrong pairing code' })
+      if (normalizePairCode(pair.code) !== FAKE_PAIR_CODE) return reply(403, { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected)
       const allow = (): void => {
         const paired: PairResponse = { deviceId: `dev_${++counter}`, token: randomBytes(32).toString('hex') }
         tokens.set(paired.token, paired.deviceId)
@@ -416,7 +417,7 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
           pending = undefined
           clearTimeout(timer)
           if (result === 'allow') allow()
-          else if (result === 'deny') reply(403, { error: 'denied on the desktop' })
+          else if (result === 'deny') reply(403, { error: 'denied on the desktop', reason: 'denied' } satisfies PairRejected)
           else reply(408, { error: 'nobody answered on the desktop' })
         },
       }

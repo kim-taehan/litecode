@@ -220,6 +220,38 @@ describe('저장·복원 — 같은 지문으로만', () => {
     expect(native.sent).toEqual([])
   })
 
+  it('옛 후보 주소에 다른 지문의 서버가 있고(DHCP 로 그 IP 를 옆 PC 가 받았다) 내 데스크탑이 꺼져 있으면 — 짝을 지우지 않고 다시 시도한다', async () => {
+    const store = await pairedStore()
+    const neighbour = await startFakeDesktop({ port: 0, stepMs: 5, tls: { key: fixture('other.key.pem'), cert: fixture('other.cert.pem') } })
+    try {
+      const dead = `127.0.0.1:${await closedPort()}`
+      const other = `127.0.0.1:${neighbour.port}`
+      store.value = { ...store.value!, address: dead, baseUrl: `https://${dead}`, addresses: [dead, other] }
+      const saved = store.value
+      native.sent.length = 0
+      const again = newLink(store)
+      await again.restore()
+      const { session } = phase(again, 'linked')
+      await until(() => session.getStatus().kind === 'reconnecting', '다시 시도 대기')
+      expect(again.state.phase).toBe('linked')
+      expect(store.value).toEqual(saved)
+      expect(native.sent).toEqual([]) // 옆 PC 로 토큰이 가지 않았다
+    } finally {
+      await neighbour.close()
+    }
+  })
+
+  it('지금 주소에서 지문이 다르고 다른 후보에도 닿지 못하면 — 그때만 "지문이 달라졌다"', async () => {
+    const store = await pairedStore()
+    const dead = `127.0.0.1:${await closedPort()}`
+    store.value = { ...store.value!, fingerprint: OTHER_FP, addresses: [live(), dead] }
+    const again = newLink(store)
+    await again.restore()
+    await until(() => again.state.phase === 'unpaired', '끊김')
+    expect(again.state).toEqual({ phase: 'unpaired', fingerprintChanged: true })
+    expect(store.value).toBeUndefined()
+  })
+
   it('https 인데 지문이 없는 저장은 믿지 않는다 (없는 것으로)', async () => {
     const store = memoryStore({ address: live(), baseUrl: `https://${live()}`, deviceId: 'd', token: 't', desktopName: 'pc' })
     const link = newLink(store)
