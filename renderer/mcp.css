@@ -37,9 +37,9 @@
 }
 
 .mcp-row__target {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 긴 명령·주소는 채팅 글처럼 줄을 바꿔 다 보인다 (사용자 요청 2026-10-06) */
+  overflow-wrap: anywhere;
+  white-space: normal;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 18px;
@@ -48,9 +48,9 @@
 
 .mcp-row__state {
   max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: right;
   font-size: 12px;
   line-height: 18px;
   color: var(--text-secondary);
