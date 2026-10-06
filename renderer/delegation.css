@@ -94,6 +94,12 @@
 }
 
 /* 프로젝트가 많으면 목록 안에서 스크롤한다 — 카드가 보낼 글·버튼을 밀어내지 않게 */
+/* 보내기 카드는 본문 높이 제한(attention.css 320px)을 푼다 — 안 그러면 프로젝트가 둘만 돼도 보낼 글·경고 상자가 스크롤 아래로 숨는다.
+   목록은 아래 .target-picker 가 따로 스크롤한다 */
+.attention-card__body:has(.target-picker) {
+  max-height: none;
+}
+
 .target-picker {
   flex: none;
   display: flex;
