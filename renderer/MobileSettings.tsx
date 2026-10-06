@@ -230,7 +230,7 @@ function PairDialog(props: {
           </dd>
           <dt>{t('remote.pair.code')}</dt>
           <dd>
-            <code className="mobile-pairing__code">{pairing.code}</code>
+            <code className="mobile-pairing__code mobile-pairing__code--short">{pairing.shortCode}</code>
           </dd>
           {fingerprintCode && emulatorPort === undefined && (
             <>
@@ -271,6 +271,9 @@ export function RemotePairPrompt({ on }: { on: boolean }) {
         </h2>
         <p id="remote-pair-description" className="confirm-dialog__description">
           {t('remote.request.description')}
+        </p>
+        <p className="confirm-dialog__description">
+          <strong>{t('remote.request.onlyYours')}</strong>
         </p>
         <dl className="mobile-pairing">
           <dt>{PLATFORM[request.platform]}</dt>

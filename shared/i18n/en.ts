@@ -768,6 +768,7 @@ export const en = {
   'remote.device.confirmRevoke': 'Confirm remove',
   'remote.request.title': 'Allow this device to connect?',
   'remote.request.description': 'If you allow it, this device can read the chats on this PC, send messages and answer approval requests. Check that the code matches the one on the phone.',
+  'remote.request.onlyYours': 'If this is not a device you just set up yourself, deny it.',
   'remote.request.confirm': 'Confirmation code',
   'remote.request.allow': 'Allow',
   'remote.request.deny': 'Deny',

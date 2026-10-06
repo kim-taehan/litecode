@@ -721,6 +721,13 @@
   user-select: all;
 }
 
+/* 직접 입력용 숫자 2자리 — 폰에서 보고 칠 수 있게 크게 */
+.mobile-pairing__code--short {
+  font-size: 32px;
+  line-height: 40px;
+  letter-spacing: 0.2em;
+}
+
 .mobile-pairing__note {
   font-size: 12px;
   color: var(--text-tertiary);

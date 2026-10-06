@@ -9,7 +9,7 @@
 // 붙은 뒤에는 저장한 지문으로만 붙는다. 지문이 바뀌었으면 자동으로 믿지 않고 연결 화면으로 돌아가 다시 짝짓게 한다.
 
 import type { PairRejectReason } from '../../../shared/remote.ts'
-import { confirmCode, normalizePairCode, PAIR_ALPHABET, PAIR_CODE_LENGTH, pairDeviceName } from '../../../shared/remotePairing.ts'
+import { confirmCode, isPairCode, normalizePairCode, pairDeviceName } from '../../../shared/remotePairing.ts'
 import type { Transport } from '../core/index.ts'
 import { diagnosticDetail, fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type PinnedNet } from '../core/index.ts'
 import { isLoopbackHost, parseAddress } from './address.ts'
@@ -40,7 +40,7 @@ export interface DesktopStore {
 
 /**
  * 짝짓기가 안 된 사유 — 화면이 각각 다른 문구로 안내한다.
- * bad-address: 주소를 읽을 수 없다 · not-loopback: `http://` 를 이 컴퓨터 밖 주소에 붙였다(요청을 보내지 않는다) · bad-code: 코드가 12자가 아니다 ·
+ * bad-address: 주소를 읽을 수 없다 · not-loopback: `http://` 를 이 컴퓨터 밖 주소에 붙였다(요청을 보내지 않는다) · bad-code: 코드가 숫자 2자리(옛 데스크탑은 12자)가 아니다 ·
  * no-name: 기기 이름이 비었다 · wrong-code: 코드가 틀렸거나 만료됐다(403) · denied: 데스크탑에서 거절(403) · timeout: 아무도 안 눌렀다(408) ·
  * blocked: 여러 번 틀려 잠시 막혔다(429) · net-timeout: 주소가 답하지 않는다(다른 망·방화벽·클라이언트 격리) ·
  * refused: PC 는 닿았는데 그 포트에 아무도 안 듣는다(모바일 연결이 꺼져 있다) · fingerprint-mismatch: QR 의 지문과 서버 인증서가 다르다 ·
@@ -179,7 +179,8 @@ export class DesktopLink {
     // 평문으로 코드·토큰이 나가는 길은 이 컴퓨터 안으로만
     if (target.scheme === 'http' && !isLoopbackHost(target.host)) return fail('not-loopback')
     const code = normalizePairCode(input.code)
-    if (code.length !== PAIR_CODE_LENGTH || [...code].some((letter) => !PAIR_ALPHABET.includes(letter))) return fail('bad-code')
+    // 숫자 2자리(지금 데스크탑) 또는 12자(옛 데스크탑)
+    if (!isPairCode(code)) return fail('bad-code')
     const deviceName = pairDeviceName(input.deviceName)
     if (!deviceName) return fail('no-name')
 

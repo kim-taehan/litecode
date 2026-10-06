@@ -792,6 +792,7 @@ export const ko = {
   'remote.device.confirmRevoke': '해제 확인',
   'remote.request.title': '이 기기의 연결을 허용할까요?',
   'remote.request.description': '허용하면 이 기기가 이 PC 의 대화를 보고, 메시지를 보내고, 승인 요청에 답할 수 있습니다. 폰 화면의 확인 코드와 같은지 보세요.',
+  'remote.request.onlyYours': '직접 요청한 기기가 아니면 거절하세요.',
   'remote.request.confirm': '확인 코드',
   'remote.request.allow': '허용',
   'remote.request.deny': '거절',

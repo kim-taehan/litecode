@@ -2,7 +2,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Keyboard, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { groupCode, normalizePairCode, PAIR_CODE_LENGTH, PAIR_DEVICE_NAME_MAX } from '../../../../shared/remotePairing.ts'
+import { groupCode, normalizePairCode, PAIR_CODE_LENGTH, PAIR_DEVICE_NAME_MAX, PAIR_SHORT_CODE_LENGTH } from '../../../../shared/remotePairing.ts'
 import { DEFAULT_ADDRESS } from '../address.ts'
 import { ChevronDown, ChevronRight, QrFrame } from '../icons.tsx'
 import type { LinkState, PairInput } from '../link.ts'
@@ -129,14 +129,17 @@ export function ConnectScreen({
                 accessibilityLabel={S.codeLabel}
                 style={[styles.input, styles.mono, styles.code]}
                 value={code}
-                // 치는 대로 데스크탑 화면의 모양으로: 대문자, O→0 · I/L→1, 네 글자씩
-                onChangeText={(text) => setCode(groupCode(normalizePairCode(text).slice(0, PAIR_CODE_LENGTH)))}
+                // 숫자 2자리(숫자 키패드). 옛 데스크탑의 12자를 붙여 넣으면 그 모양(대문자, O→0 · I/L→1, 네 글자씩)으로 받아 준다
+                onChangeText={(text) => {
+                  const typed = normalizePairCode(text)
+                  setCode(/^[0-9]*$/.test(typed) ? typed.slice(0, PAIR_SHORT_CODE_LENGTH) : groupCode(typed.slice(0, PAIR_CODE_LENGTH)))
+                }}
                 editable={!pairing}
-                placeholder="XXXX-XXXX-XXXX"
+                placeholder="00"
                 placeholderTextColor={C.faint}
                 autoCapitalize="characters"
                 autoCorrect={false}
-                keyboardType="visible-password"
+                keyboardType="number-pad"
               />
             </Field>
             <Field label={S.deviceNameLabel}>

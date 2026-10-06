@@ -11,7 +11,7 @@ export const S = {
   findingDesktop: '데스크탑을 찾는 중…',
   addressLabel: '데스크탑 주소',
   codeLabel: '연결 코드',
-  codeHint: '데스크탑의 설정 › 모바일 › 기기 연결에 보이는 12자',
+  codeHint: '데스크탑의 설정 › 모바일 › 기기 연결에 보이는 숫자 2자리',
   deviceNameLabel: '이 기기 이름',
   connect: '연결',
   waitingForAllow: '데스크탑의 허용을 기다리는 중…',
@@ -19,7 +19,7 @@ export const S = {
   pairFailure: {
     'bad-address': '주소를 읽을 수 없습니다. 192.168.0.12:47600 처럼 입력해 주세요.',
     'not-loopback': '암호화하지 않은 연결(http://)은 이 컴퓨터 안(에뮬레이터)에서만 됩니다. 앞의 http:// 를 지워 주세요.',
-    'bad-code': '연결 코드는 12자입니다. 데스크탑 화면의 코드를 그대로 입력해 주세요.',
+    'bad-code': '연결 코드는 숫자 2자리입니다. 데스크탑 화면의 코드를 그대로 입력해 주세요.',
     'no-name': '이 기기 이름을 입력해 주세요.',
     'wrong-code': '코드가 틀렸거나 만료됐습니다. 데스크탑에서 기기 연결을 다시 눌러 새 코드를 확인해 주세요.',
     denied: '데스크탑에서 연결을 거절했습니다.',

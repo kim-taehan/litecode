@@ -130,16 +130,16 @@ describe('짝짓기', () => {
     expect(desktop.pendingPair()).toBeUndefined()
   })
 
-  it('보내기 전에 걸러지는 것 — 읽을 수 없는 주소, 12자가 아닌 코드, 빈 이름, 그리고 이 컴퓨터 밖 주소. 요청이 하나도 안 나간다', async () => {
+  it('보내기 전에 걸러지는 것 — 읽을 수 없는 주소, 숫자 2자리도 12자도 아닌 코드, 빈 이름, 그리고 이 컴퓨터 밖 주소. 요청이 하나도 안 나간다', async () => {
     const transport = counting()
     const link = newLink(memoryStore(), transport)
     await link.restore()
     const failures: unknown[] = []
-    for (const bad of [{ address: 'not an address' }, { code: 'DEV0' }, { code: 'DEV0DEV0DEVU' }, { deviceName: ' \n ' }, { address: 'http://192.168.0.12:47600' }, { address: 'http://example.com' }]) {
+    for (const bad of [{ address: 'not an address' }, { code: 'DEV0' }, { code: 'DEV0DEV0DEVU' }, { code: '4' }, { code: '470' }, { code: 'AB' }, { deviceName: ' \n ' }, { address: 'http://192.168.0.12:47600' }, { address: 'http://example.com' }]) {
       await link.pair(input(bad))
       failures.push((link.state as { failure?: string }).failure)
     }
-    expect(failures).toEqual(['bad-address', 'bad-code', 'bad-code', 'no-name', 'not-loopback', 'not-loopback'])
+    expect(failures).toEqual(['bad-address', 'bad-code', 'bad-code', 'bad-code', 'bad-code', 'bad-code', 'no-name', 'not-loopback', 'not-loopback'])
     expect(transport.urls).toEqual([])
   })
 

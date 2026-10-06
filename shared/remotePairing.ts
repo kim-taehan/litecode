@@ -4,8 +4,11 @@
 
 /** Crockford base32 — 사람이 읽고 치는 글자라 헷갈리는 I·L·O·U 가 없다 */
 export const PAIR_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-/** 직접 입력용 코드 길이 (60bit) */
+/** 긴 코드 길이 (60bit) — QR 에 싣는다. 옛 데스크탑은 이것을 직접 입력용으로 보였다 */
 export const PAIR_CODE_LENGTH = 12
+/** 직접 입력용 짧은 코드 — 숫자 2자리(00~99). 같은 발급의 긴 코드와 한 세션이다: 2분·1회용·틀린 시도 3회 폐기를 같이 쓴다.
+ *  추측으로 맞을 확률은 3/100 이고, 진짜 관문은 데스크탑의 [허용] 확인이다 (사용자 2026-10-06 "단순 숫자 2자리") */
+export const PAIR_SHORT_CODE_LENGTH = 2
 /** 기기 이름 길이 한도 — 데스크탑 확인 창·기기 목록에 그대로 보인다 */
 export const PAIR_DEVICE_NAME_MAX = 64
 
@@ -16,6 +19,12 @@ export function normalizePairCode(input: string): string {
     .replace(/[\s-]/g, '')
     .replace(/O/g, '0')
     .replace(/[IL]/g, '1')
+}
+
+/** 정규화한 코드가 받을 수 있는 모양인가 — 숫자 2자리(직접 입력) 또는 12자 Crockford base32(QR·옛 데스크탑) */
+export function isPairCode(code: string): boolean {
+  if (code.length === PAIR_SHORT_CODE_LENGTH) return /^[0-9]+$/.test(code)
+  return code.length === PAIR_CODE_LENGTH && [...code].every((letter) => PAIR_ALPHABET.includes(letter))
 }
 
 /** 화면에 보일 모양 — 네 글자씩 */
