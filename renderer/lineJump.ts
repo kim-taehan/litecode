@@ -1,4 +1,4 @@
-// 오른쪽 패널의 줄 이동 (이슈 #51 — AI 의 open_file 이 줄 번호를 준다). 코드 보기는 줄 높이가 같은 pre 두 개라(FilePreview CodeLines)
+// 오른쪽 패널의 줄 이동 (이슈 #51 — AI 의 open(파일) 이 줄 번호를 준다). 코드 보기는 줄 높이가 같은 pre 두 개라(FilePreview CodeLines)
 // n번째 줄의 자리는 곱셈으로 나온다. 화면(DOM)을 모르는 순수 계산 — 재는 것(줄 높이·보이는 높이)은 부르는 쪽이 한다.
 
 export interface LineJump {

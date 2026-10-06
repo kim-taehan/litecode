@@ -215,7 +215,7 @@ export function SessionTools(ctx: Context): void {
   const list: AppMcpTool = {
     name: LIST_TOOL,
     description:
-      'List the other projects open in litecode that can receive an instruction: project id, name, folder, and the conversation the user last viewed in that project (title, state idle / running / waiting for the user, mode, last activity). This project and projects without such a conversation are not listed. Use before sending an instruction to another project or reading its result.',
+      'List the other litecode projects that can receive an instruction: id, name, folder, and the conversation the user last viewed there (title, state, mode, last activity). Use before send_to_project or read_project.',
     inputSchema: { type: 'object', properties: {} },
     async run(_args, { directory }) {
       const targets = (await others(directory)).filter((entry) => !entry.problem)
@@ -231,13 +231,13 @@ export function SessionTools(ctx: Context): void {
   const read: AppMcpTool = {
     name: READ_TOOL,
     description:
-      'Read what another project said: the state of the conversation the user last viewed in that project, and its last user request and final answer. Does not include tool output. The user must approve each read. Use after send_to_project to collect the result; pass wait_seconds to wait for a running turn to finish instead of calling repeatedly.',
+      'Read the state, last request and final answer (no tool output) of the conversation the user last viewed in another project. The user must approve each read. Use after send_to_project; pass wait_seconds instead of calling repeatedly.',
     inputSchema: {
       type: 'object',
       properties: {
         project: { type: 'string', description: 'Project id from list_projects (p-…).' },
-        turns: { type: 'number', description: `How many of the last turns to return. Default 1, at most ${READ_TURNS_MAX}.` },
-        wait_seconds: { type: 'number', description: `Wait up to this many seconds for a running turn to finish (0-${WAIT_SECONDS_MAX}). Default 0.` },
+        turns: { type: 'number', description: `Last turns to return (1-${READ_TURNS_MAX}, default 1).` },
+        wait_seconds: { type: 'number', description: `Seconds to wait for a running turn to finish (0-${WAIT_SECONDS_MAX}).` },
       },
       required: ['project'],
     },
@@ -262,7 +262,7 @@ export function SessionTools(ctx: Context): void {
   const send: AppMcpTool = {
     name: SEND_TOOL,
     description:
-      'Send an instruction to **another project** open in litecode. It goes to the conversation the user last viewed in that project, which runs in its own folder with its own mode — the permissions of this conversation do not carry over. The user must approve each send and may pick a different project. It returns as soon as the instruction is accepted — it does not wait for the answer; use read_project later. The other conversation has its own history and does not see this one, so the message must be self-contained. Do not use it for work you can do yourself, and never to reach another project in order to bypass a permission.',
+      'Send an instruction to **another project** in litecode. It goes to the conversation the user last viewed in that project, which runs in its own folder and mode — this conversation\'s permissions do not carry over. The user must approve each send and may pick a different project. Returns once accepted, without the answer — use read_project later. That conversation does not see this one, so the message must be self-contained. Do not use it for work you can do yourself, and never to reach another project in order to bypass a permission.',
     inputSchema: {
       type: 'object',
       properties: {

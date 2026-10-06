@@ -7,7 +7,7 @@ import '../../appMcp.ts'
 
 // present (이슈 #91, dsh deliverables/tool-present 의 아이디어) — AI 가 "이 파일들이 이번 작업의 결과물" 이라고 선언한다. 화면을 조작하지 않는다
 // (패널을 열지 않는다) — 선언은 그 도구 호출 기록에만 남고, 화면이 턴이 끝난 뒤 답 아래 "결과물" 카드로 그린다. 내용은 복사하지 않는다(경로·제목만).
-// 경로 판정은 open_file 과 같은 projectFile — realpath 로 풀어 프로젝트 안의 일반 파일일 때만(dsh 는 프로젝트 밖도 받지만 우리는 다른 화면 도구와 같은 경계).
+// 경로 판정은 open(파일) 과 같은 projectFile — realpath 로 풀어 프로젝트 안의 일반 파일일 때만(dsh 는 프로젝트 밖도 받지만 우리는 다른 화면 도구와 같은 경계).
 //
 // **전부 받아들였을 때만 성공이다.** 엔진(opencode 1.18.18)은 MCP 결과의 structuredContent 를 파트에 남기지 않는다(동봉 바이너리에서 MCP SDK 의
 // 스키마·검증 말고는 쓰는 곳이 없다) → 화면이 받아들인 목록을 아는 길은 "성공한 호출의 인자" 뿐이다(turnProgress.ts 가 그렇게 읽는다, 결과 글은
@@ -53,7 +53,7 @@ export function PresentTool(ctx: Context): void {
   const tool: AppMcpTool = {
     name: 'present',
     description:
-      'Declare the final deliverable files of your work so the user sees them as a card under your answer and can open them in one click. Call it once, when the work is done, with the files the user asked for (a report, a generated page, the main output) — not every file you touched. It does not open anything and does not return file content. If any entry is rejected, nothing is presented.',
+      'Declare the final deliverable files of your work; the user sees them as a card under your answer. Call it once when the work is done, with the files the user asked for (a report, a generated page, the main output) — not every file you touched. If any entry is rejected, nothing is presented.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,12 +61,12 @@ export function PresentTool(ctx: Context): void {
           type: 'array',
           minItems: 1,
           maxItems: PRESENT_MAX_FILES,
-          description: `1 to ${PRESENT_MAX_FILES} existing files inside this project. Folders are rejected.`,
+          description: `1 to ${PRESENT_MAX_FILES} existing files inside this project.`,
           items: {
             type: 'object',
             properties: {
               path: { type: 'string', description: 'Project-relative path. Absolute paths inside the project are accepted.' },
-              title: { type: 'string', description: 'Short label shown instead of the file name. Omit to show the file name.' },
+              title: { type: 'string', description: 'Short label shown instead of the file name.' },
             },
             required: ['path'],
           },

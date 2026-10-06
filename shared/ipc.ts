@@ -156,9 +156,9 @@ export const Channel = {
   RECENT_HOOKS: 'hooks:recent',
   /** 화면 → 메인 (directory?) — 화면이 지금 보여 주는 프로젝트 (앱 MCP 서버의 화면 도구가 본다, 이슈 #51) */
   APP_MCP_VIEW: 'appMcp:view',
-  /** 메인 → 화면 (directory, path, line?) — AI 가 open_file 을 불렀다 */
+  /** 메인 → 화면 (directory, path, line?) — AI 가 open(파일) 을 불렀다 */
   APP_MCP_OPEN_FILE: 'appMcp:open-file',
-  /** 메인 → 화면 (directory) — AI 가 open_terminal 을 불렀다 (명령은 메인이 이미 채웠다) */
+  /** 메인 → 화면 (directory) — AI 가 open(터미널) 을 불렀다 (명령은 메인이 이미 채웠다) */
   APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
   REMOTE_STATUS: 'remote:status',
   REMOTE_START_PAIRING: 'remote:start-pairing',
@@ -356,7 +356,7 @@ export interface LitecodeBridge {
   importHooks(keys: string[], directory: string): Promise<number>
   /** 그 프로젝트에서 돈 최근 실행 (오래된 것부터 — 앱을 끄면 사라진다) */
   recentHooks(directory: string): Promise<HookRecent[]>
-  /** 화면이 지금 보여 주는 프로젝트를 알린다 (없으면 undefined) — 앱 MCP 서버의 화면 도구(open_file·open_terminal)는 보고 있는 프로젝트에만 닿는다 */
+  /** 화면이 지금 보여 주는 프로젝트를 알린다 (없으면 undefined) — 앱 MCP 서버의 화면 도구(open(파일·터미널))는 보고 있는 프로젝트에만 닿는다 */
   viewProject(directory?: string): Promise<void>
   /** AI 가 그 프로젝트의 파일을 열라고 했다 — path 는 프로젝트 기준 상대 경로(메인이 프로젝트 안의 파일임을 확인했다), line 은 1부터 */
   onAppMcpOpenFile(listener: (directory: string, path: string, line?: number) => void): () => void

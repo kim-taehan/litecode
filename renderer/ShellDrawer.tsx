@@ -19,7 +19,7 @@ function terminalTheme() {
   return { background: token('--bg'), foreground: token('--text'), cursor: token('--accent'), selectionBackground: token('--accent-soft') }
 }
 
-/** focusSignal 이 바뀌면(⌘↓) 키를 칸으로 가져온다. quiet 로 펴면(AI 의 open_terminal, 이슈 #51) 펼 때 키를 가져오지 않는다 —
+/** focusSignal 이 바뀌면(⌘↓) 키를 칸으로 가져온다. quiet 로 펴면(AI 의 open(터미널), 이슈 #51) 펼 때 키를 가져오지 않는다 —
  *  입력창에 치던 글과 Enter 가 AI 가 채워 둔 명령으로 가면 안 된다 */
 export function ShellDrawer({ directory, focusSignal, quiet, onClose }: { directory: string; focusSignal: number; quiet?: boolean; onClose(): void }) {
   const t = useT()

@@ -5,15 +5,14 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AppMcpService } from '../../src/services/appMcp.ts'
 import { handleRpc, type AppMcpTool } from '../../src/services/appMcp/rpc.ts'
-import { OpenFileTool, openFileTarget } from '../../src/services/appMcp/tools/openFile.ts'
-import { OpenTerminalTool, terminalCommand } from '../../src/services/appMcp/tools/openTerminal.ts'
+import { OpenTool, openFileTarget, terminalCommand } from '../../src/services/appMcp/tools/open.ts'
 import { PresentTool, PRESENT_MAX_FILES } from '../../src/services/appMcp/tools/present.ts'
 import type { EngineMcp } from '../../src/services/engine.ts'
 import type { McpStatus } from '../../src/services/llm.ts'
 import { APP_MCP_NAME, McpService } from '../../src/services/mcp.ts'
 import { listMcpTools } from '../../src/services/mcpClient.ts'
 
-// 앱 MCP 서버 (이슈 #51, 설계 _workspace/01z_desktop_mcp.md) — JSON-RPC 처리, 서버의 경계(토큰·메서드·본문 상한·프로젝트 키), 화면 도구 둘,
+// 앱 MCP 서버 (이슈 #51, 설계 _workspace/01z_desktop_mcp.md) — JSON-RPC 처리, 서버의 경계(토큰·메서드·본문 상한·프로젝트 키), 화면 도구(open 의 파일·터미널),
 // ctx.mcp 로 붙는 길. 서버는 진짜 HTTP 로 띄운다(127.0.0.1, OS 가 고른 포트). 엔진(ctx.llm 의 mcp*)은 기록하는 가짜 — 진짜 opencode 는 안 띄운다.
 
 const echo: AppMcpTool = {
@@ -72,7 +71,7 @@ describe('JSON-RPC (appMcp/rpc.ts)', () => {
   })
 })
 
-describe('open_terminal 의 명령 — 채워만 둔다', () => {
+describe('open 터미널의 명령 — 채워만 둔다', () => {
   it('양끝 공백·개행은 떼고, 없거나 빈 글이면 칸만 연다', () => {
     expect(terminalCommand({ command: '  npm test\n' })).toBe('npm test')
     expect(terminalCommand({})).toBeUndefined()
@@ -148,9 +147,8 @@ async function start() {
   ctx.plugin(FakeLlm)
   ctx.plugin(McpService, { env: { HOME: path.join(tmp, 'home'), XDG_CONFIG_HOME: path.join(tmp, 'xdg') }, fallbackCwd: tmp })
   disposers.push(ctx.plugin(AppMcpService))
-  ctx.plugin(OpenFileTool)
+  ctx.plugin(OpenTool)
   const terminalsFiber = ctx.plugin(FakeTerminals)
-  ctx.plugin(OpenTerminalTool)
   const ready = await new Promise<Context>((resolve) => ctx.inject(['llm', 'mcp', 'appMcp', 'terminals'], resolve))
   await ready.appMcp.ready()
   const events: unknown[][] = []
@@ -173,7 +171,7 @@ async function start() {
     const res = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
     return ((await res.json()) as { result: { tools: { name: string }[] } }).result.tools.map((entry) => entry.name)
   }
-  await expect.poll(toolNames).toEqual(['open_file', 'open_terminal'])
+  await expect.poll(toolNames).toEqual(['open'])
   return { ctx, llm: ready.llm as unknown as FakeLlm, mcp: ready.mcp, appMcp: ready.appMcp, terminals: ready.terminals as unknown as FakeTerminals, terminalsFiber, def, post, tool, toolNames, events }
 }
 
@@ -211,7 +209,7 @@ describe('서버의 경계', () => {
 
   it('본문 상한(64KB)을 넘으면 413, 깨진 JSON 은 400, 알림은 202 에 빈 본문', async () => {
     const { post } = await start()
-    const big = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'open_file', arguments: { path: 'x'.repeat(70_000) } } })
+    const big = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'open', arguments: { kind: 'file', path: 'x'.repeat(70_000) } } })
     expect(big.status).toBe(413)
     const broken = await post('{nope')
     expect(broken.status).toBe(400)
@@ -228,8 +226,8 @@ describe('서버의 경계', () => {
     const otherUrl = (appMcp.definition(other) as Extract<EngineMcp, { type: 'remote' }>).url
     appMcp.view(other)
     // other 주소로 proj 의 파일을 달라고 해도(인자로 폴더를 주장해도) other 안에서만 찾는다
-    expect(await tool('open_file', { path: 'src/a.ts', directory: project }, otherUrl)).toEqual({ text: 'Not a file inside this project: src/a.ts', isError: true })
-    expect(await tool('open_file', { path: 'secret.txt' }, otherUrl)).toEqual({ text: 'Opened secret.txt in the side panel.', isError: false })
+    expect(await tool('open', { kind: 'file', path: 'src/a.ts', directory: project }, otherUrl)).toEqual({ text: 'Not a file inside this project: src/a.ts', isError: true })
+    expect(await tool('open', { kind: 'file', path: 'secret.txt' }, otherUrl)).toEqual({ text: 'Opened secret.txt in the side panel.', isError: false })
     expect(events).toEqual([['file', other, 'secret.txt', undefined]])
   })
 
@@ -241,13 +239,13 @@ describe('서버의 경계', () => {
   })
 })
 
-describe('open_file', () => {
+describe('open — kind file', () => {
   it('보고 있는 프로젝트의 파일을 연다 — 상대·절대 경로, 줄(1부터)', async () => {
     const { appMcp, tool, events } = await start()
     appMcp.view(project)
-    expect(await tool('open_file', { path: 'src/a.ts' })).toEqual({ text: 'Opened src/a.ts in the side panel.', isError: false })
-    expect(await tool('open_file', { path: path.join(project, 'src', 'a.ts'), line: 2 })).toEqual({ text: 'Opened src/a.ts at line 2 in the side panel.', isError: false })
-    expect(await tool('open_file', { path: './src/../src/a.ts', line: 0 })).toEqual({ text: 'Opened src/a.ts in the side panel.', isError: false })
+    expect(await tool('open', { kind: 'file', path: 'src/a.ts' })).toEqual({ text: 'Opened src/a.ts in the side panel.', isError: false })
+    expect(await tool('open', { kind: 'file', path: path.join(project, 'src', 'a.ts'), line: 2 })).toEqual({ text: 'Opened src/a.ts at line 2 in the side panel.', isError: false })
+    expect(await tool('open', { kind: 'file', path: './src/../src/a.ts', line: 0 })).toEqual({ text: 'Opened src/a.ts in the side panel.', isError: false })
     expect(events).toEqual([
       ['file', project, 'src/a.ts', undefined],
       ['file', project, 'src/a.ts', 2],
@@ -261,21 +259,21 @@ describe('open_file', () => {
     await fs.symlink(path.join(other, 'secret.txt'), path.join(project, 'link.txt'))
     await fs.symlink(other, path.join(project, 'linkdir'))
     for (const asked of ['../other/secret.txt', path.join(other, 'secret.txt'), 'link.txt', 'linkdir/secret.txt', 'src', 'nope.ts', '/etc/hosts']) {
-      expect(await tool('open_file', { path: asked })).toEqual({ text: `Not a file inside this project: ${asked}`, isError: true })
+      expect(await tool('open', { kind: 'file', path: asked })).toEqual({ text: `Not a file inside this project: ${asked}`, isError: true })
     }
-    expect((await tool('open_file', {})).isError).toBe(true)
+    expect((await tool('open', { kind: 'file' })).isError).toBe(true)
     expect(events).toEqual([])
   })
 
   it('사용자가 다른 프로젝트를 보고 있으면 열지 않고 그 사실을 돌려준다', async () => {
     const { appMcp, tool, events } = await start()
     appMcp.view(other)
-    expect(await tool('open_file', { path: 'src/a.ts' })).toEqual({
+    expect(await tool('open', { kind: 'file', path: 'src/a.ts' })).toEqual({
       text: 'The user is viewing another project (other). Ask them to switch back, then call again.',
       isError: true,
     })
     appMcp.view(undefined) // 창이 없다
-    expect(await tool('open_file', { path: 'src/a.ts' })).toMatchObject({ text: expect.stringContaining('not viewing this project'), isError: true })
+    expect(await tool('open', { kind: 'file', path: 'src/a.ts' })).toMatchObject({ text: expect.stringContaining('not viewing this project'), isError: true })
     expect(events).toEqual([])
   })
 
@@ -292,7 +290,7 @@ describe('present', () => {
   const withPresent = async () => {
     const started = await start()
     started.ctx.plugin(PresentTool)
-    await expect.poll(started.toolNames).toEqual(['open_file', 'open_terminal', 'present'])
+    await expect.poll(started.toolNames).toEqual(['open', 'present'])
     return started
   }
 
@@ -340,13 +338,13 @@ describe('present', () => {
   })
 })
 
-describe('open_terminal', () => {
+describe('open — kind terminal', () => {
   it('보고 있는 프로젝트의 터미널에 명령을 채우기만 한다 — 엔터(개행)는 보내지 않는다', async () => {
     const { appMcp, tool, terminals, events } = await start()
     appMcp.view(project)
-    expect(await tool('open_terminal', { command: 'npm run build\n' })).toEqual({ text: 'Typed into the terminal (not executed): npm run build', isError: false })
+    expect(await tool('open', { kind: 'terminal', command: 'npm run build\n' })).toEqual({ text: 'Typed into the terminal (not executed): npm run build', isError: false })
     expect(terminals.written).toEqual([[project, 'npm run build']])
-    expect(await tool('open_terminal', {})).toEqual({ text: 'Opened the terminal pane.', isError: false })
+    expect(await tool('open', { kind: 'terminal' })).toEqual({ text: 'Opened the terminal pane.', isError: false })
     expect(terminals.written).toHaveLength(1)
     expect(events).toEqual([['terminal', project], ['terminal', project]])
   })
@@ -354,7 +352,7 @@ describe('open_terminal', () => {
   it('개행이 든 명령은 거절 — 아무것도 쓰지 않고 칸도 열지 않는다', async () => {
     const { appMcp, tool, terminals, events } = await start()
     appMcp.view(project)
-    expect(await tool('open_terminal', { command: 'echo a\nrm -rf /' })).toEqual({
+    expect(await tool('open', { kind: 'terminal', command: 'echo a\nrm -rf /' })).toEqual({
       text: 'Multi-line commands and control characters are rejected — they would run immediately.',
       isError: true,
     })
@@ -365,21 +363,40 @@ describe('open_terminal', () => {
   it('다른 프로젝트를 보고 있으면 쓰지 않고 그 사실을 돌려준다', async () => {
     const { appMcp, tool, terminals, events } = await start()
     appMcp.view(other)
-    expect(await tool('open_terminal', { command: 'ls' })).toMatchObject({ text: expect.stringContaining('viewing another project (other)'), isError: true })
+    expect(await tool('open', { kind: 'terminal', command: 'ls' })).toMatchObject({ text: expect.stringContaining('viewing another project (other)'), isError: true })
     expect(terminals.written).toEqual([])
     expect(events).toEqual([])
   })
 
-  it('터미널 칸을 끄면(ctx.terminals 가 내려가면) 도구가 목록에서 빠지고, 다음 턴에 엔진에 다시 붙인다', async () => {
-    const { mcp, llm, terminalsFiber, toolNames, tool } = await start()
-    await mcp.prepare(project)
-    await mcp.prepare(project)
-    expect(llm.calls).toEqual(['add proj litecode'])
+  it('터미널 칸을 끄면(ctx.terminals 가 내려가면) 도구는 남고 터미널 갈래만 "꺼져 있다" 를 돌려준다 — 파일 갈래는 그대로', async () => {
+    const { appMcp, terminals, terminalsFiber, toolNames, tool, events } = await start()
+    appMcp.view(project)
     await terminalsFiber.dispose()
-    await expect.poll(toolNames).toEqual(['open_file'])
+    expect(await toolNames()).toEqual(['open'])
+    expect(await tool('open', { kind: 'terminal', command: 'ls' })).toEqual({ text: 'The terminal pane is turned off in Settings > Features, so nothing was opened.', isError: true })
+    expect(terminals.written).toEqual([])
+    expect(await tool('open', { kind: 'file', path: 'src/a.ts' })).toMatchObject({ isError: false })
+    expect(events).toEqual([['file', project, 'src/a.ts', undefined]])
+  })
+})
+
+describe('open — kind', () => {
+  it('kind 가 없거나 모르는 값이면 읽을 수 있는 오류 — 아무것도 열지 않는다', async () => {
+    const { appMcp, tool, terminals, events } = await start()
+    appMcp.view(project)
+    for (const kind of [undefined, 'folder', 3]) {
+      expect(await tool('open', { kind, path: 'src/a.ts', command: 'ls' })).toEqual({ text: 'kind must be "file" or "terminal".', isError: true })
+    }
+    expect(await tool('open', { kind: 'file' })).toEqual({ text: 'kind "file" needs path (project-relative).', isError: true })
+    expect(terminals.written).toEqual([])
+    expect(events).toEqual([])
+  })
+
+  it('옛 이름(open_file·open_terminal)은 모르는 도구다 — 별칭이 없다', async () => {
+    const { appMcp, tool } = await start()
+    appMcp.view(project)
+    expect(await tool('open_file', { path: 'src/a.ts' })).toEqual({ text: 'Unknown tool: open_file', isError: true })
     expect(await tool('open_terminal', { command: 'ls' })).toEqual({ text: 'Unknown tool: open_terminal', isError: true })
-    await mcp.prepare(project)
-    expect(llm.calls).toEqual(['add proj litecode', 'add proj litecode']) // 엔진은 붙일 때만 tools/list 를 읽는다
   })
 })
 
@@ -396,7 +413,7 @@ describe('ctx.mcp 로 붙는 길', () => {
   it('앱의 MCP 클라이언트(팝업의 도구 목록)로도 읽힌다 — initialize → initialized → tools/list', async () => {
     const { def } = await start()
     const tools = await listMcpTools(def, { cwd: tmp })
-    expect(tools.map((entry) => entry.name)).toEqual(['open_file', 'open_terminal'])
+    expect(tools.map((entry) => entry.name)).toEqual(['open'])
     expect(tools[0]!.description).toContain('side panel')
   })
 
@@ -404,7 +421,7 @@ describe('ctx.mcp 로 붙는 길', () => {
     const { mcp, llm, def } = await start()
     const builtin = (await mcp.list(project)).at(-1)!
     expect(builtin).toMatchObject({ name: 'litecode', source: 'builtin', scope: 'all', vars: [], enabled: true, status: 'connected' })
-    expect(builtin.tools!.map((entry) => entry.name)).toEqual(['open_file', 'open_terminal'])
+    expect(builtin.tools!.map((entry) => entry.name)).toEqual(['open'])
     expect(JSON.stringify(builtin)).not.toContain(def.headers!['Authorization']!.slice(7))
     expect(builtin.url).toBeUndefined()
     expect(await mcp.list()).toEqual([]) // 프로젝트 없이는 붙는 곳이 없다

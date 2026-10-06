@@ -549,7 +549,7 @@ export function App() {
   const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
   /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
   const [shellFocus, setShellFocus] = useState(0)
-  /** AI 가 칸을 폈을 때의 shellFocus (앱 MCP open_terminal, 이슈 #51) — 그렇게 편 칸은 키를 가져가지 않는다. ⌘↓ 를 누르면 값이 달라져 풀린다 */
+  /** AI 가 칸을 폈을 때의 shellFocus (앱 MCP open(터미널), 이슈 #51) — 그렇게 편 칸은 키를 가져가지 않는다. ⌘↓ 를 누르면 값이 달라져 풀린다 */
   const [shellQuietAt, setShellQuietAt] = useState<number>()
   useAppMcp(features.has('appMcp'), active?.project, (directory) => {
     setShellQuietAt(shellFocus)
