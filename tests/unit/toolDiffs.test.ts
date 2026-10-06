@@ -55,6 +55,12 @@ describe('toolDiffs', () => {
     expect(diffs?.[0]?.path).toBe('/elsewhere/z.txt')
   })
 
+  it('이름이 `..` 로 시작하는 폴더 안 파일은 폴더 안이다 — 상대 경로로', () => {
+    expect(toolDiffs('write', { content: 'x' }, { filepath: '/p/..env', exists: false }, ROOT)?.[0]?.path).toBe('..env')
+    expect(toolDiffs('write', { content: 'x' }, { filepath: '/p/..cache/a.txt', exists: false }, ROOT)?.[0]?.path).toBe('..cache/a.txt')
+    expect(toolDiffs('write', { content: 'x' }, { filepath: '/q/a.txt', exists: false }, ROOT)?.[0]?.path).toBe('/q/a.txt')
+  })
+
   it('파일 변경이 없는 도구·결과가 없는 도구는 undefined', () => {
     expect(toolDiffs('bash', { command: 'ls' }, { exit: 0, output: 'a' }, ROOT)).toBeUndefined()
     expect(toolDiffs('edit', { filePath: 'a' }, undefined, ROOT)).toBeUndefined()

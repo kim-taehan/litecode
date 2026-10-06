@@ -393,6 +393,12 @@ describe('결과물 선언 (litecode_present, 이슈 #91)', () => {
     expect((item as { presented: object[] }).presented).toEqual([{ path: 'report.md', title: 'Report' }, { path: 'src/a.ts' }, { path: 'out/index.html' }])
   })
 
+  it('이름이 `..` 로 시작하는 폴더 안 파일은 폴더 안이다 — 절대 경로로 받아도 상대 경로로 싣는다', () => {
+    const input = { files: [{ path: '/work/proj/..env' }, { path: '..notes/a.md' }, { path: '../outside.md' }] }
+    const [item] = messageItems([part({ status: 'completed', input, output: '' })], root)
+    expect((item as { presented: object[] }).presented).toEqual([{ path: '..env' }, { path: '..notes/a.md' }, { path: '../outside.md' }])
+  })
+
   it('running·error 파트엔 없다 — 거절된 호출의 인자는 결과물이 아니다', () => {
     expect(messageItems([part({ status: 'running', input: { files }, time: { start: 1 } })], root)[0]).not.toHaveProperty('presented')
     expect(messageItems([part({ status: 'error', input: { files }, error: 'Nothing was presented.' })], root)[0]).not.toHaveProperty('presented')

@@ -157,10 +157,10 @@ describe('NotificationsService', () => {
     expect(notifications.snapshot().c1?.status).toBe('interrupted')
   })
 
-  // 설정 > 일반의 "알림" 스위치는 없앴다 (사용자 2026-10-06 — 설정 > 기능의 알림 카드와 겹쳤다). 예전에 꺼 둔 값이 파일에 남아 있어도 PC 알림을 막지 않는다
-  it('예전 일반 설정의 알림 꺼짐 값은 더 보지 않는다 — 기능이 켜져 있으면 PC 알림이 뜬다', async () => {
+  // 설정 > 일반의 "알림" 스위치는 없앴다 (사용자 2026-10-06 — 설정 > 기능의 알림 카드와 겹쳤다). 설정에 그 값 자체가 없다 —
+  // 예전에 꺼 둔 값이 파일에 남아 있어도 읽을 때 버린다 (settings.test.ts)
+  it('일반 설정의 알림 값은 보지 않는다 — 기능이 켜져 있으면 PC 알림이 뜬다', async () => {
     const { ctx, host, notifications, toasts } = await start()
-    ctx.settings.set({ notifications: false })
     ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
     await notifications.idle()
     expect(host.shown).toHaveLength(1)

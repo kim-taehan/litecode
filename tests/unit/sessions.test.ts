@@ -150,6 +150,17 @@ describe('SessionsService', () => {
     expect(llm.purges).toBe(1) // 지운 본문을 DB 파일에서 걷어내라고 한 번
   })
 
+  // 전수 검사 #126: 첫 턴에서 엔진 세션이 붙기 전에 대화가 지워지면 그 세션을 지울 길이 없었다
+  it('지워진 대화에 뒤늦게 붙이려는 엔진 세션은 목록에 안 넣고 지운다', async () => {
+    const { sessions, llm } = await start()
+    await sessions.save(conversation('c1'))
+    await sessions.remove('c1')
+    await sessions.attach('c1', 'ses_late')
+    await settle()
+    expect(await sessions.list()).toEqual([])
+    expect(llm.deleted).toEqual(['ses_late'])
+  })
+
   it('엔진 삭제가 실패하면 DB 정리를 부르지 않는다', async () => {
     const { sessions, llm } = await start({ failing: true })
     await sessions.save(conversation('c1', { engineSessionId: 'ses_1' }))

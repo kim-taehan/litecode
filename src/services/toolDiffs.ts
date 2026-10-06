@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { insideOf } from './projectPath.ts'
 import type { FileDiff } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
@@ -66,8 +67,7 @@ export function toolDiffs(name: string, input: unknown, metadata: unknown, root:
 /** 세션 폴더 안이면 상대 경로, 밖이면 절대 경로 그대로 */
 function relative(root: string, file: string): string {
   if (!root || !path.isAbsolute(file)) return file
-  const rel = path.relative(root, file)
-  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : file
+  return insideOf(root, file) ?? file
 }
 
 /** patch 의 hunk 본문에서 추가·삭제 줄 수 (머리의 `---`·`+++` 는 hunk 밖이라 세지 않는다) */

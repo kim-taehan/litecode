@@ -1,7 +1,7 @@
 import type { Context } from 'cordis'
 import fs from 'node:fs/promises'
-import path from 'node:path'
 import { projectFile } from '../../fileMentions.ts'
+import { insideOf } from '../../projectPath.ts'
 import type { AppMcpTool } from '../rpc.ts'
 import '../../appMcp.ts'
 
@@ -23,7 +23,7 @@ export async function openFileTarget(directory: string, args: Record<string, unk
   if (typeof asked !== 'string' || !asked.trim()) throw new Error('path is required (project-relative).')
   const file = await projectFile(directory, asked.trim())
   if (!file) throw new Error(`Not a file inside this project: ${asked}`)
-  const relative = path.relative(await fs.realpath(directory), file).split(path.sep).join('/')
+  const relative = insideOf(await fs.realpath(directory), file)! // projectFile 이 폴더 안의 파일만 준다
   const line = Number(args['line'])
   return { path: relative, ...(Number.isInteger(line) && line >= 1 && { line }) }
 }

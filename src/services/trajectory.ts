@@ -40,9 +40,9 @@ export type TrajectoryRecord =
   /** 모델 스텝 하나. start = 요청을 보낸 쪽 시각(커서), firstAt = 응답이 오기 시작한 시각 — start→firstAt 이 대기.
    *  subtask 가 있으면 그 하위 작업(자식 세션)의 스텝이다 — "에이전트 · 설명" */
   | { kind: 'assistant'; text: string; start: number; firstAt: number; end?: number; tokens?: TrajectoryTokens; error?: string; subtask?: string }
-  /** 도구 호출 하나. input 은 인자 JSON 문자열, ranAt = 실행 시작(신규 세대 기록만 — 레거시엔 없다), exit = bash 의 종료 코드, diffs = 바꾼 파일 (toolDiffs.ts) */
+  /** 도구 호출 하나. input 은 인자 JSON 문자열, exit = bash 의 종료 코드, diffs = 바꾼 파일 (toolDiffs.ts) */
   /** mcp = MCP 도구 호출의 서버·도구 (이슈 #28 — 화면은 "MCP · 서버 · 도구") */
-  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; ranAt?: number; end?: number; exit?: number; diffs?: FileDiff[]; subtask?: string; mcp?: McpToolRef }
+  | { kind: 'tool'; name: string; input: string; result: string; error?: string; start: number; end?: number; exit?: number; diffs?: FileDiff[]; subtask?: string; mcp?: McpToolRef }
 
 export interface Trajectory {
   records: TrajectoryRecord[]

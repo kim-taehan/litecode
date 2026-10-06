@@ -1019,6 +1019,14 @@ describe('옛 대화 이어 쓰기 (이슈 #21)', () => {
     expect(prompts[2]).not.toHaveProperty('noReply')
   })
 
+  // 전수 검사 #126: 거절 기록(declined)을 턴 준비가 던지기 전에 적어 두면 거둘 곳이 없다
+  it('옛 글 넣기가 실패해 턴이 시작도 못 하면 그 세션의 거절 기록이 남지 않는다', async () => {
+    previous = v2
+    const { llm } = await start(await fakeOpencode('reject'))
+    expect((await llm.chat('p', 'm', directory, 'hi', 'ses_1')).ok).toBe(false)
+    expect((llm as unknown as { declined: Map<string, unknown> }).declined.size).toBe(0)
+  })
+
   it('`!` 카드를 먼저 보내도(addContext) 옛 글이 그 앞에 한 번 들어간다', async () => {
     previous = v2
     const { llm } = await start(await fakeOpencode('done'))

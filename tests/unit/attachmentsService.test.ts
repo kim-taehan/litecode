@@ -32,6 +32,10 @@ class FakeChat extends Service {
   allowAttachments(paths: readonly string[]): void {
     this.allowed.push(...paths)
   }
+  revoked: string[] = []
+  revokeAttachments(paths: readonly string[]): void {
+    this.revoked.push(...paths)
+  }
   acceptsImages(asked: unknown): boolean {
     this.asked.push(asked)
     return this.images
@@ -176,12 +180,13 @@ describe('붙여넣은 이미지의 임시 파일 정리', () => {
 
   it('discard — 칩을 빼면 이 서비스가 만든 것만 지운다 (고른 파일·모양이 틀린 입력은 그대로)', async () => {
     const mine = write('keep.png', PNG)
-    const { attachments } = await start()
+    const { attachments, chat } = await start()
     const stored = await paste(attachments, 'c1')
     await attachments.discard([stored, mine, 7])
     await attachments.discard('nope')
     expect(fs.existsSync(stored)).toBe(false)
     expect(fs.existsSync(mine)).toBe(true)
+    expect(chat.revoked).toEqual([stored, mine]) // 뺀 칩의 경로는 보내기 허용 목록에서도 뺀다 (전수 검사 #126)
   })
 
   it("보낸 뒤 ('chat/attachments-read') 그 파일을 지운다", async () => {

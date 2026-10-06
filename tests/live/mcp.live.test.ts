@@ -150,7 +150,6 @@ const row = (name: string) => dialog().locator(`.mcp-card[data-mcp="${name}"]`)
 const status = (name: string) => row(name).locator('.mcp-card__status').textContent({ timeout: 1_000 })
 const input = () => page.locator('.composer__input')
 const lastTurn = () => page.locator('.turn').last()
-const lastHead = () => lastTurn().locator('.turn__head-label').textContent({ timeout: 1_000 })
 type Requests = { count: number; lastChat: { tools: string[]; messages: { text: string }[] } }
 const requests = async (): Promise<Requests> => (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as Requests
 

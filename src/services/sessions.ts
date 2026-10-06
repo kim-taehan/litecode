@@ -133,12 +133,16 @@ export class SessionsService extends Service {
     return stored.conversations.find((entry) => entry.id === id)
   }
 
-  /** 엔진 세션이 생기자마자 붙인다 — 답을 기다리는 중에 앱이 꺼져도 다시 열 수 있게 (ctx.llm.chat 의 onSession) */
+  /** 엔진 세션이 생기자마자 붙인다 — 답을 기다리는 중에 앱이 꺼져도 다시 열 수 있게 (ctx.llm.chat 의 onSession).
+   *  그사이 대화가 지워졌으면 붙일 곳이 없다 — 그 엔진 세션은 orphans 에 넣어 지운다 */
   async attach(id: string, engineSessionId: string): Promise<void> {
-    await this.update((stored) => ({
-      ...stored,
-      conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, engineSessionId } : entry)),
-    }))
+    let orphaned = false
+    await this.update((stored) => {
+      orphaned = !stored.conversations.some((entry) => entry.id === id)
+      if (orphaned) return { ...stored, orphans: [...stored.orphans, engineSessionId] }
+      return { ...stored, conversations: stored.conversations.map((entry) => (entry.id === id ? { ...entry, engineSessionId } : entry)) }
+    })
+    if (orphaned) void this.sweep()
   }
 
   /** 엔진 메시지 하나가 말풍선에 보일 글을 적는다 — 다시 열어도 `/hi world` 가 풀어 쓴 본문 대신 보이게 (01d "말풍선 문제") */

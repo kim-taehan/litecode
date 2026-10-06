@@ -6,6 +6,7 @@ import { tr } from '../i18n.ts'
 import { reference } from '../triggers/at.ts'
 import type { ChatImage } from './llm.ts'
 import type { PastedImages } from './pastedImages.ts'
+import { insideOf } from './projectPath.ts'
 
 // 메시지 첨부 (이슈 #44, 실측 _workspace/01y_attachments.md — opencode 1.18.18 레거시). 화면은 경로만 들고 읽기는 여기(메인)서 한다.
 // - **이미지**: 앱이 읽어 ctx.llm 에 바이트로 넘긴다(ctx.llm 이 data: file 파트로 싣는다). file:// 로 넘기지 않는 이유 — 없는 파일·깨진
@@ -188,13 +189,6 @@ export async function attachPasted(
   return { picked: result.picked, rejected: [...early, ...result.rejected] }
 }
 
-/** 프로젝트 폴더 기준 상대 경로(`/` 구분) — 폴더 밖이면 undefined. 둘 다 realpath 한 값이어야 한다 (링크로 밖을 가리키면 밖이다) */
-function insideOf(root: string, file: string): string | undefined {
-  const relative = path.relative(root, file)
-  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined
-  return relative.split(path.sep).join('/')
-}
-
 /** 파일 이름을 머리로 한 코드 블록 — 울타리는 본문의 가장 긴 백틱 줄보다 길게 */
 function fileBlock(name: string, content: string): string {
   const longest = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length))
@@ -218,7 +212,7 @@ export async function outgoing(directory: string, text: string, attachments: rea
       images.push({ mime: imageMime(data)!, filename: item.name, data })
       continue
     }
-    const relative = root && insideOf(root, await fs.realpath(item.path))
+    const relative = root && insideOf(root, await fs.realpath(item.path)) // 둘 다 realpath — 링크로 밖을 가리키면 밖이다
     if (relative) mentions.push(reference(relative))
     else blocks.push(fileBlock(item.name, data.toString('utf8')))
   }

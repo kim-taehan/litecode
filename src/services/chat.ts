@@ -14,7 +14,7 @@ import type { Mode } from '../../shared/modes.ts'
 import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
 // 대화별 "턴 소유" (ctx.chat, 이슈 #52) — 보내기·대기열·턴 끝 처리(제목·저장·통계 합산·대기열의 다음 것 보내기)·중지를 메인이 쥔다.
-// 원래 화면(App.tsx 의 send·useSendQueue)이 하던 일이다. 화면은 손님이다: 보내기를 부탁하고(send) 이벤트를 받아 그린다 —
+// 원래 화면(App.tsx 의 send·useSendQueue — 지금은 없다)이 하던 일이다. 화면은 손님이다: 보내기를 부탁하고(send) 이벤트를 받아 그린다 —
 // 창을 닫았다 열어도(snapshot), 화면이 둘이어도(모바일) 대화마다 엔진에 가는 턴은 하나고 대기열도 하나다.
 //
 // - 엔진을 모른다: 턴은 ctx.llm.chat 으로만 돌리고, 목록 정보는 ctx.sessions 에 적는다
@@ -103,19 +103,34 @@ export class ChatService extends Service {
   private queues = new SendQueues()
   /** 대화 id → 도는 턴. 보내기를 받은 그 순간(엔진에 닿기 전)부터 있다 — 같은 대화에 둘이 동시에 보내도 한 턴씩 */
   private turns = new Map<string, LiveTurn>()
-  /** 사용자가 OS 파일 고르기로 골랐거나 놓거나 붙여넣은(이슈 #80) 첨부 경로 — 보낼 때 이 안의 것만 읽는다 (화면이 오염돼도 아무 파일이나 읽어 보내게 두지 않는다) */
-  private picked = new Set<string>()
+  /** 사용자가 OS 파일 고르기로 골랐거나 놓거나 붙여넣은(이슈 #80) 첨부 경로 — 보낼 때 이 안의 것만 읽는다 (화면이 오염돼도 아무 파일이나 읽어 보내게 두지 않는다).
+   *  값은 고른 횟수다 (같은 파일을 두 대화의 입력창에 붙일 수 있다) — 보내거나 칩을 뺄 때마다 하나씩 준다 (revokeAttachments) */
+  private picked = new Map<string, number>()
 
   constructor(ctx: Context) {
     super(ctx, 'chat')
     ctx.effect(() => this.queues.subscribe((cid) => void ctx.emit('chat/queue-changed', this.queueOf(cid))))
-    // 지워진 대화의 대기열은 같이 사라진다 (다른 대화가 보내 둔 지시 포함)
-    ctx.on('sessions/removed', (ids) => ids.forEach((id) => this.queues.clear(id)))
+    // 지워진 대화의 대기열은 같이 사라진다 (다른 대화가 보내 둔 지시 포함). 도는 턴도 멈춘다 — 답을 실을 대화가 없다
+    ctx.on('sessions/removed', (ids) =>
+      ids.forEach((id) => {
+        this.queues.clear(id)
+        this.turns.get(id)?.stop.abort()
+      }),
+    )
   }
 
   /** 파일 고르기가 준 경로를 적어 둔다 — send 의 첨부는 이 안의 것만 받는다 */
   allowAttachments(paths: readonly string[]): void {
-    for (const file of paths) this.picked.add(file)
+    for (const file of paths) this.picked.set(file, (this.picked.get(file) ?? 0) + 1)
+  }
+
+  /** 적어 둔 경로를 한 번씩 뺀다 — 보낸 뒤(읽고 나서)와 칩을 뺐을 때. 적은 적 없는 경로는 아무 일도 없다 */
+  revokeAttachments(paths: readonly string[]): void {
+    for (const file of paths) {
+      const left = (this.picked.get(file) ?? 0) - 1
+      if (left > 0) this.picked.set(file, left)
+      else this.picked.delete(file)
+    }
   }
 
   /** 그 모델이 이미지를 받는가 (설정 > 모델의 "이미지 입력") — 모르는 모델이면 false */
@@ -391,8 +406,10 @@ export class ChatService extends Service {
       } catch (error) {
         return { ok: false, sessionId, error: (error as Error).message }
       } finally {
-        // 읽기가 끝났다(못 읽었어도 이 첨부는 다시 안 쓰인다) — 붙여넣은 이미지의 임시 파일을 이때 지운다 (이슈 #80)
-        this.ctx.emit('chat/attachments-read', attached.map((file) => file.path))
+        // 읽기가 끝났다(못 읽었어도 이 첨부는 다시 안 쓰인다) — 허용 목록에서 빼고, 붙여넣은 이미지의 임시 파일을 이때 지운다 (이슈 #80)
+        const read = attached.map((file) => file.path)
+        this.revokeAttachments(read)
+        this.ctx.emit('chat/attachments-read', read)
       }
     }
     const files = attached.filter((file) => file.kind !== 'image').map(({ name, size }) => ({ kind: 'file' as const, name, size }))

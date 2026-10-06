@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { Conversation } from './sessions.ts'
 import './llm.ts' // 'llm/turn-*'·'llm/attention*' 이벤트 선언
 import { tr } from '../i18n.ts'
-import type { ConversationStatus, NoticeEntry, NoticeState } from '../../shared/contract.ts'
+import type { ConversationStatus, NoticeState } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { ConversationStatus, NoticeEntry, NoticeState } from '../../shared/contract.ts'
