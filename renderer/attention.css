@@ -376,3 +376,45 @@
   text-overflow: ellipsis;
   color: var(--text-secondary);
 }
+
+/* 브라우저 도구가 하려는 것 (이슈 #147) — MCP 줄 아래 한 블록. 주소·넣을 글은 줄이지 않고 줄바꿈해 전체를 보인다 */
+.attention-card__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.attention-card__detail-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.attention-card__detail-note {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.attention-card__detail-text {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--module);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* 스크립트는 길다 — 높이를 묶고 그 안에서 스크롤 */
+.attention-card__detail-text[data-code] {
+  max-height: 200px;
+  overflow-y: auto;
+}

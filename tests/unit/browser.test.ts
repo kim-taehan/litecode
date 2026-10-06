@@ -395,21 +395,65 @@ describe('ctx.browser', () => {
 })
 
 describe('승인 카드에 보일 인자', () => {
-  it('navigate 는 주소, type 은 넣을 글, 탭 열기도 주소', () => {
-    expect(browserApprovalDetail('browser_navigate', JSON.stringify({ url: 'http://wiki.corp/page' }))).toBe('http://wiki.corp/page')
-    expect(browserApprovalDetail('browser_type', JSON.stringify({ element: '검색창', target: 'e3', text: '비밀 메모' }))).toBe('비밀 메모')
-    expect(browserApprovalDetail('browser_tabs', JSON.stringify({ action: 'new', url: 'http://a.corp/' }))).toBe('http://a.corp/')
+  const detail = (tool: string, args: unknown) => browserApprovalDetail(tool, JSON.stringify(args))
+
+  it('navigate 는 열 주소 전체, 뒤로 가기는 제목만', () => {
+    const long = `http://wiki.corp/${'a'.repeat(400)}?token=1`
+    expect(detail('browser_navigate', { url: 'http://wiki.corp/page' })).toEqual({ action: 'navigate', text: 'http://wiki.corp/page' })
+    expect(detail('browser_navigate', { url: long })!.text).toBe(long)
+    expect(detail('browser_navigate_back', {})).toEqual({ action: 'back' })
   })
 
-  it('evaluate 는 실행할 코드, 누르는 도구는 대상 설명', () => {
-    expect(browserApprovalDetail('browser_evaluate', JSON.stringify({ function: '() => document.title' }))).toBe('() => document.title')
-    expect(browserApprovalDetail('browser_click', JSON.stringify({ element: '저장 버튼', target: 'e7' }))).toBe('저장 버튼')
+  it('type 은 넣을 글과 넣는 칸, fill_form 은 칸마다 한 줄', () => {
+    expect(detail('browser_type', { element: '검색창', target: 'e3', text: '비밀 메모' })).toEqual({ action: 'type', target: '검색창', text: '비밀 메모' })
+    expect(
+      detail('browser_fill_form', {
+        fields: [
+          { name: '아이디', type: 'textbox', target: 'e1', value: 'kim' },
+          { name: '비밀번호', type: 'textbox', target: 'e2', value: 'hunter2' },
+        ],
+      }),
+    ).toEqual({ action: 'fill', text: '아이디: kim\n비밀번호: hunter2' })
   })
 
-  it('보일 것이 없거나 인자를 못 읽으면 없다', () => {
-    expect(browserApprovalDetail('browser_navigate_back', '{}')).toBeUndefined()
+  it('click·hover 는 대상 설명, drag 는 어디서 어디로, select_option 은 대상과 고를 값', () => {
+    expect(detail('browser_click', { element: '저장 버튼', target: 'e7' })).toEqual({ action: 'click', text: '저장 버튼' })
+    expect(detail('browser_hover', { element: '메뉴', target: 'e2' })).toEqual({ action: 'hover', text: '메뉴' })
+    expect(detail('browser_drag', { startElement: '카드', startTarget: 'e1', endElement: '완료 칸', endTarget: 'e9' })).toEqual({ action: 'drag', text: '카드 → 완료 칸' })
+    expect(detail('browser_select_option', { element: '언어', target: 'e4', values: ['한국어', 'English'] })).toEqual({ action: 'select', target: '언어', text: '한국어, English' })
+  })
+
+  it('evaluate 는 실행할 스크립트(여러 줄 그대로), press_key 는 키', () => {
+    const script = '() => {\n  return document.title\n}'
+    expect(detail('browser_evaluate', { function: script })).toEqual({ action: 'evaluate', text: script, code: true })
+    expect(detail('browser_press_key', { key: 'Enter' })).toEqual({ action: 'key', text: 'Enter' })
+  })
+
+  it('tabs 는 동작과 주소', () => {
+    expect(detail('browser_tabs', { action: 'new', url: 'http://a.corp/' })).toEqual({ action: 'tabs', text: 'new\nhttp://a.corp/' })
+    expect(detail('browser_tabs', { action: 'select', index: 2 })).toEqual({ action: 'tabs', text: 'select 2' })
+  })
+
+  it('네트워크 읽기는 제목(무엇을 읽는지는 화면 문구) + 준 인자', () => {
+    expect(detail('browser_network_requests', {})).toEqual({ action: 'network' })
+    expect(detail('browser_network_request', { index: 3 })).toEqual({ action: 'network', text: JSON.stringify({ index: 3 }, null, 2) })
+  })
+
+  it('모르는 browser_* 도구는 인자를 그대로 JSON 으로 — 숨기지 않는다', () => {
+    const args = { where: 'http://x.corp/', deep: { a: 1 } }
+    expect(detail('browser_teleport', args)).toEqual({ text: JSON.stringify(args, null, 2) })
+    expect(detail('browser_handle_dialog', { accept: true, promptText: '네' })).toEqual({ text: JSON.stringify({ accept: true, promptText: '네' }, null, 2) })
+    expect(detail('browser_snapshot', {})).toEqual({})
+  })
+
+  it('아는 도구인데 기대한 인자가 없으면 인자 전체를 보인다', () => {
+    expect(detail('browser_navigate', { url: 42 })).toEqual({ action: 'navigate', text: JSON.stringify({ url: 42 }, null, 2) })
+    expect(detail('browser_click', { target: 'e7' })).toEqual({ action: 'click', text: JSON.stringify({ target: 'e7' }, null, 2) })
+  })
+
+  it('인자가 없거나 브라우저 도구가 아니면 없다, JSON 이 아니면 받은 글 그대로', () => {
     expect(browserApprovalDetail('browser_navigate', undefined)).toBeUndefined()
-    expect(browserApprovalDetail('browser_navigate', '{oops')).toBeUndefined()
-    expect(browserApprovalDetail('browser_navigate', JSON.stringify({ url: 42 }))).toBeUndefined()
+    expect(browserApprovalDetail('query', JSON.stringify({ url: 'http://a.corp/' }))).toBeUndefined()
+    expect(browserApprovalDetail('browser_navigate', '{oops')).toEqual({ text: '{oops' })
   })
 })
