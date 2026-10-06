@@ -80,7 +80,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 조각별 상세 기록은 **`docs/status.md`** 에 있다(약 50KB — 고치려는 기능의 줄만 읽는다. `grep -n '^| <이름>' docs/status.md`). 기능이 착지하면 그 줄을 고친다. 무엇이 있는지만 여기 적는다:
 
 - **바탕 서비스**(`src/services/`): `providers`(모델 설정·키) · `engine`(opencode 띄우기·설정 생성·키 프록시) · `llm`(엔진과의 대화 — 엔진 지식은 여기와 engine 에만) · `sessions`(대화 목록) · `chat`(턴 소유·대기열) · `projects` · `settings` · `features`(기능 켜기/끄기) · `triggers`(@ · / · !) · `attachments`
-- **기능 묶음**(끄면 통째로 내려간다, `shared/features.ts`): 필수 — 입력 트리거·`shell`(!명령)·`skills`·`mcp` / 고르는 것 — `terminal`·`trajectory`·`openIn`·`appMcp`(데스크탑 MCP) 기본 켜짐, `notifications`·`remote`(모바일 연결)·`web`(웹 가져오기)·`hooks`·`voice`(음성 입력) 기본 꺼짐
+- **기능 묶음**(끄면 통째로 내려간다, `shared/features.ts`): 필수 — 입력 트리거·`shell`(!명령)·`skills`·`mcp` / 고르는 것 — `terminal`·`trajectory`·`openIn`·`appMcp`(데스크탑 MCP) 기본 켜짐, `notifications`·`remote`(모바일 연결)·`web`(웹 가져오기)·`hooks`·`voice`(음성 입력)·`browser`(Chrome 조종) 기본 꺼짐
 - **그 밖**: `quit`(종료 확인·창 닫기), 로그·부팅 진단(`electron/resilience.ts`·`logFile.ts`), 패키징(`scripts/fetch-*.mjs` + electron-builder, opencode·ripgrep·음성 엔진 동봉)
 - **화면**(`renderer/`): 사이드바(프로젝트 전환·대화 목록·찾기·고정) + 대화(마크다운·문법 색·진행 줄·승인/질문 카드·모드 칩·할 일 줄·고친 파일/결과물 카드·훅 줄·찾기) + 입력 카드(`+` 메뉴의 스킬·MCP·훅 팝업, 첨부, 음성) + 오른쪽 패널(파일·폴더·HTML 미리보기) + 설정(일반·모델·기능·모바일)
 - **모바일**(`mobile/`, Android): 데스크탑에 붙는 화면 — 단독 세션 없음. 지금은 루프백 평문 연결만(TLS·LAN·QR 없음)
