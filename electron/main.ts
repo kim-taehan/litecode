@@ -48,6 +48,7 @@ import { PresentTool } from '../src/services/appMcp/tools/present.ts'
 import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
+import { RemoteHttps } from '../src/services/remote/https.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { attentionTarget } from '../shared/delegation.ts'
@@ -581,8 +582,10 @@ const features: FeatureDefinition[] = [
     service: 'remote',
     plugin: (ctx) => {
       ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
-      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 지금은 HTTP(127.0.0.1:47600) 하나. 블루투스 운반이 이 옆에 올라온다
+      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 평문 HTTP(127.0.0.1:47600, 에뮬레이터용)와 사내망 TLS(사설 IPv4 주소마다 :47600,
+      // 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다). 블루투스 운반이 이 옆에 올라온다
       ctx.plugin(RemoteHttp)
+      ctx.plugin(RemoteHttps, { keyFile: path.join(userData, 'remote-tls-key.json'), cipher: keyCipher })
       ctx.plugin(remoteBridge)
     },
   },
