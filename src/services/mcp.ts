@@ -310,7 +310,7 @@ export class McpService extends Service {
   checkNew(input: McpServerInput, directory: string, toFile = false): void {
     const workdir = realpathOf(directory)
     const { record } = this.resolve({ ...input, originalName: undefined }, undefined)
-    if (record.name === APP_MCP_NAME || this.builtins.has(record.name)) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
+    if (RESERVED_NAMES.includes(record.name) || this.builtins.has(record.name)) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
     const visible = [...this.servers, ...(this.projects[workdir]?.servers ?? []), ...projectServers(workdir), ...personalServers(this.opts.env ?? process.env)]
     if (visible.some((server) => server.name === record.name)) throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
     if (toFile) readProjectFile(workdir)
