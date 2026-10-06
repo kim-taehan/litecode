@@ -90,8 +90,8 @@ describe('엔진 권한 규칙 (withBrowserRules)', () => {
 
   it('기본·전체 권한: 페이지를 바꾸거나 밖으로 내보낼 수 있는 것은 ask, 읽기는 allow — 전체 권한의 "*": allow 뒤에 온다', () => {
     for (const agent of [MODE_AGENT.build, MODE_AGENT.full]) {
-      for (const tool of ['browser_navigate', 'browser_tabs', 'browser_evaluate', 'browser_click', 'browser_type', 'browser_fill_form']) expect(rule(config, agent, named(tool)), tool).toBe('ask')
-      for (const tool of ['browser_snapshot', 'browser_take_screenshot', 'browser_console_messages', 'browser_network_requests']) expect(rule(config, agent, named(tool)), tool).toBe('allow')
+      for (const tool of ['browser_navigate', 'browser_tabs', 'browser_evaluate', 'browser_click', 'browser_type', 'browser_fill_form', 'browser_network_requests', 'browser_network_request']) expect(rule(config, agent, named(tool)), tool).toBe('ask')
+      for (const tool of ['browser_snapshot', 'browser_take_screenshot', 'browser_console_messages']) expect(rule(config, agent, named(tool)), tool).toBe('allow')
     }
     const order = Object.keys(config.agent[MODE_AGENT.full]!.permission)
     expect(order.indexOf('chrome_*')).toBeGreaterThan(order.indexOf('*'))

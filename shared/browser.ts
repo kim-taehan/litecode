@@ -10,8 +10,6 @@ export const BROWSER_READ_TOOLS = [
   'browser_snapshot',
   'browser_find',
   'browser_console_messages',
-  'browser_network_requests',
-  'browser_network_request',
   'browser_take_screenshot',
   'browser_wait_for',
 ] as const
@@ -34,6 +32,9 @@ export const BROWSER_ASK_TOOLS = [
   'browser_select_option',
   'browser_handle_dialog',
   'browser_evaluate',
+  // 요청·응답의 헤더와 본문이 모델에 들어간다 — 전용 프로필에 로그인해 두고 쓰므로(쿠키·토큰이 실린다) 읽기지만 묻는다
+  'browser_network_requests',
+  'browser_network_request',
 ] as const
 
 /** 늘 막는다 — run_code_unsafe 는 MCP 프로세스(사용자 권한의 node)에서 도는 임의 코드라 bash 승인을 우회하고, file_upload·drop 은 로컬 파일을 사이트로 올린다 */
