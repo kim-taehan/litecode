@@ -1,6 +1,7 @@
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Attention } from '../../shared/contract.ts'
+import type { PairRejectReason } from '../../shared/remote.ts'
 import { DesktopLink, type DesktopStore, type SavedDesktop } from '../src/app/link.ts'
 import { Connection, RemoteClient, createFetchTransport, createNativePinnedNet, newClientMessageId, type StreamHandlers, type Transport } from '../src/core/index.ts'
 import { nodePinnedNative } from './nodePinned.ts'
@@ -15,10 +16,11 @@ import { nodePinnedNative } from './nodePinned.ts'
 interface PairRequestView {
   id: string
   deviceName: string
+  platform: string
   confirm: string
 }
 interface DesktopStatus {
-  pairing?: { code: string }
+  pairing?: { code: string; shortCode: string }
   requests: PairRequestView[]
 }
 interface Turn {
@@ -254,14 +256,57 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
 
     const code = remote.startPairing().pairing!.code
     await link.pair({ address, code: 'ZZZZ-ZZZZ-ZZZZ', deviceName: 'Pixel 8' })
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'wrong-code' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'wrong-code' })
 
     const off = ctx.on('remote/changed', (status) => {
       if (status.requests[0]) remote.answerPair(status.requests[0].id, false)
     })
     await link.pair({ address, code, deviceName: 'Pixel 8' })
     off()
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'denied' })
+  })
+
+  it('직접 입력은 데스크탑의 숫자 2자리로 — 친 모양(칸 띄움) 그대로 붙고, 폰의 확인 코드가 데스크탑 [허용] 창의 것과 같다', async () => {
+    const { ctx, remote, base } = await start()
+    let saved: SavedDesktop | undefined
+    const store: DesktopStore = { load: async () => saved, save: async (desktop) => void (saved = desktop), clear: async () => void (saved = undefined) }
+    const link = new DesktopLink({ store, transport: createFetchTransport(), pinned: createNativePinnedNet(nodePinnedNative()), platform: 'android' })
+    cleanups.push(() => link.dispose())
+    await link.restore()
+    const { shortCode } = remote.startPairing().pairing!
+    let asked: { deviceName: string; platform: string; confirm: string } | undefined
+    const off = ctx.on('remote/changed', (status) => {
+      const request = status.requests[0]
+      if (!request || asked) return
+      asked = request
+      remote.answerPair(request.id, true)
+    })
+    const pairing = link.pair({ address: base().replace('http://', ''), code: ` ${shortCode[0]} ${shortCode[1]} `, deviceName: 'Pixel 8' })
+    const confirm = link.state.phase === 'pairing' ? link.state.confirm : undefined
+    await pairing
+    off()
+    expect(link.state.phase).toBe('linked')
+    expect(asked).toMatchObject({ deviceName: 'Pixel 8', platform: 'android', confirm })
+    expect(saved?.token).toBeTruthy()
+  })
+
+  it('계약: 짝짓기 403 의 사유는 본문의 reason 이다 — 진짜 데스크탑이 내는 것을 폰의 클라이언트가 그대로 읽는다', async () => {
+    const { ctx, remote, base } = await start()
+    const client = new RemoteClient({ transport: createFetchTransport(), baseUrl: base() })
+    const reasonOf = (code: string) =>
+      client.pair({ code, deviceName: 'Pixel 8', platform: 'android' }).then(
+        () => 'paired',
+        (error: { reason?: string }) => error.reason,
+      )
+
+    expect(await reasonOf('ZZZZZZZZZZZZ')).toBe('no-code' satisfies PairRejectReason)
+    const code = remote.startPairing().pairing!.code
+    expect(await reasonOf('ZZZZZZZZZZZZ')).toBe('wrong-code' satisfies PairRejectReason)
+    const off = ctx.on('remote/changed', (status) => {
+      if (status.requests[0]) remote.answerPair(status.requests[0].id, false)
+    })
+    expect(await reasonOf(code)).toBe('denied' satisfies PairRejectReason)
+    off()
   })
 })
 

@@ -9,8 +9,10 @@ import type { KeyCipher } from '../providers.ts'
 // 새로 만든다 — 키가 같으면 지문이 같아 폰을 다시 짝지을 필요가 없다. 키는 provider 키와 같은 safeStorage 로 봉해 userData 에 둔다
 // (봉할 수 없는 환경이면 권한 0600 평문 — 같은 사용자가 이 파일을 읽을 수 있으면 이미 기기 토큰 파일·대화도 읽는다).
 //
-// 인증서는 의존성 없이 node:crypto 로 만든다: X.509 v1(확장 없음 — RFC 5280 4.1.2.1) TBSCertificate 를 DER 로 직접 쓰고
-// `crypto.sign` 으로 서명한다. 인증서 라이브러리(@peculiar/x509 는 21 패키지 + 전역 reflect-metadata 폴리필)를 들이지 않는다.
+// 인증서는 의존성 없이 node:crypto 로 만든다: X.509 v3 TBSCertificate 를 DER 로 직접 쓰고 `crypto.sign` 으로 서명한다.
+// v3 확장은 서버 인증서의 보통 모양만 — BasicConstraints CA:false · KeyUsage digitalSignature(둘 다 critical) · EKU serverAuth.
+// (처음엔 확장 없는 v1 이었다. 실제 폰(Android conscrypt/BoringSSL)이 TLS 단계에서 실패해(2026-10-06) 흔한 모양으로 바꿨다 —
+// v1 이 원인이라는 확증은 없다. SAN 은 싣지 않는다: 폰은 이름을 보지 않고 지문만 보며, 주소는 바뀐다.) 키가 같으면 SPKI 지문은 그대로다. 인증서 라이브러리(@peculiar/x509 는 21 패키지 + 전역 reflect-metadata 폴리필)를 들이지 않는다.
 
 export interface TlsIdentity {
   /** PKCS#8 PEM */
@@ -62,7 +64,7 @@ export async function loadTlsIdentity(file: string, cipher?: KeyCipher, now: Dat
   }
 }
 
-/** 자체 서명 인증서 PEM (X.509 v1, ecdsa-with-SHA256, 주체·발급자 CN=litecode) */
+/** 자체 서명 인증서 PEM (X.509 v3, ecdsa-with-SHA256, 주체·발급자 CN=litecode) */
 export function selfSignedCertificate(privateKey: KeyObject, now: Date = new Date()): string {
   const spki = createPublicKey(privateKey).export({ type: 'spki', format: 'der' })
   const serial = randomBytes(16)
@@ -71,7 +73,18 @@ export function selfSignedCertificate(privateKey: KeyObject, now: Date = new Dat
   const name = der(0x30, der(0x31, der(0x30, oid([2, 5, 4, 3]), der(0x0c, Buffer.from('litecode')))))
   const notBefore = new Date(now.getTime() - 24 * 3600_000) // PC 시계가 조금 늦어도
   const notAfter = new Date(now.getTime() + VALID_DAYS * 24 * 3600_000)
-  const tbs = der(0x30, der(0x02, serial), ecdsaWithSha256, name, der(0x30, time(notBefore), time(notAfter)), name, spki)
+  const version = der(0xa0, der(0x02, Buffer.from([2]))) // [0] EXPLICIT v3
+  const critical = der(0x01, Buffer.from([0xff]))
+  const extensions = der(
+    0xa3, // [3] EXPLICIT
+    der(
+      0x30,
+      der(0x30, oid([2, 5, 29, 19]), critical, der(0x04, der(0x30))), // basicConstraints: CA 아님
+      der(0x30, oid([2, 5, 29, 15]), critical, der(0x04, der(0x03, Buffer.from([0x07, 0x80])))), // keyUsage: digitalSignature
+      der(0x30, oid([2, 5, 29, 37]), der(0x04, der(0x30, oid([1, 3, 6, 1, 5, 5, 7, 3, 1])))), // extKeyUsage: serverAuth
+    ),
+  )
+  const tbs = der(0x30, version, der(0x02, serial), ecdsaWithSha256, name, der(0x30, time(notBefore), time(notAfter)), name, spki, extensions)
   const signature = sign('sha256', tbs, privateKey) // EC 키는 DER(ECDSA-Sig-Value)로 나온다
   const certificate = der(0x30, tbs, ecdsaWithSha256, der(0x03, Buffer.from([0]), signature))
   const base64 = certificate.toString('base64').replace(/.{64}/g, '$&\n')

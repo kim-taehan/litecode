@@ -31,6 +31,7 @@ import {
   type CreateConversationRequest,
   type Hello,
   type PairRequest,
+  type PairRejected,
   type PairResponse,
   type QueueTakeResponse,
   type RemoteConversation,
@@ -46,6 +47,8 @@ import { confirmCode, groupCode, normalizePairCode, pairDeviceName } from '../..
 import { fingerprintCode } from '../src/core/pairQr.ts'
 
 export const FAKE_PAIR_CODE = 'DEV0DEV0DEV0'
+/** 직접 입력용 숫자 2자리 (진짜 데스크탑처럼 긴 코드와 같이 받는다) */
+export const FAKE_PAIR_SHORT_CODE = '42'
 const EVENT_RING = 2000
 
 export interface FakeDesktopOptions {
@@ -393,12 +396,13 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/pair') {
-      // 진짜 데스크탑(src/services/remote.ts)과 같은 답: 틀린 코드 403 'wrong pairing code', 거절 403 'denied on the desktop', 시간 초과 408.
+      // 진짜 데스크탑(src/services/remote.ts)과 같은 답: 틀린 코드 403 reason 'wrong-code', 거절 403 reason 'denied', 시간 초과 408.
       // 다른 점: 코드가 고정이고 몇 번이든 쓸 수 있다(진짜는 2분·1회용·5회 폐기), 여러 번 틀려도 막지 않는다(진짜는 429)
       const pair = body as PairRequest | undefined
       const deviceName = typeof pair?.deviceName === 'string' ? pairDeviceName(pair.deviceName) : ''
       if (typeof pair?.code !== 'string' || !deviceName || (pair.platform !== 'android' && pair.platform !== 'ios')) return reply(400, { error: 'code, deviceName and platform are required' })
-      if (normalizePairCode(pair.code) !== FAKE_PAIR_CODE) return reply(403, { error: 'wrong pairing code' })
+      const given = normalizePairCode(pair.code)
+      if (given !== FAKE_PAIR_CODE && given !== FAKE_PAIR_SHORT_CODE) return reply(403, { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected)
       const allow = (): void => {
         const paired: PairResponse = { deviceId: `dev_${++counter}`, token: randomBytes(32).toString('hex') }
         tokens.set(paired.token, paired.deviceId)
@@ -410,13 +414,13 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
       const timer = setTimeout(() => waiting.settle('timeout'), options.pairWaitMs ?? 60_000)
       const waiting: PendingPair = {
         deviceName,
-        confirm: fingerprint ? fingerprintCode(fingerprint) : confirmCode(FAKE_PAIR_CODE, deviceName, pair.platform),
+        confirm: fingerprint ? fingerprintCode(fingerprint) : confirmCode(given, deviceName, pair.platform),
         settle(result) {
           if (pending !== waiting) return
           pending = undefined
           clearTimeout(timer)
           if (result === 'allow') allow()
-          else if (result === 'deny') reply(403, { error: 'denied on the desktop' })
+          else if (result === 'deny') reply(403, { error: 'denied on the desktop', reason: 'denied' } satisfies PairRejected)
           else reply(408, { error: 'nobody answered on the desktop' })
         },
       }
@@ -523,7 +527,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     onPairRequest: ({ deviceName, confirm }) => console.log(`짝짓기 요청: "${deviceName}" · 확인 코드 ${confirm} (폰 화면과 같은지 보고) → allow 또는 deny`),
   })
   console.log(`가짜 데스크탑 (개발용 · 평문 http) — ${['127.0.0.1', ...values('--host')].map((host) => `http://${host}:${desktop.port}`).join(' , ')}`)
-  console.log(`페어링 코드: ${groupCode(FAKE_PAIR_CODE)}   (안드로이드 에뮬레이터에서는 10.0.2.2:${desktop.port})`)
+  console.log(`페어링 코드: ${FAKE_PAIR_SHORT_CODE} (또는 ${groupCode(FAKE_PAIR_CODE)})   (안드로이드 에뮬레이터에서는 10.0.2.2:${desktop.port})`)
   console.log('명령: allow | deny (짝짓기 요청에 답) · say <대화 id> <글> (데스크탑에서 보낸 턴 — [ask] 를 넣으면 승인 요청) · drop | restart | revoke   (Ctrl+C 로 끝낸다)')
   process.stdin.setEncoding('utf8')
   process.stdin.on('data', (chunk: string) => {

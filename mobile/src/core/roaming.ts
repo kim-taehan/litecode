@@ -4,7 +4,7 @@
 
 import type { Hello } from '../../../shared/remote.ts'
 import { RemoteClient, RemoteError, type RemoteClientOptions } from './client.ts'
-import { firstReachable, worstFailure } from './net.ts'
+import { firstReachable, NetError, worstFailure } from './net.ts'
 import { hostOf, isLoopbackHost, parseHostPort } from './pairQr.ts'
 
 /** 쥐고 있을 후보 수 — 오래된 것부터 버린다 */
@@ -48,7 +48,13 @@ export class RoamingClient extends RemoteClient {
       if (others.length === 0) throw error
       let found: { address: string; value: Hello }
       try {
-        found = await firstReachable(others, (address) => this.helloAt(address))
+        // 옛 후보의 지문 불일치는 "거기엔 내 데스크탑이 없다" 다(DHCP 로 그 IP 를 옆 PC 의 litecode 가 받았다) — 닿지 않음으로 낮춘다.
+        // "지문이 달라졌다"(짝을 지운다)는 지금 주소에서 본 불일치일 때만 (QA W1)
+        found = await firstReachable(others, (address) =>
+          this.helloAt(address).catch((otherError: unknown) => {
+            throw otherError instanceof NetError && otherError.kind === 'pin-mismatch' ? new NetError('unreachable', `another desktop at ${address}`) : otherError
+          }),
+        )
       } catch (raceError) {
         throw raceError instanceof RemoteError ? raceError : worstFailure([error, raceError])
       }

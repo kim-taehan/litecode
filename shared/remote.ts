@@ -47,6 +47,13 @@ export interface PairRequest {
   deviceName: string
   platform: 'android' | 'ios'
 }
+/** POST /v1/pair 의 403 사유 — 폰은 글(error)이 아니라 이것으로 안내를 가른다.
+ *  no-code: 진행 중인 짝짓기 코드가 없다(시작 안 함·2분 만료·이미 씀·5회 틀려 버림) · wrong-code: 코드가 틀렸다 · denied: 데스크탑에서 [거절] */
+export type PairRejectReason = 'no-code' | 'wrong-code' | 'denied'
+export interface PairRejected {
+  error: string
+  reason: PairRejectReason
+}
 export interface PairResponse {
   deviceId: string
   /** 기기 토큰 — 이후 모든 요청의 `Authorization: Bearer` */

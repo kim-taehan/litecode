@@ -11,7 +11,7 @@ export const S = {
   findingDesktop: '데스크탑을 찾는 중…',
   addressLabel: '데스크탑 주소',
   codeLabel: '연결 코드',
-  codeHint: '데스크탑의 설정 › 모바일 › 기기 연결에 보이는 12자',
+  codeHint: '데스크탑의 설정 › 모바일 › 기기 연결에 보이는 숫자 2자리',
   deviceNameLabel: '이 기기 이름',
   connect: '연결',
   waitingForAllow: '데스크탑의 허용을 기다리는 중…',
@@ -19,7 +19,7 @@ export const S = {
   pairFailure: {
     'bad-address': '주소를 읽을 수 없습니다. 192.168.0.12:47600 처럼 입력해 주세요.',
     'not-loopback': '암호화하지 않은 연결(http://)은 이 컴퓨터 안(에뮬레이터)에서만 됩니다. 앞의 http:// 를 지워 주세요.',
-    'bad-code': '연결 코드는 12자입니다. 데스크탑 화면의 코드를 그대로 입력해 주세요.',
+    'bad-code': '연결 코드는 숫자 2자리입니다. 데스크탑 화면의 코드를 그대로 입력해 주세요.',
     'no-name': '이 기기 이름을 입력해 주세요.',
     'wrong-code': '코드가 틀렸거나 만료됐습니다. 데스크탑에서 기기 연결을 다시 눌러 새 코드를 확인해 주세요.',
     denied: '데스크탑에서 연결을 거절했습니다.',
@@ -32,6 +32,9 @@ export const S = {
     'qr-version': '이 앱이 모르는 QR 형식입니다. 앱을 최신으로 바꿔 주세요.',
     'qr-expired': 'QR 이 만료됐습니다. 데스크탑에서 기기 연결을 다시 눌러 새 QR 을 띄워 주세요.',
     'qr-invalid': 'QR 을 읽었지만 내용이 올바르지 않습니다. 데스크탑에서 QR 을 다시 띄워 주세요.',
+    'old-android': '이 폰의 Android 버전에서는 사내망 연결을 쓸 수 없습니다 — Android 10 이상이 필요합니다. (에뮬레이터의 이 컴퓨터 안 연결은 영향 없음)',
+    'tls-failed': '데스크탑에는 닿았지만 암호화 연결(TLS)을 맺지 못했습니다. 아래 자세한 내용을 알려 주세요.',
+    'connection-broken': '데스크탑에는 닿았지만 연결이 도중에 끊겼습니다. 다시 시도해 주세요.',
     unreachable: '데스크탑에 닿지 못했습니다. 데스크탑의 설정 › 기능에서 "모바일 연결" 이 켜져 있는지, 주소가 맞는지 확인해 주세요.',
     failed: '연결하지 못했습니다. 다시 시도해 주세요.',
   },
@@ -49,6 +52,8 @@ export const S = {
   checkFingerprint: '데스크탑의 허용 창에 뜬 지문과 같은지 보세요. 다르면 허용하지 마세요.',
   fingerprintChanged: '지문이 달라졌습니다 (데스크탑을 다시 설치했거나 다른 PC 일 수 있습니다). 새로 연결하세요.',
   fingerprintChangedShort: '지문이 달라졌습니다 — 새로 연결하세요',
+  lanUnsupported: (apiLevel: number) =>
+    `이 폰의 Android 버전(API ${apiLevel})에서는 사내망 연결을 쓸 수 없습니다 — Android 10 이상이 필요합니다. 에뮬레이터의 이 컴퓨터 안 연결(http://10.0.2.2 등)은 영향 없습니다.`,
   connectFootnote: '같은 사내망(Wi-Fi 또는 VPN)에 있어야 연결됩니다. 대화 내용은 데스크탑에만 저장됩니다.',
 
   switchProject: '프로젝트 바꾸기',

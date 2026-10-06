@@ -73,12 +73,12 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     wasConnected = connected
     notify()
   })
-  // 데스크탑이 듣는 주소가 바뀌었다 — 다음에 끊겼을 때 시도할 후보를 넓힌다. (이벤트 이름은 데스크탑 계약 shared/remote.ts 'addresses.changed' —
-  // 이 워크트리의 shared 에는 아직 없어 글로 견준다)
+  // 데스크탑이 듣는 주소가 바뀌었다 — 다음에 끊겼을 때 시도할 후보를 넓힌다. (이벤트 이름·모양은 계약 shared/remote.ts RemoteEventMap['addresses.changed'] —
+  // 이름은 타입으로 좁히고, 망에서 온 data 는 그래도 모양을 본다)
   const offAddresses = connection.onEvent((event) => {
-    const { event: name, data } = event as { event: string; data: unknown }
-    const addresses = (data as { addresses?: unknown } | undefined)?.addresses
-    if (name === 'addresses.changed' && Array.isArray(addresses)) client.adopt(addresses.filter((address): address is string => typeof address === 'string'))
+    if (event.event !== 'addresses.changed') return
+    const addresses: unknown = event.data?.addresses
+    if (Array.isArray(addresses)) client.adopt(addresses.filter((address): address is string => typeof address === 'string'))
   })
   connection.start()
 

@@ -83,6 +83,25 @@ describe('신원 — 키 하나, 인증서는 띄울 때마다', () => {
     expect(new Date(cert.validTo).getTime()).toBeGreaterThan(Date.now() + 9 * 365 * 24 * 3600_000)
   })
 
+  it('인증서는 X.509 v3 — 서버 인증서의 보통 모양(BasicConstraints CA:false · KeyUsage digitalSignature · EKU serverAuth). 같은 키면 지문은 그대로', async () => {
+    const file = path.join(box.root, 'key.json')
+    const identity = await loadTlsIdentity(file)
+    const cert = new X509Certificate(identity.cert)
+    // TBSCertificate 의 첫 칸이 [0] EXPLICIT version = 2(v3)
+    const header = (bytes: Buffer, at: number): number => (bytes[at + 1]! < 0x80 ? at + 2 : at + 2 + (bytes[at + 1]! & 0x7f))
+    const tbs = header(cert.raw, 0)
+    const version = header(cert.raw, tbs)
+    expect([...cert.raw.subarray(version, version + 5)]).toEqual([0xa0, 0x03, 0x02, 0x01, 0x02])
+    expect(cert.ca).toBe(false)
+    expect(cert.keyUsage).toEqual(['1.3.6.1.5.5.7.3.1'])
+    expect(cert.toLegacyObject()).toMatchObject({ subject: { CN: 'litecode' } })
+    expect(cert.verify(cert.publicKey)).toBe(true)
+    // 키 파일은 그대로 — 인증서 모양이 바뀌어도 SPKI 지문은 키에서 나온다 (짝지은 폰이 그대로 붙는다)
+    const again = await loadTlsIdentity(file)
+    expect(spkiFingerprint(createPrivateKey(again.key))).toBe(identity.fingerprint)
+    expect(createHash('sha256').update(new X509Certificate(again.cert).publicKey.export({ type: 'spki', format: 'der' })).digest('base64url')).toBe(identity.fingerprint)
+  })
+
   it('다시 읽으면 키가 같아 지문이 같다 — 인증서는 새로 만든다(일련번호가 다르다)', async () => {
     const file = path.join(box.root, 'key.json')
     const first = await loadTlsIdentity(file)

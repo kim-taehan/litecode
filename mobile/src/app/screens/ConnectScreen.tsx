@@ -2,7 +2,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Keyboard, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { groupCode, normalizePairCode, PAIR_CODE_LENGTH, PAIR_DEVICE_NAME_MAX } from '../../../../shared/remotePairing.ts'
+import { groupCode, normalizePairCode, PAIR_CODE_LENGTH, PAIR_DEVICE_NAME_MAX, PAIR_SHORT_CODE_LENGTH } from '../../../../shared/remotePairing.ts'
 import { DEFAULT_ADDRESS } from '../address.ts'
 import { ChevronDown, ChevronRight, QrFrame } from '../icons.tsx'
 import type { LinkState, PairInput } from '../link.ts'
@@ -18,9 +18,12 @@ export function ConnectScreen({
   defaultDeviceName,
   onPair,
   onPairQr,
+  lanBlockedApi,
 }: {
   state: Extract<LinkState, { phase: 'unpaired' | 'pairing' }>
   defaultDeviceName: string
+  /** 이 폰의 API 레벨 — 사내망(TLS 1.3) 연결을 못 하는 폰(Android 10 미만)일 때만 준다. 안내를 띄우고 QR 을 막는다(이 컴퓨터 안 평문 입력은 그대로) */
+  lanBlockedApi?: number
   onPair(input: PairInput): void
   onPairQr(text: string, deviceName: string): void
 }) {
@@ -34,6 +37,8 @@ export function ConnectScreen({
   const [, requestCamera] = useCameraPermissions()
   const pairing = state.phase === 'pairing'
   const failure = state.phase === 'unpaired' ? state.failure : undefined
+  // 진단 글 — 실제 폰에서 원인이 사유 글 하나로 뭉개지지 않게 늘 작은 글씨로 (link.ts failureDetail)
+  const detail = state.phase === 'unpaired' ? state.detail : undefined
   const revoked = state.phase === 'unpaired' && state.revoked === true
   const fingerprintChanged = state.phase === 'unpaired' && state.fingerprintChanged === true
   const scroll = useRef<ScrollView>(null)
@@ -71,11 +76,23 @@ export function ConnectScreen({
           </View>
         )}
 
+        {lanBlockedApi !== undefined && (
+          <View style={styles.revoked}>
+            <Text style={styles.revokedText}>{S.lanUnsupported(lanBlockedApi)}</Text>
+          </View>
+        )}
+
         <View style={styles.qrCard}>
           <View style={styles.qrBox}>
             <QrFrame />
           </View>
-          <Pressable accessibilityRole="button" accessibilityState={{ disabled: pairing }} disabled={pairing} style={[styles.primary, pairing && styles.disabled]} onPress={() => void scan()}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: pairing || lanBlockedApi !== undefined }}
+            disabled={pairing || lanBlockedApi !== undefined}
+            style={[styles.primary, (pairing || lanBlockedApi !== undefined) && styles.disabled]}
+            onPress={() => void scan()}
+          >
             <Text style={styles.primaryText}>{S.scanQr}</Text>
           </Pressable>
         </View>
@@ -84,6 +101,7 @@ export function ConnectScreen({
         {failure !== undefined && !open && (
           <Text accessibilityRole="alert" style={[styles.failure, styles.failureAlone]}>
             {S.pairFailure[failure]}
+            {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
           </Text>
         )}
 
@@ -111,14 +129,17 @@ export function ConnectScreen({
                 accessibilityLabel={S.codeLabel}
                 style={[styles.input, styles.mono, styles.code]}
                 value={code}
-                // 치는 대로 데스크탑 화면의 모양으로: 대문자, O→0 · I/L→1, 네 글자씩
-                onChangeText={(text) => setCode(groupCode(normalizePairCode(text).slice(0, PAIR_CODE_LENGTH)))}
+                // 숫자 2자리(숫자 키패드). 옛 데스크탑의 12자를 붙여 넣으면 그 모양(대문자, O→0 · I/L→1, 네 글자씩)으로 받아 준다
+                onChangeText={(text) => {
+                  const typed = normalizePairCode(text)
+                  setCode(/^[0-9]*$/.test(typed) ? typed.slice(0, PAIR_SHORT_CODE_LENGTH) : groupCode(typed.slice(0, PAIR_CODE_LENGTH)))
+                }}
                 editable={!pairing}
-                placeholder="XXXX-XXXX-XXXX"
+                placeholder="00"
                 placeholderTextColor={C.faint}
                 autoCapitalize="characters"
                 autoCorrect={false}
-                keyboardType="visible-password"
+                keyboardType="number-pad"
               />
             </Field>
             <Field label={S.deviceNameLabel}>
@@ -128,6 +149,7 @@ export function ConnectScreen({
             {failure !== undefined && (
               <Text accessibilityRole="alert" style={styles.failure}>
                 {S.pairFailure[failure]}
+                {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
               </Text>
             )}
 
@@ -227,6 +249,7 @@ const styles = StyleSheet.create({
   code: { fontSize: 18, letterSpacing: 2 },
   failure: { fontSize: 13, lineHeight: 20, color: C.red },
   failureAlone: { marginTop: 12 },
+  detail: { fontFamily: MONO, fontSize: 11, lineHeight: 16, color: C.sub },
   allow: { marginTop: 16, borderRadius: 14, backgroundColor: C.blueBg, paddingVertical: 14, paddingHorizontal: 16, gap: 6 },
   allowTitle: { fontSize: 15, fontWeight: '600', color: C.blueDark },
   allowHint: { fontSize: 13, lineHeight: 20, color: C.text2 },

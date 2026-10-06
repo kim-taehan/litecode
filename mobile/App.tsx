@@ -5,9 +5,9 @@ import { startKeepAlive, stopKeepAlive } from './modules/litecode-keepalive/inde
 import { AlertBanner } from './src/app/AlertBanner.tsx'
 import { AlertCenter } from './src/app/alerts.ts'
 import { useLinkState, usePrefs } from './src/app/hooks.ts'
-import { DesktopLink } from './src/app/link.ts'
+import { DesktopLink, lanUnsupported } from './src/app/link.ts'
 import { alertHost, notificationPermission, onNotificationOpen, requestNotificationPermission, setUpNotificationChannels, type NotificationPermission } from './src/app/notifications.ts'
-import { defaultDeviceName, desktopStore, pinnedNet, platform, prefsStore, transport } from './src/app/platform.ts'
+import { apiLevel, defaultDeviceName, desktopStore, pinnedNet, platform, prefsStore, transport } from './src/app/platform.ts'
 import { Preferences } from './src/app/prefs.ts'
 import { ChatScreen } from './src/app/screens/ChatScreen.tsx'
 import { ConnectScreen } from './src/app/screens/ConnectScreen.tsx'
@@ -23,7 +23,7 @@ import { C } from './src/app/theme.ts'
 type Route = { name: 'list' } | { name: 'chat'; cid: string } | { name: 'settings' }
 
 /** 앱 하나에 짝 하나 — 저장소는 Keystore, 전송은 지문 고정 모듈(https)·expo/fetch(이 컴퓨터 안 평문) (platform.ts) */
-const link = new DesktopLink({ store: desktopStore, transport, pinned: pinnedNet, platform })
+const link = new DesktopLink({ store: desktopStore, transport, pinned: pinnedNet, platform, apiLevel })
 void link.restore()
 
 const preferences = new Preferences(prefsStore)
@@ -113,7 +113,7 @@ export default function App() {
       {state.phase === 'loading' ? (
         <View style={{ flex: 1, backgroundColor: C.white }} />
       ) : state.phase !== 'linked' ? (
-        <ConnectScreen state={state} defaultDeviceName={defaultDeviceName()} onPair={(input) => void link.pair(input)} onPairQr={(text, deviceName) => void link.pairQr(text, deviceName)} />
+        <ConnectScreen state={state} defaultDeviceName={defaultDeviceName()} lanBlockedApi={lanUnsupported(platform, apiLevel) ? apiLevel : undefined} onPair={(input) => void link.pair(input)} onPairQr={(text, deviceName) => void link.pairQr(text, deviceName)} />
       ) : route.name === 'chat' ? (
         <ChatScreen key={route.cid} session={state.session} cid={route.cid} onBack={toList} />
       ) : route.name === 'settings' ? (

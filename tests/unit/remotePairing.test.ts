@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { confirmCode, groupCode, normalizePairCode, pairDeviceName, sha256 } from '../../shared/remotePairing.ts'
+import { confirmCode, groupCode, isPairCode, normalizePairCode, pairDeviceName, sha256 } from '../../shared/remotePairing.ts'
 import * as desktop from '../../src/services/remote/pairing.ts'
 
 // 짝짓기 글자 규칙 (shared/remotePairing.ts) — 데스크탑(ctx.remote)과 폰 앱이 같은 함수를 쓴다. 해시는 순수 TS 라 Node crypto 와 대조한다.
@@ -48,6 +48,14 @@ describe('사람이 친 글자', () => {
     expect(normalizePairCode('ab1o-il0z 9xyz')).toBe('AB10110Z9XYZ')
     expect(groupCode('AB10110Z9XYZ')).toBe('AB10-110Z-9XYZ')
     expect(groupCode('AB101')).toBe('AB10-1')
+  })
+
+  it('직접 입력 코드는 숫자 2자리 — 정규화가 2자리 숫자와 12자 코드를 둘 다 바르게 다룬다', () => {
+    expect(normalizePairCode(' 4 7 ')).toBe('47')
+    expect(normalizePairCode('o7')).toBe('07') // O→0 은 숫자 칸에서도 같다
+    expect(normalizePairCode('ab1o-il0z 9xyz')).toBe('AB10110Z9XYZ')
+    for (const good of ['47', '00', '99', 'AB10110Z9XYZ']) expect(isPairCode(good), good).toBe(true)
+    for (const bad of ['4', '470', 'AB', '4A', '', 'AB10110Z9XY', 'AB10110Z9XYU']) expect(isPairCode(bad), bad).toBe(false)
   })
 
   it('기기 이름: 제어 문자를 빼고 다듬어 64자까지 — 데스크탑이 받는 모양 그대로여야 확인 코드가 맞는다', () => {

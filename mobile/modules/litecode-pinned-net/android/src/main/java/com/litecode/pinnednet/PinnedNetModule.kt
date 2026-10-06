@@ -16,8 +16,10 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ConnectException
 import java.net.InetSocketAddress
+import java.net.NoRouteToHostException
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.security.MessageDigest
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
@@ -35,7 +37,8 @@ import kotlin.concurrent.thread
  * 지문 고정 연결 (modules/litecode-pinned-net/index.ts · 모양은 src/core/net.ts 의 PinnedNetNative).
  * 데스크탑의 자체 서명 인증서를 **leaf 의 SPKI SHA-256 == 저장한 지문** 일 때만 믿는다. 체인·호스트 이름은 보지 않는다 — 신원은 지문이 정한다.
  * 지문 없이 요청을 보내는 길은 없다. probe 는 핸드셰이크 도중 인증서만 보고 끊는다(응용 데이터 0).
- * 오류 code 는 net.ts NATIVE_ERROR 와 같아야 한다: ERR_PIN_MISMATCH · ERR_TIMEOUT · ERR_REFUSED · ERR_UNREACHABLE.
+ * 오류 code 는 net.ts NATIVE_ERROR 와 같아야 한다: ERR_PIN_MISMATCH · ERR_TIMEOUT · ERR_REFUSED · ERR_TLS · ERR_IO · ERR_UNREACHABLE.
+ * message 는 `<예외 단순명>: <메시지 앞 120자>` — JS 가 화면에 진단 글로 붙인다 (실제 폰에서 TLS 실패가 UNREACHABLE 로 뭉개졌던 것, 2026-10-06).
  */
 class PinnedNetModule : Module() {
   /** 지문마다 클라이언트 하나 — SSL 세션 캐시·연결 풀을 지문끼리 나눠 쓰지 않는다(재개된 세션은 trust manager 를 다시 부르지 않는다) */
@@ -164,9 +167,12 @@ internal object Pinning {
     override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
   }
 
+  /** 데스크탑은 TLS 1.3 만 받는다. "TLSv1.3" 컨텍스트(API 29+)로 1.3 을 분명히 켠다 — "TLS" 도 API 29+ 에서 1.3 을 켜지만 기본값에 기대지 않는다 */
+  private fun tlsContext(trust: X509TrustManager): SSLContext = SSLContext.getInstance("TLSv1.3").apply { init(null, arrayOf<TrustManager>(trust), null) }
+
   fun client(pin: String): OkHttpClient {
     val trust = PinTrustManager(pin)
-    val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(trust), null) }
+    val context = tlsContext(trust)
     return OkHttpClient.Builder()
       .sslSocketFactory(context.socketFactory, trust)
       // 자체 서명 인증서에 IP 로 붙는다 — 이름 검증은 뜻이 없고, 신원은 위의 지문 대조가 정한다
@@ -201,17 +207,24 @@ internal object Pinning {
 
       override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
     }
-    val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(recorder), null) }
-    Socket().use { raw ->
+    val context = tlsContext(recorder)
+    val raw = Socket()
+    var tls: SSLSocket? = null
+    try {
       raw.connect(InetSocketAddress(host, port), timeoutMs)
       raw.soTimeout = timeoutMs
-      (context.socketFactory.createSocket(raw, host, port, true) as SSLSocket).use { tls ->
-        try {
-          tls.startHandshake()
-        } catch (error: SSLException) {
-          if (seen == null) throw error
-        }
+      val socket = context.socketFactory.createSocket(raw, host, port, true) as SSLSocket
+      tls = socket
+      try {
+        socket.startHandshake()
+      } catch (error: IOException) {
+        // 지문을 본 뒤 일부러 끊었다(recorder 가 던졌다) — 그 뒤의 어떤 IO 오류도 결과를 바꾸지 않는다
+        if (seen == null) throw error
       }
+    } finally {
+      // 닫다가 난 오류(이미 끊긴 연결에 close_notify 를 쓰다 Broken pipe 등)가 본 지문을 덮지 않게 — 예전엔 `use` 가 이것을 던졌다
+      runCatching { tls?.close() }
+      runCatching { raw.close() }
     }
     return seen ?: throw SSLException("no server certificate")
   }
@@ -220,19 +233,29 @@ internal object Pinning {
 
   fun code(error: Throwable): String {
     val causes = chain(error).toList()
+    val says = { text: String -> causes.any { (it.message ?: "").contains(text) } }
     return when {
-      causes.any { it is PinMismatch || (it.message ?: "").contains(MISMATCH) } -> "ERR_PIN_MISMATCH"
+      causes.any { it is PinMismatch } || says(MISMATCH) -> "ERR_PIN_MISMATCH"
       causes.any { it is SocketTimeoutException || (it is InterruptedIOException && it.message == "timeout") } -> "ERR_TIMEOUT"
       causes.any { it is ConnectException && (it.message ?: "").contains("refused", ignoreCase = true) } -> "ERR_REFUSED"
-      causes.any { (it.message ?: "").contains("ETIMEDOUT") } -> "ERR_TIMEOUT"
-      // NoRouteToHost(EHOSTUNREACH)·주소 틀림·그 밖
-      else -> "ERR_UNREACHABLE"
+      says("ETIMEDOUT") -> "ERR_TIMEOUT"
+      // 진짜로 길이 없다 — 이것만 UNREACHABLE
+      causes.any { it is NoRouteToHostException || it is UnknownHostException } || says("ENETUNREACH") || says("EHOSTUNREACH") -> "ERR_UNREACHABLE"
+      // 닿았는데 TLS 단계에서 깨졌다 — SSLHandshakeException·SSLProtocolException·SSLPeerUnverifiedException 다 SSLException 이다
+      causes.any { it is SSLException } -> "ERR_TLS"
+      // 거부 외의 connect 실패 — 경로 문제
+      causes.any { it is ConnectException } -> "ERR_UNREACHABLE"
+      // 닿은 뒤 끊겼다(reset·Broken pipe·EOF·unexpected end of stream) 또는 그 밖
+      else -> "ERR_IO"
     }
   }
 
-  /** 지문이 달랐으면 실제 지문을 싣는다 (JS 가 꺼낸다) */
+  /** 지문이 달랐으면 실제 지문을 싣는다 (JS 가 꺼내고, 화면 진단 글에는 앞 8자만 남긴다). 그 밖은 `<가장 안쪽 예외 단순명>: <메시지 앞 120자>` */
   fun message(error: Throwable): String {
     val mismatch = chain(error).mapNotNull { it.message }.firstOrNull { it.contains(MISMATCH) }
-    return mismatch?.substring(mismatch.indexOf(MISMATCH)) ?: (error.message ?: error.javaClass.simpleName)
+    if (mismatch != null) return mismatch.substring(mismatch.indexOf(MISMATCH))
+    val root = chain(error).last()
+    val outer = if (root !== error) " (${error.javaClass.simpleName})" else ""
+    return "${root.javaClass.simpleName}$outer: ${(root.message ?: "").take(120)}"
   }
 }

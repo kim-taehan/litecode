@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FAKE_PAIR_CODE, startFakeDesktop, type FakeDesktop } from '../dev/fake-desktop.mts'
-import { DesktopLink, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
+import { DesktopLink, lanUnsupported, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
 import { createFetchTransport, createNativePinnedNet, fingerprintCode, NetError, pairUri, type PairLink } from '../src/core/index.ts'
 import { nodePinnedNative, spkiFingerprint, type NodePinnedNative } from './nodePinned.ts'
 import { until } from './support.ts'
@@ -95,7 +95,7 @@ describe('QR 로 짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pairQr(qr({ fingerprint: OTHER_FP }), 'Pixel 8')
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'fingerprint-mismatch' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'fingerprint-mismatch' })
     expect(native.sent).toEqual([])
     expect(desktop.pendingPair()).toBeUndefined()
   })
@@ -111,10 +111,10 @@ describe('QR 로 짝짓기', () => {
     ]
     for (const [text, failure] of cases) {
       await link.pairQr(text, 'Pixel 8')
-      expect(link.state, failure).toEqual({ phase: 'unpaired', failure })
+      expect(link.state, failure).toMatchObject({ phase: 'unpaired', failure })
     }
     await link.pairQr(qr(), '  ')
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'no-name' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'no-name' })
     expect(native.sent).toEqual([])
   })
 
@@ -122,7 +122,7 @@ describe('QR 로 짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pairQr(qr({ addresses: [`127.0.0.1:${await closedPort()}`] }), 'Pixel 8')
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'refused' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'refused' })
   })
 
   it('데스크탑에서 거절하면 denied', async () => {
@@ -132,7 +132,7 @@ describe('QR 로 짝짓기', () => {
     await until(() => desktop.pendingPair() !== undefined, '짝짓기 요청')
     desktop.answerPair(false)
     await pairing
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'denied' })
   })
 })
 
@@ -154,19 +154,54 @@ describe('직접 입력 (TOFU)', () => {
     expect(store.value?.fingerprint).toBe(DESKTOP_FP)
   })
 
-  it('https 주소에 아무도 안 들으면 refused (요청 없음)', async () => {
+  it('https 주소에 아무도 안 들으면 refused (요청 없음) — 화면에 진단 글 [코드 · 예외: 메시지] 가 같이 간다', async () => {
     const link = newLink()
     await link.restore()
     await link.pair({ address: `https://127.0.0.1:${await closedPort()}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 8' })
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'refused' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'refused', detail: expect.stringMatching(/^\[ERR_REFUSED · .*ECONNREFUSED.*\]$/) })
     expect(native.sent).toEqual([])
   })
 
   it('운반의 실패를 사유로: 시간 초과 · 거부 · 지문 불일치 · 그 밖', () => {
+    expect(pairFailure(new NetError('tls-failed', 'x'))).toBe('tls-failed')
+    expect(pairFailure(new NetError('broken', 'x'))).toBe('connection-broken')
     expect(pairFailure(new NetError('timeout', 'x'))).toBe('net-timeout')
     expect(pairFailure(new NetError('refused', 'x'))).toBe('refused')
     expect(pairFailure(new NetError('pin-mismatch', 'x'))).toBe('fingerprint-mismatch')
     expect(pairFailure(new NetError('unreachable', 'x'))).toBe('unreachable')
+  })
+})
+
+describe('Android 10 미만 — 사내망(TLS 1.3) 연결을 시도하지 않는다 (QA W2)', () => {
+  it('판정: android 이고 API 29 미만일 때만', () => {
+    expect(lanUnsupported('android', 28)).toBe(true)
+    expect(lanUnsupported('android', 24)).toBe(true)
+    expect(lanUnsupported('android', 29)).toBe(false)
+    expect(lanUnsupported('android', undefined)).toBe(false)
+    expect(lanUnsupported('ios', 17)).toBe(false)
+  })
+
+  it('QR·https 직접 입력은 old-android 로 — 핸드셰이크도 요청도 없다. 이 컴퓨터 안 평문은 그대로 된다', async () => {
+    const probes: string[] = []
+    const probing = { ...native, probe: (host: string, port: number, timeoutMs: number) => (probes.push(`${host}:${port}`), native.probe(host, port, timeoutMs)) }
+    const link = new DesktopLink({ store: memoryStore(), transport: createFetchTransport(), pinned: createNativePinnedNet(probing), platform: 'android', apiLevel: 28, now: () => NOW })
+    links.push(link)
+    await link.restore()
+    await link.pairQr(qr(), 'Pixel 2')
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'old-android' })
+    await link.pair({ address: `https://${live()}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 2' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'old-android' })
+    expect(probes).toEqual([])
+    expect(native.sent).toEqual([])
+
+    const plain = await startFakeDesktop({ port: 0, stepMs: 5 })
+    try {
+      await link.pair({ address: `http://127.0.0.1:${plain.port}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 2' })
+      expect(link.state.phase).toBe('linked')
+    } finally {
+      link.dispose()
+      await plain.close()
+    }
   })
 })
 
@@ -218,6 +253,38 @@ describe('저장·복원 — 같은 지문으로만', () => {
     expect(again.state).toEqual({ phase: 'unpaired', fingerprintChanged: true })
     expect(store.value).toBeUndefined()
     expect(native.sent).toEqual([])
+  })
+
+  it('옛 후보 주소에 다른 지문의 서버가 있고(DHCP 로 그 IP 를 옆 PC 가 받았다) 내 데스크탑이 꺼져 있으면 — 짝을 지우지 않고 다시 시도한다', async () => {
+    const store = await pairedStore()
+    const neighbour = await startFakeDesktop({ port: 0, stepMs: 5, tls: { key: fixture('other.key.pem'), cert: fixture('other.cert.pem') } })
+    try {
+      const dead = `127.0.0.1:${await closedPort()}`
+      const other = `127.0.0.1:${neighbour.port}`
+      store.value = { ...store.value!, address: dead, baseUrl: `https://${dead}`, addresses: [dead, other] }
+      const saved = store.value
+      native.sent.length = 0
+      const again = newLink(store)
+      await again.restore()
+      const { session } = phase(again, 'linked')
+      await until(() => session.getStatus().kind === 'reconnecting', '다시 시도 대기')
+      expect(again.state.phase).toBe('linked')
+      expect(store.value).toEqual(saved)
+      expect(native.sent).toEqual([]) // 옆 PC 로 토큰이 가지 않았다
+    } finally {
+      await neighbour.close()
+    }
+  })
+
+  it('지금 주소에서 지문이 다르고 다른 후보에도 닿지 못하면 — 그때만 "지문이 달라졌다"', async () => {
+    const store = await pairedStore()
+    const dead = `127.0.0.1:${await closedPort()}`
+    store.value = { ...store.value!, fingerprint: OTHER_FP, addresses: [live(), dead] }
+    const again = newLink(store)
+    await again.restore()
+    await until(() => again.state.phase === 'unpaired', '끊김')
+    expect(again.state).toEqual({ phase: 'unpaired', fingerprintChanged: true })
+    expect(store.value).toBeUndefined()
   })
 
   it('https 인데 지문이 없는 저장은 믿지 않는다 (없는 것으로)', async () => {
