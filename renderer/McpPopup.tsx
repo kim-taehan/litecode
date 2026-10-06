@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { McpScope, McpServerInput, McpServerSummary, McpTestResult, Project } from '../shared/ipc.ts'
 import { PlusDialog, PlusGroup } from './PlusDialog.tsx'
 import { byScope, mcpState } from './plusView.ts'
-import { reason } from './Settings.tsx'
+import { reason } from './ipcError.ts'
 import { useT } from './settingsStore.ts'
 import './mcp.css'
 

@@ -59,6 +59,7 @@ async function start(): Promise<{ llm: LlmService; ctx: Context }> {
   }
   class FakeEngine extends Service {
     configDir = dir
+    up = true
     constructor(ctx: Context) {
       super(ctx, 'engine')
     }
@@ -72,7 +73,7 @@ async function start(): Promise<{ llm: LlmService; ctx: Context }> {
   ctx.plugin(FakeEngine)
   ctx.plugin(LlmService)
   ctx.plugin(TrajectoryService)
-  return new Promise((resolve) => ctx.inject(['llm', 'trajectory'], (ready) => resolve({ llm: ready.llm, ctx: ready })))
+  return new Promise((resolve) => ctx.inject(['llm', 'trajectory', 'engine'], (ready) => resolve({ llm: ready.llm, ctx: ready })))
 }
 
 function plantPlugin(rel = 'proj/.opencode/plugin/x.js'): string {
@@ -177,6 +178,22 @@ describe('깨끗한 폴더', () => {
     expect((await llm.history(project, 'ses_1')).error).toBeUndefined()
     expect(requests.length).toBeGreaterThan(0)
     expect(requests.every((request) => request.includes(encodeURIComponent(project)) || request.includes('/api/session/ses_1/message'))).toBe(true)
+  })
+
+  it('엔진이 안 떠 있으면 MCP 끊기는 엔진을 찾지 않는다 — 끊을 것이 없다 (앱을 끌 때 죽은 엔진을 다시 띄우지 않게, #126 오류 13)', async () => {
+    const { llm, ctx } = await start()
+    const engine = ctx.engine as unknown as { up: boolean; connection(): Promise<unknown> }
+    let asked = 0
+    const connection = engine.connection.bind(engine)
+    engine.connection = () => (asked++, connection())
+    engine.up = false
+    await llm.mcpDisconnect(project, 'x')
+    expect(asked).toBe(0)
+    expect(requests).toEqual([])
+    engine.up = true
+    await llm.mcpDisconnect(project, 'x')
+    expect(asked).toBe(1)
+    expect(requests).toHaveLength(1)
   })
 
   it('검사는 매 호출 — 통과한 뒤 생긴 파일도 다음 호출에서 걸리고, 치우면 다시 된다 (캐시 없음)', async () => {

@@ -69,8 +69,9 @@ export interface Hello {
 /** GET /v1/projects */
 export type RemoteProject = Project
 
-/** GET /v1/conversations?project= 의 항목 — 목록 정보에서 usage·labels(와 `!` 카드 shells — 폰에 셸을 열지 않는다)를 뺀 것 + 상태 점 */
-export interface RemoteConversation extends Omit<Conversation, 'usage' | 'labels' | 'shells'> {
+/** GET /v1/conversations?project= 의 항목 — 목록 정보 중 서버가 실제로 싣는 것(ctx.remote 의 toRemote)만 + 상태 점. usage·labels·첨부 표·
+ *  고정·`!` 카드(shells — 폰에 셸을 열지 않는다)는 오지 않는다 */
+export interface RemoteConversation extends Pick<Conversation, 'id' | 'project' | 'title' | 'updatedAt' | 'engineSessionId' | 'model' | 'mode'> {
   status?: ConversationStatus
 }
 

@@ -3,7 +3,6 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { tr } from '../i18n.ts'
-import { projectFile } from './fileMentions.ts'
 
 // "다른 앱에서 열기" — 지금 대화의 프로젝트 폴더를 설치된 앱(편집기·Git GUI·터미널)에서 연다 (사용자 결정 2026-10-02, _workspace/01m_open_in.md).
 // 첫 버전은 mac 만. 앱 목록은 정해 둔 허용 목록이고(dsh open-in-app 의 mac 항목과 같은 범위), 그중 /Applications·~/Applications 에
@@ -19,25 +18,23 @@ declare module 'cordis' {
 }
 
 /** 메뉴 순서 = 파일 관리자 → 편집기·IDE → Git GUI → 터미널. bundles 는 흔한 설치 이름 — 첫 번째로 있는 것 하나 */
-/** files = 파일 하나도 연다(편집기·IDE) — 파일 미리보기 패널의 "다른 앱에서 열기"(이슈 #17). 터미널은 넘긴 파일을 실행할 수 있고,
- *  Finder·Git 도구는 파일을 받는 뜻이 달라서 빠진다 */
-const CATALOG: readonly { id: string; name: string; bundles?: readonly string[]; fixed?: 'finder' | 'terminal'; files?: true }[] = [
+const CATALOG: readonly { id: string; name: string; bundles?: readonly string[]; fixed?: 'finder' | 'terminal' }[] = [
   { id: 'finder', name: 'Finder', fixed: 'finder' },
-  { id: 'cursor', name: 'Cursor', bundles: ['Cursor.app'], files: true },
-  { id: 'vscode', name: 'VS Code', bundles: ['Visual Studio Code.app'], files: true },
-  { id: 'vscodeinsiders', name: 'VS Code Insiders', bundles: ['Visual Studio Code - Insiders.app'], files: true },
-  { id: 'windsurf', name: 'Windsurf', bundles: ['Windsurf.app'], files: true },
-  { id: 'zed', name: 'Zed', bundles: ['Zed.app', 'Zed Preview.app'], files: true },
-  { id: 'sublimetext', name: 'Sublime Text', bundles: ['Sublime Text.app'], files: true },
-  { id: 'xcode', name: 'Xcode', bundles: ['Xcode.app'], files: true },
-  { id: 'androidstudio', name: 'Android Studio', bundles: ['Android Studio.app'], files: true },
-  { id: 'intellij', name: 'IntelliJ IDEA', bundles: ['IntelliJ IDEA.app', 'IntelliJ IDEA Ultimate.app', 'IntelliJ IDEA CE.app'], files: true },
-  { id: 'pycharm', name: 'PyCharm', bundles: ['PyCharm.app', 'PyCharm Professional.app', 'PyCharm CE.app', 'PyCharm Community.app'], files: true },
-  { id: 'webstorm', name: 'WebStorm', bundles: ['WebStorm.app'], files: true },
-  { id: 'phpstorm', name: 'PhpStorm', bundles: ['PhpStorm.app'], files: true },
-  { id: 'goland', name: 'GoLand', bundles: ['GoLand.app'], files: true },
-  { id: 'rider', name: 'Rider', bundles: ['Rider.app', 'JetBrains Rider.app'], files: true },
-  { id: 'rustrover', name: 'RustRover', bundles: ['RustRover.app'], files: true },
+  { id: 'cursor', name: 'Cursor', bundles: ['Cursor.app'] },
+  { id: 'vscode', name: 'VS Code', bundles: ['Visual Studio Code.app'] },
+  { id: 'vscodeinsiders', name: 'VS Code Insiders', bundles: ['Visual Studio Code - Insiders.app'] },
+  { id: 'windsurf', name: 'Windsurf', bundles: ['Windsurf.app'] },
+  { id: 'zed', name: 'Zed', bundles: ['Zed.app', 'Zed Preview.app'] },
+  { id: 'sublimetext', name: 'Sublime Text', bundles: ['Sublime Text.app'] },
+  { id: 'xcode', name: 'Xcode', bundles: ['Xcode.app'] },
+  { id: 'androidstudio', name: 'Android Studio', bundles: ['Android Studio.app'] },
+  { id: 'intellij', name: 'IntelliJ IDEA', bundles: ['IntelliJ IDEA.app', 'IntelliJ IDEA Ultimate.app', 'IntelliJ IDEA CE.app'] },
+  { id: 'pycharm', name: 'PyCharm', bundles: ['PyCharm.app', 'PyCharm Professional.app', 'PyCharm CE.app', 'PyCharm Community.app'] },
+  { id: 'webstorm', name: 'WebStorm', bundles: ['WebStorm.app'] },
+  { id: 'phpstorm', name: 'PhpStorm', bundles: ['PhpStorm.app'] },
+  { id: 'goland', name: 'GoLand', bundles: ['GoLand.app'] },
+  { id: 'rider', name: 'Rider', bundles: ['Rider.app', 'JetBrains Rider.app'] },
+  { id: 'rustrover', name: 'RustRover', bundles: ['RustRover.app'] },
   { id: 'fork', name: 'Fork', bundles: ['Fork.app'] },
   { id: 'sourcetree', name: 'Sourcetree', bundles: ['Sourcetree.app'] },
   { id: 'github', name: 'GitHub Desktop', bundles: ['GitHub Desktop.app'] },
@@ -72,8 +69,6 @@ export interface OpenInApp {
   name: string
   /** data:image/png, 못 구하면 null (화면은 ↗) */
   icon: string | null
-  /** 파일 하나도 연다(편집기·IDE) — 파일 미리보기의 "다른 앱에서 열기" 메뉴는 이것만 */
-  files?: true
 }
 
 /** host 가 할 일 — open-a: `open` 에 이 인자 그대로(셸 없음), os-open: OS 기본 열기(Finder) */
@@ -89,10 +84,6 @@ export interface OpenInOptions extends DetectOptions {
   host: OpenInHost
   /** 기본 process.platform — 단위 테스트가 mac 밖을 흉내 낸다 */
   platform?: NodeJS.Platform
-}
-
-export function opensFiles(id: string): boolean {
-  return CATALOG.some((entry) => entry.id === id && entry.files)
 }
 
 const DEFAULT_FIXED ={ finder: '/System/Library/CoreServices/Finder.app', terminal: '/System/Applications/Utilities/Terminal.app' }
@@ -124,24 +115,7 @@ export class OpenInService extends Service {
   }
 
   async apps(): Promise<OpenInApp[]> {
-    return (await this.load()).map(({ id, name, icon }) => (opensFiles(id) ? { id, name, icon, files: true } : { id, name, icon }))
-  }
-
-  /** 등록된 프로젝트 안의 파일 하나를 편집기로 연다 (파일 미리보기 패널). 파일은 칩과 같은 (폴더, 답의 글자) 로 받아 projectFile 로 푼다 —
-   *  프로젝트 밖·링크로 밖·없는 파일이면 실행기를 부르지 않고 거절한다. 편집기가 아닌 앱(터미널 등)도 거절 */
-  async openFile(appId: string, directory: string, token: string): Promise<void> {
-    const target = (await this.load()).find((entry) => entry.id === appId)
-    if (typeof appId !== 'string' || !target || !opensFiles(target.id)) throw new Error(tr('openIn.unknownApp'))
-    const registered = typeof directory === 'string' && (await this.ctx.projects.list()).some((project) => project.path === directory)
-    if (!registered) throw new Error(tr('openIn.notProject'))
-    const file = typeof token === 'string' ? await projectFile(directory, token) : undefined
-    if (!file) throw new Error(tr('filePreview.unavailable'))
-    try {
-      await this.opts.host.launch({ kind: 'open-a', args: ['-a', target.bundle, file] })
-    } catch (error) {
-      this.detected = undefined
-      throw new Error(tr('openIn.failed', { app: target.name, message: error instanceof Error ? error.message : String(error) }))
-    }
+    return (await this.load()).map(({ id, name, icon }) => ({ id, name, icon }))
   }
 
   /** 등록된 프로젝트 폴더를 탐지된 앱으로 연다. 그 밖은 실행기를 부르지 않고 거절한다 */

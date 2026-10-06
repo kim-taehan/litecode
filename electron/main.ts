@@ -422,7 +422,6 @@ const openInHost = openInTest ? recordingOpenInHost(openInTest) : systemOpenInHo
 function openInBridge(ctx: Context): void {
   handle(ctx, Channel.OPEN_IN_APPS, async () => ctx.openIn.apps())
   handle(ctx, Channel.OPEN_IN, async (_event, appId: string, directory: string) => ctx.openIn.open(appId, directory))
-  handle(ctx, Channel.OPEN_FILE_IN, async (_event, appId: string, directory: string, token: string) => ctx.openIn.openFile(appId, directory, token))
 }
 openInBridge.inject = ['openIn']
 
