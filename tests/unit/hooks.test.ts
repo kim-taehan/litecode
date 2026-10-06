@@ -300,6 +300,11 @@ async function writeHooks(hooks: HookDef[]): Promise<void> {
   await fs.writeFile(path.join(root, 'hooks.json'), JSON.stringify(serializeHooks(hooks)))
 }
 
+/** hooks-projects.json 에 이 프로젝트(root)만의 훅을 통째로 쓴다 */
+async function writeProjectHooks(hooks: HookDef[]): Promise<void> {
+  await fs.writeFile(path.join(root, 'hooks-projects.json'), JSON.stringify(serializeProjects({ [root]: { hooks, enabled: {} } })))
+}
+
 async function start(opts: { timeoutMs?: number; hooks?: boolean } = {}) {
   const ctx = new Context()
   ctx.plugin(FakeLlm)
@@ -333,7 +338,7 @@ describe('HooksService.run (여러 훅 합치기)', () => {
   it('모든 프로젝트 → 이 프로젝트 순으로 하나씩 돌고, 통과한 훅의 맥락을 돈 순서로 모은다', async () => {
     const { hooks } = await start()
     await writeHooks([hook('UserPromptSubmit', 'echo A; echo a >> order.log'), hook('Stop', 'echo never')])
-    hooks.save([hook('UserPromptSubmit', 'echo C; echo c >> order.log')], root)
+    await writeProjectHooks([hook('UserPromptSubmit', 'echo C; echo c >> order.log')])
     const result = await hooks.run(input())
     expect(result).toMatchObject({ outcome: 'passed', context: ['A', 'C'] })
     expect(result.runs.map((run) => run.command)).toEqual(['echo A; echo a >> order.log', 'echo C; echo c >> order.log'])
@@ -343,7 +348,7 @@ describe('HooksService.run (여러 훅 합치기)', () => {
   it('가장 제한적인 결과: 하나라도 막으면 막기다 — 그 뒤 훅은 돌지 않는다', async () => {
     const { hooks } = await start()
     await writeHooks([hook('UserPromptSubmit', 'echo A'), hook('UserPromptSubmit', 'echo "안 됨" >&2; exit 2')])
-    hooks.save([hook('UserPromptSubmit', 'touch ran-after-block')], root)
+    await writeProjectHooks([hook('UserPromptSubmit', 'touch ran-after-block')])
     const result = await hooks.run(input())
     expect(result).toMatchObject({ outcome: 'blocked', reason: '안 됨', context: ['A'] })
     expect(result.runs.map((run) => run.outcome)).toEqual(['passed', 'blocked'])
@@ -393,14 +398,19 @@ describe('HooksService.run (여러 훅 합치기)', () => {
     expect((await fs.readdir(root)).filter((name) => name.startsWith('hooks')).sort()).toEqual(['hooks-projects.json', 'hooks.json'])
   })
 
-  it('저장: 모양이 틀린 것은 빠지고, 프로젝트만의 훅은 그 프로젝트에서만 보인다. 덮어쓰기 전에 깨진 파일은 옆에 남긴다', async () => {
+  it('저장: 프로젝트만의 훅은 그 프로젝트에서만 보인다. 덮어쓰기 전에 깨진 파일은 옆에 남기고, 두 파일은 사람이 고치기 좋게 들여 쓴다', async () => {
     const { hooks } = await start()
     await fs.writeFile(path.join(root, 'hooks.json'), '{broken')
-    hooks.save([hook('Stop', 'make check', { timeout: 5 }), hook('Stop', '   '), { ...hook('Stop', 'x'), event: 'Nope' as never }])
-    hooks.save([hook('PreToolUse', './guard.sh', { matcher: 'bash' })], root)
+    hooks.saveHook({ scope: 'all', event: 'Stop', matcher: '', command: 'make check', timeout: 5 }, root)
+    hooks.saveHook({ scope: 'project', event: 'PreToolUse', matcher: 'bash', command: './guard.sh' }, root)
     expect(await hooks.list()).toEqual([{ ...hook('Stop', 'make check', { timeout: 5 }), scope: 'all', key: 'Stop||make check', on: true }])
     expect((await hooks.list(root)).map((entry) => [entry.event, entry.scope])).toEqual([['Stop', 'all'], ['PreToolUse', 'project']])
     expect((await fs.readdir(root)).some((name) => name.startsWith('hooks.json.corrupt-'))).toBe(true)
+    hooks.setEnabled(root, 'Stop||make check', false)
+    for (const name of ['hooks.json', 'hooks-projects.json']) {
+      const text = await fs.readFile(path.join(root, name), 'utf8')
+      expect(text).toBe(`${JSON.stringify(JSON.parse(text), null, 2)}\n`)
+    }
   })
 
   it('실행 기록을 남긴다 (최근 것, 대화·폴더와 함께)', async () => {
@@ -418,6 +428,50 @@ describe('HooksService.run (여러 훅 합치기)', () => {
     await fiber!.dispose()
     expect((await running).runs).toMatchObject([{ outcome: 'failed', reason: tr('hooks.stopped') }])
     expect(await fs.readdir(root)).not.toContain('ran-after-dispose')
+  })
+})
+
+// 이슈 #126 오류 2 — 기능 `hooks` 를 끄거나 앱을 끄면 이 서비스가 먼저 내려간다. 멈춘 훅의 결과를 내려간 컨텍스트로 대화에 적으려다 던지지 않는다
+describe('훅이 도는 중에 서비스가 내려간다', () => {
+  const rejections: unknown[] = []
+  const onRejection = (reason: unknown): void => void rejections.push(reason)
+  beforeEach(() => {
+    rejections.length = 0
+    process.on('unhandledRejection', onRejection)
+  })
+  afterEach(() => void process.off('unhandledRejection', onRejection))
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 150))
+  const done = (): ToolDone => ({ sessionId: 'ses_1', directory: root, tool: 'bash', input: { command: 'ls' }, output: 'x', child: false })
+
+  it('도구 실행 후 훅: 처리 안 된 거절이 없고, 멈춘 훅·밀려 있던 훅의 줄을 대화에 적지 않는다', async () => {
+    const { ctx, chat, hooks, fiber, turn, ended } = await start()
+    await writeHooks([hook('PostToolUse', 'while :; do :; done')])
+    await chat.send('c1', send('hi'))
+    const call = await turn(1)
+    ctx.emit('llm/tool-done', done())
+    ctx.emit('llm/tool-done', done()) // 앞 훅 뒤에 밀려 있다
+    await new Promise((resolve) => setTimeout(resolve, 100)) // 첫 훅이 도는 중
+    await fiber!.dispose()
+    await settle()
+    call.finish()
+    expect(hookLines((await ended(1)).message.items)).toEqual([])
+    await settle()
+    expect(rejections).toEqual([])
+    expect(hooks.recent()).toMatchObject([{ event: 'PostToolUse', outcome: 'failed', reason: tr('hooks.stopped') }])
+  })
+
+  it('도구 실행 전 훅: 판정이 던지지 않는다 (멈춘 훅은 실패 = 통과)', async () => {
+    const { ctx, chat, fiber, turn, ended } = await start()
+    await writeHooks([hook('PreToolUse', 'while :; do :; done', { matcher: 'bash' })])
+    await chat.send('c1', send('hi'))
+    const call = await turn(1)
+    const verdict = ctx.serial('llm/pre-tool', { sessionId: 'ses_1', directory: root, tool: 'bash', input: { command: 'ls' }, child: false, signal: new AbortController().signal })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await fiber!.dispose()
+    await expect(verdict).resolves.toBe('allow')
+    call.finish()
+    expect(hookLines((await ended(1)).message.items)).toEqual([])
+    expect(rejections).toEqual([])
   })
 })
 
@@ -689,7 +743,7 @@ describe('게이트 대상 알리기 (ctx.llm.gateTools — 이슈 #102 2단계)
     await turn(1)
     expect(llm.gates.at(-1)).toEqual(['bash', 'edit|write'])
     const before = llm.gates.length
-    hooks.save([hook('PreToolUse', 'true', { matcher: 'read' })], root)
+    hooks.saveHook({ scope: 'project', event: 'PreToolUse', matcher: 'read', command: 'true' }, root)
     await until(() => llm.gates.length > before)
     expect(llm.gates.at(-1)).toEqual(['bash', 'edit|write', 'read'])
     hooks.setEnabled(root, hookKey(hook('PreToolUse', 'true', { matcher: 'read' })), false)
