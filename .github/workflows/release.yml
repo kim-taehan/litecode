@@ -52,12 +52,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: build/vendor
-          key: vendor-${{ hashFiles('scripts/fetch-opencode.mjs', 'scripts/fetch-speech.mjs') }}
+          key: vendor-${{ hashFiles('scripts/fetch-opencode.mjs', 'scripts/fetch-speech.mjs', 'scripts/fetch-browser.mjs') }}
 
       - name: Fetch bundled binaries
         run: |
           node scripts/fetch-opencode.mjs mac-arm64 mac-x64 win-x64
           node scripts/fetch-speech.mjs mac-arm64 mac-x64 win-x64
+          node scripts/fetch-browser.mjs
 
       - name: Build installers
         run: |

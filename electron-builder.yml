@@ -33,6 +33,10 @@ extraResources:
   # 런타임 자리는 src/services/speech/assets.ts bundledSpeechDir (Resources/speech). 폴더 이름을 바꾸지 않는다 — 본체가 네이티브 패키지를 이름으로 찾는다
   - from: build/vendor/speech/${os}-${arch}
     to: speech
+  # 브라우저 기능의 MCP 서버 (scripts/fetch-browser.mjs, +7.6MB) — @playwright/mcp · playwright-core. 순수 JS 라 타깃 구분이 없다(`${os}-${arch}` 없음).
+  # asar 밖이어야 한다 — 엔진이 앱 실행 파일을 node 로 돌려 cli.js 를 파일로 읽는다. 런타임 자리는 src/services/browser/assets.ts bundledBrowserDir
+  - from: build/vendor/browser
+    to: browser
   # 동봉한 것의 출처·라이선스 (SenseVoice 모델은 표기 의무가 있다)
   - from: THIRD_PARTY_NOTICES.md
     to: THIRD_PARTY_NOTICES.md

@@ -12,6 +12,7 @@ import { keepTail, streamText } from './outputBuffer.ts'
 import type { ProviderConfig } from './providers.ts'
 import type { Mode } from '../../shared/modes.ts'
 import { matchesTool, UNGATED_TOOLS } from '../../shared/hooks.ts'
+import { BROWSER_DENIED_TOOLS, BROWSER_MCP_NAME, BROWSER_QUIET_TOOLS, BROWSER_READ_TOOLS } from '../../shared/browser.ts'
 import { engineLimit } from '../../shared/outputLimit.ts'
 import { tr } from '../i18n.ts'
 import { removeAppPluginDirs } from './enginePlugins.ts'
@@ -262,6 +263,43 @@ const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
   [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...PRESENT_ALLOW },
   // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
   [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...SEND_TOOLS_DENY },
+}
+
+// 브라우저 도구 (`chrome_*`, 이슈 #147 — 실측·권고 _workspace/01aj_playwright_mcp.md §4, 도구 갈래는 shared/browser.ts). ctx.browser 가 동봉한
+// Playwright MCP 를 내장 서버 `chrome` 으로 붙인다(이름은 ctx.mcp 가 예약). 규칙은 기능이 꺼져 있어도 늘 적는다 — 서버가 없으면 걸릴 도구가 없고,
+// 기능을 켤 때 엔진을 다시 띄우지 않아도 된다. engineConfig 가 만든 설정 **위에 따로 얹는다**(withBrowserRules) — 다른 규칙 표를 건드리지 않는다:
+// - 전역 `chrome_*: deny` — 하위 작업(general·explore)과 모르는 에이전트는 못 쓴다 (도구 25개의 스키마 26KB 도 그 요청에서 빠진다).
+//   모드 에이전트가 아닌 정의(general-ask, 게이트가 만든 general·explore)는 자기 `*_*: ask` 가 전역 deny 를 되살리므로 맨 뒤에 다시 deny
+// - 기본·전체 권한: `chrome_*: ask` 뒤에 읽기·조용한 조작만 allow, 늘 막는 셋은 deny. **모르는 `chrome_*` 도구는 ask** — 버전을 올려 새 도구가
+//   생겨도 allow 가 기본이 되지 않는다. 전체 권한에서도 묻는 이유는 shared/browser.ts BROWSER_ASK_TOOLS (보내기 도구와 같은 모양: `"*": allow` 뒤의 ask)
+// - 계획: `*_*: deny` 밑에서 읽기만 allow. ⚠️ 읽기 도구도 `filename` 인자를 주면 프로젝트 폴더에 파일을 쓴다(01aj §2 G — edit 권한을 안 거친다)
+// - 매번 묻기: `*_*: ask` 가 전부 묻는다 — 전역 deny 를 되살리므로 늘 막는 셋만 다시 deny
+// - 훅 게이트가 MCP 에 걸렸으면(gated) allow 를 ask 로 적는다 — withGate 가 하는 일("allow 인 것만 ask 로")을 이 묶음에도. 판정을 통과한 요청을
+//   묻지 않고 실행할지는 ctx.llm 이 shared/modes.ts modePermission 으로 가른다 (같은 표 — 단위 테스트가 댄다)
+// ⚠️ `chrome_*` 처럼 서버 이름을 앞에 둔 와일드카드는 따로 실측하지 않았다 — `*_*`(#28)·"뒤가 이긴다"(12조합 3/3)와 같은 매처에 기댄다.
+//   deny 한 개별 이름이 LLM 요청에서 빠지는 것·개별 ask 가 permission.asked 로 오는 것은 실측했다 (01aj §2 M, 각 1/1)
+const BROWSER_WILDCARD = `${BROWSER_MCP_NAME}_*`
+const browserRules = (tools: readonly string[], action: string): Record<string, string> => Object.fromEntries(tools.map((tool) => [`${BROWSER_MCP_NAME}_${tool}`, action]))
+const BROWSER_ALWAYS_DENY = browserRules(BROWSER_DENIED_TOOLS, 'deny')
+const BROWSER_OFF = { [BROWSER_WILDCARD]: 'deny' }
+
+/** 그 에이전트 권한 맨 뒤에 얹을 브라우저 규칙 — 모드 에이전트가 아니면 통째로 deny */
+function browserAgentRules(agent: string, gated: boolean): Record<string, string> {
+  const quiet = gated ? 'ask' : 'allow'
+  if (agent === MODE_AGENT.plan) return browserRules(BROWSER_READ_TOOLS, quiet)
+  if (agent === MODE_AGENT.ask) return BROWSER_ALWAYS_DENY
+  if (agent !== MODE_AGENT.build && agent !== MODE_AGENT.full) return BROWSER_OFF
+  return { [BROWSER_WILDCARD]: 'ask', ...browserRules([...BROWSER_READ_TOOLS, ...BROWSER_QUIET_TOOLS], quiet), ...BROWSER_ALWAYS_DENY }
+}
+
+/** engineConfig 가 만든 설정에 브라우저 도구 규칙을 얹는다 — 전역과 에이전트마다 맨 뒤에 (규칙은 뒤가 이긴다). gated 는 훅 게이트가 MCP 도구에 걸렸나 */
+export function withBrowserRules(config: Record<string, unknown>, gated: boolean): Record<string, unknown> {
+  const agents = config['agent'] as Record<string, { permission: Permission }>
+  return {
+    ...config,
+    agent: Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: { ...def.permission, ...browserAgentRules(name, gated) } }])),
+    permission: { ...(config['permission'] as Permission), ...BROWSER_OFF },
+  }
 }
 
 // 도구 실행 전 게이트 (이슈 #102 2단계, 실측 _workspace/01af_hooks.md §4 — 플러그인 없이 "실행 전에 막기"). 도구 실행 전 판정을 받을 도구의 권한에
@@ -763,7 +801,7 @@ export class EngineService extends Service {
     const wanted = this.wanted()
     const { gate } = wanted
     onRead(JSON.stringify(wanted)) // 읽자마자 적는다 (사이에 await 없음) — 이 뒤에 바뀐 값은 다시 띄워야 먹는다
-    const config = engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, ...wanted })
+    const config = withBrowserRules(engineConfig(this.ctx.providers.all(), proxy, { childEnv: env, ...wanted }), gate.mcp)
     fs.writeFileSync(path.join(this.opts.configDir, 'opencode.json'), JSON.stringify(config, null, 2))
     prepareInstallMarkers(this.opts.configDir, env)
 
