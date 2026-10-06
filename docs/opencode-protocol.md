@@ -168,6 +168,13 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     연결까지 기다림), `POST /mcp/{name}/disconnect`. 엔진을 다시 띄우면 사라져 `ctx.mcp` 가 매 턴(`llm/before-turn`) 다시 붙인다. 도구·권한 이름은 `<서버>_<도구>` — 와일드카드 `*_*`
     로 계획 deny·매번 묻기 ask(하위 에이전트 general-ask 도). `*_*` 는 밑줄 있는 내장 권한(external_directory·doom_loop·plan_enter·plan_exit)에도 걸려 기본값을 다시 적는다.
     로컬 서버 자식엔 opencode env 가 통째로 가므로 비밀 이름을 빈 값으로 덮는다. 원격은 `oauth:false`
+  - **local MCP 를 Electron 으로** (#147, `_workspace/01aj_playwright_mcp.md`, 2026-10-06): `POST /mcp` 의 `config: {type:"local", command:[process.execPath, <cli.js>, …],
+    environment:{ELECTRON_RUN_AS_NODE:"1"}}` — 개발 Electron·설치본 바이너리 둘 다 node 20.18.3 으로 돈다. 폐쇄망 PC 에 node 가 없어도 동봉한 JS MCP 서버를 쓸 수 있다.
+    `RunAsNode` 퓨즈를 끄면 깨진다. local MCP 자식의 **cwd 는 그 프로젝트 폴더**다(재확인) — cwd 에 파일을 쓰는 서버(Playwright MCP 의 `.playwright-mcp/`)는 출력 폴더를 따로 줘야 한다.
+    MCP 도구가 이미지를 돌려주면 도구 파트 `state.attachments: [{mime, url:"data:…"}]` 로 온다(글은 `state.output`). MCP 도구의 승인 요청은 `patterns:["*"]`, `metadata:{}` 다 —
+    인자(주소 등)로 규칙을 나눌 수 없다, 인자는 도구 파트의 `state.input` 에서 읽는다. `POST /mcp/{name}/disconnect` 와 opencode 종료(SIGKILL 포함)는 stdio 자식의 표준입력을
+    닫아 자식이 스스로 끝난다(mac, 각 1/1) — 자식이 띄운 손자(Chrome)는 자식이 정상 종료할 때만 정리된다. Playwright MCP 0.0.83: 기본 `--snapshot-mode full` 은 동작 응답에
+    스냅샷을 **파일 링크**로만 준다 — `none` + 명시적 `browser_snapshot` 호출이 본문으로 받는 길이다. Chrome 은 `--user-data-dir=<경로>` 한 인자로 뜬다(경로에 공백이 있어도 — 2026-10-06 헤드리스 1/1)
   - **할 일 목록(todowrite)** (#83, `_workspace/01ae_todo.md`): 인자 `{todos:[{content, status, priority}]}` — id 없음, status(pending·in_progress·completed·cancelled)·priority 는
     검사 안 되는 문자열. **호출마다 목록 전체를 보내고 통째로 교체된다.** 끝난 파트의 `state.metadata.todos` 가 그 시점 목록, 같은 내용이 `todo.updated {sessionID, todos}` 로 오고
     `GET /session/{id}/todo?directory=` 가 맨 배열로 준다(재시작·자동 요약 뒤에도 남는다). 틀린 인자는 `running`(input 실림) 뒤 `error` 이고 목록은 안 바뀐다 → 화면은 `completed` 파트만 본다.

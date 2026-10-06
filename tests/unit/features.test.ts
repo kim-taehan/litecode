@@ -44,7 +44,7 @@ let tmp: string
 let file: string
 
 /** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)·훅(hooks, 이슈 #102)·음성 입력(voice)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56) */
-const DEFAULT_ON = FEATURES.filter((feature) => feature !== 'web' && feature !== 'notifications' && feature !== 'remote' && feature !== 'hooks' && feature !== 'voice')
+const DEFAULT_ON = FEATURES.filter((feature) => feature !== 'web' && feature !== 'notifications' && feature !== 'remote' && feature !== 'hooks' && feature !== 'voice' && feature !== 'browser')
 /** 묶음이 있는 기능 (web 은 없다) */
 const BUNDLED = FEATURES.filter((feature) => feature !== 'web')
 
@@ -237,7 +237,7 @@ describe('featureOn', () => {
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'appMcp', 'hooks', 'voice'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'appMcp', 'hooks', 'voice', 'browser'])
     expect(featureOn(undefined, 'voice')).toBe(false) // 음성 입력은 기본 꺼짐 — 마이크 권한을 묻는 기능
     expect(featureOn({ voice: true }, 'voice')).toBe(true)
     expect(featureOn(undefined, 'hooks')).toBe(false) // 훅은 기본 꺼짐 (이슈 #102)

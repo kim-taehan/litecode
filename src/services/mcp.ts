@@ -9,6 +9,7 @@ import { listMcpTools, type McpTool } from './mcpClient.ts'
 import type { KeyCipher } from './providers.ts'
 import { readJsonFileSync } from './jsonFile.ts'
 import { tr } from '../i18n.ts'
+import { BROWSER_MCP_NAME } from '../../shared/browser.ts'
 import './llm.ts'
 
 // MCP 서버 (ctx.mcp, 이슈 #28). 채팅은 opencode 레거시 경로라 MCP 도구가 네이티브로 실린다 — 이 서비스는 "어떤 서버를 어느 폴더에 붙일지" 만 쥔다.
@@ -40,7 +41,7 @@ import './llm.ts'
 //   서버·어느 프로젝트든 전용 서버와 겹치는 모든 프로젝트 서버), 폴더 정의는 앱 서버(어느 묶음이든)와 이름이 같으면 붙이지 않는다(shadowed)
 //
 // 내장 서버 (이슈 #51, _workspace/01z_desktop_mcp.md 3-1): 앱 자신이 띄운 MCP 서버(ctx.appMcp)를 registerBuiltin 으로 받아 사용자 서버와 같은
-// 길(매 턴 붙이기·프로젝트별 켜기)로 붙인다. 이름 `litecode` 는 예약이다 — 사용자는 그 이름으로 저장할 수 없고, 폴더 정의·예전에 저장된 앱 서버는
+// 길(매 턴 붙이기·프로젝트별 켜기)로 붙인다. 이름 `litecode`(와 브라우저 기능의 `chrome`, #147)는 예약이다 — 사용자는 그 이름으로 저장할 수 없고, 폴더 정의·예전에 저장된 앱 서버는
 // 붙이지 않는다(shadowed). 엔진 설정이 `litecode_*` 도구에 따로 권한을 주므로(계획 모드에서도 허용 등) 남의 서버가 그 이름을 쓰면 안 된다.
 // 팝업에는 "모든 프로젝트" 묶음 맨 끝에 읽기 전용 한 줄(주소·토큰은 화면에 안 준다)
 
@@ -53,6 +54,8 @@ declare module 'cordis' {
 export type McpSource = 'app' | 'personal' | 'project' | 'builtin'
 /** 앱 MCP 서버(ctx.appMcp)의 이름 — 모델이 보는 도구는 `litecode_<도구>`. 예약 */
 export const APP_MCP_NAME = 'litecode'
+/** 내장 서버만 쓰는 이름 — 엔진 설정이 그 이름의 도구(`litecode_*`·`chrome_*`)에 따로 권한을 준다. 그 내장 서버가 올라와 있지 않아도(기능 꺼짐) 예약이다 */
+const RESERVED_NAMES: readonly string[] = [APP_MCP_NAME, BROWSER_MCP_NAME]
 /** 내장 서버의 그 폴더용 정의 — 아직 붙일 수 없으면(서버가 안 떴다) undefined */
 export type BuiltinMcp = (workdir: string) => EngineMcp | undefined
 /** 팝업의 묶음 — "이 프로젝트만"(앱이 그 프로젝트에 저장한 서버·폴더 정의) / "모든 프로젝트"(앱 서버·개인 설정) */
@@ -209,9 +212,9 @@ export class McpService extends Service {
     const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
     const own = mine?.servers ?? []
     const ownNames = new Set(own.map((server) => server.name))
-    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, APP_MCP_NAME])
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, ...RESERVED_NAMES])
     // 예약 이름으로 저장돼 있던 앱 서버(이 기능 전의 것)는 붙이지 않는다
-    const reserved = (server: McpServerRecord) => server.name === APP_MCP_NAME && { shadowed: true }
+    const reserved = (server: McpServerRecord) => RESERVED_NAMES.includes(server.name) && { shadowed: true }
     const entries: { summary: McpServerSummary; def?: EngineMcp }[] = [
       ...own.map((server) => ({
         summary: { ...appSummary(server, 'project', this.secrets[secretKey(server.name, workdir)] ?? {}), enabled: on(server.name, server.enabled), ...reserved(server) },
@@ -227,7 +230,7 @@ export class McpService extends Service {
         def: reserved(server) ? undefined : this.engineDef(server),
       })),
     ]
-    const known = new Set([...entries.map((entry) => entry.summary.name), APP_MCP_NAME, ...this.builtins.keys()])
+    const known = new Set([...entries.map((entry) => entry.summary.name), ...RESERVED_NAMES, ...this.builtins.keys()])
     for (const { name, def, enabled } of personalServers(this.opts.env ?? process.env)) {
       if (known.has(name)) continue
       known.add(name)
@@ -270,7 +273,7 @@ export class McpService extends Service {
     if (scope === 'project' && !workdir) throw new Error(tr('mcp.error.noProject'))
     const owner = scope === 'project' ? workdir : undefined
     const { record, secrets } = this.resolve(input, existing, owner)
-    if (record.name === APP_MCP_NAME) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
+    if (RESERVED_NAMES.includes(record.name)) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
     // 이름 하나 = 서버 하나 — 이 프로젝트에서 보이는 앱 서버끼리, 그리고 모든 프로젝트 서버는 어느 프로젝트의 전용 서버와도 겹치지 않게
     if ([...this.servers, ...(scope === 'project' ? mine : [])].some((server) => server.name === record.name && server !== existing)) {
       throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
@@ -365,13 +368,13 @@ export class McpService extends Service {
     const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
     const own = mine?.servers ?? []
     const ownNames = new Set(own.map((server) => server.name))
-    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, APP_MCP_NAME])
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, ...RESERVED_NAMES])
     const folder = projectServers(workdir)
     const wanted = new Map<string, EngineMcp>()
     for (const { name, def, enabled } of folder) if (on(name, enabled) && !appNames.has(name)) wanted.set(name, def)
     for (const server of this.servers) if (!ownNames.has(server.name) && on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server))
     for (const server of own) if (on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server, workdir))
-    wanted.delete(APP_MCP_NAME) // 예약 이름으로 저장돼 있던 앱 서버 — 내장 서버만 그 이름을 쓴다
+    for (const name of RESERVED_NAMES) wanted.delete(name) // 예약 이름으로 저장돼 있던 앱 서버 — 내장 서버만 그 이름을 쓴다
     for (const [name, define] of this.builtins) {
       const def = on(name, true) ? define(workdir) : undefined
       if (def) wanted.set(name, def)

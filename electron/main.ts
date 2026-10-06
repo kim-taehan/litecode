@@ -57,6 +57,8 @@ import { speechBridgeStreams } from '../src/services/speech/bridge.ts'
 import { SpeechService } from '../src/services/speech.ts'
 import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
 import { systemSpeechHost } from './speechHost.ts'
+import { BrowserService } from '../src/services/browser.ts'
+import { bundledBrowserDir, devBrowserDir } from '../src/services/browser/assets.ts'
 import { restorableBounds, windowMode } from './windowBounds.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -617,6 +619,20 @@ const features: FeatureDefinition[] = [
         root: app.isPackaged ? bundledSpeechDir(process.resourcesPath) : devSpeechDir(path.join(__dirname, '../..')),
       })
       ctx.plugin(speechBridge)
+    },
+  },
+  {
+    // 브라우저 (이슈 #147) — 기본 꺼짐. 동봉한 Playwright MCP(extraResources `browser`, 개발 실행은 `node scripts/fetch-browser.mjs` 로 받아 둔
+    // build/vendor)를 내장 MCP 서버 `chrome` 으로 붙인다. 서버는 엔진이 이 앱 실행 파일을 node 로 돌려 띄우고, Chrome 창은 첫 도구 호출 때 뜬다.
+    // 끄거나 앱을 끄면 전용 프로필(userData/browser/profile)로 뜬 Chrome 을 닫는다
+    id: 'browser',
+    service: 'browser',
+    plugin: (ctx) => {
+      ctx.plugin(BrowserService, {
+        runner: process.execPath,
+        root: app.isPackaged ? bundledBrowserDir(process.resourcesPath) : devBrowserDir(path.join(__dirname, '../..')),
+        dataDir: path.join(userData, 'browser'),
+      })
     },
   },
 ]
