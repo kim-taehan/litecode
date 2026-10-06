@@ -26,6 +26,7 @@ export interface Triggers {
     onSelect(event: React.SyntheticEvent<HTMLTextAreaElement>): void
     onFocus(event: React.FocusEvent<HTMLTextAreaElement>): void
     onBlur(): void
+    onInput(event: React.FormEvent<HTMLTextAreaElement>): void
     onCompositionStart(): void
     onCompositionEnd(event: React.CompositionEvent<HTMLTextAreaElement>): void
     'aria-activedescendant'?: string
@@ -133,7 +134,12 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
         setFocused(true)
         setCaret(event.currentTarget.selectionStart)
       },
-      onBlur: () => setFocused(false),
+      onBlur: () => {
+        setFocused(false)
+        setComposing(false)
+      },
+      // 조합 끝(compositionend)을 한 번 놓치면 composing 이 참으로 남아 후보를 영영 안 묻는다 (이슈 #138) — 입력 이벤트가 알려 주는 값으로 매번 맞춘다
+      onInput: (event) => setComposing((event.nativeEvent as InputEvent).isComposing === true),
       onCompositionStart: () => setComposing(true),
       onCompositionEnd: (event) => {
         setComposing(false)
