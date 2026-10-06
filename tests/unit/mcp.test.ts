@@ -47,6 +47,11 @@ class FakeLlm extends Service {
     this.calls.push(`connect ${path.basename(directory)} ${name}`)
     this.status.set(directory, { ...(this.status.get(directory) ?? {}), [name]: { status: 'connected' } })
   }
+  /** 폴더 → 모델에 안 보일 도구 (이슈 #164) */
+  hidden = new Map<string, Readonly<Record<string, readonly string[]>>>()
+  hideMcpTools(directory: string, hidden: Readonly<Record<string, readonly string[]>>) {
+    this.hidden.set(directory, hidden)
+  }
 }
 
 let tmp: string
@@ -373,6 +378,71 @@ describe('McpService — 프로젝트 기준 (#43)', () => {
   })
 })
 
+describe('McpService — 서버 안의 도구 고르기 (#164)', () => {
+  const local = (name: string, command: string[] = ['/bin/cat']): McpServerInput => ({ name, type: 'local', command, vars: [] })
+
+  it('끈 도구는 그 프로젝트의 다음 턴에 ctx.llm 으로 간다 — 다른 프로젝트는 그대로, 파일엔 프로젝트별로 남는다', async () => {
+    const { mcp, llm } = await start()
+    mcp.save(local('wiki'))
+    mcp.setTools('wiki', { off: ['delete_page'] }, project)
+    await mcp.prepare(project)
+    await mcp.prepare(other)
+    expect(llm.hidden.get(project)).toEqual({ wiki: ['delete_page'] })
+    expect(llm.hidden.get(other)).toEqual({})
+    expect((await mcp.list(project))[0]!.toolSelection).toEqual({ off: ['delete_page'] })
+    expect((await mcp.list(other))[0]!.toolSelection).toBeUndefined()
+    const stored = JSON.parse(await fs.readFile(path.join(tmp, 'mcp-projects.json'), 'utf8')) as Record<string, { tools?: unknown }>
+    expect(stored[project]!.tools).toEqual({ wiki: { off: ['delete_page'] } })
+
+    const again = await start()
+    await again.mcp.prepare(project)
+    expect(again.llm.hidden.get(project)).toEqual({ wiki: ['delete_page'] })
+    again.mcp.setTools('wiki', undefined, project) // [전부 켜기]
+    await again.mcp.prepare(project)
+    expect(again.llm.hidden.get(project)).toEqual({})
+  })
+
+  it('only(전부 끄기 뒤 고른 것) — 서버의 도구 목록을 물어 나머지를 숨긴다. 새 도구도 숨겨진다', async () => {
+    const script = path.join(tmp, 'fake.cjs')
+    await fs.writeFile(script, FAKE_STDIO) // 도구 first·second
+    const { mcp, llm } = await start()
+    mcp.save(local('docs', [process.execPath, script]))
+    mcp.setTools('docs', { only: ['first'] }, project)
+    await mcp.prepare(project)
+    expect(llm.hidden.get(project)).toEqual({ docs: ['second'] })
+    mcp.setTools('docs', { only: [] }, project)
+    await mcp.prepare(project)
+    expect(llm.hidden.get(project)).toEqual({ docs: ['first', 'second'] })
+  })
+
+  it('프로젝트 폴더 정의 서버도 고를 수 있고 .mcp.json 은 안 고친다. 내장 서버의 선택은 받지 않는다', async () => {
+    const { mcp, llm } = await start()
+    const file = path.join(project, '.mcp.json')
+    const text = JSON.stringify({ mcpServers: { atlassian: { command: '/bin/cat' } } })
+    await fs.writeFile(file, text)
+    mcp.setTools('atlassian', { off: ['jira_delete'] }, project)
+    mcp.registerBuiltin('litecode', () => ({ type: 'remote', url: 'http://127.0.0.1:1/mcp' }))
+    expect(() => mcp.setTools('litecode', { off: ['x'] }, project)).toThrow()
+    await mcp.prepare(project)
+    expect(llm.hidden.get(project)).toEqual({ atlassian: ['jira_delete'] })
+    expect(await fs.readFile(file, 'utf8')).toBe(text)
+  })
+
+  it('이름을 바꾸면 선택이 따라가고, 지우면 같이 지운다. 옛 파일(tools 없음)도 읽는다', async () => {
+    await fs.writeFile(path.join(tmp, 'mcp-projects.json'), JSON.stringify({ [project]: { servers: [], enabled: { wiki: true } } }))
+    const { mcp, llm } = await start()
+    mcp.save({ ...local('db'), scope: 'project' }, project)
+    mcp.setTools('db', { off: ['drop'] }, project)
+    mcp.save({ ...local('db2'), originalName: 'db' }, project)
+    expect((await mcp.list(project))[0]).toMatchObject({ name: 'db2', toolSelection: { off: ['drop'] } })
+    mcp.remove('db2', project)
+    mcp.save({ ...local('db2'), scope: 'project' }, project)
+    expect((await mcp.list(project))[0]!.toolSelection).toBeUndefined()
+    await mcp.prepare(project)
+    expect(llm.hidden.get(project)).toEqual({})
+  })
+})
+
 describe('프로젝트·개인 정의 읽기', () => {
   it('.mcp.json(Claude Code)·opencode.jsonc·.opencode 를 겹쳐 읽는다 — 뒤가 이기고 enabled:false 는 꺼진 채', async () => {
     await fs.mkdir(path.join(project, '.opencode'))
@@ -440,7 +510,8 @@ describe('listMcpTools — 앱이 직접 붙어 도구 목록만 본다', () => 
       { type: 'local', command: [process.execPath, script], environment: { ENV_DUMP: dump, MY_TOKEN: 'mine' } },
       { cwd: tmp, env: { PATH: process.env.PATH, OPENCODE_SERVER_PASSWORD: 'pw', GITHUB_TOKEN: 'ghp', HOME: '/h' } },
     )
-    expect(tools).toEqual([{ name: 'first', description: 'one' }, { name: 'second' }])
+    // tokens = 도구 정의 JSON 글자 수 ÷ 3.5 올림 (이슈 #164): {"name":"first","description":"one"} 36자 → 11, {"name":"second"} 17자 → 5
+    expect(tools).toEqual([{ name: 'first', description: 'one', tokens: 11 }, { name: 'second', tokens: 5 }])
     const env = JSON.parse(await fs.readFile(dump, 'utf8')) as Record<string, string>
     expect(env['OPENCODE_SERVER_PASSWORD']).toBeUndefined()
     expect(env['GITHUB_TOKEN']).toBeUndefined()
@@ -469,7 +540,7 @@ describe('listMcpTools — 앱이 직접 붙어 도구 목록만 본다', () => 
         '})',
       ].join('\n'),
     )
-    expect(await listMcpTools({ type: 'local', command: [process.execPath, script] }, { cwd: tmp, env: { PATH: process.env.PATH } })).toEqual([{ name: 'search', description: '한글 설명' }])
+    expect(await listMcpTools({ type: 'local', command: [process.execPath, script] }, { cwd: tmp, env: { PATH: process.env.PATH } })).toMatchObject([{ name: 'search', description: '한글 설명' }])
   })
 
   // 참고 레포 검토(02x B): 헤더에 비밀을 실은 요청이 리다이렉트를 따라가면 그 값이 다른 곳으로 간다
@@ -516,7 +587,7 @@ describe('listMcpTools — 앱이 직접 붙어 도구 목록만 본다', () => 
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`
     try {
-      expect(await listMcpTools({ type: 'remote', url, headers: { Authorization: 'Bearer good' } }, { cwd: tmp })).toEqual([{ name: 'ping', description: 'p' }])
+      expect(await listMcpTools({ type: 'remote', url, headers: { Authorization: 'Bearer good' } }, { cwd: tmp })).toMatchObject([{ name: 'ping', description: 'p' }])
       expect(seen[1]).toEqual({ auth: 'Bearer good', session: 's1' })
       await expect(listMcpTools({ type: 'remote', url, headers: { Authorization: 'Bearer bad' } }, { cwd: tmp })).rejects.toThrow('HTTP 401')
     } finally {

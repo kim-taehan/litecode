@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { ascendingId, finishedTool, interruptedError, LlmService, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
+import { ascendingId, finishedTool, interruptedError, LlmService, MCP_TOOLS_MARKER, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
@@ -556,6 +556,22 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     await llm.chat('p', 'm', directory, 'again', 'ses_1') // 이어가는 턴 — 모드를 안 주면 기본(build) 에이전트를 싣는다
     expect(prompts[1]).toMatchObject({ agent: 'build', model: { providerID: 'p', modelID: 'm' } })
     expect(prompts[1]!['messageID']).not.toBe(prompts[0]!['messageID'])
+  })
+
+  // 이슈 #164 실측(docs/opencode-protocol.md): prompt_async 의 tools 맵은 세션 permission 을 **통째로 바꾸고 남는다**(빈 맵·필드 없음은 그대로 둔다) →
+  // 매 턴 표지 하나를 넣어 늘 바꾼다. true 는 allow 규칙이 되어 승인을 건너뛰므로 false 만 싣는다
+  it('MCP 도구 숨기기 (#164) — 매 턴 tools 맵에 표지 + 그 폴더에서 숨긴 도구를 엔진 이름(비영숫자는 _)으로 false, 다른 폴더 값은 안 섞인다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    await llm.chat('p', 'm', directory, 'none hidden')
+    expect(prompts[0]!['tools']).toEqual({ [MCP_TOOLS_MARKER]: false })
+    llm.hideMcpTools(directory, { 'dot.srv': ['do.thing-x', 'plain'], wiki: [] })
+    llm.hideMcpTools('/elsewhere', { other: ['x'] })
+    await llm.chat('p', 'm', directory, 'hidden', 'ses_1')
+    expect(prompts[1]!['tools']).toEqual({ [MCP_TOOLS_MARKER]: false, 'dot_srv_do_thing-x': false, dot_srv_plain: false })
+    llm.hideMcpTools(directory, {})
+    await llm.chat('p', 'm', directory, 'shown again', 'ses_1')
+    expect(prompts[2]!['tools']).toEqual({ [MCP_TOOLS_MARKER]: false }) // 표지만 — 앞 턴의 숨김이 세션에 남지 않게 바꾼다
+    expect(Object.values(prompts[2]!['tools'] as object)).not.toContain(true)
   })
 
   it('모든 레거시 호출에 ?directory=<작업 폴더> 를 붙인다 (빠지면 다른 인스턴스로 간다 — 01w)', async () => {
