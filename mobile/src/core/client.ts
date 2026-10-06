@@ -24,10 +24,13 @@ import type { Transport } from './transport.ts'
 /** 데스크탑이 2xx 가 아닌 답을 했다. 닿지 못한 것(연결 실패·시간 초과)은 이것이 아니라 transport 의 오류 그대로다 */
 export class RemoteError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  /** 본문의 기계가 읽는 사유 (예: 짝짓기 403 의 PairRejectReason). 옛 데스크탑은 싣지 않는다 */
+  readonly reason?: string
+  constructor(status: number, message: string, reason?: string) {
     super(message)
     this.name = 'RemoteError'
     this.status = status
+    this.reason = reason
   }
 }
 
@@ -59,8 +62,9 @@ const PAIR_TIMEOUT_MS = 65_000
 
 export class RemoteClient {
   token: string | undefined
-  private readonly transport: Transport
-  private readonly baseUrl: string
+  /** `http(s)://ip:port` — 주소를 옮겨 다니는 클라이언트(roaming.ts)가 바꾼다 */
+  baseUrl: string
+  protected readonly transport: Transport
   private readonly requestTimeoutMs: number
   private readonly sendRetries: number
   private readonly sendRetryDelayMs: number
@@ -180,8 +184,8 @@ export class RemoteClient {
       parsed = undefined
     }
     if (response.status < 200 || response.status >= 300) {
-      const message = (parsed as { error?: unknown } | undefined)?.error
-      throw new RemoteError(response.status, typeof message === 'string' ? message : `HTTP ${response.status}`)
+      const { error: message, reason } = (parsed ?? {}) as { error?: unknown; reason?: unknown }
+      throw new RemoteError(response.status, typeof message === 'string' ? message : `HTTP ${response.status}`, typeof reason === 'string' ? reason : undefined)
     }
     return parsed as T
   }

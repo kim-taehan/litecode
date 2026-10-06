@@ -7,6 +7,7 @@ import { ChatService } from '../../../src/services/chat.ts'
 import { ProjectsService } from '../../../src/services/projects.ts'
 import { RemoteService, type RemoteServiceOptions } from '../../../src/services/remote.ts'
 import { RemoteHttp, type RemoteHttpOptions } from '../../../src/services/remote/http.ts'
+import { RemoteHttps, type RemoteHttpsOptions } from '../../../src/services/remote/https.ts'
 import { serveFramed, type FramedServer } from '../../../src/services/remote/framed.ts'
 import type { ByteLink } from '../../../shared/remoteFraming.ts'
 import { SessionsService } from '../../../src/services/sessions.ts'
@@ -137,10 +138,10 @@ export interface Answer<T = any> {
 }
 
 /** http: false 면 HTTP 운반을 올리지 않는다 (운반 없는 ctx.remote — 테스트가 자기 운반을 올린다). listeners·port 는 HTTP 운반의 것.
- *  ctx.remote 는 떠 있으면 켜진 것이다 — 운반은 올라오는 대로 뜬다 */
-export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpOptions & { http?: boolean } = {}) {
+ *  tls 를 주면 TLS 운반도 올린다 (키 파일은 임시 폴더, 포트 기본 0). ctx.remote 는 떠 있으면 켜진 것이다 — 운반은 올라오는 대로 뜬다 */
+export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpOptions & { http?: boolean; tls?: Partial<RemoteHttpsOptions> } = {}) {
   const { root, project, cleanups } = box
-  const { http: withHttp = true, listeners, port = 0, ...service } = options
+  const { http: withHttp = true, tls, listeners, port = 0, ...service } = options
   const ctx = new Context()
   const fibers = [
     ctx.plugin(FakeLlm),
@@ -162,8 +163,19 @@ export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpO
       carrier.inject = RemoteHttp.inject
       httpFiber = ctx.plugin(carrier)
     })
+  let tlsFiber: { dispose(): Promise<void> } | undefined
+  const plugTls = (): Promise<void> =>
+    new Promise((resolve) => {
+      const carrier = (inner: Context): void => {
+        RemoteHttps(inner, { keyFile: path.join(root, 'remote-tls-key.json'), port: 0, ...tls })
+        resolve()
+      }
+      carrier.inject = RemoteHttps.inject
+      tlsFiber = ctx.plugin(carrier)
+    })
   const mounted = withHttp ? plugHttp() : Promise.resolve()
   cleanups.push(async () => {
+    await tlsFiber?.dispose()
     await httpFiber?.dispose()
     for (const fiber of fibers.reverse()) await fiber.dispose()
   })
@@ -171,6 +183,11 @@ export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpO
   const remote = ready.remote
   await mounted
   await remote.ready()
+  // TLS 운반은 HTTP 뒤에 올린다 — 주소 목록의 첫째가 평문 루프백으로 남는다 (base())
+  if (tls) {
+    await plugTls()
+    await remote.ready()
+  }
   await ready.projects.open(project)
   const llm = ready.llm as unknown as FakeLlm
   const chatEvents: { [K in keyof ChatEventMap]: [K, ChatEventMap[K]] }[keyof ChatEventMap][] = []

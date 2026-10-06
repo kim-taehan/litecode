@@ -43,11 +43,11 @@ import { SkillsService, type SkillScope } from '../src/services/skills.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 import { McpService, type McpServerInput } from '../src/services/mcp.ts'
 import { AppMcpService } from '../src/services/appMcp.ts'
-import { OpenFileTool } from '../src/services/appMcp/tools/openFile.ts'
+import { OpenTool } from '../src/services/appMcp/tools/open.ts'
 import { PresentTool } from '../src/services/appMcp/tools/present.ts'
-import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
+import { RemoteHttps } from '../src/services/remote/https.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { attentionTarget } from '../shared/delegation.ts'
@@ -463,7 +463,7 @@ function mcpBridge(ctx: Context): void {
 }
 mcpBridge.inject = ['mcp']
 
-// 앱 MCP 서버 (이슈 #51) — AI 의 open_file·open_terminal 을 화면에 잇는다. 화면 도구는 사용자가 보고 있는 프로젝트에만 닿는다:
+// 앱 MCP 서버 (이슈 #51) — AI 의 open(파일·터미널)을 화면에 잇는다. 화면 도구는 사용자가 보고 있는 프로젝트에만 닿는다:
 // 화면이 지금 프로젝트를 알리고(APP_MCP_VIEW), 도구의 요청은 모든 창에 흘린다(화면이 프로젝트로 거른다). 창이 다 닫히면 보고 있는 것이 없다
 function appMcpBridge(ctx: Context): void {
   handle(ctx, Channel.APP_MCP_VIEW, async (_event, directory?: string) => ctx.appMcp.view(typeof directory === 'string' ? directory : undefined))
@@ -523,7 +523,6 @@ const features: FeatureDefinition[] = [
     plugin: (ctx) => {
       ctx.plugin(TerminalsService)
       ctx.plugin(terminalsBridge)
-      ctx.plugin(OpenTerminalTool) // 앱 MCP 의 open_terminal — 터미널 칸을 끄면 도구도 목록에서 빠진다
     },
   },
   {
@@ -581,19 +580,21 @@ const features: FeatureDefinition[] = [
     service: 'remote',
     plugin: (ctx) => {
       ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
-      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 지금은 HTTP(127.0.0.1:47600) 하나. 블루투스 운반이 이 옆에 올라온다
+      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 평문 HTTP(127.0.0.1:47600, 에뮬레이터용)와 사내망 TLS(사설 IPv4 주소마다 :47600,
+      // 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다). 블루투스 운반이 이 옆에 올라온다
       ctx.plugin(RemoteHttp)
+      ctx.plugin(RemoteHttps, { keyFile: path.join(userData, 'remote-tls-key.json'), cipher: keyCipher })
       ctx.plugin(remoteBridge)
     },
   },
   {
     // 데스크탑 MCP — 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰). ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다.
-    // 설정 > 기능에서 끄면(이슈 #99) 서버·도구·IPC 가 함께 내려가고 다음 턴의 붙이기가 엔진에서 끊는다. open_terminal 은 터미널 묶음에 있다
+    // 설정 > 기능에서 끄면(이슈 #99) 서버·도구·IPC 가 함께 내려가고 다음 턴의 붙이기가 엔진에서 끊는다. open 의 터미널 갈래는 터미널 칸을 끄면 "꺼져 있다" 를 돌려준다
     id: 'appMcp',
     service: 'appMcp',
     plugin: (ctx) => {
       ctx.plugin(AppMcpService)
-      ctx.plugin(OpenFileTool)
+      ctx.plugin(OpenTool) // 앱 MCP 의 open — 파일(오른쪽 패널)·터미널(채워만 둠)
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
       ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)

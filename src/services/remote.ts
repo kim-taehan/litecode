@@ -12,7 +12,8 @@ import type { RemoteCarrier, RemoteExchange, RemoteOutcome, RemotePeer, RemoteRe
 import { DeviceStore, FailureLimiter, type DevicePlatform, type StoredDevice } from './remote/devices.ts'
 import { EventLog } from './remote/eventLog.ts'
 import { StreamQueue } from './remote/streamQueue.ts'
-import { confirmCode, groupCode, newPairCode, normalizePairCode } from './remote/pairing.ts'
+import { confirmCode, groupCode, newPairCode, newShortPairCode, normalizePairCode } from './remote/pairing.ts'
+import { fingerprintCode } from '../../shared/remotePairing.ts'
 import { emptyChatView, withHistory } from '../../shared/chatReducer.ts'
 import type { ChatLive, ChatOrigin } from '../../shared/chat.ts'
 import type { AttentionAnswer, Conversation, History, NoticeState } from '../../shared/contract.ts'
@@ -20,11 +21,13 @@ import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import {
   REMOTE_API_VERSION,
   REMOTE_PING_INTERVAL_MS,
+  pairUri,
   remotePath,
   type AttentionReplyResponse,
   type ConversationSnapshot,
   type Hello,
   type ModelChoice,
+  type PairRejected,
   type PairResponse,
   type QueueTakeResponse,
   type RemoteConversation,
@@ -69,7 +72,8 @@ declare module 'cordis' {
 export const REMOTE_DEFAULT_PORT = 47600
 const PAIR_CODE_TTL_MS = 2 * 60_000
 const PAIR_WAIT_MS = 60_000
-const PAIR_MAX_FAILURES = 5
+/** 긴 코드·짧은 코드를 합쳐 이만큼 틀리면 세션을 버린다 — 2자리 코드를 추측으로 맞힐 확률 3/100 (사용자 2026-10-06, 전에는 5) */
+const PAIR_MAX_FAILURES = 3
 /** 기억하는 clientMessageId 수 — 재시도는 보낸 직후에만 온다 */
 const SENT_MEMORY = 1000
 /** 폰이 만들고 아직 아무것도 안 보낸 새 대화 수 */
@@ -93,8 +97,10 @@ export interface RemotePairRequest {
   id: string
   deviceName: string
   platform: DevicePlatform
-  /** 확인 코드 8자 (`ABCD-EFGH`) — 폰 화면과 같아야 한다 */
+  /** 확인 코드 8자 (`ABCD-EFGH`) — 폰 화면과 같아야 한다. pinned 면 TLS 인증서 지문 앞 8자다 */
   confirm: string
+  /** 사내망(TLS)으로 왔다 — confirm 이 지문 앞 8자 */
+  pinned?: true
 }
 
 export interface RemoteDeviceInfo {
@@ -114,14 +120,23 @@ export interface RemoteStatus {
   addresses: string[]
   /** 운반이 못 뜬 사유 (code: EADDRINUSE 등) */
   error?: { code?: string; message: string }
-  /** 지금 쓸 수 있는 짝짓기 코드. uri 는 QR 에 실을 문자열(`litecode://pair?…`) */
-  pairing?: { code: string; expiresAt: number; uri: string }
+  /** 사내망(TLS) 리스너의 인증서 지문 (SPKI SHA-256 base64url) — TLS 운반이 없거나 못 떴으면 없다 */
+  fingerprint?: string
+  /** 지문 앞 8자 (`ABCD-EFGH`, shared/remotePairing.ts fingerprintCode) — 직접 입력 화면과 [허용] 확인에 보인다 */
+  fingerprintCode?: string
+  /** 마지막으로 바깥(사내망 리스너)에서 접속이 들어온 시각 — 막힌 접속도 센다. 한 번도 없으면 없다 (진단: 클라이언트 격리·방화벽) */
+  lastAttemptAt?: number
+  /** 지금 쓸 수 있는 짝짓기 코드. code 는 긴 코드(QR·옛 폰), shortCode 는 직접 입력용 숫자 2자리 — 한 세션이다.
+   *  uri 는 QR 에 실을 문자열(`litecode://pair?…`) — 사내망(TLS) 주소가 있을 때만 */
+  pairing?: { code: string; shortCode: string; expiresAt: number; uri?: string }
   requests: RemotePairRequest[]
   devices: RemoteDeviceInfo[]
 }
 
 interface ActiveCode {
   code: string
+  /** 직접 입력용 숫자 2자리 — code 와 같은 세션(만료·1회용·틀린 시도) */
+  shortCode: string
   expiresAt: number
   failures: number
 }
@@ -169,6 +184,8 @@ export class RemoteService extends Service {
   /** 운반 띄우기·닫기를 한 줄로 세운다 — 내리자마자 올려도 포트가 닫힌 뒤 다시 연다 */
   private queue: Promise<void>
   private disposed = false
+  /** 이 실행에서 마지막으로 알린 주소 목록 (쉼표로 이음) — 바뀌면 addresses.changed */
+  private announced?: string
 
   constructor(
     ctx: Context,
@@ -235,12 +252,17 @@ export class RemoteService extends Service {
     const connected = new Set([...this.streams].map((stream) => stream.deviceId))
     const carriers = [...this.carriers].map((carrier) => carrier.status())
     const error = carriers.find((carrier) => carrier.error)?.error
+    const fingerprint = this.fingerprint()
+    const attempts = carriers.flatMap((carrier) => (carrier.lastAttemptAt === undefined ? [] : [carrier.lastAttemptAt]))
+    const uri = code && this.pairUri(code)
     return {
       port: carriers.find((carrier) => carrier.port !== undefined)?.port ?? REMOTE_DEFAULT_PORT,
       addresses: this.listening(),
       ...(error && { error }),
-      ...(code && { pairing: { code: groupCode(code.code), expiresAt: code.expiresAt, uri: this.pairUri(code) } }),
-      requests: [...this.pending.values()].map(({ id, deviceName, platform, confirm }) => ({ id, deviceName, platform, confirm })),
+      ...(fingerprint && { fingerprint, fingerprintCode: fingerprintCode(fingerprint) }),
+      ...(attempts.length > 0 && { lastAttemptAt: Math.max(...attempts) }),
+      ...(code && { pairing: { code: groupCode(code.code), shortCode: code.shortCode, expiresAt: code.expiresAt, ...(uri && { uri }) } }),
+      requests: [...this.pending.values()].map(({ id, deviceName, platform, confirm, pinned }) => ({ id, deviceName, platform, confirm, ...(pinned && { pinned }) })),
       devices: this.store.list().map(({ id, name, platform, pairedAt, lastSeenAt }) => ({ id, name, platform, pairedAt, lastSeenAt, connected: connected.has(id) })),
     }
   }
@@ -261,10 +283,15 @@ export class RemoteService extends Service {
     }
   }
 
+  /** 운반의 상태가 바뀌었다 (다시 바인딩한 주소·수신 시도) — 운반이 부른다. 주소가 바뀌었으면 폰에 `addresses.changed` 를 보낸다 */
+  carrierChanged(): void {
+    if (!this.disposed) this.changed()
+  }
+
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용). 앞 코드는 버린다 */
   startPairing(): RemoteStatus {
     if (!this.live()) throw new Error(tr('remote.error.notListening'))
-    this.code = { code: newPairCode(), expiresAt: this.now() + PAIR_CODE_TTL_MS, failures: 0 }
+    this.code = { code: newPairCode(), shortCode: newShortPairCode(), expiresAt: this.now() + PAIR_CODE_TTL_MS, failures: 0 }
     return this.changed()
   }
 
@@ -302,7 +329,10 @@ export class RemoteService extends Service {
         let started = false
         for (const carrier of this.carriers) {
           if (carrier.status().up) continue
-          if (!this.live()) this.log = new EventLog(this.now) // 새 실행 — 폰이 쥔 seq 는 무효다
+          if (!this.live()) {
+            this.log = new EventLog(this.now) // 새 실행 — 폰이 쥔 seq 는 무효다
+            this.announced = undefined
+          }
           this.started.add(carrier)
           await carrier.start()
           started = true
@@ -316,6 +346,11 @@ export class RemoteService extends Service {
   /** 운반들이 듣고 있는 주소 (`ip:port`) */
   private listening(): string[] {
     return [...this.carriers].flatMap((carrier) => carrier.status().addresses)
+  }
+
+  /** 지문으로 고정되는 운반(TLS)의 지문 — 떠 있는 것만 */
+  private fingerprint(): string | undefined {
+    return [...this.carriers].map((carrier) => carrier.status()).find((status) => status.up && status.fingerprint)?.fingerprint
   }
 
   /** 떠 있는 운반이 하나라도 있나 — 폰이 붙을 수 있다 */
@@ -337,6 +372,10 @@ export class RemoteService extends Service {
 
   private changed(): RemoteStatus {
     const status = this.status()
+    // 이 실행에서 처음 본 주소는 알리지 않는다 (hello 가 준다) — 그 뒤 바뀌면 붙어 있는 폰에 알린다
+    const addresses = status.addresses.join(',')
+    if (this.announced !== undefined && addresses !== this.announced) this.emitEvent('addresses.changed', { addresses: status.addresses })
+    if (this.live()) this.announced = addresses
     this.ctx.emit('remote/changed', status)
     return status
   }
@@ -393,7 +432,7 @@ export class RemoteService extends Service {
       return { status: 400, body: { error: 'malformed request' } }
     }
 
-    if (request.method === 'POST' && request.path === remotePath.pair) return this.pair(body, exchange.signal)
+    if (request.method === 'POST' && request.path === remotePath.pair) return this.pair(body, exchange.signal, peer.fingerprint)
 
     const device = this.store.authenticate(request.headers.authorization)
     if (!device) {
@@ -417,8 +456,8 @@ export class RemoteService extends Service {
   }
 
   /** POST /v1/pair — 코드가 맞으면 그 코드를 쓰고(1회용) 데스크탑 [허용] 을 기다린다. 응답은 사용자가 답하거나 시간이 다 됐을 때.
-   *  gone: 폰이 기다리다 떠났다 */
-  private pair(body: unknown, gone: AbortSignal): RemoteReply | Promise<RemoteReply> {
+   *  gone: 폰이 기다리다 떠났다. fingerprint: 요청이 지문으로 고정되는 운반(TLS)으로 왔으면 그 지문 — 확인 코드가 지문 앞 8자가 된다 */
+  private pair(body: unknown, gone: AbortSignal, fingerprint?: string): RemoteReply | Promise<RemoteReply> {
     const input = body as { code?: unknown; deviceName?: unknown; platform?: unknown } | undefined
     // 이름은 데스크탑 확인 창·기기 목록에 그대로 보인다 — 제어 문자는 빼고 길이를 자른다
     const deviceName = typeof input?.deviceName === 'string' ? input.deviceName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, DEVICE_NAME_MAX) : ''
@@ -427,11 +466,13 @@ export class RemoteService extends Service {
       return { status: 400, body: { error: 'code, deviceName and platform are required' } }
     }
     const active = this.activeCode()
-    if (!active) return { status: 403, body: { error: 'no pairing in progress' } }
-    if (!sameText(normalizePairCode(input.code), active.code)) {
-      if (++active.failures >= PAIR_MAX_FAILURES) this.code = undefined // 5회째 — 코드를 버린다. 새로 [기기 연결] 을 눌러야 한다
+    if (!active) return { status: 403, body: { error: 'no pairing in progress', reason: 'no-code' } satisfies PairRejected }
+    // 긴 코드(QR)든 짧은 코드(직접 입력)든 — 둘은 한 세션이다
+    const given = normalizePairCode(input.code)
+    if (!sameText(given, active.code) && !sameText(given, active.shortCode)) {
+      if (++active.failures >= PAIR_MAX_FAILURES) this.code = undefined // 3회째 — 세션을 버린다(긴 코드·짧은 코드 모두). 새로 [기기 연결] 을 눌러야 한다
       this.changed()
-      return { status: 403, body: { error: 'wrong pairing code' } }
+      return { status: 403, body: { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected }
     }
     this.code = undefined // 1회용
 
@@ -443,13 +484,16 @@ export class RemoteService extends Service {
         id,
         deviceName,
         platform,
-        confirm: confirmCode(active.code, deviceName, platform),
+        // TLS 면 폰이 고정한 인증서의 지문 앞 8자, 루프백 평문이면 요청에서 만든 확인 코드 (shared/remotePairing.ts)
+        // 확인 코드는 폰이 친 코드로 만든다 — 폰은 자기가 친 것밖에 모른다 (긴 코드면 전과 같다)
+        confirm: fingerprint ? fingerprintCode(fingerprint) : confirmCode(given, deviceName, platform),
+        ...(fingerprint && { pinned: true as const }),
         settle: (result) => {
           if (settled) return
           settled = true
           clearTimeout(timer)
           this.pending.delete(id)
-          if (result === 'deny') resolve({ status: 403, body: { error: 'denied on the desktop' } })
+          if (result === 'deny') resolve({ status: 403, body: { error: 'denied on the desktop', reason: 'denied' } satisfies PairRejected })
           else if (result === 'timeout') resolve({ status: 408, body: { error: 'nobody answered on the desktop' } })
           // 받을 상대가 없다 (폰이 떠났거나, 연결을 꺼서 운반이 곧 닫힌다)
           else if (result === 'gone') resolve({ status: 503, body: { error: 'pairing was abandoned' } })
@@ -487,6 +531,7 @@ export class RemoteService extends Service {
         runId: this.log.runId,
         seq: this.log.seq,
         addresses: this.listening(),
+        ...(this.fingerprint() && { fingerprint: this.fingerprint() }),
       } satisfies Hello,
     ],
 
@@ -651,18 +696,20 @@ export class RemoteService extends Service {
     return this.code
   }
 
-  /** QR 에 실을 문자열 (01t 3절). 지문(fp)은 TLS 라운드에서 채운다 — 지금은 비어 있다 */
-  private pairUri(code: ActiveCode): string {
-    const query = new URLSearchParams({
-      v: String(REMOTE_API_VERSION),
-      d: this.store.desktopId,
-      n: this.opts.name ?? os.hostname(),
-      a: this.listening().join(','),
-      fp: '',
-      c: code.code,
-      x: String(Math.floor(code.expiresAt / 1000)),
+  /** QR 에 실을 문자열 (01t 3절) — 지문으로 고정되는 운반(TLS)이 떠 있을 때만, 그 운반의 주소만. 평문 루프백 주소는 싣지 않는다 */
+  private pairUri(code: ActiveCode): string | undefined {
+    const fingerprint = this.fingerprint()
+    const addresses = [...this.carriers].map((carrier) => carrier.status()).flatMap((status) => (status.up && status.fingerprint === fingerprint ? status.addresses : []))
+    if (!fingerprint || addresses.length === 0) return undefined
+    return pairUri({
+      version: REMOTE_API_VERSION,
+      desktopId: this.store.desktopId,
+      name: this.opts.name ?? os.hostname(),
+      addresses,
+      fingerprint,
+      code: code.code,
+      expiresAt: Math.floor(code.expiresAt / 1000),
     })
-    return `litecode://pair?${query.toString()}`
   }
 }
 

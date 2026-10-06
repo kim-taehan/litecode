@@ -2,9 +2,10 @@ import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FAKE_PAIR_CODE, startFakeDesktop, type FakeDesktop } from '../dev/fake-desktop.mts'
 import { DEFAULT_ADDRESS, isLoopbackHost, parseAddress } from '../src/app/address.ts'
-import { DesktopLink, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
+import { DesktopLink, failureDetail, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
 import type { AppSession } from '../src/app/session.ts'
-import { createFetchTransport, RemoteError, type Transport } from '../src/core/index.ts'
+import { createFetchTransport, createNativePinnedNet, NetError, RemoteError, type Transport } from '../src/core/index.ts'
+import { nodePinnedNative } from './nodePinned.ts'
 import { until } from './support.ts'
 
 // 짝짓기·저장·복원·해제(link.ts)와 진짜 세션(remoteSession.ts)을 가짜 데스크탑(진짜 http·SSE)에 붙여 본다.
@@ -38,7 +39,7 @@ afterEach(async () => {
 })
 
 function newLink(store: DesktopStore = memoryStore(), transport: Transport = createFetchTransport()): DesktopLink {
-  const link = new DesktopLink({ store, transport, platform: 'android' })
+  const link = new DesktopLink({ store, transport, pinned: createNativePinnedNet(nodePinnedNative()), platform: 'android' })
   links.push(link)
   return link
 }
@@ -62,12 +63,18 @@ async function linked(store: DesktopStore = memoryStore(), transport?: Transport
 }
 
 describe('주소', () => {
-  it('host · host:port · http:// 를 읽고, 포트가 없으면 47600', () => {
-    expect(parseAddress(' 10.0.2.2:47611 ')).toEqual({ host: '10.0.2.2', port: 47611, address: '10.0.2.2:47611', baseUrl: 'http://10.0.2.2:47611' })
+  it('host · host:port · http(s):// 를 읽고, 포트가 없으면 47600', () => {
+    expect(parseAddress(' 10.0.2.2:47611 ')).toEqual({ host: '10.0.2.2', port: 47611, address: '10.0.2.2:47611', scheme: 'http', baseUrl: 'http://10.0.2.2:47611' })
     expect(parseAddress('LOCALHOST')).toMatchObject({ host: 'localhost', port: 47600 })
     expect(parseAddress('http://127.0.0.1:8080/')).toMatchObject({ baseUrl: 'http://127.0.0.1:8080' })
     expect(parseAddress(DEFAULT_ADDRESS)).toMatchObject({ host: '10.0.2.2', port: 47600 })
-    for (const bad of ['', 'https://10.0.2.2', '10.0.2.2:99999', '10.0.2.2:0', 'a b', '10.0.2.2/path', 'user@10.0.2.2']) expect(parseAddress(bad), bad).toBeUndefined()
+    for (const bad of ['', 'ftp://10.0.2.2', '10.0.2.2:99999', '10.0.2.2:0', 'a b', '10.0.2.2/path', 'user@10.0.2.2']) expect(parseAddress(bad), bad).toBeUndefined()
+  })
+
+  it('방식을 안 쓰면 이 컴퓨터 안은 http, 그 밖은 https(지문 고정). 쓴 방식은 그대로', () => {
+    expect(parseAddress('192.168.0.12')).toMatchObject({ scheme: 'https', baseUrl: 'https://192.168.0.12:47600' })
+    expect(parseAddress('HTTPS://10.0.2.2:47600')).toMatchObject({ scheme: 'https', baseUrl: 'https://10.0.2.2:47600' })
+    expect(parseAddress('http://192.168.0.12:47600')).toMatchObject({ scheme: 'http' }) // 짝(link.ts)이 not-loopback 으로 거절한다
   })
 
   it('이 컴퓨터 안 주소만 루프백이다 — 비슷하게 생긴 것은 아니다', () => {
@@ -108,10 +115,10 @@ describe('짝짓기', () => {
     await until(() => desktop.pendingPair() !== undefined, '짝짓기 요청')
     desktop.answerPair(false)
     await denied
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'denied' })
 
     await link.pair(input()) // pairWaitMs 300 — 아무도 답하지 않는다
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'timeout' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'timeout' })
     expect(store.value).toBeUndefined()
   })
 
@@ -119,24 +126,24 @@ describe('짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pair(input({ code: 'AAAA-BBBB-CCCC' }))
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'wrong-code' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'wrong-code' })
     expect(desktop.pendingPair()).toBeUndefined()
   })
 
-  it('보내기 전에 걸러지는 것 — 읽을 수 없는 주소, 12자가 아닌 코드, 빈 이름, 그리고 이 컴퓨터 밖 주소. 요청이 하나도 안 나간다', async () => {
+  it('보내기 전에 걸러지는 것 — 읽을 수 없는 주소, 숫자 2자리도 12자도 아닌 코드, 빈 이름, 그리고 이 컴퓨터 밖 주소. 요청이 하나도 안 나간다', async () => {
     const transport = counting()
     const link = newLink(memoryStore(), transport)
     await link.restore()
     const failures: unknown[] = []
-    for (const bad of [{ address: 'not an address' }, { code: 'DEV0' }, { code: 'DEV0DEV0DEVU' }, { deviceName: ' \n ' }, { address: '192.168.0.12:47600' }, { address: 'example.com' }]) {
+    for (const bad of [{ address: 'not an address' }, { code: 'DEV0' }, { code: 'DEV0DEV0DEVU' }, { code: '4' }, { code: '470' }, { code: 'AB' }, { deviceName: ' \n ' }, { address: 'http://192.168.0.12:47600' }, { address: 'http://example.com' }]) {
       await link.pair(input(bad))
       failures.push((link.state as { failure?: string }).failure)
     }
-    expect(failures).toEqual(['bad-address', 'bad-code', 'bad-code', 'no-name', 'not-loopback', 'not-loopback'])
+    expect(failures).toEqual(['bad-address', 'bad-code', 'bad-code', 'bad-code', 'bad-code', 'bad-code', 'no-name', 'not-loopback', 'not-loopback'])
     expect(transport.urls).toEqual([])
   })
 
-  it('주소에 닿지 못하면 unreachable', async () => {
+  it('아무도 안 듣는 포트면 refused (PC 는 닿았다 — 모바일 연결이 꺼져 있다)', async () => {
     // 열었다 닫은 포트 — 아무도 듣지 않는다
     const closed = await new Promise<number>((resolve) => {
       const server = net.createServer().listen(0, '127.0.0.1', () => {
@@ -147,7 +154,7 @@ describe('짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pair(input({ address: `127.0.0.1:${closed}` }))
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'unreachable' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'refused' })
   })
 
   it('데스크탑의 답을 사유로: 403(거절·틀린 코드·만료) · 408 · 429 · 그 밖', () => {
@@ -158,6 +165,22 @@ describe('짝짓기', () => {
     expect(pairFailure(new RemoteError(429, 'too many failed attempts'))).toBe('blocked')
     expect(pairFailure(new RemoteError(500, 'boom'))).toBe('failed')
     expect(pairFailure(new TypeError('fetch failed'))).toBe('unreachable')
+  })
+
+  it('진단 글 — 어떤 실패든 [코드 · 예외: 메시지] 를 단다 (네이티브가 준 것, 데스크탑의 답, 그 밖)', () => {
+    expect(failureDetail(new NetError('tls-failed', 'x', undefined, '[ERR_TLS · SSLException: boom]'))).toBe('[ERR_TLS · SSLException: boom]')
+    expect(failureDetail(new RemoteError(403, 'wrong pairing code', 'wrong-code'))).toBe('[HTTP 403 · wrong-code: wrong pairing code]')
+    expect(failureDetail(new RemoteError(500, 'boom'))).toBe('[HTTP 500 · boom]')
+    expect(failureDetail(new TypeError('Network request failed'))).toBe('[unreachable · TypeError: Network request failed]')
+    expect(failureDetail(new NetError('refused', 'connect ECONNREFUSED'))).toBe('[refused · NetError: connect ECONNREFUSED]')
+  })
+
+  it('403 은 본문의 reason 으로 가른다 — 글이 바뀌어도. reason 이 없으면(옛 데스크탑) 글로', () => {
+    expect(pairFailure(new RemoteError(403, 'pairing denied: expired', 'no-code'))).toBe('wrong-code')
+    expect(pairFailure(new RemoteError(403, 'not denied, just wrong', 'wrong-code'))).toBe('wrong-code')
+    expect(pairFailure(new RemoteError(403, 'nope', 'denied'))).toBe('denied')
+    expect(pairFailure(new RemoteError(403, 'denied on the desktop'))).toBe('denied')
+    expect(pairFailure(new RemoteError(403, 'wrong pairing code'))).toBe('wrong-code')
   })
 })
 

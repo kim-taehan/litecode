@@ -4,8 +4,11 @@
 
 /** Crockford base32 — 사람이 읽고 치는 글자라 헷갈리는 I·L·O·U 가 없다 */
 export const PAIR_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-/** 직접 입력용 코드 길이 (60bit) */
+/** 긴 코드 길이 (60bit) — QR 에 싣는다. 옛 데스크탑은 이것을 직접 입력용으로 보였다 */
 export const PAIR_CODE_LENGTH = 12
+/** 직접 입력용 짧은 코드 — 숫자 2자리(00~99). 같은 발급의 긴 코드와 한 세션이다: 2분·1회용·틀린 시도 3회 폐기를 같이 쓴다.
+ *  추측으로 맞을 확률은 3/100 이고, 진짜 관문은 데스크탑의 [허용] 확인이다 (사용자 2026-10-06 "단순 숫자 2자리") */
+export const PAIR_SHORT_CODE_LENGTH = 2
 /** 기기 이름 길이 한도 — 데스크탑 확인 창·기기 목록에 그대로 보인다 */
 export const PAIR_DEVICE_NAME_MAX = 64
 
@@ -16,6 +19,12 @@ export function normalizePairCode(input: string): string {
     .replace(/[\s-]/g, '')
     .replace(/O/g, '0')
     .replace(/[IL]/g, '1')
+}
+
+/** 정규화한 코드가 받을 수 있는 모양인가 — 숫자 2자리(직접 입력) 또는 12자 Crockford base32(QR·옛 데스크탑) */
+export function isPairCode(code: string): boolean {
+  if (code.length === PAIR_SHORT_CODE_LENGTH) return /^[0-9]+$/.test(code)
+  return code.length === PAIR_CODE_LENGTH && [...code].every((letter) => PAIR_ALPHABET.includes(letter))
 }
 
 /** 화면에 보일 모양 — 네 글자씩 */
@@ -32,17 +41,30 @@ export function pairDeviceName(input: string): string {
 }
 
 /**
- * 확인 코드 8자 — 데스크탑 [허용] 확인과 폰 화면에 같은 글자가 보여야 한다. 이번 라운드엔 TLS 지문이 없어(루프백 평문)
+ * 확인 코드 8자 — 데스크탑 [허용] 확인과 폰 화면에 같은 글자가 보여야 한다. 루프백 평문 짝짓기(지문이 없다)에서는
  * 요청 자체에서 만든다: sha256("litecode-pair\n" + 코드 + "\n" + 기기 이름 + "\n" + 플랫폼) 의 앞 40bit 를 Crockford base32 8자로.
- * 코드는 normalizePairCode 한 것, 기기 이름은 pairDeviceName 한 것을 넣는다. TLS 라운드에서는 인증서 지문 앞 8자로 바뀐다 (01t 3절)
+ * 코드는 normalizePairCode 한 것, 기기 이름은 pairDeviceName 한 것을 넣는다. TLS(사내망) 짝짓기에서는 fingerprintCode 를 쓴다 (01t 3절)
  */
 export function confirmCode(code: string, deviceName: string, platform: string): string {
-  const digest = sha256(`litecode-pair\n${code}\n${deviceName}\n${platform}`)
-  // 앞 5바이트(40bit)를 5bit 씩 8번
+  return groupCode(crockford40(sha256(`litecode-pair\n${code}\n${deviceName}\n${platform}`)))
+}
+
+/**
+ * 지문 앞 8자 (TLS 라운드, 01t 3절) — 사내망(TLS) 짝짓기에서 데스크탑 [허용] 확인과 폰 화면에 같은 글자가 보여야 한다.
+ * fingerprint 는 인증서 공개키(SPKI DER)의 SHA-256 을 base64url(덧붙임 `=` 없음)로 쓴 43자다 (QR 의 `fp`, hello.fingerprint).
+ * 그 해시의 앞 40bit 를 Crockford base32 8자로, 네 글자씩(`ABCD-EFGH`). 폰은 TLS 로 받은(고정한) 인증서에서 같은 값을 낸다.
+ * 루프백 평문 짝짓기(에뮬레이터)에는 지문이 없어 confirmCode 가 그대로 쓰인다
+ */
+export function fingerprintCode(fingerprint: string): string {
+  return groupCode(crockford40(base64UrlBytes(fingerprint)))
+}
+
+/** 앞 5바이트(40bit)를 5bit 씩 8번 */
+function crockford40(bytes: Uint8Array): string {
   let text = ''
   let buffer = 0
   let bits = 0
-  for (const byte of digest.subarray(0, 5)) {
+  for (const byte of bytes.subarray(0, 5)) {
     buffer = (buffer << 8) | byte
     bits += 8
     while (bits >= 5) {
@@ -51,7 +73,28 @@ export function confirmCode(code: string, deviceName: string, platform: string):
       buffer &= (1 << bits) - 1
     }
   }
-  return groupCode(text)
+  return text
+}
+
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+/** base64url(덧붙임 없음) 글을 바이트로 (atob·Buffer 없이 — 어느 런타임에서도 같게). 모르는 글자는 건너뛴다 */
+function base64UrlBytes(text: string): Uint8Array {
+  const bytes: number[] = []
+  let buffer = 0
+  let bits = 0
+  for (const symbol of text) {
+    const value = BASE64URL.indexOf(symbol)
+    if (value < 0) continue
+    buffer = (buffer << 6) | value
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      bytes.push((buffer >> bits) & 255)
+      buffer &= (1 << bits) - 1
+    }
+  }
+  return new Uint8Array(bytes)
 }
 
 const K = new Uint32Array([

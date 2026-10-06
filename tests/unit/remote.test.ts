@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RemoteStatus } from '../../src/services/remote.ts'
 import { hashToken } from '../../src/services/remote/devices.ts'
 import { EventLog } from '../../src/services/remote/eventLog.ts'
-import { confirmCode, newPairCode, normalizePairCode } from '../../src/services/remote/pairing.ts'
+import { confirmCode, newPairCode, newShortPairCode, normalizePairCode } from '../../src/services/remote/pairing.ts'
 import { tr } from '../../src/i18n.ts'
 import type { Attention, AttentionAnswer, TurnItem } from '../../shared/contract.ts'
-import type { ConversationSnapshot, Hello, RemoteConversation, RemoteModel } from '../../shared/remote.ts'
+import type { ConversationSnapshot, Hello, PairRejected, RemoteConversation, RemoteModel } from '../../shared/remote.ts'
 import { MODEL, box, parseFrames, setUp, start, tearDown, until } from './support/remoteHarness.ts'
 
 // ctx.remote — 모바일이 붙는 문 (이슈 #56, 설계 01t 2·3절). 서버는 진짜 HTTP(127.0.0.1 빈 포트)로 띄운다 (support/remoteHarness.ts).
@@ -30,6 +30,17 @@ describe('짝짓기 코드', () => {
   it('12자 Crockford base32 — 헷갈리는 글자가 없고, 친 글자는 대문자·칸 나눔 제거·O→0·I/L→1 로 견준다', () => {
     for (let index = 0; index < 50; index++) expect(newPairCode()).toMatch(/^[0-9A-HJKMNP-TV-Z]{12}$/)
     expect(normalizePairCode('ab1o-il0z 9xyz')).toBe('AB10110Z9XYZ')
+  })
+
+  it('직접 입력 코드는 숫자 2자리 00~99 — 고르게 나온다 (3000번 발급해 100개가 다 나오고 한 값이 몰리지 않는다)', () => {
+    const counts = new Map<string, number>()
+    for (let index = 0; index < 3000; index++) {
+      const code = newShortPairCode()
+      expect(code).toMatch(/^[0-9]{2}$/)
+      counts.set(code, (counts.get(code) ?? 0) + 1)
+    }
+    expect(counts.size).toBe(100) // 기댓값 30 — 하나라도 0 일 확률은 100·e^-30 수준
+    expect(Math.max(...counts.values())).toBeLessThan(80)
   })
 
   it('확인 코드는 8자(XXXX-XXXX)이고 코드·기기 이름·플랫폼으로 정해진다', () => {
@@ -141,9 +152,7 @@ describe('짝짓기', () => {
     const { ctx, remote, requestPair, api } = await start()
     const pairing = remote.startPairing().pairing!
     expect(pairing.code).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/)
-    const uri = new URL(pairing.uri)
-    expect(uri.protocol).toBe('litecode:')
-    expect(Object.fromEntries(uri.searchParams)).toMatchObject({ v: '1', n: 'test-pc', a: remote.status().addresses[0], fp: '', c: pairing.code.replace(/-/g, '') })
+    expect(pairing.uri).toBeUndefined() // QR 은 사내망(TLS) 주소가 있을 때만 — 루프백 평문뿐이면 직접 입력만 (remoteTls.test.ts)
 
     const changes: RemoteStatus[] = []
     ctx.on('remote/changed', (status) => void changes.push(status))
@@ -167,11 +176,32 @@ describe('짝짓기', () => {
     expect((await api('GET', '/v1/hello', { token: paired.body.token })).status).toBe(200)
   })
 
+  it('직접 입력은 2자리 숫자 코드로 — 같은 발급의 긴 코드(QR)와 한 세션: 하나를 쓰면 둘 다 사라진다. [허용] 창에 기기 이름·플랫폼·확인 코드가 실린다', async () => {
+    const { remote, requestPair, api } = await start()
+    const pairing = remote.startPairing().pairing!
+    expect(pairing.shortCode).toMatch(/^[0-9]{2}$/)
+    const { answer, request } = await requestPair('Pixel 8', ` ${pairing.shortCode} `)
+    expect(request).toMatchObject({ deviceName: 'Pixel 8', platform: 'android' })
+    expect(request.confirm).toBe(confirmCode(pairing.shortCode, 'Pixel 8', 'android')) // 폰이 친 코드로 — 폰 화면과 같다
+    expect(remote.status().pairing).toBeUndefined()
+    remote.answerPair(request.id, true)
+    expect((await answer).status).toBe(200)
+    expect(await api('POST', '/v1/pair', { body: { code: pairing.code, deviceName: 'x', platform: 'android' } })).toMatchObject({ status: 403, body: { reason: 'no-code' } })
+  })
+
+  it('2자리가 아닌 숫자·글자는 틀린 코드다 (시도로 센다)', async () => {
+    const { remote, api } = await start()
+    const { shortCode } = remote.startPairing().pairing!
+    const other = shortCode.length === 2 ? `${shortCode}0` : '470'
+    for (const given of [shortCode[0]!, other]) expect(await api('POST', '/v1/pair', { body: { code: given, deviceName: 'x', platform: 'ios' } })).toMatchObject({ status: 403, body: { reason: 'wrong-code' } })
+    expect(remote.status().pairing).toBeDefined()
+  })
+
   it('거절하면 403 이고 기기는 생기지 않는다', async () => {
     const { remote, requestPair } = await start()
     const { answer, request } = await requestPair()
     remote.answerPair(request.id, false)
-    expect((await answer).status).toBe(403)
+    expect(await answer).toMatchObject({ status: 403, body: { reason: 'denied' } satisfies Partial<PairRejected> })
     expect(remote.status()).toMatchObject({ requests: [], devices: [] })
   })
 
@@ -194,35 +224,38 @@ describe('짝짓기', () => {
     expect(remote.status().devices).toEqual([])
   })
 
-  it('틀린 코드는 403 — 5회째에 코드를 버려, 그 뒤엔 맞는 코드도 안 된다', async () => {
+  it('틀린 코드는 403 — 긴 코드·짧은 코드 합쳐 3회째에 세션을 버려, 그 뒤엔 맞는 코드(둘 다)도 안 된다', async () => {
     const { remote, api } = await start()
-    const code = remote.startPairing().pairing!.code
+    const { code, shortCode } = remote.startPairing().pairing!
+    const wrongShort = shortCode === '00' ? '01' : '00'
     const attempt = (given: string) => api('POST', '/v1/pair', { body: { code: given, deviceName: 'x', platform: 'ios' } })
-    for (let count = 1; count <= 5; count++) {
+    for (const given of ['000000000000', wrongShort, '000000000000']) {
       expect(remote.status().pairing).toBeDefined()
-      expect((await attempt('000000000000')).status).toBe(403)
+      expect(await attempt(given)).toMatchObject({ status: 403, body: { reason: 'wrong-code' } })
     }
     expect(remote.status().pairing).toBeUndefined()
-    expect((await attempt(code)).status).toBe(403)
+    expect(await attempt(code)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
+    expect(await attempt(shortCode)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
     expect(remote.status().requests).toEqual([])
   })
 
   it('코드는 2분 뒤 만료되고, 한 번 쓴 코드는 다시 못 쓴다. 짝짓기를 시작하지 않았으면 어떤 코드도 안 된다', async () => {
     const { remote, api, requestPair } = await start()
     const attempt = (code: string) => api('POST', '/v1/pair', { body: { code, deviceName: 'x', platform: 'android' } })
-    expect((await attempt('AAAAAAAAAAAA')).status).toBe(403)
+    expect(await attempt('AAAAAAAAAAAA')).toMatchObject({ status: 403, body: { reason: 'no-code' } })
 
     const expired = remote.startPairing().pairing!
     expect(expired.expiresAt - (Date.now() + box.offset)).toBeGreaterThan(115_000)
     box.offset += 2 * 60_000 + 1
     expect(remote.status().pairing).toBeUndefined()
-    expect((await attempt(expired.code)).status).toBe(403)
+    expect(await attempt(expired.code)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
+    expect(await attempt(expired.shortCode)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
 
     const used = remote.startPairing().pairing!.code
     const { answer, request } = await requestPair('Pixel', used)
     remote.answerPair(request.id, true)
     expect((await answer).status).toBe(200)
-    expect((await attempt(used)).status).toBe(403)
+    expect(await attempt(used)).toMatchObject({ status: 403, body: { reason: 'no-code' } })
 
     remote.startPairing()
     expect(remote.cancelPairing().pairing).toBeUndefined()

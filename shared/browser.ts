@@ -6,39 +6,35 @@
 export const BROWSER_MCP_NAME = 'chrome'
 
 /** 읽기 — 묻지 않는다. 계획 모드에서도 쓴다 */
-export const BROWSER_READ_TOOLS = [
-  'browser_snapshot',
-  'browser_find',
-  'browser_console_messages',
-  'browser_take_screenshot',
-  'browser_wait_for',
-] as const
+export const BROWSER_READ_TOOLS = ['browser_snapshot', 'browser_console_messages', 'browser_take_screenshot', 'browser_wait_for'] as const
 
-/** 페이지 밖으로 나가는 것이 없는 조작 (창 크기·미디어 흉내·페이지 닫기) — 기본·전체 권한에서 묻지 않는다 */
-export const BROWSER_QUIET_TOOLS = ['browser_resize', 'browser_emulate_media', 'browser_close'] as const
+/** 이미 열린 페이지 안의 조작 — 프로젝트 내용을 새 주소로 실어 보낼 수 없다(주소·입력·스크립트는 아래 ASK). 사용자 요청(2026-10-06 "승인을 계속 요청하네"):
+ *  기본·전체 권한에서 묻지 않는다. 로그인해 둔 사이트에서 누르면 그 사이트의 일이 일어난다는 점은 남는다 — 매번 묻기 모드는 전부 묻는다 */
+export const BROWSER_QUIET_TOOLS = ['browser_click', 'browser_press_key', 'browser_select_option'] as const
 
 /** 페이지를 바꾸거나 밖으로 내보낼 수 있는 것 — **전체 권한에서도 묻는다**: 페이지 내용은 그대로 모델에 들어가고(프롬프트 주입) 주소·입력·스크립트는
  *  프로젝트 내용을 임의 주소로 실어 보낼 수 있는데, 승인 요청의 patterns 가 `["*"]` 뿐이라 주소별 규칙을 못 건다 (다른 프로젝트에 보내기 도구와 같은 모양) */
-export const BROWSER_ASK_TOOLS = [
-  'browser_navigate',
-  'browser_navigate_back',
-  'browser_tabs',
-  'browser_click',
+export const BROWSER_ASK_TOOLS = ['browser_navigate', 'browser_tabs', 'browser_type', 'browser_fill_form', 'browser_evaluate'] as const
+
+/** 모델 도구 목록에서 뺀다 (deny 한 도구는 LLM 에 실리지 않는다 — 실측). 두 가지 이유:
+ *  ① 위험 — run_code_unsafe 는 MCP 프로세스(사용자 권한의 node)에서 도는 임의 코드라 bash 승인을 우회하고, file_upload·drop 은 로컬 파일을 사이트로 올린다.
+ *  ② 개수 — 도구가 많으면 요청마다 입력이 커지고 작은 모델이 고르기 어렵다(사용자 2026-10-06 "도구가 너무 많다"). 쓸 일이 드문 것(찾기·창 크기·미디어 흉내·
+ *  끌기·올리기·대화상자·뒤로 가기·페이지 닫기·네트워크 내용)을 뺀 12개만 남긴다. 필요해지면 이 목록에서 옮긴다 */
+export const BROWSER_DENIED_TOOLS = [
+  'browser_run_code_unsafe',
+  'browser_file_upload',
+  'browser_drop',
+  'browser_find',
+  'browser_resize',
+  'browser_emulate_media',
+  'browser_close',
   'browser_hover',
   'browser_drag',
-  'browser_press_key',
-  'browser_type',
-  'browser_fill_form',
-  'browser_select_option',
   'browser_handle_dialog',
-  'browser_evaluate',
-  // 요청·응답의 헤더와 본문이 모델에 들어간다 — 전용 프로필에 로그인해 두고 쓰므로(쿠키·토큰이 실린다) 읽기지만 묻는다
+  'browser_navigate_back',
   'browser_network_requests',
   'browser_network_request',
 ] as const
-
-/** 늘 막는다 — run_code_unsafe 는 MCP 프로세스(사용자 권한의 node)에서 도는 임의 코드라 bash 승인을 우회하고, file_upload·drop 은 로컬 파일을 사이트로 올린다 */
-export const BROWSER_DENIED_TOOLS = ['browser_run_code_unsafe', 'browser_file_upload', 'browser_drop'] as const
 
 export type BrowserToolKind = 'read' | 'quiet' | 'ask' | 'deny'
 

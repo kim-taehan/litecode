@@ -178,6 +178,8 @@ export function statusBanner(status: ConnectionStatus, now: number): string | un
       return S.unresponsive
     case 'revoked':
       return S.revoked
+    case 'fingerprint-changed':
+      return S.fingerprintChangedShort
     case 'connecting':
       return S.connecting
     default:

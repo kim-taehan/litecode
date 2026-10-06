@@ -1,5 +1,6 @@
 // ⚠️ 개발용 가짜 데스크탑 — 제품 코드가 아니다. 앱 번들·설치본 어디에도 들어가지 않는다 (앱은 이 파일을 import 하지 않는다).
 // **평문 http** 다: TLS 도, 지문 고정도, 데스크탑 [허용] 확인도 없다. 페어링 코드는 고정이고 몇 번이든 쓸 수 있다.
+// (시험은 `tls` 옵션으로 자체 서명 https 로도 띄운다 — 폰의 지문 고정 경로를 재려고. 명령줄로는 평문만 띄운다.)
 // 믿을 수 있는 망(내 PC·에뮬레이터·내 폰)에서 앱을 개발할 때만 띄운다. 진짜 대화·파일·키는 여기에 없다.
 //
 // 데스크탑 쪽 원격 서비스(ctx.chat·ctx.remote)가 아직 없어서, shared/remote.ts 계약(/v1 REST + SSE, 01t 2절)을 흉내 낸다 (이슈 #42):
@@ -17,8 +18,9 @@
 // 뜬 뒤 터미널에 한 줄 치면: `allow`·`deny`(짝짓기 요청에 답) · `say c_login 안녕`(데스크탑에서 보낸 턴 — 폰 알림 시험) · `drop`(이벤트 스트림을 끊는다 — 다시 붙기 확인) · `restart`(데스크탑 재시작 흉내 — runId 가 바뀐다) ·
 //   `revoke`(모든 기기 해제)
 
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes, X509Certificate } from 'node:crypto'
 import http from 'node:http'
+import https from 'node:https'
 import { pathToFileURL } from 'node:url'
 import type { Attention, AttentionAnswer, HistoryMessage, NoticeState, TurnItem } from '../../shared/contract.ts'
 import {
@@ -29,6 +31,7 @@ import {
   type CreateConversationRequest,
   type Hello,
   type PairRequest,
+  type PairRejected,
   type PairResponse,
   type QueueTakeResponse,
   type RemoteConversation,
@@ -41,8 +44,11 @@ import {
   type StopResponse,
 } from '../../shared/remote.ts'
 import { confirmCode, groupCode, normalizePairCode, pairDeviceName } from '../../shared/remotePairing.ts'
+import { fingerprintCode } from '../src/core/pairQr.ts'
 
 export const FAKE_PAIR_CODE = 'DEV0DEV0DEV0'
+/** 직접 입력용 숫자 2자리 (진짜 데스크탑처럼 긴 코드와 같이 받는다) */
+export const FAKE_PAIR_SHORT_CODE = '42'
 const EVENT_RING = 2000
 
 export interface FakeDesktopOptions {
@@ -59,12 +65,16 @@ export interface FakeDesktopOptions {
   pairWaitMs?: number
   /** manualPair 일 때 요청이 왔다 — confirm 은 폰 화면에 뜬 것과 같아야 하는 확인 코드 */
   onPairRequest?(request: { deviceName: string; confirm: string }): void
+  /** 주면 https 로 연다 (시험용 자체 서명 인증서 — tests/fixtures). 확인 코드는 인증서 지문 앞 8자가 된다 */
+  tls?: { key: string; cert: string }
 }
 
 export interface FakeDesktop {
-  /** http://127.0.0.1:<port> */
+  /** http(s)://127.0.0.1:<port> */
   url: string
   port: number
+  /** tls 일 때 인증서 지문 (SPKI SHA-256 base64url) */
+  fingerprint?: string
   /** 시작된 턴 수 (대기열에서 합쳐 간 것은 한 턴) */
   turnCount(): number
   /** 그 대화의 턴이 도는 중인가 */
@@ -121,6 +131,7 @@ const MODELS: RemoteModel[] = [
 export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promise<FakeDesktop> {
   const stepMs = options.stepMs ?? 700
   const pingMs = options.pingMs ?? REMOTE_PING_INTERVAL_MS
+  const fingerprint = options.tls ? createHash('sha256').update(new X509Certificate(options.tls.cert).publicKey.export({ type: 'spki', format: 'der' })).digest('base64url') : undefined
   const model = { providerId: MODELS[0]!.providerId, modelId: MODELS[0]!.modelId }
 
   let runId = newRunId()
@@ -385,12 +396,13 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/pair') {
-      // 진짜 데스크탑(src/services/remote.ts)과 같은 답: 틀린 코드 403 'wrong pairing code', 거절 403 'denied on the desktop', 시간 초과 408.
+      // 진짜 데스크탑(src/services/remote.ts)과 같은 답: 틀린 코드 403 reason 'wrong-code', 거절 403 reason 'denied', 시간 초과 408.
       // 다른 점: 코드가 고정이고 몇 번이든 쓸 수 있다(진짜는 2분·1회용·5회 폐기), 여러 번 틀려도 막지 않는다(진짜는 429)
       const pair = body as PairRequest | undefined
       const deviceName = typeof pair?.deviceName === 'string' ? pairDeviceName(pair.deviceName) : ''
       if (typeof pair?.code !== 'string' || !deviceName || (pair.platform !== 'android' && pair.platform !== 'ios')) return reply(400, { error: 'code, deviceName and platform are required' })
-      if (normalizePairCode(pair.code) !== FAKE_PAIR_CODE) return reply(403, { error: 'wrong pairing code' })
+      const given = normalizePairCode(pair.code)
+      if (given !== FAKE_PAIR_CODE && given !== FAKE_PAIR_SHORT_CODE) return reply(403, { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected)
       const allow = (): void => {
         const paired: PairResponse = { deviceId: `dev_${++counter}`, token: randomBytes(32).toString('hex') }
         tokens.set(paired.token, paired.deviceId)
@@ -402,13 +414,13 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
       const timer = setTimeout(() => waiting.settle('timeout'), options.pairWaitMs ?? 60_000)
       const waiting: PendingPair = {
         deviceName,
-        confirm: confirmCode(FAKE_PAIR_CODE, deviceName, pair.platform),
+        confirm: fingerprint ? fingerprintCode(fingerprint) : confirmCode(given, deviceName, pair.platform),
         settle(result) {
           if (pending !== waiting) return
           pending = undefined
           clearTimeout(timer)
           if (result === 'allow') allow()
-          else if (result === 'deny') reply(403, { error: 'denied on the desktop' })
+          else if (result === 'deny') reply(403, { error: 'denied on the desktop', reason: 'denied' } satisfies PairRejected)
           else reply(408, { error: 'nobody answered on the desktop' })
         },
       }
@@ -437,7 +449,8 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
   const listening: string[] = []
   let port = options.port ?? 47600
   for (const host of ['127.0.0.1', ...(options.hosts ?? [])]) {
-    const server = http.createServer((request, response) => void handle(request, response).catch(() => response.destroy()))
+    const listener = (request: http.IncomingMessage, response: http.ServerResponse): void => void handle(request, response).catch(() => response.destroy())
+    const server = options.tls ? https.createServer({ key: options.tls.key, cert: options.tls.cert }, listener) : http.createServer(listener)
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
       server.listen(port, host, resolve)
@@ -452,8 +465,9 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
   }
 
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: `${options.tls ? 'https' : 'http'}://127.0.0.1:${port}`,
     port,
+    fingerprint,
     turnCount: () => turns,
     running: (cid) => chats.get(cid)?.turn !== undefined,
     dropStreams,
@@ -513,7 +527,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     onPairRequest: ({ deviceName, confirm }) => console.log(`짝짓기 요청: "${deviceName}" · 확인 코드 ${confirm} (폰 화면과 같은지 보고) → allow 또는 deny`),
   })
   console.log(`가짜 데스크탑 (개발용 · 평문 http) — ${['127.0.0.1', ...values('--host')].map((host) => `http://${host}:${desktop.port}`).join(' , ')}`)
-  console.log(`페어링 코드: ${groupCode(FAKE_PAIR_CODE)}   (안드로이드 에뮬레이터에서는 10.0.2.2:${desktop.port})`)
+  console.log(`페어링 코드: ${FAKE_PAIR_SHORT_CODE} (또는 ${groupCode(FAKE_PAIR_CODE)})   (안드로이드 에뮬레이터에서는 10.0.2.2:${desktop.port})`)
   console.log('명령: allow | deny (짝짓기 요청에 답) · say <대화 id> <글> (데스크탑에서 보낸 턴 — [ask] 를 넣으면 승인 요청) · drop | restart | revoke   (Ctrl+C 로 끝낸다)')
   process.stdin.setEncoding('utf8')
   process.stdin.on('data', (chunk: string) => {

@@ -20,6 +20,8 @@ export interface RemotePeer {
   /** 운반의 id ('http' · 'bluetooth' …) */
   carrier: string
   key: string
+  /** 이 통로가 지문으로 고정돼 있으면(TLS) 그 지문 — 짝짓기 확인 코드가 지문 앞 8자가 된다. 평문·블루투스는 없다 */
+  fingerprint?: string
 }
 
 export interface RemoteReply {
@@ -63,6 +65,10 @@ export interface RemoteCarrierStatus {
   port?: number
   /** 켰는데 못 뜬 사유 */
   error?: { code?: string; message: string }
+  /** 폰이 공개키 지문으로 고정하는 운반(TLS)의 지문 — SPKI SHA-256 base64url */
+  fingerprint?: string
+  /** 마지막으로 접속이 들어온 시각 (막은 것도) — 진단용. 세지 않는 운반은 없다 */
+  lastAttemptAt?: number
 }
 
 /** 운반 하나 — `ctx.remote.carrier(carrier)` 로 올린다. 모바일 연결이 켜져 있는 동안만 ctx.remote 가 start 한다 */

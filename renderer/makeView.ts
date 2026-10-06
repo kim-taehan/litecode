@@ -1,6 +1,6 @@
 import type { Attention } from '../shared/ipc.ts'
 import type { HookEvent } from '../shared/hooks.ts'
-import { HOOK_TOOL, hookRequest, MAKE_SERVER, MCP_TOOL, mcpRequest, SECRET_MASK, SKILL_TOOL, skillRequest, type MakeScope } from '../shared/make.ts'
+import { CREATE_TOOL, hookRequest, MAKE_SERVER, makeKind, mcpRequest, SECRET_MASK, skillRequest, type MakeScope } from '../shared/make.ts'
 
 // 만들기 도구(스킬·MCP 서버·훅, 이슈 #145 — 시안 _workspace/mock-make)의 승인 카드가 그릴 것. 순수 함수다 (React·IPC 없음).
 // 인자는 메인과 같은 함수(shared/make.ts)로 읽는다 — 틀린 요청은 메인이 카드를 띄우기 전에 막으므로 여기까지 오면 읽힌다.
@@ -55,10 +55,11 @@ function parse(json: string): Record<string, unknown> {
 
 /** 만들기 도구의 승인 요청이면 카드 내용을, 아니면(다른 권한·인자를 못 이었다·못 읽는다) undefined — 보통의 승인 카드로 그린다 */
 export function makeCard(request: PermissionRequest): MakeCard | undefined {
-  if (request.mcp?.server !== MAKE_SERVER || request.input === undefined) return undefined
+  if (request.mcp?.server !== MAKE_SERVER || request.mcp.tool !== CREATE_TOOL || request.input === undefined) return undefined
   try {
     const args = parse(request.input)
-    if (request.mcp.tool === SKILL_TOOL) {
+    const kind = makeKind(args)
+    if (kind === 'skill') {
       const skill = skillRequest(args)
       const lines = skill.body.split('\n')
       return {
@@ -72,7 +73,7 @@ export function makeCard(request: PermissionRequest): MakeCard | undefined {
         file: `.opencode/skills/${skill.name}/SKILL.md`,
       }
     }
-    if (request.mcp.tool === MCP_TOOL) {
+    if (kind === 'mcp_server') {
       const server = mcpRequest(args)
       const secret = (entry: { value: string; secret: boolean }): boolean => entry.secret || entry.value === SECRET_MASK
       return {
@@ -85,12 +86,10 @@ export function makeCard(request: PermissionRequest): MakeCard | undefined {
         inApp: server.vars.some(secret),
       }
     }
-    if (request.mcp.tool === HOOK_TOOL) {
-      const hook = hookRequest(args)
-      return { kind: 'hook', scope: hook.scope, event: hook.event, matcher: hook.matcher, command: hook.command }
-    }
+    const hook = hookRequest(args)
+    return { kind: 'hook', scope: hook.scope, event: hook.event, matcher: hook.matcher, command: hook.command }
   } catch {
     // 못 읽는 인자 — 보통의 승인 카드로 (그 허용은 저장할 곳이 실리지 않아 도구가 받지 않는다)
+    return undefined
   }
-  return undefined
 }

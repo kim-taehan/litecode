@@ -5,11 +5,13 @@
 //   스트림이 끝남·연결 실패 → reconnecting(attempt, retryAt) — 1초·2초·4초…30초 지수 백오프, 붙으면 connected
 //   30초 동안 아무 바이트도 안 옴(ping 도) → unresponsive ("데스크탑 응답 없음(잠자기?)") — 뒤에서 같은 백오프로 계속 붙어 본다
 //   `device.revoked` 이벤트 또는 401 → revoked — 다시 붙지 않는다 (다시 짝지어야 한다)
+//   지금 주소의 서버 지문이 다르고 다른 후보에도 닿지 못했다 → fingerprint-changed (옛 후보의 다른 지문은 닿지 않음으로 — roaming.ts) — 자동으로 믿지 않는다, 다시 붙지 않는다 (다시 짝지어야 한다)
 // 다시 붙을 때: hello(runId 대조) → events?run=&after=<적용한 마지막 seq>. 이을 수 없으면 리듀서가 resync 를 올리고, 여기서 목록과
 // 열린 대화의 스냅샷을 다시 받는다.
 
 import { REMOTE_SILENCE_TIMEOUT_MS, type RemoteEvent } from '../../../shared/remote.ts'
 import { RemoteError, type RemoteClient } from './client.ts'
+import { NetError } from './net.ts'
 import { initialState, reduce, type RemoteAction, type RemoteState } from './state.ts'
 
 export type ConnectionStatus =
@@ -20,6 +22,8 @@ export type ConnectionStatus =
   | { kind: 'reconnecting'; attempt: number; retryAt: number }
   | { kind: 'unresponsive'; attempt: number; retryAt: number }
   | { kind: 'revoked' }
+  /** 데스크탑 인증서 지문이 짝지을 때와 다르다 (다시 설치했거나 다른 PC) */
+  | { kind: 'fingerprint-changed' }
 
 const BACKOFF_BASE_MS = 1_000
 const BACKOFF_MAX_MS = 30_000
@@ -161,6 +165,7 @@ export class Connection {
   /** 붙지 못했거나 끊겼다 — 백오프 뒤 다시 */
   private failed(error?: unknown): void {
     if (error instanceof RemoteError && error.status === 401) return this.revoked()
+    if (error instanceof NetError && error.kind === 'pin-mismatch') return this.halt({ kind: 'fingerprint-changed' })
     this.teardown()
     this.attempt += 1
     const delay = backoffMs(this.attempt)
@@ -169,8 +174,13 @@ export class Connection {
   }
 
   private revoked(): void {
+    this.halt({ kind: 'revoked' })
+  }
+
+  /** 다시 붙지 않는다 — 다시 짝지어야 한다 */
+  private halt(status: Extract<ConnectionStatus, { kind: 'revoked' | 'fingerprint-changed' }>): void {
     this.teardown()
-    this.setStatus({ kind: 'revoked' })
+    this.setStatus(status)
   }
 
   private armSilence(): void {

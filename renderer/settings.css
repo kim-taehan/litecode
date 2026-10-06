@@ -721,9 +721,35 @@
   user-select: all;
 }
 
+/* 직접 입력용 숫자 2자리 — 폰에서 보고 칠 수 있게 크게 */
+.mobile-pairing__code--short {
+  font-size: 32px;
+  line-height: 40px;
+  letter-spacing: 0.2em;
+}
+
 .mobile-pairing__note {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+/* [기기 연결] 모달 — QR 은 흰 바탕 검은 칸 고정(어두운 테마에서도 카메라가 읽게) */
+.mobile-pair-dialog__qr {
+  display: block;
+  width: 220px;
+  height: 220px;
+  margin: 0 auto 16px;
+  border-radius: 8px;
+}
+
+.mobile-pair-dialog__manual {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.mobile-pair-dialog__remaining {
+  margin-right: auto;
+  align-self: center;
 }
 
 .mobile-device {
