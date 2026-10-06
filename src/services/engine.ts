@@ -236,25 +236,29 @@ export function engineMcpConfig(def: EngineMcp, hidden: readonly string[]): Reco
 // 매번 묻기는 open_file·open_terminal 둘 다(터미널은 실행이 사용자 손에 있다). 매번 묻기의 하위 작업(general-ask)은 와일드카드대로 묻는다.
 // 그 이름은 ctx.mcp 가 예약한다 — 사용자·폴더 서버는 `litecode` 라는 이름으로 못 붙는다
 //
-// 세션 도구 (이슈 #55, 01z 1-3·1-6·3-5 — 실측한 모양 그대로): 읽기 둘(list_sessions·read_session)은 묻지 않는다. **보내기 둘은 전역 deny +
-// 기본 모드 에이전트에만 ask** — 그래야 하위 작업(general·explore)과 모르는 에이전트의 도구 목록에서 빠진다(9/9. 규칙이 없으면 general 이 보고
-// 부른다, 6/6). 전체 권한은 `"*":"allow"` 뒤의 개별 ask 가 묻게 하고(3/3), 매번 묻기는 `*_*: ask` 가 전역 deny 뒤에 와 묻는다. 계획은 `*_*: deny`
-// 그대로라 보내기 도구가 없다(사용자 결정). general-ask 는 자기 `*_*: ask` 가 전역 deny 를 되살리므로 **그 뒤에 개별 deny 가 따로** 있어야 한다
-// (웹 도구 deny 와 같은 함정). ⚠️ 승인에 `always` 로 답하면 그 폴더의 모든 세션에서 더는 묻지 않는다 — ctx.llm.reply 는 once·reject 만 보낸다
+// 세션 도구 (이슈 #55·#137, 01z 1-3·1-6·3-5 — 실측한 모양 그대로. 이름은 #137 에서 다른 프로젝트용으로 바뀌었다: list_projects·read_project·
+// send_to_project, 새 대화를 만드는 도구는 없앴다): 목록(list_projects)은 묻지 않는다. **보내기·읽기는 전역 deny + 기본 모드 에이전트에만 ask** —
+// 그래야 하위 작업(general·explore)과 모르는 에이전트의 도구 목록에서 빠진다(9/9. 규칙이 없으면 general 이 보고 부른다, 6/6). 전체 권한은
+// `"*":"allow"` 뒤의 개별 ask 가 묻게 하고(3/3), 매번 묻기는 `*_*: ask` 가 전역 deny 뒤에 와 묻는다. 계획은 `*_*: deny` 그대로라 보내기 도구가
+// 없고(사용자 결정), 읽기는 그 뒤의 개별 ask 로 묻는다. general-ask 는 자기 `*_*: ask` 가 전역 deny 를 되살리므로 **그 뒤에 개별 deny 가 따로**
+// 있어야 한다 (웹 도구 deny 와 같은 함정). ⚠️ 승인에 `always` 로 답하면 그 폴더의 모든 세션에서 더는 묻지 않는다 — ctx.llm.reply 는 once·reject 만 보낸다.
+// 읽기를 묻는 것은 #137 부터다 — 다른 프로젝트의 내용이 이 대화로 들어온다. ⚠️ 읽기의 "전역 deny + 에이전트 ask"·계획의 "`*_*: deny` 뒤 개별 ask" 는
+// 따로 실측하지 않았다 — 보내기의 같은 모양(9/9)과 "뒤가 이긴다"(12조합 3/3)에 기댄다
 //
 // 결과물 선언 (present, 이슈 #91): 화면을 조작하지 않는 읽기 전용 선언이라 **네 모드 모두 묻지 않는다**(계획 포함). 하위 작업은 못 쓴다 — 결과물은 메인
 // 대화가 선언한다(카드도 메인 줄만 모은다, dsh 와 같은 결론). 모양은 보내기 도구와 같다: 전역 deny 로 general·explore·모르는 에이전트에서 빼고
 // 모드 에이전트마다 개별 allow, general-ask 는 자기 `*_*: ask` 뒤에 개별 deny. ⚠️ "전역 deny + 에이전트 allow" 는 실측하지 않았다 —
 // 보내기 도구의 "전역 deny + 에이전트 ask"(9/9)와 같은 규칙 순서(뒤가 이긴다)에 기댄다
-const SEND_TOOLS_ASK = { litecode_send_to_session: 'ask', litecode_start_session: 'ask' }
+const READ_TOOL_ASK = { litecode_read_project: 'ask' }
+const SEND_TOOLS_ASK = { litecode_send_to_project: 'ask', ...READ_TOOL_ASK }
 const PRESENT_ALLOW = { litecode_present: 'allow' }
 const PRESENT_DENY = { litecode_present: 'deny' }
-const SEND_TOOLS_DENY = { litecode_send_to_session: 'deny', litecode_start_session: 'deny' }
-const READ_TOOLS_ALLOW = { litecode_list_sessions: 'allow', litecode_read_session: 'allow' }
+const SEND_TOOLS_DENY = { litecode_send_to_project: 'deny', litecode_read_project: 'deny' }
+const LIST_TOOL_ALLOW = { litecode_list_projects: 'allow' }
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
-  plan: { '*_*': 'deny', litecode_open_file: 'allow', ...READ_TOOLS_ALLOW, ...PRESENT_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
+  plan: { '*_*': 'deny', litecode_open_file: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ASK, ...PRESENT_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
   [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...PRESENT_ALLOW },
-  [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open_file: 'allow', litecode_open_terminal: 'allow', ...READ_TOOLS_ALLOW, ...PRESENT_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
+  [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open_file: 'allow', litecode_open_terminal: 'allow', ...LIST_TOOL_ALLOW, ...PRESENT_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
   [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...PRESENT_ALLOW },
   // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
   [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...SEND_TOOLS_DENY },

@@ -27,8 +27,9 @@ const PLAIN_PERMISSIONS = ['bash', 'edit', 'read', 'glob', 'grep', 'task', 'webf
 const GUARDED_PERMISSIONS = ['edit', 'bash', 'webfetch', 'websearch']
 /** 매번 묻기에서만 쓰는 하위 에이전트 (engine.ts SUBAGENT_ASK) */
 const ASKING_SUBAGENT = 'general-ask'
-const APP_SEND_TOOLS = ['litecode_send_to_session', 'litecode_start_session']
-const APP_READ_TOOLS = ['litecode_list_sessions', 'litecode_read_session']
+const APP_SEND_TOOL = 'litecode_send_to_project'
+/** 다른 프로젝트의 대화 읽기 — 계획 모드에서도 묻고 쓴다 (이슈 #137) */
+const APP_READ_TOOL = 'litecode_read_project'
 
 /** `.env` 파일 읽기 — 엔진 기본이 묻는다 (`.env.example` 은 아니다) */
 function readsEnvFile(resources: readonly string[]): boolean {
@@ -46,10 +47,11 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
   if (permission === 'plan_enter' || permission === 'plan_exit') return 'ask' // 앱이 쓰지 않는 엔진 도구 — 모르는 것으로
   if (permission.includes('_')) {
     // MCP 도구 (`<서버>_<도구>`)
-    if (APP_SEND_TOOLS.includes(permission)) return child || mode === 'plan' ? 'deny' : 'ask'
+    if (permission === APP_SEND_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
+    if (permission === APP_READ_TOOL) return child ? 'deny' : 'ask'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'
     if (child) return asking ? 'ask' : 'allow'
-    if (APP_READ_TOOLS.includes(permission) || permission === 'litecode_open_file') return 'allow'
+    if (permission === 'litecode_list_projects' || permission === 'litecode_open_file') return 'allow'
     if (permission === 'litecode_open_terminal') return mode === 'plan' ? 'deny' : 'allow'
     return mode === 'plan' ? 'deny' : asking ? 'ask' : 'allow'
   }

@@ -151,9 +151,9 @@ export interface AttentionQuestion {
 /** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'. "항상 허용" 은 없다(사용자 결정) */
 export type AttentionAnswer = 'once' | 'reject' | string[][]
 
-/** 승인 카드에서 사용자가 고른 "받을 대화" (이슈 #67) — 다른 대화에 지시를 보내는 도구의 허용(once)에 함께 싣는다. 기존 대화 하나 또는 새 대화.
- *  엔진은 모른다(엔진에 가는 답은 once 뿐) — 앱이 허용 기록에 적어 두고 앱 MCP 서버의 도구가 실행할 때 쓴다 */
-export type AttentionTarget = { kind: 'conversation'; conversationId: string } | { kind: 'new' }
+/** 승인 카드에서 사용자가 고른 "받을 대화" (이슈 #67·#137) — 다른 프로젝트에 지시를 보내는 도구의 허용(once)에 함께 싣는다. 고른 프로젝트의
+ *  마지막에 보던 대화 하나다. 엔진은 모른다(엔진에 가는 답은 once 뿐) — 앱이 허용 기록에 적어 두고 앱 MCP 서버의 도구가 실행할 때 쓴다 */
+export type AttentionTarget = { kind: 'conversation'; conversationId: string }
 
 /** 첨부 종류 (이슈 #44) — file: 글 파일(본문에 `@경로` 나 글로 풀려 간다), image: png·jpeg (엔진에 이미지로 간다) */
 export type AttachmentKind = 'file' | 'image'
@@ -184,6 +184,8 @@ export interface AttachmentPick {
 export interface MessageOrigin {
   conversationId: string
   title: string
+  /** 보낸 프로젝트의 이름 (이슈 #137 — 다른 프로젝트에서 왔다). 그 전에 같은 프로젝트의 대화가 보낸 기록에는 없다 */
+  project?: string
 }
 
 /** 지난 대화의 말풍선 하나 (중립 모양 — 화면은 opencode 메시지 형식을 모른다). assistant 의 error 는 실패·중단 사유 */

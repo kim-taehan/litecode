@@ -39,8 +39,6 @@ export interface QueuedSend {
   origin?: ChatOrigin
   /** origin 이 다른 대화일 때 — 보낸 대화 (말풍선 딱지·대기열 줄에 보인다). 화면(IPC)이 보낸 것에는 없다 */
   from?: MessageOrigin
-  /** 새 대화의 제목 (start_session). 없으면 첫 메시지의 첫 줄 */
-  title?: string
 }
 
 export interface SendResult {

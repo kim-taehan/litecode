@@ -52,9 +52,10 @@ export function questionView(request: QuestionAttention): QuestionView {
 /**
  * 내 말(user) 하나의 모양 — 데스크탑 ChatTurn 의 UserMessage 와 같은 판정.
  * hook: 턴 끝 훅이 이어 보낸 글 — 말풍선이 아니라 구분되는 줄(사유는 빈 글일 수 있다).
- * bubble: 첨부 이름(있으면) + 다른 대화가 보낸 지시면 그 대화 제목(origin) + 글. 글이 비면(첨부만 보냄) 말풍선은 그리지 않는다
+ * bubble: 첨부 이름(있으면) + 다른 대화가 보낸 지시면 그 대화 제목(origin)과 보낸 프로젝트 이름(originProject — 다른 프로젝트에서 왔다, 이슈 #137.
+ * 그 전에 같은 프로젝트의 대화가 보낸 기록에는 없다) + 글. 글이 비면(첨부만 보냄) 말풍선은 그리지 않는다
  */
-export type UserMessageView = { kind: 'hook'; reason: string } | { kind: 'bubble'; text: string; attachments: string[]; origin?: string }
+export type UserMessageView = { kind: 'hook'; reason: string } | { kind: 'bubble'; text: string; attachments: string[]; origin?: string; originProject?: string }
 
 export function userMessageView(message: HistoryMessage): UserMessageView {
   const reason = stopFeedbackReason(message.text)
@@ -64,6 +65,7 @@ export function userMessageView(message: HistoryMessage): UserMessageView {
     text: message.text.trim(),
     attachments: (message.attachments ?? []).map((attachment) => attachment.name),
     ...(message.origin && { origin: message.origin.title || S.untitled }),
+    ...(message.origin?.project && { originProject: message.origin.project }),
   }
 }
 

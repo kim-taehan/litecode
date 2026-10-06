@@ -180,6 +180,9 @@ function bootstrap(ctx: Context): void {
     ctx.providers.fetchAvailableModels(draft),
   )
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
+  // 프로젝트마다 마지막에 보던 대화 (이슈 #137) — 화면이 대화를 열 때 알리고, 다른 프로젝트에 지시를 보낼 때 받는 대화가 된다
+  handle(ctx, Channel.MARK_VIEWED, async (_event, conversationId: string) => ctx.sessions.noteViewed(String(conversationId)))
+  handle(ctx, Channel.LAST_VIEWED, async () => ctx.sessions.lastViewed())
   handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))
   // 고른 모델·모드·시각만 — 제목·통계·엔진 세션은 ctx.chat 이 적는다 (화면이 통째로 덮지 않게)
   handle(ctx, Channel.PATCH_CONVERSATION, async (_event, id: string, patch: { model?: ChatModel; mode?: Mode; updatedAt?: number }) => {
@@ -578,7 +581,7 @@ const features: FeatureDefinition[] = [
       ctx.plugin(AppMcpService)
       ctx.plugin(OpenFileTool)
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
-      ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 넷 — 다른 대화 보기·지시 보내기 (이슈 #55)
+      ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
       ctx.plugin(appMcpBridge)
     },
   },

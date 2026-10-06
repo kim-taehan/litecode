@@ -726,6 +726,13 @@ export class LlmService extends Service {
     return { workdir }
   }
 
+  /** 그 폴더를 엔진에 넘길 수 없으면 그 사유 (engineFolder 문 — 없는 폴더·플러그인 파일이 있는 폴더). 다른 프로젝트의 대화에 지시를 넣기 전에
+   *  세션 도구가 미리 본다 (이슈 #137) — 넣은 뒤에 알면 보낸 쪽은 "받았다" 로 알고 받는 턴만 실패한다 */
+  async folderProblem(directory: string): Promise<string | undefined> {
+    const folder = await this.engineFolder(directory)
+    return 'error' in folder ? folder.error : undefined
+  }
+
   /** engineFolder 의 던지는 판 */
   private async openFolder(directory: string): Promise<string> {
     const folder = await this.engineFolder(directory)

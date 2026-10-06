@@ -389,17 +389,6 @@ describe('ChatService — 대기열', () => {
     expect((await stored('c1'))!.origins).toBeUndefined()
   })
 
-  it('새 대화에 제목을 주면 그 제목으로 만든다 (start_session) — 있는 대화의 제목은 안 바꾼다', async () => {
-    const { chat, turn, stored } = await start()
-    await chat.send('c1', input('첫 지시', { title: 'README 정리' }))
-    const first = await turn(1)
-    expect((await stored('c1'))!.title).toBe('README 정리')
-    first.finish()
-    await chat.send('c1', input('둘째', { title: '다른 제목' }))
-    await turn(2)
-    expect((await stored('c1'))!.title).toBe('README 정리')
-  })
-
   it('한 턴에 보낸 지시 수를 센다 — 상한을 넘으면 세지 않는다. 도는 턴이 없으면 못 센다', async () => {
     const { chat, turn } = await start()
     expect(chat.countSend('c1', 2)).toBe(false)
@@ -641,10 +630,8 @@ describe('ChatService — 스냅샷과 전달', () => {
     expect(llm.replies).toEqual([['ses_1', 'per_1', 'once']])
     // 지시 보내기를 허용하며 고른 받을 대화 (이슈 #67) 도 그대로 전한다
     await chat.reply('ses_1', 'per_2', answer, { kind: 'conversation', conversationId: 'c9' })
-    await chat.reply('ses_1', 'per_3', answer, { kind: 'new' })
     expect(llm.replies.slice(1)).toEqual([
       ['ses_1', 'per_2', 'once', { kind: 'conversation', conversationId: 'c9' }],
-      ['ses_1', 'per_3', 'once', { kind: 'new' }],
     ])
     expect(await chat.stopSubtask('sub_1')).toBe(true)
     expect(await chat.stopSubtask('nope')).toBe(false)
@@ -692,7 +679,7 @@ describe('ChatService — 대화 이름 바꾸기 (이슈 #63)', () => {
     expect(await chat.rename('c1', '  결제 API 문서 정리 ')).toMatchObject({ id: 'c1', title: '결제 API 문서 정리' })
     expect(of('conversations.changed').slice(before)).toEqual([{ project: '/work/a', removed: [] }])
 
-    await chat.send('c1', input('둘째 질문', { title: '다른 제목' }))
+    await chat.send('c1', input('둘째 질문'))
     expect(of('turn.started')[1]!.conversation.title).toBe('결제 API 문서 정리')
     ;(await turn(2)).finish()
     expect((await ended(2)).conversation!.title).toBe('결제 API 문서 정리')
