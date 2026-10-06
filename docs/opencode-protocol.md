@@ -143,6 +143,14 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     게이트웨이가 큰 max_tokens 를 거절하는지는 미측정. 보고 토큰이 문턱을 넘은 스텝 뒤, 그리고 게이트웨이 한도 초과(`ContextOverflowError`) 뒤에(한도를 비워도) 돈다.
     순서: 요약 user(compaction 파트) → 요약 답(summary:true) → 이음 user(합성 "Continue…" 또는 앞 user 복사본) → `session.compacted` → 그 답 → idle. 요약도 넘치면 이음 없이 idle.
     `ctx.llm` 은 턴 안의 요약·이음 user 를 그 턴 것으로 보고 이음의 답을 그 턴 답으로 쓴다
+  - **손으로 부르는 요약** (#144, 실측 2026-10-06 가짜 LLM): 레거시 `POST /session/{id}/summarize?directory=` 본문 `{providerID, modelID, auto?}` — 둘 다 **필수**(빠지면 400 `Missing key`),
+    추가 필드 불가(messageID 를 못 정한다). 응답 200 `true` 는 요약이 **끝나거나 멈춘 뒤**에 온다(가짜 LLM 2.5초 → 2.55초) — 진행은 `/event` 로 본다.
+    순서: user(엔진이 id 를 정함, 파트 `compaction{auto:false}`, 글 없음) → busy → 요약 답(`summary:true`, agent `compaction`, parentID = 그 user) → `session.compacted` → idle. **이음 user 가 없다.**
+    요약 요청은 도구 없이 `<conversation>` 을 실어 그 모델로 간다(`max_tokens` = limit.output). 빈 세션도 요약한다(LLM 을 부른다) → 앱이 막는다. 요약 뒤 다음 턴은 정상.
+    **멈춘 요약은 다음 프롬프트를 삼킨다 (3/3)**: abort 는 200 `true` → `session.error(MessageAbortedError)` → idle, 요약 답은 그 오류로 남는다. 그 뒤 첫 프롬프트는 답 대신
+    요약 답(parentID = 새 user, summary:true)만 만들고 idle 이다 — 사용자의 글이 답을 못 받는다. `DELETE /session/{id}/message/{id}?directory=`(200 `true`)로 요약 답·요약 user 를 지우면
+    다음 턴이 정상이다(3/3, 요약 user 만 지워도 되지만 고아 요약 답이 기록에 남는다). `ctx.llm.compact` 는 끝나지 않은 손 요약을 늘 지운다. 신규 세대 `POST /api/session/{id}/compact`(204)는 안 쟀다.
+    자동 요약을 멈춘 뒤에도 같은지는 **안 쟀다**
   - **diff** (#20): `apply_patch` 는 모델 id 에 `gpt-` 가 있을 때만 있고 그때는 edit·write 가 없다. edit `metadata.filediff{file(절대), patch}`, write `metadata{filepath, exists}`,
     apply_patch `metadata.files[]{filePath, type, patch}`. git 이 아닌 폴더의 worktree 는 `/` — 경로는 세션 폴더 기준으로 앱이 계산
   - **하위 작업(task)** (#31, 실측 2026-10-02 `_workspace/probe-31/`): 한 메시지의 task 여럿은 동시에 돈다. 자식 세션은 `session.created{info.parentID}`, 부모 task 파트
@@ -160,6 +168,13 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     연결까지 기다림), `POST /mcp/{name}/disconnect`. 엔진을 다시 띄우면 사라져 `ctx.mcp` 가 매 턴(`llm/before-turn`) 다시 붙인다. 도구·권한 이름은 `<서버>_<도구>` — 와일드카드 `*_*`
     로 계획 deny·매번 묻기 ask(하위 에이전트 general-ask 도). `*_*` 는 밑줄 있는 내장 권한(external_directory·doom_loop·plan_enter·plan_exit)에도 걸려 기본값을 다시 적는다.
     로컬 서버 자식엔 opencode env 가 통째로 가므로 비밀 이름을 빈 값으로 덮는다. 원격은 `oauth:false`
+  - **local MCP 를 Electron 으로** (#147, `_workspace/01aj_playwright_mcp.md`, 2026-10-06): `POST /mcp` 의 `config: {type:"local", command:[process.execPath, <cli.js>, …],
+    environment:{ELECTRON_RUN_AS_NODE:"1"}}` — 개발 Electron·설치본 바이너리 둘 다 node 20.18.3 으로 돈다. 폐쇄망 PC 에 node 가 없어도 동봉한 JS MCP 서버를 쓸 수 있다.
+    `RunAsNode` 퓨즈를 끄면 깨진다. local MCP 자식의 **cwd 는 그 프로젝트 폴더**다(재확인) — cwd 에 파일을 쓰는 서버(Playwright MCP 의 `.playwright-mcp/`)는 출력 폴더를 따로 줘야 한다.
+    MCP 도구가 이미지를 돌려주면 도구 파트 `state.attachments: [{mime, url:"data:…"}]` 로 온다(글은 `state.output`). MCP 도구의 승인 요청은 `patterns:["*"]`, `metadata:{}` 다 —
+    인자(주소 등)로 규칙을 나눌 수 없다, 인자는 도구 파트의 `state.input` 에서 읽는다. `POST /mcp/{name}/disconnect` 와 opencode 종료(SIGKILL 포함)는 stdio 자식의 표준입력을
+    닫아 자식이 스스로 끝난다(mac, 각 1/1) — 자식이 띄운 손자(Chrome)는 자식이 정상 종료할 때만 정리된다. Playwright MCP 0.0.83: 기본 `--snapshot-mode full` 은 동작 응답에
+    스냅샷을 **파일 링크**로만 준다 — `none` + 명시적 `browser_snapshot` 호출이 본문으로 받는 길이다. Chrome 은 `--user-data-dir=<경로>` 한 인자로 뜬다(경로에 공백이 있어도 — 2026-10-06 헤드리스 1/1)
   - **할 일 목록(todowrite)** (#83, `_workspace/01ae_todo.md`): 인자 `{todos:[{content, status, priority}]}` — id 없음, status(pending·in_progress·completed·cancelled)·priority 는
     검사 안 되는 문자열. **호출마다 목록 전체를 보내고 통째로 교체된다.** 끝난 파트의 `state.metadata.todos` 가 그 시점 목록, 같은 내용이 `todo.updated {sessionID, todos}` 로 오고
     `GET /session/{id}/todo?directory=` 가 맨 배열로 준다(재시작·자동 요약 뒤에도 남는다). 틀린 인자는 `running`(input 실림) 뒤 `error` 이고 목록은 안 바뀐다 → 화면은 `completed` 파트만 본다.

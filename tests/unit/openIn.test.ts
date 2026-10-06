@@ -147,37 +147,3 @@ describe('OpenInService', () => {
     expect((await openIn.apps()).map((entry) => entry.id)).not.toContain('zed')
   })
 })
-
-describe('OpenInService.openFile (파일 미리보기 패널)', () => {
-  it('편집기만 files 표시, 등록된 프로젝트 안 파일을 open -a <번들> <realpath> 로', async () => {
-    const zed = await app(roots[0], 'Zed.app')
-    await app(roots[0], 'iTerm.app')
-    await fs.mkdir(path.join(project, 'src'))
-    await fs.writeFile(path.join(project, 'src', 'a.ts'), 'x\n')
-    const host = recorder()
-    const { openIn, projects } = await service(host)
-    await projects.open(project)
-    expect((await openIn.apps()).filter((entry) => entry.files).map((entry) => entry.id)).toEqual(['zed'])
-    await openIn.openFile('zed', project, 'src/a.ts')
-    expect(host.launches).toEqual([{ kind: 'open-a', args: ['-a', zed, path.join(project, 'src', 'a.ts')] }])
-  })
-
-  it('편집기 아닌 앱(터미널·Finder)·밖 파일·링크로 밖·등록 안 된 폴더는 거절하고 실행기를 부르지 않는다', async () => {
-    await app(roots[0], 'Zed.app')
-    await app(roots[0], 'iTerm.app')
-    await fs.writeFile(path.join(project, 'run.sh'), 'echo hi\n')
-    await fs.writeFile(path.join(tmp, 'secret.txt'), 's\n')
-    await fs.symlink(path.join(tmp, 'secret.txt'), path.join(project, 'leak.txt'))
-    const host = recorder()
-    const { openIn, projects } = await service(host)
-    await projects.open(project)
-    await expect(openIn.openFile('iterm', project, 'run.sh')).rejects.toThrow()
-    await expect(openIn.openFile('terminal', project, 'run.sh')).rejects.toThrow()
-    await expect(openIn.openFile('finder', project, 'run.sh')).rejects.toThrow()
-    await expect(openIn.openFile('zed', project, '../secret.txt')).rejects.toThrow()
-    await expect(openIn.openFile('zed', project, 'leak.txt')).rejects.toThrow()
-    await expect(openIn.openFile('zed', project, 'nope.ts')).rejects.toThrow()
-    await expect(openIn.openFile('zed', tmp, 'secret.txt')).rejects.toThrow() // 등록 안 된 폴더
-    expect(host.launches).toEqual([])
-  })
-})

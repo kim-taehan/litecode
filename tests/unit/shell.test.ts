@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context } from 'cordis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { OUTPUT_LIMIT, ShellService, shellCommand, shellContext } from '../../src/services/shell.ts'
+import { shellCommand } from '../../src/services/exec.ts'
+import { OUTPUT_LIMIT, ShellService, shellContext } from '../../src/services/shell.ts'
 import { setMainLanguage } from '../../src/i18n.ts'
 
 // `!명령` 실행 (ctx.shell) — 프로젝트 폴더·로그인 셸·출력 합치기·상한·■·기한 (closed-code shellRunner + 01h)

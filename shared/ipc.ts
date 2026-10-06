@@ -34,7 +34,7 @@ export type { Subtask, TurnItem } from '../src/services/turnProgress.ts'
 export type { FileDiff } from '../src/services/toolDiffs.ts'
 export type { Project } from '../src/services/projects.ts'
 export type { Conversation, ShellCard } from '../src/services/sessions.ts'
-export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
+export type { AppCommand, TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
 export type { Appearance, Settings } from '../src/services/settings.ts'
 export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
@@ -80,6 +80,8 @@ export const Channel = {
   REMOVE_PROJECT: 'projects:remove',
   RENAME_PROJECT: 'projects:rename',
   LIST_CONVERSATIONS: 'sessions:list',
+  MARK_VIEWED: 'sessions:viewed',
+  LAST_VIEWED: 'sessions:last-viewed',
   SAVE_CONVERSATION: 'sessions:save',
   PATCH_CONVERSATION: 'sessions:patch',
   RENAME_CONVERSATION: 'sessions:rename',
@@ -104,6 +106,7 @@ export const Channel = {
   TURN_ATTENTION: 'chat:attention',
   REPLY_ATTENTION: 'chat:reply-attention',
   STOP_TURN: 'chat:stop',
+  COMPACT_CHAT: 'chat:compact',
   STOP_SUBTASK: 'chat:stop-subtask',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
@@ -130,7 +133,6 @@ export const Channel = {
   NOTIFICATION_OPEN: 'notifications:open',
   OPEN_IN_APPS: 'openIn:apps',
   OPEN_IN: 'openIn:open',
-  OPEN_FILE_IN: 'openIn:open-file',
   GET_FEATURES: 'features:get',
   /** 메인 → 화면 (FeatureId[]) — 켜진 기능이 바뀌었다 (묶음을 다 올리고 내린 뒤) */
   FEATURES_CHANGED: 'features:changed',
@@ -232,6 +234,10 @@ export interface LitecodeBridge {
   renameProject(directory: string, name: string): Promise<Project[]>
   /** 저장된 대화 목록 정보 — 모든 프로젝트, 맨 앞이 가장 최근에 만든 것 */
   listConversations(): Promise<Conversation[]>
+  /** 사용자가 그 (저장된) 대화를 열어 보고 있다 — 그 프로젝트의 "마지막에 보던 대화" 로 저장한다 (이슈 #137, ctx.sessions.noteViewed) */
+  markViewed(conversationId: string): Promise<void>
+  /** 프로젝트 경로 → 그 프로젝트에서 마지막에 보던 대화 id (앱을 껐다 켜도 남는다) — 다른 프로젝트에 지시를 보낼 때 받는 대화 */
+  lastViewed(): Promise<Record<string, string>>
   /** 넣거나 고친다. 그 프로젝트가 보관 개수를 넘어 지운 대화 id 를 준다. 보낸 대화의 저장은 메인(ctx.chat)이 한다 — 화면은 `!명령` 만
    *  돌린 새 대화를 목록에 넣을 때만 쓴다 */
   saveConversation(conversation: Conversation): Promise<string[]>
@@ -271,6 +277,9 @@ export interface LitecodeBridge {
   /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴은 "중단됨"(interrupted) 으로 끝난다 (onTurnEnded). 쌓인 대기열은 보내지 않고
    *  붙잡힌다(onQueueChanged 의 held) — takeQueue 로 입력창에 되돌린다. 도는 턴이 없으면 false */
   stopTurn(conversationId: string): Promise<boolean>
+  /** `/compact` — 그 대화를 요약해 컨텍스트를 줄인다. 요약은 한 턴처럼 돈다 (onTurnStarted → 요약 줄 onTurnProgress → onTurnEnded, 멈춤은 stopTurn).
+   *  턴이 도는 중이거나 아직 한 번도 안 보낸 대화면 시작하지 않고 그 사유를 준다 */
+  compactChat(conversationId: string): Promise<{ ok: true } | { ok: false; error: string }>
   /** 도는 턴의 하위 작업 하나만 멈춘다 (subtaskId = 그 하위 작업 진행 줄의 id) — 턴은 이어 간다. 도는 턴의 하위 작업이 아니면 false */
   stopSubtask(subtaskId: string): Promise<boolean>
   /** 답의 인라인 코드 중 그 프로젝트 안의 실제 파일인 것만 (받은 글자 그대로) — 파일 언급 칩 */
@@ -313,8 +322,6 @@ export interface LitecodeBridge {
   openInApps(): Promise<OpenInApp[]>
   /** 그 프로젝트 폴더를 그 앱으로 연다. 목록 밖 앱·등록 안 된 폴더·실행 실패면 지금 언어의 사유로 거절 */
   openIn(appId: string, directory: string): Promise<void>
-  /** 프로젝트 안 파일 하나를 편집기(files 표시 앱)로 연다 — 파일 미리보기 패널. 편집기 아닌 앱·밖 파일·등록 안 된 폴더면 거절 */
-  openFileIn(appId: string, directory: string, token: string): Promise<void>
   /** 켜진 기능 (ctx.features) — 꺼진 기능의 버튼·탭·메뉴·단축키는 그리지 않는다. 켜고 끄기는 setSettings({ features }) */
   getFeatures(): Promise<FeatureId[]>
   onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void

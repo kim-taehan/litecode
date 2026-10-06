@@ -8,7 +8,9 @@ import { realDirectory, type McpStatus } from './llm.ts'
 import { listMcpTools, type McpTool } from './mcpClient.ts'
 import type { KeyCipher } from './providers.ts'
 import { readJsonFileSync } from './jsonFile.ts'
+import { insideOf } from './projectPath.ts'
 import { tr } from '../i18n.ts'
+import { BROWSER_MCP_NAME } from '../../shared/browser.ts'
 import './llm.ts'
 
 // MCP 서버 (ctx.mcp, 이슈 #28). 채팅은 opencode 레거시 경로라 MCP 도구가 네이티브로 실린다 — 이 서비스는 "어떤 서버를 어느 폴더에 붙일지" 만 쥔다.
@@ -40,7 +42,7 @@ import './llm.ts'
 //   서버·어느 프로젝트든 전용 서버와 겹치는 모든 프로젝트 서버), 폴더 정의는 앱 서버(어느 묶음이든)와 이름이 같으면 붙이지 않는다(shadowed)
 //
 // 내장 서버 (이슈 #51, _workspace/01z_desktop_mcp.md 3-1): 앱 자신이 띄운 MCP 서버(ctx.appMcp)를 registerBuiltin 으로 받아 사용자 서버와 같은
-// 길(매 턴 붙이기·프로젝트별 켜기)로 붙인다. 이름 `litecode` 는 예약이다 — 사용자는 그 이름으로 저장할 수 없고, 폴더 정의·예전에 저장된 앱 서버는
+// 길(매 턴 붙이기·프로젝트별 켜기)로 붙인다. 이름 `litecode`(와 브라우저 기능의 `chrome`, #147)는 예약이다 — 사용자는 그 이름으로 저장할 수 없고, 폴더 정의·예전에 저장된 앱 서버는
 // 붙이지 않는다(shadowed). 엔진 설정이 `litecode_*` 도구에 따로 권한을 주므로(계획 모드에서도 허용 등) 남의 서버가 그 이름을 쓰면 안 된다.
 // 팝업에는 "모든 프로젝트" 묶음 맨 끝에 읽기 전용 한 줄(주소·토큰은 화면에 안 준다)
 
@@ -53,6 +55,8 @@ declare module 'cordis' {
 export type McpSource = 'app' | 'personal' | 'project' | 'builtin'
 /** 앱 MCP 서버(ctx.appMcp)의 이름 — 모델이 보는 도구는 `litecode_<도구>`. 예약 */
 export const APP_MCP_NAME = 'litecode'
+/** 내장 서버만 쓰는 이름 — 엔진 설정이 그 이름의 도구(`litecode_*`·`chrome_*`)에 따로 권한을 준다. 그 내장 서버가 올라와 있지 않아도(기능 꺼짐) 예약이다 */
+const RESERVED_NAMES: readonly string[] = [APP_MCP_NAME, BROWSER_MCP_NAME]
 /** 내장 서버의 그 폴더용 정의 — 아직 붙일 수 없으면(서버가 안 떴다) undefined */
 export type BuiltinMcp = (workdir: string) => EngineMcp | undefined
 /** 팝업의 묶음 — "이 프로젝트만"(앱이 그 프로젝트에 저장한 서버·폴더 정의) / "모든 프로젝트"(앱 서버·개인 설정) */
@@ -209,9 +213,9 @@ export class McpService extends Service {
     const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
     const own = mine?.servers ?? []
     const ownNames = new Set(own.map((server) => server.name))
-    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, APP_MCP_NAME])
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, ...RESERVED_NAMES])
     // 예약 이름으로 저장돼 있던 앱 서버(이 기능 전의 것)는 붙이지 않는다
-    const reserved = (server: McpServerRecord) => server.name === APP_MCP_NAME && { shadowed: true }
+    const reserved = (server: McpServerRecord) => RESERVED_NAMES.includes(server.name) && { shadowed: true }
     const entries: { summary: McpServerSummary; def?: EngineMcp }[] = [
       ...own.map((server) => ({
         summary: { ...appSummary(server, 'project', this.secrets[secretKey(server.name, workdir)] ?? {}), enabled: on(server.name, server.enabled), ...reserved(server) },
@@ -227,7 +231,7 @@ export class McpService extends Service {
         def: reserved(server) ? undefined : this.engineDef(server),
       })),
     ]
-    const known = new Set([...entries.map((entry) => entry.summary.name), APP_MCP_NAME, ...this.builtins.keys()])
+    const known = new Set([...entries.map((entry) => entry.summary.name), ...RESERVED_NAMES, ...this.builtins.keys()])
     for (const { name, def, enabled } of personalServers(this.opts.env ?? process.env)) {
       if (known.has(name)) continue
       known.add(name)
@@ -270,7 +274,7 @@ export class McpService extends Service {
     if (scope === 'project' && !workdir) throw new Error(tr('mcp.error.noProject'))
     const owner = scope === 'project' ? workdir : undefined
     const { record, secrets } = this.resolve(input, existing, owner)
-    if (record.name === APP_MCP_NAME) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
+    if (RESERVED_NAMES.includes(record.name)) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
     // 이름 하나 = 서버 하나 — 이 프로젝트에서 보이는 앱 서버끼리, 그리고 모든 프로젝트 서버는 어느 프로젝트의 전용 서버와도 겹치지 않게
     if ([...this.servers, ...(scope === 'project' ? mine : [])].some((server) => server.name === record.name && server !== existing)) {
       throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
@@ -298,6 +302,38 @@ export class McpService extends Service {
     }
     this.forget(existing?.name ?? record.name)
     this.persist()
+  }
+
+  /** 대화로 서버를 더하기 전의 검사 (이슈 #145 — 앱 MCP 의 add_mcp_server). 입력 모양·예약 이름·**그 프로젝트에서 이미 보이는 이름**(앱 서버·
+   *  그 프로젝트 전용·폴더 정의·개인 설정 — save 는 앱 서버끼리만 본다). toFile 이면 프로젝트의 `.mcp.json` 을 고쳐 쓸 수 있는지도 본다.
+   *  안 되면 사유를 던진다 */
+  checkNew(input: McpServerInput, directory: string, toFile = false): void {
+    const workdir = realpathOf(directory)
+    const { record } = this.resolve({ ...input, originalName: undefined }, undefined)
+    if (RESERVED_NAMES.includes(record.name) || this.builtins.has(record.name)) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
+    const visible = [...this.servers, ...(this.projects[workdir]?.servers ?? []), ...projectServers(workdir), ...personalServers(this.opts.env ?? process.env)]
+    if (visible.some((server) => server.name === record.name)) throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
+    if (toFile) readProjectFile(workdir)
+  }
+
+  /** 프로젝트 폴더의 `.mcp.json`(Claude Code 모양 — projectServers 가 읽는 그 모양)에 서버 하나를 더한다 (이슈 #145). 있던 서버·다른 열쇠는
+   *  그대로 두고, 파일이 깨져 있으면 덮어쓰지 않고 던진다. 링크를 풀어 프로젝트 폴더 안일 때만 쓴다. **비밀 값은 프로젝트 파일에 적지 않는다** —
+   *  비밀이 있는 서버는 save 의 project 묶음(앱 안)으로 넣는다. 돌려주는 것은 쓴 파일의 경로. 다음 턴에 그 폴더에 붙는다 */
+  addToProjectFile(input: McpServerInput, directory: string): string {
+    this.checkNew(input, directory)
+    const workdir = realpathOf(directory)
+    const { record, secrets } = this.resolve({ ...input, originalName: undefined }, undefined)
+    if (Object.keys(secrets).length > 0) throw new Error(tr('mcp.error.projectFileSecret'))
+    const { file, config } = readProjectFile(workdir)
+    const values = Object.fromEntries(record.vars.map((entry) => [entry.name, entry.value ?? '']))
+    const more = Object.keys(values).length > 0
+    const entry =
+      record.type === 'remote'
+        ? { type: 'http', url: record.url, ...(more && { headers: values }) }
+        : { command: record.command![0], ...(record.command!.length > 1 && { args: record.command!.slice(1) }), ...(more && { env: values }) }
+    const servers = (config['mcpServers'] ?? {}) as Record<string, unknown>
+    fs.writeFileSync(file, `${JSON.stringify({ ...config, mcpServers: { ...servers, [record.name]: entry } }, null, 2)}\n`)
+    return file
   }
 
   /** 앱 서버를 지운다 — directory(지금 프로젝트)의 전용 서버를 먼저 찾고, 없으면 모든 프로젝트 서버. 그 이름의 켜기 값도 같이 지운다 */
@@ -365,13 +401,13 @@ export class McpService extends Service {
     const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
     const own = mine?.servers ?? []
     const ownNames = new Set(own.map((server) => server.name))
-    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, APP_MCP_NAME])
+    const appNames = new Set([...this.servers.map((server) => server.name), ...ownNames, ...RESERVED_NAMES])
     const folder = projectServers(workdir)
     const wanted = new Map<string, EngineMcp>()
     for (const { name, def, enabled } of folder) if (on(name, enabled) && !appNames.has(name)) wanted.set(name, def)
     for (const server of this.servers) if (!ownNames.has(server.name) && on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server))
     for (const server of own) if (on(server.name, server.enabled)) wanted.set(server.name, this.engineDef(server, workdir))
-    wanted.delete(APP_MCP_NAME) // 예약 이름으로 저장돼 있던 앱 서버 — 내장 서버만 그 이름을 쓴다
+    for (const name of RESERVED_NAMES) wanted.delete(name) // 예약 이름으로 저장돼 있던 앱 서버 — 내장 서버만 그 이름을 쓴다
     for (const [name, define] of this.builtins) {
       const def = on(name, true) ? define(workdir) : undefined
       if (def) wanted.set(name, def)
@@ -594,6 +630,28 @@ export function personalServers(env: NodeJS.ProcessEnv): ParsedServer[] {
   const merged = new Map<string, ParsedServer>()
   for (const file of ['config.json', 'opencode.json', 'opencode.jsonc']) for (const server of opencodeServers(readJsonc(path.join(dir, file)))) merged.set(server.name, server)
   return [...merged.values()]
+}
+
+/** 고쳐 쓸 프로젝트의 `.mcp.json` — 없으면 빈 것. 폴더 밖을 가리키는 링크·JSON 이 아닌 글·모양이 다른 파일이면 던진다 (덮어쓰지 않는다).
+ *  주석이 든 파일도 받지 않는다 — 고쳐 쓰면 주석이 사라진다 */
+function readProjectFile(workdir: string): { file: string; config: Record<string, unknown> } {
+  const file = path.join(workdir, '.mcp.json')
+  if (!fs.lstatSync(file, { throwIfNoEntry: false })) return { file, config: {} }
+  let real: string | undefined
+  try {
+    real = fs.realpathSync(file)
+  } catch {
+    // 끊어진 링크 — 아래에서 거절
+  }
+  if (!real || insideOf(workdir, real) === undefined) throw new Error(tr('mcp.error.projectFileOutside'))
+  let config: unknown
+  try {
+    config = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch {
+    throw new Error(tr('mcp.error.projectFileBroken'))
+  }
+  if (!isObject(config) || (config['mcpServers'] !== undefined && !isObject(config['mcpServers']))) throw new Error(tr('mcp.error.projectFileBroken'))
+  return { file, config }
 }
 
 /** opencode 설정의 mcp: {이름: {type:"local", command[], environment?, enabled?} | {type:"remote", url, headers?, enabled?}} */

@@ -45,6 +45,8 @@ let prompts: Record<string, unknown>[] = []
 let release: () => void = () => {}
 /** 받은 POST (경로 본문 — 쿼리는 뺀다) */
 let calls: string[] = []
+/** 받은 DELETE /session/ses_1/message/{id} 의 id (순서대로) */
+let deleted: string[] = []
 /** 받은 모든 요청의 URL (쿼리 포함) — 레거시 호출의 ?directory= 를 본다 */
 let urls: string[] = []
 /** 신규 세대 기록(레거시 전환 전에 쌓인 대화, GET /api/session/{id}/message). 비어 있지 않으면 레거시 기록(GET /session/{id}/message)도
@@ -54,6 +56,7 @@ let previous: unknown[] = []
 let gatedPermissions: string[] = []
 /** 가짜 엔진이 받은 게이트 대상 (EngineService.setGate — 받으면 다시 띄울 수 있다) */
 let engineGates: string[][] = []
+let engineRestarts = 0
 const AGENTS = ['build', 'plan', 'litecode-ask', 'litecode-full'].map((id) => ({ id, mode: 'primary' }))
 
 afterEach(() => {
@@ -70,7 +73,10 @@ async function fakeOpencode(ending: Ending): Promise<string> {
   let busy = false
   calls = []
   urls = []
-  const legacy: unknown[] = []
+  deleted = []
+  const legacy: { info: { id: string; [key: string]: unknown }; parts: unknown[] }[] = []
+  /** 도는 손 요약을 닫는다 (요약 답을 끝내고 POST …/summarize 에 답한다) — error 를 주면 그 오류로 */
+  let summarizing: ((error?: { name: string; data: { message: string } }) => void) | undefined
   const pending: { permission: unknown[]; question: unknown[] } = { permission: [], question: [] }
   /** 허용 뒤에 이어서 올 승인 요청 ('twoasks') */
   const followUp: unknown[] = []
@@ -148,10 +154,54 @@ async function fakeOpencode(ending: Ending): Promise<string> {
     if (route === '/session/ses_1/abort') {
       return void req.on('end', () => {
         res.end('true')
+        summarizing?.({ name: 'MessageAbortedError', data: { message: 'Aborted' } })
         emit('session.error', { error: { name: 'MessageAbortedError', data: { message: 'The operation was aborted.' } } })
         idle()
         idle()
       })
+    }
+    // 손으로 부른 요약 (이슈 #144 실측 2026-10-06): 요약 user(엔진이 id 를 정한다, compaction 파트 auto:false) → 요약 답(summary) → 끝나면
+    // session.compacted → idle. 이음 user 가 없다. 응답(200 true)은 요약이 끝나거나 멈춘 뒤에 온다. 'huge' 는 요약 답이 오류로 끝난다
+    if (req.method === 'POST' && route === '/session/ses_1/summarize') {
+      return void req.on('end', () => {
+        if (ending === 'reject') return void res.writeHead(400).end()
+        const info = (extra: Record<string, unknown> = {}) => ({ id: 'msg_ms', sessionID: 'ses_1', role: 'assistant', parentID: 'msg_m', summary: true, agent: 'compaction', time: { created: 4 }, ...extra })
+        legacy.push({ info: { id: 'msg_m', role: 'user' }, parts: [{ type: 'compaction', auto: false }] }, { info: info(), parts: [] })
+        idle() // 앞 턴의 늦은 idle — 요약 user 를 보기 전이라 끝이 아니다
+        busy = true
+        emit('message.updated', { info: { id: 'msg_m', sessionID: 'ses_1', role: 'user', time: { created: 3 } } })
+        emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: 'msg_m', id: 'prt_m', type: 'compaction', auto: false } })
+        emit('session.status', { status: { type: 'busy' } })
+        emit('message.updated', { info: info() })
+        summarizing = (error) => {
+          summarizing = undefined
+          const closed = info({ time: { created: 4, completed: 5 }, ...(error && { error }) })
+          legacy[legacy.length - 1] = { info: closed, parts: [] }
+          emit('message.updated', { info: closed })
+          res.end('true')
+        }
+        if (ending === 'done') {
+          setTimeout(() => {
+            emit('message.part.updated', { part: { sessionID: 'ses_1', messageID: 'msg_ms', id: 'prt_s', type: 'text', text: '## Objective', time: { start: 4, end: 5 } } })
+            summarizing?.()
+            emit('session.compacted', {})
+            idle()
+          }, 30)
+        }
+        if (ending === 'huge') {
+          setTimeout(() => {
+            summarizing?.({ name: 'ContextOverflowError', data: { message: 'Session too large to compact - context exceeds model limit even after stripping media' } })
+            idle()
+          }, 30)
+        }
+      })
+    }
+    const removed = req.method === 'DELETE' && /^\/session\/ses_1\/message\/(\w+)$/.exec(route)
+    if (removed) {
+      deleted.push(removed[1]!)
+      const at = legacy.findIndex((message) => message.info.id === removed[1])
+      if (at !== -1) legacy.splice(at, 1)
+      return void res.end('true')
     }
     if (route === '/session/ses_1/prompt_async') {
       return void req.on('end', () => {
@@ -247,8 +297,8 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           }
           // 앱 MCP 도구의 승인 (01z 1-3): 묻는 이벤트에는 인자가 없고, 그 순간 그 callID 의 파트가 running + input 이다
           if (ending === 'mcpask') {
-            part({ type: 'tool', id: 'prt_b', tool: 'litecode_send_to_session', callID: 'call_1', state: { status: 'running', input: MCP_ARGS } })
-            pending.permission = [{ id: 'per_1', sessionID: 'ses_1', permission: 'litecode_send_to_session', patterns: ['*'], metadata: {}, always: ['*'], tool: { messageID: A, callID: 'call_1' } }]
+            part({ type: 'tool', id: 'prt_b', tool: 'litecode_send_to_project', callID: 'call_1', state: { status: 'running', input: MCP_ARGS } })
+            pending.permission = [{ id: 'per_1', sessionID: 'ses_1', permission: 'litecode_send_to_project', patterns: ['*'], metadata: {}, always: ['*'], tool: { messageID: A, callID: 'call_1' } }]
             emit('permission.asked', { id: 'per_1' })
           }
           // 매번 묻기의 웹 가져오기 (이슈 #107, 01ai): permission.asked 는 요청 전체를 싣고 오지만 정본 목록은 400 이다
@@ -293,6 +343,7 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
   prompts = []
   gatedPermissions = []
   engineGates = []
+  engineRestarts = 0
   class FakeProviders extends Service {
     constructor(ctx: Context) {
       super(ctx, 'providers')
@@ -309,6 +360,10 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
       return { url, headers: {}, closed: closer.signal, providerBaseURL: () => PROXY, gated: (permission: string) => gatedPermissions.includes(permission) }
     }
     async purgeDeleted() {}
+    async restart() {
+      engineRestarts++
+      return this.connection()
+    }
     setGate(matchers: readonly string[]) {
       engineGates.push([...matchers])
     }
@@ -439,6 +494,54 @@ describe('ctx.llm 자동 요약·재시도 (이슈 #20 L2)', () => {
       { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'waiting' },
       { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'done' },
     ])
+  })
+})
+
+// 손으로 부르는 요약 (/compact, 이슈 #144) — 레거시 POST /session/{id}/summarize. 자동 요약과 같은 요약 줄(running → done)을 낸다
+describe('ctx.llm.compact (손으로 부르는 요약)', () => {
+  const lines = (items: TurnItem[]) => items.map((item) => (item.kind === 'compaction' ? `${item.id} ${item.status}` : item.kind))
+
+  it('그 세션에 모델을 명시해 요약을 부르고, 요약 줄 running → done 뒤 idle 에 끝난다 — 요약 글은 답이 아니고 요약 user 의 id 를 돌려준다', async () => {
+    const { llm, seen } = await start(await fakeOpencode('done'))
+    const items: TurnItem[] = []
+    expect(await llm.compact('p', 'm', directory, 'ses_1', (item) => items.push(item))).toEqual({ ok: true, sessionId: 'ses_1', text: '', messageId: 'msg_m' })
+    expect(lines(items)).toEqual(['msg_m:compaction running', 'msg_m:compaction done'])
+    expect(calls).toContain('/session/ses_1/summarize {"providerID":"p","modelID":"m"}')
+    expect(urls.find((url) => url.startsWith('/session/ses_1/summarize'))).toBe(`/session/ses_1/summarize?directory=${encodeURIComponent(directory)}`)
+    expect(deleted).toEqual([])
+    expect(seen).toEqual([]) // 턴 알림(llm/turn-*)은 내지 않는다 — 답이 온 것이 아니다
+  })
+
+  it('멈추면 엔진의 요약도 멈추고(abort) "중단됨" 으로 끝난다 — 끝나지 않은 요약 메시지는 지운다 (남으면 다음 프롬프트를 삼킨다, 실측 3/3)', async () => {
+    const { llm } = await start(await fakeOpencode('hold'))
+    const items: TurnItem[] = []
+    const stop = new AbortController()
+    const compacting = llm.compact('p', 'm', directory, 'ses_1', (item) => items.push(item), stop.signal)
+    await expect.poll(() => lines(items)).toEqual(['msg_m:compaction running'])
+    stop.abort()
+    expect(await compacting).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped') })
+    expect(calls).toContain('/session/ses_1/abort')
+    expect(deleted).toEqual(['msg_ms', 'msg_m'])
+  })
+
+  it('요약이 실패하면(요약 답 오류) 그 사유로 끝나고 그 요약 메시지도 지운다', async () => {
+    const { llm } = await start(await fakeOpencode('huge'))
+    const items: TurnItem[] = []
+    expect(await llm.compact('p', 'm', directory, 'ses_1', (item) => items.push(item))).toMatchObject({ ok: false, error: tr('error.contextOverflow') })
+    expect(lines(items).at(-1)).toBe('msg_m:compaction failed')
+    expect(deleted).toEqual(['msg_ms', 'msg_m'])
+  })
+
+  it('엔진이 요약 요청을 거절하면 그 상태로 실패한다', async () => {
+    const { llm } = await start(await fakeOpencode('reject'))
+    expect(await llm.compact('p', 'm', directory, 'ses_1')).toMatchObject({ ok: false, error: tr('error.compactSend', { status: 400 }) })
+  })
+
+  it('없는 폴더·모르는 provider 면 엔진에 요약을 보내지 않는다 (engineFolder 문)', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    expect(await llm.compact('p', 'm', path.join(directory, 'gone'), 'ses_1')).toMatchObject({ ok: false, error: tr('error.noWorkdir', { dir: path.join(directory, 'gone') }) })
+    expect(await llm.compact('nope', 'm', directory, 'ses_1')).toMatchObject({ ok: false, error: tr('error.noProvider', { id: 'nope' }) })
+    expect(calls.some((call) => call.startsWith('/session/ses_1/summarize'))).toBe(false)
   })
 })
 
@@ -727,7 +830,7 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
 })
 
 describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)', () => {
-  const SEND = { server: 'litecode', tool: 'send_to_session' }
+  const SEND = { server: 'litecode', tool: 'send_to_project' }
 
   it('승인 카드에 그 도구 호출의 인자가 실린다(callID 로 running 파트에서). 앱에서 허용한 호출은 approved 이고 한 번 쓰면 소진된다', async () => {
     const url = await fakeOpencode('mcpask')
@@ -745,7 +848,7 @@ describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)
     })
     expect(result.ok).toBe(true)
     expect(shown[0]).toEqual([
-      { kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'litecode_send_to_session', resources: ['*'], mcp: SEND, input: JSON.stringify(MCP_ARGS) },
+      { kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'litecode_send_to_project', resources: ['*'], mcp: SEND, input: JSON.stringify(MCP_ARGS) },
     ])
     expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: true })
     expect(again).toBeUndefined()
@@ -951,6 +1054,43 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     })
     expect(result.ok).toBe(true)
     expect(engineGates).toEqual([['bash'], ['edit']])
+  })
+
+  it('reloadWhenIdle (#145): 도는 턴이 없으면 바로 엔진을 다시 띄우고, 도는 턴이 있으면 끝난 뒤에 한 번만 — 도는 턴을 끊지 않는다', async () => {
+    const { llm } = await start(await fakeOpencode('permission'))
+    llm.reloadWhenIdle()
+    expect(engineRestarts).toBe(1)
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      if (!requests[0]) return
+      llm.reloadWhenIdle()
+      llm.reloadWhenIdle()
+      expect(engineRestarts).toBe(1) // 턴이 도는 중 — 아직
+      void llm.reply('ses_1', requests[0].id, 'once')
+    })
+    expect(result.ok).toBe(true)
+    expect(engineRestarts).toBe(2)
+  })
+
+  it("승인 카드에 싣는 MCP 도구 인자는 'llm/attention-input' 이 돌려준 것으로 바뀐다 (#145 — 비밀 가리기). 부른 대화 찾기는 원래 인자 그대로", async () => {
+    const { llm, ctx } = await start(await fakeOpencode('mcpask'))
+    const refs: unknown[] = []
+    ctx.on('llm/attention-input', (ref, input) => {
+      refs.push(ref)
+      return { ...(input as object), message: 'MASKED' }
+    })
+    const shown: Attention[][] = []
+    let caller: Awaited<ReturnType<LlmService['callerOf']>>
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      shown.push(requests)
+      if (!requests[0]) return
+      void llm.reply('ses_1', requests[0].id, 'once', { kind: 'scope', scope: 'all' }).then(async () => {
+        caller = await llm.callerOf(directory, { server: 'litecode', tool: 'send_to_project' }, MCP_ARGS)
+      })
+    })
+    expect(result.ok).toBe(true)
+    expect(shown[0]![0]).toMatchObject({ input: JSON.stringify({ ...MCP_ARGS, message: 'MASKED' }) })
+    expect(refs[0]).toEqual({ server: 'litecode', tool: 'send_to_project' })
+    expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: true, target: { kind: 'scope', scope: 'all' } })
   })
 
   it('판정 통과로 보낸 once 는 사용자 승인이 아니다 — 호출 장부에 허용으로 적히지 않는다 (앱 MCP 세션 도구가 그 기록만 받는다, #55)', async () => {

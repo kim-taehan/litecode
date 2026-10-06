@@ -671,8 +671,7 @@
   color: var(--text);
 }
 
-.feature-card__description,
-.feature-card__requires {
+.feature-card__description {
   margin: 0;
   display: -webkit-box;
   overflow: hidden;
@@ -681,10 +680,6 @@
   color: var(--text-tertiary);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.feature-card__requires {
-  color: var(--warn);
 }
 
 .settings-switch:disabled {

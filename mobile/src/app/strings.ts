@@ -61,6 +61,7 @@ export const S = {
   answerOnDesktop: '이 질문은 폰에서 답할 수 없습니다. 데스크탑에서 답해 주세요.',
   hookFollowUp: '턴 끝 훅이 이어서 보냄',
   delegatedFrom: (title: string) => `다른 대화에서 온 지시 · ${title}`,
+  delegatedFromProject: (project: string, title: string) => `다른 프로젝트에서 온 지시 · ${project} · ${title}`,
 
   now: '지금',
   secondsAgo: (n: number) => `${n}초`,

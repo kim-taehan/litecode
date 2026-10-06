@@ -72,6 +72,14 @@ class FakeLlm extends Service {
       stop?.addEventListener('abort', () => end({ ok: false, sessionId: id, error: tr('error.stopped'), interrupted: true }))
     })
   }
+  /** 손으로 부른 요약 (/compact, 이슈 #144) — 받아 쥐고 있다가 시험이 끝낸다 */
+  compacts: { providerId: string; modelId: string; directory: string; sessionId: string; progress(item: TurnItem): void; finish(result?: Partial<ChatResult> & { messageId?: string }): void }[] = []
+  async compact(providerId: string, modelId: string, directory: string, sessionId: string, onProgress?: (item: TurnItem) => void, stop?: AbortSignal): Promise<ChatResult & { messageId?: string }> {
+    return new Promise((resolve) => {
+      this.compacts.push({ providerId, modelId, directory, sessionId, progress: (item) => onProgress?.(item), finish: (result = {}) => resolve({ ok: true, sessionId, text: '', messageId: 'msg_compact', ...result }) })
+      stop?.addEventListener('abort', () => resolve({ ok: false, sessionId, error: tr('error.stopped'), interrupted: true }))
+    })
+  }
   async reply(...args: unknown[]): Promise<void> {
     this.replies.push(args)
   }
@@ -389,17 +397,6 @@ describe('ChatService — 대기열', () => {
     expect((await stored('c1'))!.origins).toBeUndefined()
   })
 
-  it('새 대화에 제목을 주면 그 제목으로 만든다 (start_session) — 있는 대화의 제목은 안 바꾼다', async () => {
-    const { chat, turn, stored } = await start()
-    await chat.send('c1', input('첫 지시', { title: 'README 정리' }))
-    const first = await turn(1)
-    expect((await stored('c1'))!.title).toBe('README 정리')
-    first.finish()
-    await chat.send('c1', input('둘째', { title: '다른 제목' }))
-    await turn(2)
-    expect((await stored('c1'))!.title).toBe('README 정리')
-  })
-
   it('한 턴에 보낸 지시 수를 센다 — 상한을 넘으면 세지 않는다. 도는 턴이 없으면 못 센다', async () => {
     const { chat, turn } = await start()
     expect(chat.countSend('c1', 2)).toBe(false)
@@ -641,10 +638,8 @@ describe('ChatService — 스냅샷과 전달', () => {
     expect(llm.replies).toEqual([['ses_1', 'per_1', 'once']])
     // 지시 보내기를 허용하며 고른 받을 대화 (이슈 #67) 도 그대로 전한다
     await chat.reply('ses_1', 'per_2', answer, { kind: 'conversation', conversationId: 'c9' })
-    await chat.reply('ses_1', 'per_3', answer, { kind: 'new' })
     expect(llm.replies.slice(1)).toEqual([
       ['ses_1', 'per_2', 'once', { kind: 'conversation', conversationId: 'c9' }],
-      ['ses_1', 'per_3', 'once', { kind: 'new' }],
     ])
     expect(await chat.stopSubtask('sub_1')).toBe(true)
     expect(await chat.stopSubtask('nope')).toBe(false)
@@ -692,7 +687,7 @@ describe('ChatService — 대화 이름 바꾸기 (이슈 #63)', () => {
     expect(await chat.rename('c1', '  결제 API 문서 정리 ')).toMatchObject({ id: 'c1', title: '결제 API 문서 정리' })
     expect(of('conversations.changed').slice(before)).toEqual([{ project: '/work/a', removed: [] }])
 
-    await chat.send('c1', input('둘째 질문', { title: '다른 제목' }))
+    await chat.send('c1', input('둘째 질문'))
     expect(of('turn.started')[1]!.conversation.title).toBe('결제 API 문서 정리')
     ;(await turn(2)).finish()
     expect((await ended(2)).conversation!.title).toBe('결제 API 문서 정리')
@@ -739,5 +734,78 @@ describe('ChatService — 도는 턴 수 (종료 확인이 묻는다, 이슈 #92
     ;(await turn(2)).finish()
     await ended(2)
     expect(chat.running()).toBe(0)
+  })
+})
+
+// 손으로 부르는 요약 (/compact, 이슈 #144) — 요약도 "도는 턴" 이다: 도는 중 표시·멈춤·대기열이 보통 턴과 같이 움직인다
+describe('ChatService — 요약 (/compact)', () => {
+  /** 한 턴을 끝낸 대화 c1 */
+  async function talked() {
+    const started = await start()
+    await started.chat.send('c1', input('첫 질문'))
+    ;(await started.turn(1)).finish()
+    await started.ended(1)
+    return started
+  }
+
+  it('그 대화의 세션·모델로 요약을 한 번 부르고, 턴처럼 시작·진행 줄·끝을 알린다 — 내 말은 친 글(/compact), 다시 열어도 보이게 적어 둔다', async () => {
+    const { chat, llm, ctx, of, ended } = await talked()
+    expect(await chat.compact('c1')).toEqual({ ok: true })
+    expect(chat.turnOf('c1')).toMatchObject({ origin: 'user' })
+    await until(() => llm.compacts.length === 1)
+    expect(llm.compacts[0]).toMatchObject({ providerId: 'gw', modelId: 'm1', directory: '/work/a', sessionId: 'ses_1' })
+    expect(of('turn.started')[1]).toMatchObject({ cid: 'c1', origin: 'user', message: { role: 'user', text: '/compact' } })
+    const line: TurnItem = { kind: 'compaction', id: 'msg_compact:compaction', status: 'running' }
+    llm.compacts[0]!.progress(line)
+    expect(of('turn.progress').at(-1)).toEqual({ cid: 'c1', item: line })
+    expect(chat.snapshot()['c1']?.turn?.progress).toEqual([line])
+    llm.compacts[0]!.progress({ ...line, status: 'done' })
+    llm.compacts[0]!.finish()
+    const end = await ended(2)
+    expect(end).toMatchObject({ cid: 'c1', outcome: 'done', message: { role: 'assistant', text: '', items: [{ ...line, status: 'done' }] } })
+    expect(chat.turnOf('c1')).toBeUndefined()
+    expect(llm.calls).toHaveLength(1) // 프롬프트로 보내지 않는다
+    expect((await ctx.sessions.list()).find((entry) => entry.id === 'c1')?.labels).toMatchObject({ msg_compact: '/compact' })
+  })
+
+  it('턴이 도는 중이면 거절한다 — 대기열에 넣지 않는다', async () => {
+    const { chat, llm, turn } = await start()
+    await chat.send('c1', input('긴 질문'))
+    await turn(1)
+    expect(await chat.compact('c1')).toEqual({ ok: false, error: tr('compact.busy') })
+    expect(chat.queued('c1')).toBe(0)
+    expect(llm.compacts).toHaveLength(0)
+    llm.calls[0]!.finish()
+  })
+
+  it('요약이 도는 중에 또 부르면 거절하고, 그사이 보낸 글은 대기열에 쌓였다가 요약이 끝나면 간다', async () => {
+    const { chat, llm, turn, ended } = await talked()
+    expect(await chat.compact('c1')).toEqual({ ok: true })
+    expect(await chat.compact('c1')).toEqual({ ok: false, error: tr('compact.busy') })
+    expect(await chat.send('c1', input('요약 뒤 질문'))).toEqual({ state: 'queued' })
+    await until(() => llm.compacts.length === 1)
+    llm.compacts[0]!.finish()
+    await ended(2)
+    expect((await turn(2)).prompt).toBe('요약 뒤 질문')
+    llm.calls[1]!.finish()
+    await ended(3)
+    expect(llm.compacts).toHaveLength(1)
+  })
+
+  it('아직 한 번도 안 보낸 대화면 요약할 내용이 없다고 알린다 — 엔진을 부르지 않고 턴도 열지 않는다', async () => {
+    const { chat, llm, names } = await start()
+    expect(await chat.compact('c-new')).toEqual({ ok: false, error: tr('compact.empty') })
+    expect(llm.compacts).toHaveLength(0)
+    expect(chat.turnOf('c-new')).toBeUndefined()
+    expect(names()).toEqual([])
+  })
+
+  it('멈춤이 듣는다 — 요약 턴은 "중단됨" 으로 끝난다', async () => {
+    const { chat, llm, ended } = await talked()
+    await chat.compact('c1')
+    await until(() => llm.compacts.length === 1)
+    expect(chat.stop('c1')).toBe(true)
+    expect(await ended(2)).toMatchObject({ cid: 'c1', outcome: 'interrupted', message: { interrupted: true, error: tr('error.stopped') } })
+    expect(chat.turnOf('c1')).toBeUndefined()
   })
 })

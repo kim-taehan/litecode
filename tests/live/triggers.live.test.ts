@@ -203,7 +203,7 @@ describe('입력 트리거 ↔ 실물 opencode', () => {
     const sent = (await fakeLlm()).lastChatText
     expect(sent).toContain('$ echo LITE-$((6*7)); pwd')
     expect(sent).toContain('LITE-42')
-    expect(sent).toContain('종료 코드 0')
+    expect(sent).toContain('exit code 0')
     expect(await page.locator('.bubble--user').allTextContents()).not.toContain(expect.stringContaining('LITE-42')) // 말풍선으로 새지 않는다
   })
 

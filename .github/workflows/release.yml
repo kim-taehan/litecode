@@ -1,0 +1,78 @@
+# dev 가 main 에 머지되면 설치본을 만들어 새 버전으로 올린다.
+# 버전은 마지막 v* 태그에서 패치를 하나 올린다(처음은 v0.1.0) — package.json 은 빌드 안에서만 고치고 커밋하지 않는다(main 과 dev 가 갈라지지 않게).
+# 서명 인증서가 없어 mac 은 ad-hoc 서명이다(build/afterPack.cjs). Windows 설치본도 같은 mac 러너에서 만다.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  installers:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Next version
+        id: version
+        run: |
+          last=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
+          if [ -z "$last" ]; then
+            next=0.1.0
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            next="$major.$minor.$((patch + 1))"
+          fi
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "version $next (after ${last:-none})"
+
+      - run: npm ci
+
+      - run: npm version ${{ steps.version.outputs.next }} --no-git-tag-version
+
+      - run: npm test
+
+      # 동봉할 opencode·ripgrep·음성 엔진 (체크섬 대조는 스크립트가 한다)
+      - uses: actions/cache@v4
+        with:
+          path: build/vendor
+          key: vendor-${{ hashFiles('scripts/fetch-opencode.mjs', 'scripts/fetch-speech.mjs', 'scripts/fetch-browser.mjs') }}
+
+      - name: Fetch bundled binaries
+        run: |
+          node scripts/fetch-opencode.mjs mac-arm64 mac-x64 win-x64
+          node scripts/fetch-speech.mjs mac-arm64 mac-x64 win-x64
+          node scripts/fetch-browser.mjs
+
+      - name: Build installers
+        run: |
+          npm run dist:mac -- --publish never
+          npm run dist:win -- --publish never
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.next }}" \
+            release/litecode-mac-arm64.zip \
+            release/litecode-mac-x64.zip \
+            release/litecode-win-x64.exe \
+            --target "$GITHUB_SHA" \
+            --title "litecode ${{ steps.version.outputs.next }}" \
+            --generate-notes

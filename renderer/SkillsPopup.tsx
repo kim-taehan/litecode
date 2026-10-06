@@ -5,7 +5,7 @@ import { PlusDialog, PlusGroup } from './PlusDialog.tsx'
 import { byScope } from './plusView.ts'
 import { SkillBadge } from './SkillBadge.tsx'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
-import { reason } from './Settings.tsx'
+import { reason } from './ipcError.ts'
 
 // 스킬 팝업 (이슈 #43 — 입력창 `+` 메뉴 > 스킬, 시안 _workspace/mock-plus/Skills.dc.html). 설정 > 스킬(이슈 #7)에 있던 것을 프로젝트 기준으로 옮겼다:
 // 두 묶음 "이 프로젝트만"(프로젝트 폴더 아래의 스킬)·"모든 프로젝트"(앱 설정 폴더·홈의 스킬), 묶음 머리에 "폴더 열기", 줄을 누르면 지침 본문.

@@ -2,6 +2,8 @@
 // 엔진 쪽 뜻(opencode 에이전트·권한)은 ctx.engine 만 안다 (engine.ts MODE_AGENT) — 화면은 이 이름만 안다.
 // plan: 읽기·검색만 / build: opencode 기본(편집·명령 허용, 폴더 밖·.env 는 묻는다) / ask: 편집·명령·웹마다 묻는다 / full: 다 묻지 않는다
 
+import { browserToolKind } from './browser.ts'
+
 export const MODES = ['plan', 'build', 'ask', 'full'] as const
 export type Mode = (typeof MODES)[number]
 
@@ -27,8 +29,11 @@ const PLAIN_PERMISSIONS = ['bash', 'edit', 'read', 'glob', 'grep', 'task', 'webf
 const GUARDED_PERMISSIONS = ['edit', 'bash', 'webfetch', 'websearch']
 /** 매번 묻기에서만 쓰는 하위 에이전트 (engine.ts SUBAGENT_ASK) */
 const ASKING_SUBAGENT = 'general-ask'
-const APP_SEND_TOOLS = ['litecode_send_to_session', 'litecode_start_session']
-const APP_READ_TOOLS = ['litecode_list_sessions', 'litecode_read_session']
+const APP_SEND_TOOL = 'litecode_send_to_project'
+/** 다른 프로젝트의 대화 읽기 — 계획 모드에서도 묻고 쓴다 (이슈 #137) */
+const APP_READ_TOOL = 'litecode_read_project'
+/** 스킬·MCP 서버·훅 만들기 (이슈 #145) — 전체 권한에서도 묻는다, 계획·하위 작업에는 없다 */
+const APP_MAKE_TOOLS = ['litecode_create_skill', 'litecode_add_mcp_server', 'litecode_add_hook']
 
 /** `.env` 파일 읽기 — 엔진 기본이 묻는다 (`.env.example` 은 아니다) */
 function readsEnvFile(resources: readonly string[]): boolean {
@@ -46,10 +51,19 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
   if (permission === 'plan_enter' || permission === 'plan_exit') return 'ask' // 앱이 쓰지 않는 엔진 도구 — 모르는 것으로
   if (permission.includes('_')) {
     // MCP 도구 (`<서버>_<도구>`)
-    if (APP_SEND_TOOLS.includes(permission)) return child || mode === 'plan' ? 'deny' : 'ask'
+    // 브라우저 도구 (`chrome_*`, 이슈 #147 — engine.ts withBrowserRules 와 같은 표): 하위 작업은 못 쓴다. 계획은 읽기만, 매번 묻기는 전부 묻고,
+    // 기본·전체 권한은 읽기·조용한 조작만 묻지 않는다 (페이지를 바꾸거나 밖으로 내보낼 수 있는 것은 전체 권한에서도 묻는다)
+    const browser = browserToolKind(permission)
+    if (browser) {
+      if (browser === 'deny' || child) return 'deny'
+      if (mode === 'plan') return browser === 'read' ? 'allow' : 'deny'
+      return asking || browser === 'ask' ? 'ask' : 'allow'
+    }
+    if (permission === APP_SEND_TOOL || APP_MAKE_TOOLS.includes(permission)) return child || mode === 'plan' ? 'deny' : 'ask'
+    if (permission === APP_READ_TOOL) return child ? 'deny' : 'ask'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'
     if (child) return asking ? 'ask' : 'allow'
-    if (APP_READ_TOOLS.includes(permission) || permission === 'litecode_open_file') return 'allow'
+    if (permission === 'litecode_list_projects' || permission === 'litecode_open_file') return 'allow'
     if (permission === 'litecode_open_terminal') return mode === 'plan' ? 'deny' : 'allow'
     return mode === 'plan' ? 'deny' : asking ? 'ask' : 'allow'
   }

@@ -37,7 +37,7 @@ import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { QueueDock } from './QueueDock.tsx'
 import { TodoDock } from './Todo.tsx'
 import { DelegationContext, FromIcon } from './Delegation.tsx'
-import { peerOf, sidebarMark } from './delegationView.ts'
+import { peerOf, projectTargets, sidebarMark } from './delegationView.ts'
 import { RunningCount, RunningFilter } from './Background.tsx'
 import { runningIn, runningOutside } from './backgroundView.ts'
 import { StopIcon, useEscapeTwice, useStopTurn } from './stopTurn.tsx'
@@ -308,6 +308,9 @@ export function App() {
   const [sessions, setSessions] = useState<Session[]>([])
   /** 프로젝트별로 마지막에 보던 대화 */
   const [activeIds, setActiveIds] = useState<Record<string, string>>({})
+  /** 프로젝트 경로 → 마지막에 보던 **저장된** 대화 (이슈 #137) — 메인이 저장한다(앱을 껐다 켜도 남는다). 다른 프로젝트에 지시를 보낼 때 받는 대화.
+   *  activeIds 와 다르다: 그쪽은 이번 실행 동안만이고 빈 새 대화도 가리킨다 */
+  const [lastViewed, setLastViewed] = useState<Record<string, string>>({})
   const [switching, setSwitching] = useState(false)
   /** 폴더를 고르거나 여는 중 — 한 번에 하나만 (dsh ui-workspace) */
   const [picking, setPicking] = useState(false)
@@ -364,6 +367,8 @@ export function App() {
 
   useEffect(() => {
     void window.litecode.listProviders().then(setProviders)
+    // 이번 실행에 이미 본 것(아래 효과가 적는다)이 먼저다
+    void window.litecode.lastViewed().then((stored) => setLastViewed((now) => ({ ...stored, ...now })), () => {})
     // 저장된 대화 목록을 먼저 올린다 — 프로젝트를 열 때 "대화가 없으면 새 대화" 가 저장된 대화를 보고 판단하게.
     // 앱을 켜면 마지막 프로젝트(목록 맨 앞)를 열어 본다. 디스크에서 지워졌으면 안내 화면에 사유를 보이고,
     // 다른 프로젝트로 몰래 넘어가지 않는다 — 사용자가 고르지 않은 폴더에서 대화가 돌면 안 된다.
@@ -403,7 +408,7 @@ export function App() {
       window.litecode.onTurnStarted((data) => {
         // 보는 대화의 턴일 때만 — 다른 대화의 턴이 지금 읽던 자리를 맨 아래로 끌고 가지 않게
         if (data.cid === activeIdRef.current) following.current = true
-        // 화면이 모르는 대화의 턴 — 다른 대화가 지시로 새로 만든 대화다 (start_session, 이슈 #55). 메인이 저장한 목록 정보로 목록에 넣는다.
+        // 화면이 모르는 대화의 턴 — 화면 밖(짝지은 폰)에서 새로 만든 대화다. 메인이 저장한 목록 정보로 목록에 넣는다.
         // 내용은 이 턴이 전부라 엔진에서 다시 부르지 않는다 (history 없음 = 이번 실행에 만든 대화)
         if (!sessionsRef.current.some((session) => session.id === data.cid)) {
           const created: Session = { ...fromConversation(data.conversation), history: undefined }
@@ -510,19 +515,36 @@ export function App() {
   useEffect(() => {
     if (active && fresh.has(active.id)) setFresh((now) => new Set([...now].filter((id) => id !== active.id)))
   }, [active?.id, fresh])
-  /** 다른 대화에 지시 보내기 (이슈 #55) 의 화면 조각이 쓰는 것 — 같은 프로젝트의 저장된 대화(제목·상태·모드), 지금 대화의 모드·모델, 대화 열기.
+  // 지금 보는 저장된 대화를 그 프로젝트의 "마지막에 보던 대화" 로 메인에 알린다 (이슈 #137). 빈 새 대화는 알리지 않는다 — 첫 글을 보내 저장되면
+  // (saved 가 바뀐다) 그때 알린다. 메인은 저장 안 된 id 를 무시한다
+  const viewedId = active && !isBlank(active) ? active.id : undefined
+  const viewedProject = active?.project
+  useEffect(() => {
+    if (!viewedId || !viewedProject) return
+    setLastViewed((now) => (now[viewedProject] === viewedId ? now : { ...now, [viewedProject]: viewedId }))
+    void window.litecode.markViewed(viewedId).catch(() => {})
+  }, [viewedId, viewedProject])
+  /** 다른 프로젝트에 지시 보내기 (이슈 #55·#137) 의 화면 조각이 쓰는 것 — 저장된 대화 전부(제목·상태·모드), 다른 프로젝트마다 마지막에 보던 대화,
+   *  지금 대화의 모드·지금 프로젝트의 이름, 대화 열기(다른 프로젝트의 대화면 그 프로젝트로 넘어간다 — 알림을 눌렀을 때와 같은 길).
    *  값이 같으면 같은 객체다 — 컨텍스트를 읽는 작업 줄이 타자마다 다시 그려지지 않게 */
   const projectPath = project?.path
-  const delegation = useMemo(
-    () => ({
-      peers: sessions
-        .filter((session) => session.project === projectPath && !isBlank(session))
-        .map((session) => peerOf(session, notices.state[session.id]?.status, session.history !== 'missing' && !!findModel(providers, session.model))),
-      self: { id: active?.id, mode },
-      open: (id: string) => projectPath && setActiveIds((now) => ({ ...now, [projectPath]: id })),
-    }),
-    [sessions, projectPath, notices.state, providers, active?.id, mode],
-  )
+  const projectName = project?.name
+  const openConversation = useRef(openNotice)
+  openConversation.current = openNotice
+  const delegation = useMemo(() => {
+    const peers = sessions
+      .filter((session) => !isBlank(session))
+      .map((session) => peerOf(session, notices.state[session.id]?.status, session.history !== 'missing' && !!findModel(providers, session.model)))
+    return {
+      peers,
+      targets: projectTargets(projects ?? [], lastViewed, peers, projectPath),
+      self: { mode, project: projectName },
+      open: (id: string) => {
+        const target = sessionsRef.current.find((session) => session.id === id)
+        if (target) void openConversation.current({ project: target.project, conversationId: id })
+      },
+    }
+  }, [sessions, projects, lastViewed, projectPath, projectName, notices.state, providers, mode])
   /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
   const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
   /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
@@ -535,10 +557,18 @@ export function App() {
   })
   const trigger = useTriggers({
     directory: active?.project,
+    conversation: active?.id,
     draft,
     setDraft,
     onSend: (text, display) => send({ text, display }),
     onShell: (_directory, command) => void runShell(command),
+    onApp: async (command) => {
+      if (command === 'clear') return void startNewChat()
+      if (!active) return undefined
+      // 아직 한 번도 안 보낸 대화(메인에 없다)도 메인이 "요약할 내용이 없다" 로 답한다
+      const started = await window.litecode.compactChat(active.id)
+      return started.ok ? undefined : started.error
+    },
   })
   /** 음성 입력 (이슈 #109) — 받아쓴 글은 녹음을 시작한 대화의 초안에 넣기만 한다 (VoiceInput.tsx) */
   const voice = useVoiceInput({
@@ -971,6 +1001,7 @@ export function App() {
                     if (event.nativeEvent.isComposing || event.keyCode === 229) return // 한글 조합 확정 Enter
                     if (event.key === 'Enter') event.currentTarget.blur()
                     if (event.key === 'Escape') {
+                      event.preventDefault() // 이 Esc 는 여기서 썼다 — 녹음(VoiceInput)까지 취소하지 않게
                       renameCancelled.current = true
                       setRenaming(undefined)
                     }
@@ -1514,7 +1545,9 @@ function ProjectPopover({ projects, current, statusOf, runningOf, busy, error, o
       if (!ref.current?.parentElement?.contains(event.target as Node)) onClose(false)
     }
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') onClose(true)
+      if (event.key !== 'Escape' || event.isComposing) return // 한글 조합 취소 Esc 에 닫지 않는다
+      event.preventDefault() // 이 Esc 는 여기서 썼다 — 녹음(VoiceInput)까지 취소하지 않게
+      onClose(true)
     }
     document.addEventListener('mousedown', onMouseDown)
     document.addEventListener('keydown', onKeyDown)

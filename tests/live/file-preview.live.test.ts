@@ -7,10 +7,10 @@ import { _electron as electron, type ElectronApplication, type Page } from 'play
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { freePort, isolatedEnv } from './support/opencodeServer.ts'
-import { detectApps, opensFiles, type Launch } from '../../src/services/openIn.ts'
+import type { Launch } from '../../src/services/openIn.ts'
 
 // 파일 미리보기 패널 실물 테스트 (이슈 #17) — 진짜 Electron 창에서 가짜 LLM 이 echo 한 답의 파일 칩을 눌러, 렌더러 → preload
-// (chat:preview-file·openIn:open-file) → 메인 검사(등록 프로젝트·realpath·크기·이진) → 패널까지 관통하는지 본다. Finder·다른 앱은 띄우지
+// (chat:preview-file) → 메인 검사(등록 프로젝트·realpath·크기·이진) → 패널까지 관통하는지 본다. Finder·다른 앱은 띄우지
 // 않는다(reveal 은 기록, openIn 실행기는 숨김 테스트 모드의 기록기). 자기 앱·vite·임시 폴더를 띄우고, 끝나면 그 임시 폴더만 지운다.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
@@ -28,7 +28,6 @@ const HELLO = 'export const a = 1\nexport const b = 2\nconsole.log(a + b)\n'
 const README = '# 제목\n\n본문 **굵게** 와 `src/hello.ts`\n'
 const BIG_LINE = 'x'.repeat(99) + '\n' // 100 바이트
 const BIG = BIG_LINE.repeat(15_000) // 1.5MB — 한도(1MB) 넘음
-const editors = detectApps().filter((entry) => opensFiles(entry.id))
 
 beforeAll(async () => {
   execFileSync(path.join(root, 'node_modules/.bin/tsc'), ['-p', 'tsconfig.electron.json'], { cwd: root, stdio: 'inherit' })
@@ -156,27 +155,11 @@ describe('파일 미리보기 패널', () => {
     expect(await page.evaluate((dir) => window.litecode.previewFile(dir, '../outside/secret.txt'), project)).toEqual({ status: 'unavailable' })
   })
 
-  it('다른 앱에서 열기 — 편집기만 메뉴에, 그 파일을 open -a 로 (기록). 설정 > 기능에서 끄면 숨는다', async () => {
+  it('미리보기 패널에는 "다른 앱에서 열기" 버튼이 없다 — 파일을 다른 앱에서 여는 길(openIn:open-file)은 걷었다 (#126)', async () => {
     await chip('src/hello.ts').click()
     await expect.poll(() => panel().locator('.file-preview__path').textContent()).toBe('src/hello.ts')
-    const split = panel().locator('.open-in__split')
-    if (editors.length === 0) {
-      expect(await split.count()).toBe(0) // 이 기계에 편집기가 없으면 버튼이 없다
-    } else {
-      await split.waitFor()
-      await panel().locator('.open-in__primary').click()
-      await expect.poll(launches).toEqual([{ kind: 'open-a', args: ['-a', editors[0].bundle, path.join(project, 'src', 'hello.ts')] }])
-      if (editors.length > 1) {
-        await panel().getByRole('button', { name: '다른 앱에서 열기' }).click()
-        expect(await panel().getByRole('menuitem').count()).toBe(editors.length)
-        await page.keyboard.press('Escape') // 메뉴만 닫힌다
-        await expect.poll(() => panel().getByRole('menu').count()).toBe(0)
-        expect(await panel().count()).toBe(1)
-      }
-    }
-    await page.evaluate(() => window.litecode.setSettings({ features: { openIn: false } }))
-    await expect.poll(() => split.count()).toBe(0)
-    await page.evaluate(() => window.litecode.setSettings({ features: {} }))
+    expect(await panel().locator('.open-in__split').count()).toBe(0)
+    expect(await launches()).toEqual([])
   })
 
   it('왼쪽 끝을 끌면 폭이 바뀐다 — 대화 칸은 400 이상 남기고(창의 70% 도 넘지 않음), 좁히면 300 까지', async () => {

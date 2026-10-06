@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, screen, session, shell, systemPreferences } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -48,6 +49,7 @@ import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
+import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
@@ -56,6 +58,8 @@ import { speechBridgeStreams } from '../src/services/speech/bridge.ts'
 import { SpeechService } from '../src/services/speech.ts'
 import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
 import { systemSpeechHost } from './speechHost.ts'
+import { BrowserService } from '../src/services/browser.ts'
+import { bundledBrowserDir, devBrowserDir } from '../src/services/browser/assets.ts'
 import { restorableBounds, windowMode } from './windowBounds.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -137,6 +141,14 @@ mounted.push(ctx.plugin(ProviderRegistry, {
     },
   ],
 }))
+/** `@` 메뉴의 전체 파일 목록용 rg — 설치본은 Resources/rg, 개발 실행은 build/vendor/rg/<타깃> (없으면 undefined) */
+function bundledRg(): string | undefined {
+  const name = process.platform === 'win32' ? 'rg.exe' : 'rg'
+  const os = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux'
+  const file = app.isPackaged ? path.join(bundledPaths(process.resourcesPath).rgDir, name) : path.join(__dirname, '../../build/vendor/rg', `${os}-${process.arch}`, name)
+  return fs.existsSync(file) ? file : undefined
+}
+
 // opencode 는 앱이 직접 띄운다 (서버 하나). 사용자가 따로 띄운 opencode 에 붙는 길은 두지 않는다 — 폐쇄망에서는 사용자가
 // `opencode serve` 를 칠 수 없고, 제품이 안 쓰는 분기는 낡는다 (closed-code 결정과 같다). 실물 테스트도 앱이 띄운 것을 쓴다.
 mounted.push(ctx.plugin(EngineService, {
@@ -180,6 +192,9 @@ function bootstrap(ctx: Context): void {
     ctx.providers.fetchAvailableModels(draft),
   )
   handle(ctx, Channel.LIST_CONVERSATIONS, async () => ctx.sessions.list())
+  // 프로젝트마다 마지막에 보던 대화 (이슈 #137) — 화면이 대화를 열 때 알리고, 다른 프로젝트에 지시를 보낼 때 받는 대화가 된다
+  handle(ctx, Channel.MARK_VIEWED, async (_event, conversationId: string) => ctx.sessions.noteViewed(String(conversationId)))
+  handle(ctx, Channel.LAST_VIEWED, async () => ctx.sessions.lastViewed())
   handle(ctx, Channel.SAVE_CONVERSATION, async (_event, conversation: Conversation) => ctx.sessions.save(conversation))
   // 고른 모델·모드·시각만 — 제목·통계·엔진 세션은 ctx.chat 이 적는다 (화면이 통째로 덮지 않게)
   handle(ctx, Channel.PATCH_CONVERSATION, async (_event, id: string, patch: { model?: ChatModel; mode?: Mode; updatedAt?: number }) => {
@@ -272,6 +287,7 @@ function chatBridge(ctx: Context): void {
   handle(ctx, Channel.DROP_QUEUED, async (_event, conversationId: string, index: number) => ctx.chat.dropQueued(String(conversationId), Number(index)))
   handle(ctx, Channel.CHAT_SNAPSHOT, async () => ctx.chat.snapshot())
   handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => ctx.chat.stop(String(conversationId)))
+  handle(ctx, Channel.COMPACT_CHAT, async (_event, conversationId: string) => ctx.chat.compact(String(conversationId)))
   handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.chat.stopSubtask(String(subtaskId)))
   // target: 지시 보내기 승인 카드에서 고른 받을 대화 (이슈 #67) — 모양만 거른다. 그 대화로 보낼 수 있는지는 도구가 실행할 때 다시 본다
   handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer, target?: unknown) => ctx.chat.reply(sessionId, requestId, answer, attentionTarget(target)))
@@ -422,7 +438,6 @@ const openInHost = openInTest ? recordingOpenInHost(openInTest) : systemOpenInHo
 function openInBridge(ctx: Context): void {
   handle(ctx, Channel.OPEN_IN_APPS, async () => ctx.openIn.apps())
   handle(ctx, Channel.OPEN_IN, async (_event, appId: string, directory: string) => ctx.openIn.open(appId, directory))
-  handle(ctx, Channel.OPEN_FILE_IN, async (_event, appId: string, directory: string, token: string) => ctx.openIn.openFile(appId, directory, token))
 }
 openInBridge.inject = ['openIn']
 
@@ -490,7 +505,8 @@ speechBridge.inject = ['speech']
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게
  *  (web 만 묶음이 없다). service 는 묶음이 올리는 서비스 키 — 부팅 진단이 켜진 기능의 서비스가 떴는지 본다 */
 const features: FeatureDefinition[] = [
-  { id: 'at', plugin: AtTrigger },
+  // 동봉 rg 로 프로젝트 전체 파일 목록을 훑는다 (#148). 개발 실행은 받아 둔 build/vendor 것 — 없으면 포함 검색은 지금 폴더·엔진 결과만
+  { id: 'at', plugin: (ctx) => void ctx.plugin(AtTrigger, { rg: bundledRg() }) },
   { id: 'slash', plugin: SlashTrigger },
   { id: 'bang', plugin: BangTrigger }, // `!명령`(shell) 이 꺼지면 같이 꺼진다 (FEATURE_REQUIRES)
   {
@@ -579,7 +595,8 @@ const features: FeatureDefinition[] = [
       ctx.plugin(AppMcpService)
       ctx.plugin(OpenFileTool)
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
-      ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 넷 — 다른 대화 보기·지시 보내기 (이슈 #55)
+      ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
+      ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
       ctx.plugin(appMcpBridge)
     },
   },
@@ -604,6 +621,20 @@ const features: FeatureDefinition[] = [
         root: app.isPackaged ? bundledSpeechDir(process.resourcesPath) : devSpeechDir(path.join(__dirname, '../..')),
       })
       ctx.plugin(speechBridge)
+    },
+  },
+  {
+    // 브라우저 (이슈 #147) — 기본 꺼짐. 동봉한 Playwright MCP(extraResources `browser`, 개발 실행은 `node scripts/fetch-browser.mjs` 로 받아 둔
+    // build/vendor)를 내장 MCP 서버 `chrome` 으로 붙인다. 서버는 엔진이 이 앱 실행 파일을 node 로 돌려 띄우고, Chrome 창은 첫 도구 호출 때 뜬다.
+    // 끄거나 앱을 끄면 전용 프로필(userData/browser/profile)로 뜬 Chrome 을 닫는다
+    id: 'browser',
+    service: 'browser',
+    plugin: (ctx) => {
+      ctx.plugin(BrowserService, {
+        runner: process.execPath,
+        root: app.isPackaged ? bundledBrowserDir(process.resourcesPath) : devBrowserDir(path.join(__dirname, '../..')),
+        dataDir: path.join(userData, 'browser'),
+      })
     },
   },
 ]

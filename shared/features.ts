@@ -4,20 +4,24 @@
 // 바탕(대화·엔진·설정·provider·프로젝트·대화 저장)은 여기에 없다 — 끌 수 없다.
 
 // skills(이슈 #7)는 묶음(ctx.skills — `+` 메뉴의 스킬 팝업 목록(#43)·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
-export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'appMcp', 'hooks', 'voice'] as const
+export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'appMcp', 'hooks', 'voice', 'browser'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 카드가 없다.
  *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP */
-export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true }
+const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true } as const satisfies Partial<Record<FeatureId, boolean>>
+export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = FIXED
+
+/** 사용자가 켜고 끄는 기능의 id — 카드의 이름·설명 글(`feature.<id>`)은 이것에만 있다 */
+export type ChoosableFeatureId = Exclude<FeatureId, keyof typeof FIXED>
 
 /** 사용자가 켜고 끄는 기능 (설정 > 기능의 카드) */
 export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
 
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
-export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly FeatureId[] }[] = [
+export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
-  { id: 'ai', features: ['appMcp', 'web'] },
+  { id: 'ai', features: ['appMcp', 'web', 'browser'] },
   { id: 'automation', features: ['hooks'] },
   { id: 'devices', features: ['voice', 'remote', 'notifications'] },
 ]
@@ -28,8 +32,9 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
  *  나머지(터미널 칸·추론 과정·다른 앱에서 열기·데스크탑 MCP)는 기본 켜짐.
  *  데스크탑 MCP(appMcp, 이슈 #99)는 앱 내장 MCP 서버(ctx.appMcp)와 그 도구 — 끄면 서버가 내려가고 다음 턴부터 엔진에서 `litecode_*` 도구가 빠진다.
  *  훅(hooks, 이슈 #102)은 기본 꺼짐 — 사용자 셸 명령을 AI 의 행동에 걸어 돌리는 기능이라 사용자가 켠다.
- *  음성 입력(voice — ctx.speech)도 기본 꺼짐 — 마이크 권한을 묻고 쓰는 동안 메모리 ~1GB 인 기능이라 사용자가 켠다. 꺼져 있으면 마이크 권한도 거절한다 */
-export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice']
+ *  음성 입력(voice — ctx.speech)도 기본 꺼짐 — 마이크 권한을 묻고 쓰는 동안 메모리 ~1GB 인 기능이라 사용자가 켠다. 꺼져 있으면 마이크 권한도 거절한다.
+ *  브라우저(browser — ctx.browser, 이슈 #147)도 기본 꺼짐 — AI 가 Chrome 창을 조종하고, 켜면 도구 25개의 스키마(26KB)가 매 요청에 실린다 */
+export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser']
 
 /** 저장된 값이 없을 때의 켜짐 */
 export function featureDefault(feature: FeatureId): boolean {
@@ -37,7 +42,7 @@ export function featureDefault(feature: FeatureId): boolean {
 }
 
 /** 그 기능이 쓰려면 같이 켜져 있어야 하는 기능 — `!` 입력은 `!명령` 실행(ctx.shell)이 돌린다 */
-export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'] }
+export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'], browser: ['mcp'] }
 
 /** 기능별 켜기 값 — 없는 키는 기본값(featureDefault) */
 export type FeatureSwitches = Partial<Record<FeatureId, boolean>>

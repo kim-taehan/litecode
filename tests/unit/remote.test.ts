@@ -348,6 +348,47 @@ describe('REST', () => {
     expect((await api('POST', '/v1/conversations/elsewhere/messages', { token, body: { text: 'hi', clientMessageId: 'a' } })).status).toBe(404)
   })
 
+  it('목록의 진행 중·답 필요는 알림 기능 없이도 ctx.chat 의 도는 턴에서 온다 — 이벤트(notices.changed)도 같이 (#126 E3)', async () => {
+    const { ctx, api, pair, save, turn, events } = await start()
+    const { token } = await pair()
+    await save('c1')
+    await save('c2')
+    const stream = await events(token)
+    const statuses = async () => Object.fromEntries((await api<RemoteConversation[]>('GET', `/v1/conversations?project=${encodeURIComponent(project)}`, { token })).body.map((entry) => [entry.id, entry.status]))
+    const notices = () => parseFrames(stream.raw()).filter((frame) => frame.event === 'notices.changed').map((frame) => frame.data)
+    expect(ctx.get('notifications')).toBeUndefined()
+    expect(await statuses()).toEqual({ c1: undefined, c2: undefined })
+
+    await ctx.chat.send('c1', { text: 'go' })
+    const call = await turn(1)
+    expect(await statuses()).toEqual({ c1: 'running', c2: undefined })
+
+    call.attention([{ kind: 'permission', id: 'per_1', sessionId: call.sessionId, action: 'bash', resources: ['ls'] } as Attention])
+    expect(await statuses()).toEqual({ c1: 'attention', c2: undefined })
+    call.attention([])
+    expect(await statuses()).toEqual({ c1: 'running', c2: undefined })
+
+    call.finish()
+    await until(() => ctx.chat.snapshot().c1 === undefined, '턴 끝')
+    expect(await statuses()).toEqual({ c1: undefined, c2: undefined })
+    await until(() => notices().length === 4, 'notices')
+    expect(notices()).toEqual([{ c1: { project, status: 'running' } }, { c1: { project, status: 'attention' } }, { c1: { project, status: 'running' } }, {}])
+  })
+
+  it('안 본 완료·실패는 알림 기능의 것 그대로 — 도는 턴이 있는 대화는 ctx.chat 것이 이긴다', async () => {
+    const { ctx, api, pair, save, turn } = await start()
+    const { token } = await pair()
+    await save('c1')
+    await save('c2')
+    ctx.provide('notifications')
+    ;(ctx as unknown as { notifications: unknown }).notifications = { snapshot: () => ({ c1: { project, status: 'done' }, c2: { project, status: 'failed' } }) }
+    await ctx.chat.send('c1', { text: 'go' })
+    const call = await turn(1)
+    const list = (await api<RemoteConversation[]>('GET', `/v1/conversations?project=${encodeURIComponent(project)}`, { token })).body
+    expect(Object.fromEntries(list.map((entry) => [entry.id, entry.status]))).toEqual({ c1: 'running', c2: 'failed' })
+    call.finish()
+  })
+
   it('모델 목록에는 주소·키가 없다', async () => {
     const { api, pair } = await start()
     const { token } = await pair()

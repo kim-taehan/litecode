@@ -33,8 +33,7 @@ declare module 'cordis' {
 export const OUTPUT_LIMIT = 100 * 1024
 export const TIMEOUT_MS = 60_000
 
-// 띄우기·그룹 종료·기한은 exec.ts — 훅(ctx.hooks)과 같이 쓴다. 원래 자리의 이름은 다시 내보낸다
-export { shellCommand } from './exec.ts'
+// 띄우기·그룹 종료·기한은 exec.ts — 훅(ctx.hooks)과 같이 쓴다
 
 export class ShellService extends Service {
   private running = new Map<string, ExecHandle>()

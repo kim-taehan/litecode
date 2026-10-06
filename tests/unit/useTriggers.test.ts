@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { triggerOpen } from '../../renderer/useTriggers.ts'
+import { slashName } from '../../renderer/TriggerPopup.tsx'
 import type { TriggerQuery } from '../../shared/ipc.ts'
 
 // 감사 E10 — 후보 메뉴는 입력창에 포커스가 있을 때만 열린다 (초안이 `/he` 로 끝난 대화로 돌아오기만 해서는 뜨지 않는다)
@@ -28,5 +29,16 @@ describe('triggerOpen', () => {
     expect(triggerOpen(query(2), '0:he', true)).toBe(false)
     expect(triggerOpen(query(2, 0, 'hel'), '0:he', true)).toBe(true)
     expect(triggerOpen(query(2, 3), '0:he', true)).toBe(true)
+  })
+})
+
+// `/` 메뉴 줄 (이슈 #144 시안 B): 아이콘이 종류를 말하므로 보이는 이름에서 `/` 를 뺀다 — 넣는 글·읽히는 이름은 `/이름` 그대로
+describe('slashName', () => {
+  it('앱·명령·스킬 줄은 앞의 / 를 빼고, 파일·폴더 줄은 그대로다', () => {
+    expect(slashName({ icon: 'app', label: '/compact' })).toBe('compact')
+    expect(slashName({ icon: 'command', label: '/init' })).toBe('init')
+    expect(slashName({ icon: 'skill', label: '/review-pr' })).toBe('review-pr')
+    expect(slashName({ icon: 'file', label: 'README.md' })).toBe('README.md')
+    expect(slashName({ icon: 'folder', label: '/odd/' })).toBe('/odd/')
   })
 })
