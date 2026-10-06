@@ -172,13 +172,13 @@ export function SessionTools(ctx: Context): void {
   }
 
   /** 보내기 도구를 부른 대화 — 자격(본 세션·앱에서 허용·깊이 1)을 다 보고 준다. chosen 은 허용하며 사용자가 고른 받을 대화 (없으면 도구 인자대로) */
-  async function sender(directory: string, args: Record<string, unknown>): Promise<{ from: Conversation; chosen?: AttentionTarget }> {
+  async function sender(directory: string, args: Record<string, unknown>): Promise<{ from: Conversation; chosen?: Extract<AttentionTarget, { kind: 'conversation' }> }> {
     const caller = await approved(directory, SEND_TOOL, args, 'Nothing was sent.')
     const found = (await inProject(directory)).find((entry) => entry.engineSessionId === caller.sessionId)
     const turn = found && ctx.chat.turnOf(found.id)
     if (!found || !turn) throw new Error(NO_CALLER)
     if (turn.origin.startsWith('session:')) throw new Error('This turn was started by another conversation and cannot delegate further.')
-    return { from: found, ...(caller.target && { chosen: caller.target }) }
+    return { from: found, ...(caller.target?.kind === 'conversation' && { chosen: caller.target }) }
   }
 
   /** 보내는 프로젝트의 이름 — 받는 대화의 딱지·감싼 글에 보인다. 목록에서 빠진 폴더면 폴더 이름 */

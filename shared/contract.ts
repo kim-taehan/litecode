@@ -153,7 +153,10 @@ export type AttentionAnswer = 'once' | 'reject' | string[][]
 
 /** 승인 카드에서 사용자가 고른 "받을 대화" (이슈 #67·#137) — 다른 프로젝트에 지시를 보내는 도구의 허용(once)에 함께 싣는다. 고른 프로젝트의
  *  마지막에 보던 대화 하나다. 엔진은 모른다(엔진에 가는 답은 once 뿐) — 앱이 허용 기록에 적어 두고 앱 MCP 서버의 도구가 실행할 때 쓴다 */
-export type AttentionTarget = { kind: 'conversation'; conversationId: string }
+export type AttentionTarget =
+  | { kind: 'conversation'; conversationId: string }
+  /** 스킬·MCP 서버·훅을 만드는 도구(이슈 #145)의 허용에 싣는 "저장할 곳" — 카드에서 사용자가 고른 값 (shared/make.ts) */
+  | { kind: 'scope'; scope: 'project' | 'all' }
 
 /** 첨부 종류 (이슈 #44) — file: 글 파일(본문에 `@경로` 나 글로 풀려 간다), image: png·jpeg (엔진에 이미지로 간다) */
 export type AttachmentKind = 'file' | 'image'

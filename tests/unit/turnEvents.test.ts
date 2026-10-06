@@ -56,6 +56,7 @@ let previous: unknown[] = []
 let gatedPermissions: string[] = []
 /** 가짜 엔진이 받은 게이트 대상 (EngineService.setGate — 받으면 다시 띄울 수 있다) */
 let engineGates: string[][] = []
+let engineRestarts = 0
 const AGENTS = ['build', 'plan', 'litecode-ask', 'litecode-full'].map((id) => ({ id, mode: 'primary' }))
 
 afterEach(() => {
@@ -342,6 +343,7 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
   prompts = []
   gatedPermissions = []
   engineGates = []
+  engineRestarts = 0
   class FakeProviders extends Service {
     constructor(ctx: Context) {
       super(ctx, 'providers')
@@ -358,6 +360,10 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
       return { url, headers: {}, closed: closer.signal, providerBaseURL: () => PROXY, gated: (permission: string) => gatedPermissions.includes(permission) }
     }
     async purgeDeleted() {}
+    async restart() {
+      engineRestarts++
+      return this.connection()
+    }
     setGate(matchers: readonly string[]) {
       engineGates.push([...matchers])
     }
@@ -1048,6 +1054,43 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     })
     expect(result.ok).toBe(true)
     expect(engineGates).toEqual([['bash'], ['edit']])
+  })
+
+  it('reloadWhenIdle (#145): 도는 턴이 없으면 바로 엔진을 다시 띄우고, 도는 턴이 있으면 끝난 뒤에 한 번만 — 도는 턴을 끊지 않는다', async () => {
+    const { llm } = await start(await fakeOpencode('permission'))
+    llm.reloadWhenIdle()
+    expect(engineRestarts).toBe(1)
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      if (!requests[0]) return
+      llm.reloadWhenIdle()
+      llm.reloadWhenIdle()
+      expect(engineRestarts).toBe(1) // 턴이 도는 중 — 아직
+      void llm.reply('ses_1', requests[0].id, 'once')
+    })
+    expect(result.ok).toBe(true)
+    expect(engineRestarts).toBe(2)
+  })
+
+  it("승인 카드에 싣는 MCP 도구 인자는 'llm/attention-input' 이 돌려준 것으로 바뀐다 (#145 — 비밀 가리기). 부른 대화 찾기는 원래 인자 그대로", async () => {
+    const { llm, ctx } = await start(await fakeOpencode('mcpask'))
+    const refs: unknown[] = []
+    ctx.on('llm/attention-input', (ref, input) => {
+      refs.push(ref)
+      return { ...(input as object), message: 'MASKED' }
+    })
+    const shown: Attention[][] = []
+    let caller: Awaited<ReturnType<LlmService['callerOf']>>
+    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+      shown.push(requests)
+      if (!requests[0]) return
+      void llm.reply('ses_1', requests[0].id, 'once', { kind: 'scope', scope: 'all' }).then(async () => {
+        caller = await llm.callerOf(directory, { server: 'litecode', tool: 'send_to_project' }, MCP_ARGS)
+      })
+    })
+    expect(result.ok).toBe(true)
+    expect(shown[0]![0]).toMatchObject({ input: JSON.stringify({ ...MCP_ARGS, message: 'MASKED' }) })
+    expect(refs[0]).toEqual({ server: 'litecode', tool: 'send_to_project' })
+    expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: true, target: { kind: 'scope', scope: 'all' } })
   })
 
   it('판정 통과로 보낸 once 는 사용자 승인이 아니다 — 호출 장부에 허용으로 적히지 않는다 (앱 MCP 세션 도구가 그 기록만 받는다, #55)', async () => {

@@ -8,6 +8,7 @@ import { realDirectory, type McpStatus } from './llm.ts'
 import { listMcpTools, type McpTool } from './mcpClient.ts'
 import type { KeyCipher } from './providers.ts'
 import { readJsonFileSync } from './jsonFile.ts'
+import { insideOf } from './projectPath.ts'
 import { tr } from '../i18n.ts'
 import { BROWSER_MCP_NAME } from '../../shared/browser.ts'
 import './llm.ts'
@@ -301,6 +302,38 @@ export class McpService extends Service {
     }
     this.forget(existing?.name ?? record.name)
     this.persist()
+  }
+
+  /** 대화로 서버를 더하기 전의 검사 (이슈 #145 — 앱 MCP 의 add_mcp_server). 입력 모양·예약 이름·**그 프로젝트에서 이미 보이는 이름**(앱 서버·
+   *  그 프로젝트 전용·폴더 정의·개인 설정 — save 는 앱 서버끼리만 본다). toFile 이면 프로젝트의 `.mcp.json` 을 고쳐 쓸 수 있는지도 본다.
+   *  안 되면 사유를 던진다 */
+  checkNew(input: McpServerInput, directory: string, toFile = false): void {
+    const workdir = realpathOf(directory)
+    const { record } = this.resolve({ ...input, originalName: undefined }, undefined)
+    if (record.name === APP_MCP_NAME || this.builtins.has(record.name)) throw new Error(tr('mcp.error.nameReserved', { name: record.name }))
+    const visible = [...this.servers, ...(this.projects[workdir]?.servers ?? []), ...projectServers(workdir), ...personalServers(this.opts.env ?? process.env)]
+    if (visible.some((server) => server.name === record.name)) throw new Error(tr('mcp.error.nameTaken', { name: record.name }))
+    if (toFile) readProjectFile(workdir)
+  }
+
+  /** 프로젝트 폴더의 `.mcp.json`(Claude Code 모양 — projectServers 가 읽는 그 모양)에 서버 하나를 더한다 (이슈 #145). 있던 서버·다른 열쇠는
+   *  그대로 두고, 파일이 깨져 있으면 덮어쓰지 않고 던진다. 링크를 풀어 프로젝트 폴더 안일 때만 쓴다. **비밀 값은 프로젝트 파일에 적지 않는다** —
+   *  비밀이 있는 서버는 save 의 project 묶음(앱 안)으로 넣는다. 돌려주는 것은 쓴 파일의 경로. 다음 턴에 그 폴더에 붙는다 */
+  addToProjectFile(input: McpServerInput, directory: string): string {
+    this.checkNew(input, directory)
+    const workdir = realpathOf(directory)
+    const { record, secrets } = this.resolve({ ...input, originalName: undefined }, undefined)
+    if (Object.keys(secrets).length > 0) throw new Error(tr('mcp.error.projectFileSecret'))
+    const { file, config } = readProjectFile(workdir)
+    const values = Object.fromEntries(record.vars.map((entry) => [entry.name, entry.value ?? '']))
+    const more = Object.keys(values).length > 0
+    const entry =
+      record.type === 'remote'
+        ? { type: 'http', url: record.url, ...(more && { headers: values }) }
+        : { command: record.command![0], ...(record.command!.length > 1 && { args: record.command!.slice(1) }), ...(more && { env: values }) }
+    const servers = (config['mcpServers'] ?? {}) as Record<string, unknown>
+    fs.writeFileSync(file, `${JSON.stringify({ ...config, mcpServers: { ...servers, [record.name]: entry } }, null, 2)}\n`)
+    return file
   }
 
   /** 앱 서버를 지운다 — directory(지금 프로젝트)의 전용 서버를 먼저 찾고, 없으면 모든 프로젝트 서버. 그 이름의 켜기 값도 같이 지운다 */
@@ -597,6 +630,28 @@ export function personalServers(env: NodeJS.ProcessEnv): ParsedServer[] {
   const merged = new Map<string, ParsedServer>()
   for (const file of ['config.json', 'opencode.json', 'opencode.jsonc']) for (const server of opencodeServers(readJsonc(path.join(dir, file)))) merged.set(server.name, server)
   return [...merged.values()]
+}
+
+/** 고쳐 쓸 프로젝트의 `.mcp.json` — 없으면 빈 것. 폴더 밖을 가리키는 링크·JSON 이 아닌 글·모양이 다른 파일이면 던진다 (덮어쓰지 않는다).
+ *  주석이 든 파일도 받지 않는다 — 고쳐 쓰면 주석이 사라진다 */
+function readProjectFile(workdir: string): { file: string; config: Record<string, unknown> } {
+  const file = path.join(workdir, '.mcp.json')
+  if (!fs.lstatSync(file, { throwIfNoEntry: false })) return { file, config: {} }
+  let real: string | undefined
+  try {
+    real = fs.realpathSync(file)
+  } catch {
+    // 끊어진 링크 — 아래에서 거절
+  }
+  if (!real || insideOf(workdir, real) === undefined) throw new Error(tr('mcp.error.projectFileOutside'))
+  let config: unknown
+  try {
+    config = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch {
+    throw new Error(tr('mcp.error.projectFileBroken'))
+  }
+  if (!isObject(config) || (config['mcpServers'] !== undefined && !isObject(config['mcpServers']))) throw new Error(tr('mcp.error.projectFileBroken'))
+  return { file, config }
 }
 
 /** opencode 설정의 mcp: {이름: {type:"local", command[], environment?, enabled?} | {type:"remote", url, headers?, enabled?}} */

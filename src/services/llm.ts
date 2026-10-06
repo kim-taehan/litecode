@@ -73,6 +73,9 @@ declare module 'cordis' {
      *  이슈 #102 2단계). ctx.serial 로 차례로 묻고 처음 나온 판정을 쓴다: 'allow'(통과) · { deny, reason }(막는다 — 사유가 모델에 가고 턴은 이어진다) ·
      *  'ask'(사용자에게 묻는다 — 승인 카드). 답이 없으면(undefined) 판정한 쪽이 없는 것이다. 통과·무응답이어도 **모드가 원래 묻는 호출은 승인 카드가 뜬다** */
     'llm/pre-tool'(info: PreTool): Promise<PreToolDecision | undefined> | PreToolDecision | undefined
+    /** 승인 카드에 MCP 도구 호출의 인자를 싣기 직전 (ctx.bail — 처음 나온 값을 쓴다). 그 도구를 아는 쪽이 화면에 가면 안 되는 값(비밀)을 가린
+     *  인자를 돌려준다 (이슈 #145). 답이 없으면 인자 그대로 싣는다. 도구가 받는 인자·부른 대화 찾기(callerOf)는 원래 값 그대로다 */
+    'llm/attention-input'(ref: McpToolRef, input: unknown): unknown
   }
 }
 
@@ -246,6 +249,8 @@ export class LlmService extends Service {
   private mcpServers = new Map<string, string[]>()
   /** gateTools 로 받았지만 아직 엔진에 못 넘긴 매처 — 도는 턴이 없어지면 넘긴다 */
   private gateWanted?: readonly string[]
+  /** 엔진을 다시 띄워 달라는 요청(reloadWhenIdle)이 밀려 있다 */
+  private reloadWanted = false
 
   /** /event 를 여는 dispatcher. 전역 fetch(undici) 기본 bodyTimeout·headersTimeout 은 300초다 — 레거시 /event 는 heartbeat 가 10초마다 오므로
    *  무바이트 한도를 STREAM_IDLE_TIMEOUT_MS 로 줄여 죽은 연결을 30초 안에 알아챈다(이슈 #20). 시험은 더 짧게 줄 수 있다 (01q).
@@ -357,6 +362,7 @@ export class LlmService extends Service {
       this.turns--
       this.purgeIfIdle()
       this.gateIfIdle()
+      this.reloadIfIdle()
     }
   }
 
@@ -373,6 +379,19 @@ export class LlmService extends Service {
     const matchers = this.gateWanted
     this.gateWanted = undefined
     this.ctx.engine.setGate(matchers)
+  }
+
+  /** 엔진이 띄울 때만 읽는 것(스킬 목록 — 폴더별로 기억해 다시 띄워야 바뀐다)이 바뀌었다 — 엔진을 다시 띄운다 (이슈 #145: 대화로 만든 스킬).
+   *  **도는 턴이 있으면 다 끝난 뒤로 미룬다**(재시작은 도는 턴을 끊는다 — 이 요청은 도는 턴 안의 도구가 한다) */
+  reloadWhenIdle(): void {
+    this.reloadWanted = true
+    this.reloadIfIdle()
+  }
+
+  private reloadIfIdle(): void {
+    if (this.turns > 0 || !this.reloadWanted) return
+    this.reloadWanted = false
+    void this.ctx.engine.restart().catch((error: unknown) => console.error('[llm] 스킬 변경 후 엔진 재시작 실패', (error as Error).message))
   }
 
   /** 세션을 쓸 준비 — 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 보고, 모드를 주면 그 에이전트가 있는지 보고, 세션이 없으면 만든다.
@@ -603,6 +622,7 @@ export class LlmService extends Service {
       this.turns--
       this.purgeIfIdle()
       this.gateIfIdle()
+      this.reloadIfIdle()
     }
   }
 
@@ -1193,7 +1213,8 @@ export class LlmService extends Service {
         ...permissions.map((entry): Attention => {
           const ref = mcp(entry.permission)
           // 묻는 이벤트에는 인자가 없다 — 그 순간 그 callID 의 파트가 running + input 이라 이어 붙인다 (01z 1-3, 3/3). 카드가 대상·보낼 글을 그린다
-          const input = ref && entry.tool?.callID ? calls?.inputOf(entry.tool.callID) : undefined
+          const raw = ref && entry.tool?.callID ? calls?.inputOf(entry.tool.callID) : undefined
+          const input = ref && raw !== undefined ? (this.ctx.bail('llm/attention-input', ref, raw) ?? raw) : raw
           return {
             kind: 'permission',
             id: entry.id,
