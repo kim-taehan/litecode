@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { detect, TriggerRegistry, type TriggerSource } from '../../src/services/triggers.ts'
-import { AtTrigger, reference } from '../../src/triggers/at.ts'
+import { AtTrigger, containing, reference } from '../../src/triggers/at.ts'
 import { expandTemplate, SlashTrigger } from '../../src/triggers/slash.ts'
 import { BangTrigger } from '../../src/triggers/bang.ts'
 import type { EngineCommand, EngineSkill, FileEntry } from '../../src/services/llm.ts'
@@ -158,7 +158,22 @@ describe('@ 파일', () => {
     await triggers.query(scope, '@src/', 5)
     const found = await triggers.query(scope, '@alp', 4)
     expect(found?.candidates).toEqual([{ id: 'src/deep/alpha.ts', label: 'alpha.ts', detail: 'src/deep', icon: 'file', group: '파일', drill: false }])
-    expect(llm.calls).toEqual(['list /work/a ', 'list /work/a src/', 'find /work/a alp 20'])
+    expect(llm.calls).toEqual(['list /work/a ', 'list /work/a src/', 'list /work/a ', 'find /work/a alp 100'])
+  })
+
+  it('글자를 치면 이름에 그 글자가 든 것이 먼저다 — 폴더도, 대소문자 무시, 가운데 글자도', async () => {
+    const { ctx, triggers } = await start()
+    ctx.plugin(AtTrigger)
+    await settle()
+    expect((await triggers.query(scope, '@adm', 4))?.candidates.map((entry) => entry.label)).toEqual(['README.md', 'alpha.ts'])
+    expect((await triggers.query(scope, '@ac', 3))?.candidates.map((entry) => entry.label)).toEqual(['sp ace/', 'alpha.ts'])
+  })
+
+  it('containing: 지금 폴더의 이름 포함 → 경로 포함 → 나머지 퍼지, 같은 경로는 한 번', () => {
+    const listed = [{ path: 'src/', type: 'directory' as const }, { path: 'docs/', type: 'directory' as const }]
+    const found = [{ path: 'lib/x.ts', type: 'file' as const }, { path: 'docs/resource.md', type: 'file' as const }, { path: 'src/', type: 'directory' as const }]
+    expect(containing(listed, found, 'src').map((entry) => entry.path)).toEqual(['src/', 'lib/x.ts', 'docs/resource.md'])
+    expect(containing(listed, found, 'RC').map((entry) => entry.path)).toEqual(['src/', 'docs/resource.md', 'lib/x.ts'])
   })
 
   it('고르면 경로 텍스트만 넣고(공백 경로는 따옴표), 폴더로 들어가면 메뉴를 연 채 둔다', async () => {
