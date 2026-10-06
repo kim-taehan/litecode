@@ -175,6 +175,12 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     인자(주소 등)로 규칙을 나눌 수 없다, 인자는 도구 파트의 `state.input` 에서 읽는다. `POST /mcp/{name}/disconnect` 와 opencode 종료(SIGKILL 포함)는 stdio 자식의 표준입력을
     닫아 자식이 스스로 끝난다(mac, 각 1/1) — 자식이 띄운 손자(Chrome)는 자식이 정상 종료할 때만 정리된다. Playwright MCP 0.0.83: 기본 `--snapshot-mode full` 은 동작 응답에
     스냅샷을 **파일 링크**로만 준다 — `none` + 명시적 `browser_snapshot` 호출이 본문으로 받는 길이다. Chrome 은 `--user-data-dir=<경로>` 한 인자로 뜬다(경로에 공백이 있어도 — 2026-10-06 헤드리스 1/1)
+  - **MCP 도구를 턴마다 숨기기** (#164, 2026-10-06, 일회용 스크립트 — 실물 opencode 1.18.18 + 가짜 LLM 의 `lastChat.tools`, 서버 이름 `my-srv`·`dot.srv x`, 도구 `do.thing-x`·`plain`·`Other Tool`):
+    `/doc` 의 prompt_async 본문에 `tools: {[이름]: boolean}` 가 있다. `{"my-srv_plain": false}` 를 실은 턴의 LLM 요청 tools 에서 그 도구가 빠진다(같은 세션의 다른 도구·다른 세션·
+    다른 폴더는 그대로). 엔진 도구 이름은 서버·도구 둘 다 `[A-Za-z0-9_-]` 밖 글자를 `_` 로(`dot.srv x` + `do.thing-x` → `dot_srv_x_do_thing-x`) — MCP 서버가 준 원래 이름
+    (`my-srv_do.thing-x`)은 안 먹는다. **이 맵은 세션 `permission` 을 통째로 바꾸고(`[{permission:이름, pattern:"*", action:"deny"}]`) 다음 턴에도 남는다** — 필드가 없거나
+    `{}` 면 앞 값 그대로, 다른 맵을 주면 바뀐다(합치지 않는다). 와일드카드(`my-srv_*`)도 먹는다. `true` 는 `action:"allow"` 규칙이 된다 — 모드의 ask 를 건너뛸 수 있어 싣지 않는다.
+    그래서 `ctx.llm` 은 매 턴 엔진 이름이 될 수 없는 표지(`litecode:no-tool`) 하나 + 숨길 도구를 false 로 싣는다(표지만 실은 턴에 전부 되살아남 1/1). 하위 에이전트(task)의 자식 세션에 이 숨김이 가는지는 안 쟀다
   - **할 일 목록(todowrite)** (#83, `_workspace/01ae_todo.md`): 인자 `{todos:[{content, status, priority}]}` — id 없음, status(pending·in_progress·completed·cancelled)·priority 는
     검사 안 되는 문자열. **호출마다 목록 전체를 보내고 통째로 교체된다.** 끝난 파트의 `state.metadata.todos` 가 그 시점 목록, 같은 내용이 `todo.updated {sessionID, todos}` 로 오고
     `GET /session/{id}/todo?directory=` 가 맨 배열로 준다(재시작·자동 요약 뒤에도 남는다). 틀린 인자는 `running`(input 실림) 뒤 `error` 이고 목록은 안 바뀐다 → 화면은 `completed` 파트만 본다.

@@ -4,7 +4,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
 {
   "build": [
     "litecode_send_to_project: "ask"",
-    "litecode_read_project: "ask"",
+    "litecode_read_project: "allow"",
     "litecode_create: "ask"",
     "litecode_present: "allow"",
     "bash: "ask"",
@@ -84,7 +84,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
   "litecode-full": [
     "*: "allow"",
     "litecode_send_to_project: "ask"",
-    "litecode_read_project: "ask"",
+    "litecode_read_project: "allow"",
     "litecode_create: "ask"",
     "litecode_present: "allow"",
     "bash: "ask"",
@@ -105,7 +105,6 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "websearch: "deny"",
     "task: "deny"",
     "*_*: "deny"",
-    "litecode_read_project: "ask"",
     "external_directory: "ask"",
     "doom_loop: "ask"",
     "glob: "ask"",
@@ -113,6 +112,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "read: "ask"",
     "skill: {"*":"ask","customize-opencode":"deny"}",
     "todowrite: "ask"",
+    "litecode_read_project: "ask"",
     "litecode_present: "ask"",
     "litecode_open: "ask"",
     "litecode_list_projects: "ask"",

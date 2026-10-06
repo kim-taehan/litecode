@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { McpScope, McpServerInput, McpServerSummary, McpTestResult, Project } from '../shared/ipc.ts'
+import type { McpScope, McpServerInput, McpServerSummary, McpTestResult, McpToolSelection, Project } from '../shared/ipc.ts'
+import { ALL_TOOLS_OFF, serverCost, shortTokens, toolBudget, TOOL_BUDGET_MAX_TOKENS, withTool } from '../shared/mcpTools.ts'
 import { PlusDialog, PlusGroup } from './PlusDialog.tsx'
-import { byScope, mcpState } from './plusView.ts'
+import { byScope, mcpState, toolPicking, toolRows } from './plusView.ts'
 import { reason } from './ipcError.ts'
-import { useT } from './settingsStore.ts'
+import { useSettings, useT } from './settingsStore.ts'
 import './mcp.css'
 
 // MCP 서버 팝업 (이슈 #43 — 입력창 `+` 메뉴 > MCP 서버, 시안 _workspace/mock-plus/Mcp.dc.html). 설정 > MCP(이슈 #28)에 있던 것을 프로젝트 기준으로 옮겼다.
@@ -12,6 +13,8 @@ import './mcp.css'
 // - 줄: 이름(+ 출처 배지: 폴더 정의는 파일 이름, 개인 설정) · 명령/주소 · 상태(연결됨 · 도구 N / 실패 · 사유 / 꺼짐) · 스위치.
 //   **스위치는 이 프로젝트에서만** 켜고 끈다. 줄을 누르면 도구 목록·편집·삭제가 펼쳐진다
 // - 앱 서버만 고칠 수 있다. 폴더 정의·개인 설정 서버는 읽기 전용이고 값은 안 보인다(이름만)
+// - 서버 안의 도구 고르기 (이슈 #164, 시안 _workspace/mock-tools/Main·List.dc.html): 목록 머리에 "AI 에게 가는 도구 N개 · 요청마다 약 M 토큰"
+//   (많으면 주황 띠), 줄마다 "도구 켠 수 / 전체" 와 토큰 어림. 펼치면 체크 목록(검색·전부 켜기·전부 끄기). 고른 값은 이 프로젝트에만 (ctx.mcp)
 // - 편집 폼은 #28 그대로(dsh ui-settings-models 의 편집 카드 하나·쓰기 전용 비밀·두 번 눌러 삭제): 비밀(헤더·env 값 중 "비밀" 표시)은 쓰기 전용 —
 //   저장된 값은 안 보이고 "저장됨" 만, 빈 칸으로 두면 그대로 둔다. 연결 테스트는 저장하지 않고 앱이 직접 잠깐 붙어 도구 목록을 본다
 
@@ -48,6 +51,15 @@ export function McpPopup({ project, onClose }: { project: Project; onClose(): vo
     if (saved) void reload()
   }
 
+  /** 도구 고르기 — 화면을 먼저 바꾸고 저장한다 (체크마다 목록을 다시 읽지 않게). 실패하면 다시 읽는다 */
+  const setTools = (server: McpServerSummary, selection: McpToolSelection | undefined): void => {
+    setServers((now) => now?.map((entry) => (entry === server ? { ...entry, toolSelection: selection } : entry)))
+    window.litecode.setMcpTools(server.name, selection, directory).catch((failure: unknown) => {
+      setError(reason(failure))
+      void reload()
+    })
+  }
+
   const groups = byScope(servers ?? [])
   const group = (scope: McpScope) => (
     <PlusGroup
@@ -75,6 +87,8 @@ export function McpPopup({ project, onClose }: { project: Project; onClose(): vo
               void act(() => window.litecode.removeMcp(server.name, directory))
             }}
             onToggle={(on) => void act(() => window.litecode.setMcpEnabled(server.name, on, directory))}
+            projectName={project.name}
+            onTools={(selection) => setTools(server, selection)}
           />
           {server.source === 'app' && editing === server.name && <ServerEditor server={server} directory={directory} onDone={done} />}
         </div>
@@ -95,6 +109,7 @@ export function McpPopup({ project, onClose }: { project: Project; onClose(): vo
           {error}
         </p>
       )}
+      {servers && <ToolBudget servers={servers} />}
       {group('project')}
       {group('all')}
       <p className="plus-dialog__footnote">{t('mcp.footer')}</p>
@@ -111,14 +126,33 @@ interface RowProps {
   onCancelDelete(): void
   onConfirmDelete(): void
   onToggle(on: boolean): void
+  projectName: string
+  onTools(selection: McpToolSelection | undefined): void
 }
 
-function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDelete, onConfirmDelete, onToggle }: RowProps) {
+/** 목록 머리 띠 — AI 에게 가는 도구 합계 (내장 서버 포함, 꺼진 서버·꺼 둔 도구 제외). 아는 도구가 없으면(연결 전) 안 보인다 */
+function ToolBudget({ servers }: { servers: McpServerSummary[] }) {
   const t = useT()
+  const { language } = useSettings()
+  if (!servers.some((server) => mcpState(server) === 'connected' && server.tools)) return null
+  const budget = toolBudget(servers)
+  return (
+    <div className="mcp-budget" data-heavy={budget.heavy}>
+      <span className="mcp-budget__title">{t('mcp.tools.budget', { count: budget.count, tokens: shortTokens(budget.tokens, language) })}</span>
+      {budget.heavy && <span className="mcp-budget__hint">{t('mcp.tools.budgetHint')}</span>}
+    </div>
+  )
+}
+
+function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDelete, onConfirmDelete, onToggle, projectName, onTools }: RowProps) {
+  const t = useT()
+  const { language } = useSettings()
   const [open, setOpen] = useState(false)
   const app = server.source === 'app'
   const target = maskCredentials(server.type === 'remote' ? server.url : server.command?.join(' '))
   const state = mcpState(server)
+  const picking = toolPicking(server)
+  const cost = state === 'connected' ? serverCost(server) : undefined
   // 출처 배지 — 폴더 정의는 그 파일 이름(시안의 ".mcp.json"), 개인 설정은 "개인 설정". 앱에서 만든 서버는 배지 없음
   // 내장 = 앱 자신의 MCP 서버(이슈 #51) — 읽기 전용, 주소 없음
   const badge =
@@ -126,15 +160,17 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
   const stateText =
     state === 'shadowed'
       ? t('mcp.shadowed')
-      : state === 'connected' && server.tools
-        ? t('mcp.testOk', { count: server.tools.length })
-        : state === 'failed' && server.error
-          ? `${t('mcp.status.failed')} · ${server.error}`
-          : state
-            ? isKnownStatus(state)
-              ? t(`mcp.status.${state}`)
-              : state
-            : undefined
+      : state === 'connected' && cost && cost.count < cost.total
+        ? t('mcp.tools.state', { on: cost.count, total: cost.total })
+        : state === 'connected' && server.tools
+          ? t('mcp.testOk', { count: server.tools.length })
+          : state === 'failed' && server.error
+            ? `${t('mcp.status.failed')} · ${server.error}`
+            : state
+              ? isKnownStatus(state)
+                ? t(`mcp.status.${state}`)
+                : state
+              : undefined
   return (
     <>
       <div className="mcp-row__main">
@@ -145,9 +181,18 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
           </span>
           {target && <span className="mcp-row__target">{target}</span>}
         </button>
-        {stateText && (
-          <span className="mcp-row__state" data-state={state} title={stateText}>
-            {stateText}
+        {(stateText || cost) && (
+          <span className="mcp-row__meta">
+            {stateText && (
+              <span className="mcp-row__state" data-state={state} title={stateText}>
+                {stateText}
+              </span>
+            )}
+            {cost && (
+              <span className="mcp-row__cost" data-heavy={cost.tokens > TOOL_BUDGET_MAX_TOKENS}>
+                {t('mcp.tools.cost', { tokens: shortTokens(cost.tokens, language) })}
+              </span>
+            )}
           </span>
         )}
         <button
@@ -172,8 +217,15 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
           )}
           {server.error && <div className="mcp-row__line mcp-row__line--error">{server.error}</div>}
           {server.toolsError && <div className="mcp-row__line mcp-row__line--error">{server.toolsError}</div>}
-          {server.tools && <ToolList tools={server.tools} />}
+          {picking === 'pick' && server.tools ? (
+            <ToolPicker tools={server.tools} selection={server.toolSelection} onChange={onTools} />
+          ) : picking === 'waiting' ? (
+            <div className="mcp-row__line mcp-picker__waiting">{t('mcp.tools.waiting')}</div>
+          ) : (
+            server.tools && <ToolList tools={server.tools} />
+          )}
           <div className="mcp-row__actions">
+            {picking === 'pick' && <span className="mcp-row__scope-note">{t('mcp.tools.projectOnly', { project: projectName })}</span>}
             {!app ? (
               <span className="mcp-card__readonly">{t('mcp.readOnly')}</span>
             ) : confirming ? (
@@ -201,6 +253,57 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
         </div>
       )}
     </>
+  )
+}
+
+/** 서버 안의 도구 고르기 (이슈 #164, 시안 _workspace/mock-tools/Main.dc.html) — 검색·전부 켜기/끄기·체크 목록(이름 + 설명 한 줄 + 토큰 어림).
+ *  많으면 목록 높이를 묶고 안에서 스크롤. dsh ui-tool 의 도구 줄처럼 이름은 고정폭 */
+function ToolPicker({ tools, selection, onChange }: { tools: NonNullable<McpServerSummary['tools']>; selection?: McpToolSelection; onChange(selection: McpToolSelection | undefined): void }) {
+  const t = useT()
+  const { language } = useSettings()
+  const [query, setQuery] = useState('')
+  const rows = toolRows(tools, selection, query)
+  const used = serverCost({ tools, toolSelection: selection })!
+  const all = serverCost({ tools })!
+  return (
+    <div className="mcp-picker">
+      <div className="mcp-picker__head">
+        <span className="mcp-picker__title">{t('mcp.tools.title')}</span>
+        <span className="mcp-picker__summary">{t('mcp.tools.summary', { tokens: shortTokens(used.tokens, language), all: shortTokens(all.tokens, language) })}</span>
+      </div>
+      <div className="mcp-picker__bar">
+        <input className="settings-input mcp-picker__search" aria-label={t('mcp.tools.search')} placeholder={t('mcp.tools.searchPlaceholder')} value={query} onChange={(event) => setQuery(event.target.value)} />
+        <button type="button" className="settings-button" disabled={!selection} onClick={() => onChange(undefined)}>
+          {t('mcp.tools.allOn')}
+        </button>
+        <button type="button" className="settings-button" disabled={!!selection?.only && selection.only.length === 0} onClick={() => onChange(ALL_TOOLS_OFF)}>
+          {t('mcp.tools.allOff')}
+        </button>
+      </div>
+      <ul className="mcp-picker__list">
+        {rows.map((row) => (
+          <li key={row.name}>
+            <label className="mcp-picker__item" data-on={row.on} data-tool={row.name}>
+              <input type="checkbox" checked={row.on} onChange={(event) => onChange(withTool(selection, row.name, event.target.checked))} />
+              <span className="mcp-picker__text">
+                <span className="mcp-tools__name">{row.name}</span>
+                {row.description && (
+                  <span className="mcp-picker__description" title={row.description}>
+                    {row.description}
+                  </span>
+                )}
+              </span>
+              <span className="mcp-picker__cost">{t('mcp.tools.toolCost', { tokens: shortTokens(row.tokens, language) })}</span>
+            </label>
+          </li>
+        ))}
+        {rows.length === 0 && <li className="mcp-picker__empty">{t('mcp.tools.noMatch')}</li>}
+      </ul>
+      <div className="mcp-picker__note">
+        <span className="mcp-picker__note-label">{t('mcp.tools.newLabel')}</span>
+        <span>{t(selection?.only ? 'mcp.tools.newOff' : 'mcp.tools.newOn')}</span>
+      </div>
+    </div>
   )
 }
 

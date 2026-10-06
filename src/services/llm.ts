@@ -247,6 +247,8 @@ export class LlmService extends Service {
   private running = new Set<{ tracker: TurnTracker; workdir: string; sessionId: string; calls: ToolCalls }>()
   /** 폴더(realpath) → 마지막으로 본 그 인스턴스의 MCP 서버 이름 — 도구 이름 `<서버>_<도구>` 를 가른다 (mcpTool) */
   private mcpServers = new Map<string, string[]>()
+  /** 폴더(realpath) → 모델에 안 보일 MCP 도구 (서버 → MCP 서버가 준 도구 이름들, 이슈 #164). ctx.mcp 가 매 턴 전(llm/before-turn)에 바꾼다 */
+  private hiddenMcpTools = new Map<string, Readonly<Record<string, readonly string[]>>>()
   /** gateTools 로 받았지만 아직 엔진에 못 넘긴 매처 — 도는 턴이 없어지면 넘긴다 */
   private gateWanted?: readonly string[]
   /** 엔진을 다시 띄워 달라는 요청(reloadWhenIdle)이 밀려 있다 */
@@ -521,6 +523,7 @@ export class LlmService extends Service {
             model: { providerID: providerId, modelID: modelId },
             agent: MODE_AGENT[mode],
             ...(system && { system }),
+            tools: promptTools(this.hiddenMcpTools.get(workdir)),
             parts: promptParts(prompt, images),
           }),
         }).catch((error: unknown) => {
@@ -744,6 +747,12 @@ export class LlmService extends Service {
   // - 넘긴 headers·environment 는 디스크(설정·로그·DB)·env·API(/config·/mcp·/provider) 어디에도 안 나온다 (grep 0) — 로컬 자식 env 에만 있다
   // - POST /mcp/{name}/disconnect → true, 상태 disabled, 프로세스 종료, 도구 빠짐. connect 로 되살린다. 지우는 API 는 없다
   // - 엔진을 다시 띄우면 동적 추가는 다 사라진다 — ctx.mcp 가 매 턴(llm/before-turn) 상태를 보고 다시 붙인다
+
+  /** 그 폴더(realpath)의 다음 턴부터 모델에 안 보일 MCP 도구 — 서버 이름 → MCP 서버가 준 도구 이름 (이슈 #164). 부를 때마다 그 폴더 값을 통째로 바꾼다.
+   *  엔진 이름(`<서버>_<도구>`)으로 바꿔 prompt_async 의 tools 에 싣는 것은 여기서 한다 (promptTools) */
+  hideMcpTools(directory: string, hidden: Readonly<Record<string, readonly string[]>>): void {
+    this.hiddenMcpTools.set(directory, hidden)
+  }
 
   /** 그 폴더 인스턴스의 MCP 서버 상태 */
   async mcpStatus(directory: string): Promise<Record<string, McpStatus>> {
@@ -1383,6 +1392,20 @@ function parseFrame(frame: string): EngineEvent | undefined {
   } catch {
     return undefined
   }
+}
+
+/** prompt_async 의 tools 에 늘 넣는 표지 — 엔진 도구 이름이 될 수 없는 글자(`:`)라 아무 도구도 안 가린다 (promptTools) */
+export const MCP_TOOLS_MARKER = 'litecode:no-tool'
+
+/** prompt_async 의 tools — 숨긴 MCP 도구를 엔진 이름으로 false (이슈 #164, 실측 2026-10-06 opencode 1.18.18 + 가짜 LLM, docs/opencode-protocol.md):
+ *  - `{이름: false}` 는 그 턴의 LLM 요청 도구 목록에서 그 도구를 뺀다. 이름은 `<서버>_<도구>`, 둘 다 [A-Za-z0-9_-] 밖 글자는 `_` (sanitizeMcpName)
+ *  - 이 맵은 세션 permission 을 **통째로 바꾸고 다음 턴에도 남는다** — 필드가 없거나 빈 맵이면 그대로 둔다. 그래서 숨길 것이 없어도 표지 하나를
+ *    넣어 늘 바꾼다 (앞 턴·앞 실행의 숨김이 남지 않게)
+ *  - `true` 는 그 도구의 allow 규칙이 되어 모드의 승인(ask)을 건너뛴다 — 싣지 않는다 */
+export function promptTools(hidden: Readonly<Record<string, readonly string[]>> = {}): Record<string, false> {
+  const tools: Record<string, false> = { [MCP_TOOLS_MARKER]: false }
+  for (const [server, names] of Object.entries(hidden)) for (const name of names) tools[`${sanitizeMcpName(server)}_${sanitizeMcpName(name)}`] = false
+  return tools
 }
 
 /** prompt_async 의 parts (01y 1절) — 글 파트 뒤에 이미지를 `{type:"file", mime, filename, url:"data:<mime>;base64,…"}` 로. 글이 없고 이미지만
