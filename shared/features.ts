@@ -9,13 +9,17 @@ export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 카드가 없다.
  *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP */
-export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true }
+const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true } as const satisfies Partial<Record<FeatureId, boolean>>
+export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = FIXED
+
+/** 사용자가 켜고 끄는 기능의 id — 카드의 이름·설명 글(`feature.<id>`)은 이것에만 있다 */
+export type ChoosableFeatureId = Exclude<FeatureId, keyof typeof FIXED>
 
 /** 사용자가 켜고 끄는 기능 (설정 > 기능의 카드) */
 export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
 
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
-export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly FeatureId[] }[] = [
+export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
   { id: 'ai', features: ['appMcp', 'web'] },
   { id: 'automation', features: ['hooks'] },

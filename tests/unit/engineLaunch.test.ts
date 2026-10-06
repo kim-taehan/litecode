@@ -110,6 +110,19 @@ describe('EngineService — 뜨는 중에 온 설정 변경', () => {
     expect(await engine.connection()).toBe(conn)
   })
 
+  it('떠 있나(up) — 띄우기 전·죽은 뒤에는 아니다. 묻는 것만으로는 띄우지 않는다 (#126 오류 13)', async () => {
+    const { engine } = await start(0)
+    expect(engine.up).toBe(false)
+    expect(serves()).toBe(0)
+    const conn = await engine.connection()
+    expect(engine.up).toBe(true)
+    const record = JSON.parse(fs.readFileSync(path.join(dir, 'opencode-server.json'), 'utf8')) as { pid: number }
+    process.kill(record.pid, 'SIGKILL') // 엔진이 죽었다
+    await new Promise<void>((resolve) => conn.closed.addEventListener('abort', () => resolve()))
+    expect(engine.up).toBe(false)
+    expect(serves()).toBe(1)
+  })
+
   it('설정을 읽은 뒤에 게이트가 달라지면 다시 띄운다 — 같은 값이면 그대로', async () => {
     const { engine } = await start(0)
     const conn = await engine.connection()

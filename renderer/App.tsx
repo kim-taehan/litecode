@@ -535,6 +535,7 @@ export function App() {
   })
   const trigger = useTriggers({
     directory: active?.project,
+    conversation: active?.id,
     draft,
     setDraft,
     onSend: (text, display) => send({ text, display }),
@@ -971,6 +972,7 @@ export function App() {
                     if (event.nativeEvent.isComposing || event.keyCode === 229) return // 한글 조합 확정 Enter
                     if (event.key === 'Enter') event.currentTarget.blur()
                     if (event.key === 'Escape') {
+                      event.preventDefault() // 이 Esc 는 여기서 썼다 — 녹음(VoiceInput)까지 취소하지 않게
                       renameCancelled.current = true
                       setRenaming(undefined)
                     }
@@ -1514,7 +1516,9 @@ function ProjectPopover({ projects, current, statusOf, runningOf, busy, error, o
       if (!ref.current?.parentElement?.contains(event.target as Node)) onClose(false)
     }
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') onClose(true)
+      if (event.key !== 'Escape' || event.isComposing) return // 한글 조합 취소 Esc 에 닫지 않는다
+      event.preventDefault() // 이 Esc 는 여기서 썼다 — 녹음(VoiceInput)까지 취소하지 않게
+      onClose(true)
     }
     document.addEventListener('mousedown', onMouseDown)
     document.addEventListener('keydown', onKeyDown)

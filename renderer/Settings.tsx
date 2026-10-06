@@ -22,9 +22,6 @@ import './settings.css'
 // dsh 와 다른 점: "모델 가져오기" 는 고르는 창 없이 없는 id 만 목록에 더한다(00_request 성공 기준 4).
 // 처음 여는 페이지는 모델이다 — 일반 페이지가 생기기 전부터 설정 버튼이 모델을 열었다(실물 테스트가 그 동작을 지킨다). dsh 는 일반을 먼저 연다
 
-// McpPopup·SkillsPopup 이 아직 여기서 가져간다 — 정본은 ipcError.ts
-export { reason }
-
 type Page = 'general' | 'models' | 'features' | 'mobile'
 
 interface SettingsModalProps {

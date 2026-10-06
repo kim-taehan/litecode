@@ -1,11 +1,11 @@
 import { Context, Service } from 'cordis'
-import { mkdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import './chat.ts'
 import './sessions.ts'
 import { realDirectory } from './llm.ts'
 import type { ExecHandle } from './exec.ts'
-import { readJsonFileSync } from './jsonFile.ts'
+import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
 import path from 'node:path'
 import { dropHook, entriesFor, gateMatchers, importCandidates, lenientReader, parseHooks, parseProjects, putHook, serializeHooks, serializeProjects, type HookStore } from './hooks/config.ts'
 import { hookSpawn, runHook, type HookInput, type HookRun } from './hooks/run.ts'
@@ -99,8 +99,6 @@ const COMMAND_SHOWN = 120
 const TEST_OUTPUT_LIMIT = 20_000
 const RECENT_SHOWN = 50
 
-export { stopFeedback }
-
 /** 프로젝트별 파일의 열쇠 — realpath, 없는 폴더는 준 경로 그대로 */
 function realKey(directory: string): string {
   try {
@@ -108,15 +106,6 @@ function realKey(directory: string): string {
   } catch {
     return directory
   }
-}
-
-/** hooks.json·hooks-projects.json 을 쓴다 — 사람이 열어 고치는 파일이라 들여 쓴다 (settings.json 과 같이). 임시 파일에 쓰고 바꿔 끼운다.
- *  jsonFile.ts 의 writeJsonFileSync 가 들여쓰기를 받게 되면 그것으로 합친다 (이슈 #126 오류 12) */
-function writeHooksFile(file: string, value: unknown): void {
-  mkdirSync(path.dirname(file), { recursive: true })
-  const temp = `${file}.${process.pid}.tmp`
-  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`)
-  renameSync(temp, file)
 }
 
 export class HooksService extends Service {
@@ -349,8 +338,9 @@ export class HooksService extends Service {
     const projects = parseProjects(readJsonFileSync(this.opts.projectsFile, 'object'))
     const project = (projects[realKey(directory)] ??= { hooks: [], enabled: {} })
     apply({ all, project, projects })
-    writeHooksFile(this.opts.file, serializeHooks(all))
-    writeHooksFile(this.opts.projectsFile, serializeProjects(projects))
+    // 사람이 열어 고치는 파일이라 들여 쓴다 (settings.json 과 같이)
+    writeJsonFileSync(this.opts.file, serializeHooks(all), { pretty: true })
+    writeJsonFileSync(this.opts.projectsFile, serializeProjects(projects), { pretty: true })
     void this.syncGate()
   }
 
@@ -358,7 +348,7 @@ export class HooksService extends Service {
     const key = realKey(directory)
     const projects = parseProjects(readJsonFileSync(this.opts.projectsFile, 'object'))
     projects[key] = change(projects[key] ?? { hooks: [], enabled: {} })
-    writeHooksFile(this.opts.projectsFile, serializeProjects(projects))
+    writeJsonFileSync(this.opts.projectsFile, serializeProjects(projects), { pretty: true })
   }
 
   private async conversation(match: (entry: Conversation) => boolean): Promise<Conversation | undefined> {

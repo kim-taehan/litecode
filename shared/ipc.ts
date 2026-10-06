@@ -130,7 +130,6 @@ export const Channel = {
   NOTIFICATION_OPEN: 'notifications:open',
   OPEN_IN_APPS: 'openIn:apps',
   OPEN_IN: 'openIn:open',
-  OPEN_FILE_IN: 'openIn:open-file',
   GET_FEATURES: 'features:get',
   /** 메인 → 화면 (FeatureId[]) — 켜진 기능이 바뀌었다 (묶음을 다 올리고 내린 뒤) */
   FEATURES_CHANGED: 'features:changed',
@@ -313,8 +312,6 @@ export interface LitecodeBridge {
   openInApps(): Promise<OpenInApp[]>
   /** 그 프로젝트 폴더를 그 앱으로 연다. 목록 밖 앱·등록 안 된 폴더·실행 실패면 지금 언어의 사유로 거절 */
   openIn(appId: string, directory: string): Promise<void>
-  /** 프로젝트 안 파일 하나를 편집기(files 표시 앱)로 연다 — 파일 미리보기 패널. 편집기 아닌 앱·밖 파일·등록 안 된 폴더면 거절 */
-  openFileIn(appId: string, directory: string, token: string): Promise<void>
   /** 켜진 기능 (ctx.features) — 꺼진 기능의 버튼·탭·메뉴·단축키는 그리지 않는다. 켜고 끄기는 setSettings({ features }) */
   getFeatures(): Promise<FeatureId[]>
   onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void

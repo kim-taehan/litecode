@@ -14,8 +14,8 @@ import { EventLog } from './remote/eventLog.ts'
 import { StreamQueue } from './remote/streamQueue.ts'
 import { confirmCode, groupCode, newPairCode, normalizePairCode } from './remote/pairing.ts'
 import { emptyChatView, withHistory } from '../../shared/chatReducer.ts'
-import type { ChatOrigin } from '../../shared/chat.ts'
-import type { AttentionAnswer, Conversation, History } from '../../shared/contract.ts'
+import type { ChatLive, ChatOrigin } from '../../shared/chat.ts'
+import type { AttentionAnswer, Conversation, History, NoticeState } from '../../shared/contract.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import {
   REMOTE_API_VERSION,
@@ -162,6 +162,10 @@ export class RemoteService extends Service {
   private sent = new Map<string, Promise<SendMessageResponse>>()
   /** 폰이 만든 새 대화 — 첫 메시지를 보내기 전에는 저장하지 않는다 (데스크탑의 빈 새 대화와 같다: 보관 개수를 차지하지 않는다) */
   private drafts = new Map<string, Conversation>()
+  /** 도는 턴의 대화 id → 프로젝트 (notices.changed 에 싣는다 — ctx.chat 의 스냅샷에는 프로젝트가 없다) */
+  private turnProjects = new Map<string, string>()
+  /** 마지막으로 낸 notices.changed (JSON) — 같은 것을 두 번 내지 않는다 (알림 기능이 켜져 있으면 같은 변화가 두 길로 온다) */
+  private lastNotices = '{}'
   /** 운반 띄우기·닫기를 한 줄로 세운다 — 내리자마자 올려도 포트가 닫힌 뒤 다시 연다 */
   private queue: Promise<void>
   private disposed = false
@@ -179,22 +183,46 @@ export class RemoteService extends Service {
     this.sync()
 
     // ctx.chat 의 이벤트를 계약의 이벤트로 — 데스크탑 화면에만 필요한 덧붙인 필드(conversation·held·attachments·removed)는 뺀다
-    ctx.on('chat/turn-started', ({ cid, message, origin }) => {
+    ctx.on('chat/turn-started', ({ cid, message, origin, conversation }) => {
       this.drafts.delete(cid) // 보낸 대화는 ctx.chat 이 저장했다
+      this.turnProjects.set(cid, conversation.project)
       this.emitEvent('turn.started', { cid, message, origin: remoteOrigin(origin) })
+      this.emitNotices()
     })
     ctx.on('chat/turn-progress', ({ cid, item }) => this.emitEvent('turn.progress', { cid, item }))
-    ctx.on('chat/turn-attention', ({ cid, requests }) => this.emitEvent('turn.attention', { cid, requests }))
-    ctx.on('chat/turn-ended', ({ cid, message, usage, outcome }) => this.emitEvent('turn.ended', { cid, message, ...(usage && { usage }), outcome }))
+    ctx.on('chat/turn-attention', ({ cid, requests }) => {
+      this.emitEvent('turn.attention', { cid, requests })
+      this.emitNotices()
+    })
+    ctx.on('chat/turn-ended', ({ cid, message, usage, outcome }) => {
+      this.turnProjects.delete(cid)
+      this.emitEvent('turn.ended', { cid, message, ...(usage && { usage }), outcome })
+      this.emitNotices()
+    })
     ctx.on('chat/queue-changed', ({ cid, items }) => this.emitEvent('queue.changed', { cid, items }))
     ctx.on('chat/conversations-changed', ({ project }) => this.emitEvent('conversations.changed', { project }))
-    // 알림 기능이 꺼져 있으면 이 이벤트는 오지 않는다 (없어도 동작한다)
-    ctx.on('notifications/changed', (state) => this.emitEvent('notices.changed', state))
+    // 알림 기능이 꺼져 있으면 이 이벤트는 오지 않는다 (없어도 동작한다 — 진행 중·답 필요는 위 ctx.chat 이벤트로 나간다)
+    ctx.on('notifications/changed', (state) => this.emitNotices(state))
 
     ctx.effect(() => () => {
       this.disposed = true
       return this.sync()
     })
+  }
+
+  /** 폰에 보낼 대화 상태 (#126 E3) — 진행 중·답 필요는 알림 기능(기본 꺼짐)과 무관하게 ctx.chat 의 도는 턴에서, 안 본 완료·실패·중단은
+   *  알림 기능의 것 그대로. 서비스가 뜨기 전에 시작한 턴은 프로젝트를 몰라 여기엔 빠진다 (목록의 status 에는 실린다) */
+  private emitNotices(unread: NoticeState = this.ctx.get('notifications')?.snapshot() ?? {}): void {
+    const state: NoticeState = { ...unread }
+    for (const [cid, live] of Object.entries(this.ctx.chat.snapshot())) {
+      const status = liveStatus(live)
+      const project = this.turnProjects.get(cid)
+      if (status && project) state[cid] = { project, status }
+    }
+    const json = JSON.stringify(state)
+    if (json === this.lastNotices) return
+    this.lastNotices = json
+    this.emitEvent('notices.changed', state)
   }
 
   /** 파일을 읽고 밀린 운반 띄우기·닫기가 끝날 때까지 */
@@ -471,7 +499,9 @@ export class RemoteService extends Service {
       const stored = (await this.ctx.sessions.list()).filter((entry) => entry.project === project)
       const drafts = [...this.drafts.values()].filter((entry) => entry.project === project && !stored.some((saved) => saved.id === entry.id))
       const list = [...drafts, ...stored].sort((a, b) => b.updatedAt - a.updatedAt)
-      return [200, list.map((entry) => toRemote(entry, notices[entry.id]?.status))]
+      // 진행 중·답 필요는 ctx.chat 의 도는 턴에서 (알림 기능과 무관 — emitNotices), 안 본 끝남만 알림 기능에서
+      const live = this.ctx.chat.snapshot()
+      return [200, list.map((entry) => toRemote(entry, liveStatus(live[entry.id]) ?? notices[entry.id]?.status))]
     },
 
     // 새 대화 — 등록된 프로젝트에만. 첫 메시지를 보낼 때 ctx.chat 이 저장한다 (그 전엔 폰에만 보인다)
@@ -639,6 +669,12 @@ export class RemoteService extends Service {
 /** ctx.chat 의 출처를 계약의 origin 으로 — 폰이 보낸 것은 그 기기 id, 그 밖(데스크탑 화면·다른 대화의 지시)은 'desktop' */
 function remoteOrigin(origin: string): string {
   return origin.startsWith('device:') ? origin.slice('device:'.length) : 'desktop'
+}
+
+/** 도는 턴의 상태 — 승인·질문을 기다리면 답 필요, 아니면 진행 중. 도는 턴이 없으면 없다 */
+function liveStatus(live: ChatLive | undefined): 'running' | 'attention' | undefined {
+  if (!live?.turn) return undefined
+  return live.turn.attention.length > 0 ? 'attention' : 'running'
 }
 
 /** 목록 정보에서 폰에 안 주는 것(통계·보일 글 표·첨부 표·`!` 카드)을 뺀다 */

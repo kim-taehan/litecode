@@ -657,6 +657,11 @@ export class EngineService extends Service {
     return !!this.current && this.launched !== undefined && JSON.stringify(this.wanted()) !== this.launched
   }
 
+  /** 떠 있나(띄우는 중 포함) — 묻기만 하고 띄우지 않는다. 엔진과 같이 사라지는 것(붙인 MCP)을 치우려고 죽은 엔진을 다시 띄우지 않게 (#126) */
+  get up(): boolean {
+    return !!this.current
+  }
+
   /** 떠 있는 서버의 연결. 없거나 죽었으면 띄운다 (동시에 불러도 한 번만) */
   connection(): Promise<EngineConnection> {
     if (this.disposed) return Promise.reject(new Error(tr('error.appQuitting')))

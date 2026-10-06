@@ -675,8 +675,10 @@ export class LlmService extends Service {
     return status
   }
 
-  /** 그 폴더 인스턴스의 서버를 끊는다 (상태 disabled, 프로세스 종료) */
+  /** 그 폴더 인스턴스의 서버를 끊는다 (상태 disabled, 프로세스 종료). 엔진이 안 떠 있으면 끊을 것이 없다 — 동적으로 붙인 것은 엔진과 같이
+   *  사라진다. 끊으려고 엔진을 띄우지 않는다 (앱을 끌 때 ctx.mcp 의 detachAll 이 죽은 엔진을 다시 띄웠다, #126) */
   async mcpDisconnect(directory: string, name: string): Promise<void> {
+    if (!this.ctx.engine.up) return
     const { conn, workdir } = await this.legacyTarget(directory)
     const res = await fetch(`${conn.url}/mcp/${encodeURIComponent(name)}/disconnect?${at(workdir)}`, {
       method: 'POST',
