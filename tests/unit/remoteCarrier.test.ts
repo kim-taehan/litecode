@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { RemoteCarrier, RemoteCarrierStatus, RemoteExchange, RemoteOutcome, RemotePeer, RemoteRequest, RemoteStreamSink } from '../../src/services/remote/carrier.ts'
+import type { RemoteCarrier, RemoteCarrierStatus, RemoteStreamSink } from '../../src/services/remote/carrier.ts'
 import { serveFramed } from '../../src/services/remote/framed.ts'
 import { StreamQueue } from '../../src/services/remote/streamQueue.ts'
 import { FRAME, FrameChannel, utf8, type FrameMessage } from '../../shared/remoteFraming.ts'
@@ -94,25 +94,25 @@ describe('운반 등록 — ctx.remote.carrier', () => {
     return { carrier, calls }
   }
 
-  it('연결이 켜져 있는 동안만 운반을 띄운다 — 켜면 start, 끄면 stop, 내리면(등록 해제) stop', async () => {
-    const { remote } = await start({}, false)
-    const { carrier, calls } = fakeCarrier('fake')
-    const off = remote.carrier(carrier)
+  it('서비스가 떠 있는 동안 운반을 띄운다 — 올리면 start, 내리면(등록 해제) stop, 서비스가 내려가면 stop', async () => {
+    const { remote } = await start()
+    const first = fakeCarrier('first')
+    const off = remote.carrier(first.carrier)
     await remote.ready()
-    expect(calls).toEqual([]) // 꺼져 있다
-    await remote.setEnabled(true)
-    expect(calls).toEqual(['start'])
-    await remote.setEnabled(false)
-    expect(calls).toEqual(['start', 'stop'])
-    await remote.setEnabled(true)
+    expect(first.calls).toEqual(['start'])
     off()
     await remote.ready()
-    expect(calls).toEqual(['start', 'stop', 'start', 'stop'])
-    await remote.setEnabled(false)
-    expect(calls).toHaveLength(4) // 내린 운반은 더 부르지 않는다
+    expect(first.calls).toEqual(['start', 'stop'])
+    const second = fakeCarrier('second')
+    remote.carrier(second.carrier)
+    await remote.ready()
+    expect(second.calls).toEqual(['start'])
+    await box.cleanups.pop()!() // 서비스를 내린다
+    expect(second.calls).toEqual(['start', 'stop'])
+    expect(first.calls).toHaveLength(2) // 내린 운반은 더 부르지 않는다
   })
 
-  it('켜져 있을 때 올린 운반은 곧바로 띄우고, 상태가 바뀌었다고 알린다', async () => {
+  it('올린 운반은 곧바로 띄우고, 상태가 바뀌었다고 알린다', async () => {
     const { ctx, remote } = await start()
     const seen: number[] = []
     ctx.on('remote/changed', () => void seen.push(1))
@@ -124,19 +124,18 @@ describe('운반 등록 — ctx.remote.carrier', () => {
   })
 
   it('주소 없는 운반만 떠 있어도 연결은 살아 있다 — 짝짓기를 시작할 수 있고, 한 운반의 사유는 상태에 보인다', async () => {
-    const { remote } = await start({ http: false }, false)
+    const { remote } = await start({ http: false })
     const up = fakeCarrier('pipe')
     const down = fakeCarrier('bt', true)
     remote.carrier(up.carrier)
     remote.carrier(down.carrier)
-    const status = await remote.setEnabled(true)
-    expect(status).toMatchObject({ enabled: true, addresses: [], error: { code: 'ENOBT' } })
+    await remote.ready()
+    expect(remote.status()).toMatchObject({ addresses: [], error: { code: 'ENOBT' } })
     expect(remote.startPairing().pairing?.code).toMatch(/^[0-9A-Z-]{14}$/)
   })
 
   it('떠 있는 운반이 하나도 없으면 짝짓기를 시작할 수 없다', async () => {
-    const { remote } = await start({ http: false }, false)
-    await remote.setEnabled(true)
+    const { remote } = await start({ http: false })
     expect(() => remote.startPairing()).toThrow()
   })
 })

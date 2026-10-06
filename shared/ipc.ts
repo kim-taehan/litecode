@@ -2,7 +2,7 @@
 // 타입은 서비스 쪽 정의를 그대로 재수출한다 — 같은 모양을 두 곳에 베끼지 않는다.
 
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
-import type { Attention, AttentionAnswer, ChatResult, History } from '../src/services/llm.ts'
+import type { Attention, AttentionAnswer, History } from '../src/services/llm.ts'
 import type { Mode } from './modes.ts'
 import type { AttachmentKind, AttachmentPick } from './contract.ts'
 import type { ChatEventMap, ChatModel, ChatSnapshot, QueuedSend, SendResult } from './chat.ts'
@@ -24,7 +24,7 @@ import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
-export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, ChatResult, History, HistoryMessage } from '../src/services/llm.ts'
+export type { Attention, AttentionAnswer, AttentionQuestion, AttentionSubtask, History, HistoryMessage } from '../src/services/llm.ts'
 export type { Mode } from './modes.ts'
 export type { Attachment, AttachmentKind, AttachmentPick, AttentionTarget, PickedAttachment } from './contract.ts'
 import type { AttentionTarget } from './contract.ts'
@@ -159,7 +159,6 @@ export const Channel = {
   /** 메인 → 화면 (directory) — AI 가 open_terminal 을 불렀다 (명령은 메인이 이미 채웠다) */
   APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
   REMOTE_STATUS: 'remote:status',
-  REMOTE_SET_ENABLED: 'remote:set-enabled',
   REMOTE_START_PAIRING: 'remote:start-pairing',
   REMOTE_CANCEL_PAIRING: 'remote:cancel-pairing',
   REMOTE_ANSWER_PAIR: 'remote:answer-pair',
@@ -168,10 +167,6 @@ export const Channel = {
   REMOTE_CHANGED: 'remote:changed',
   /** 음성 입력(ctx.speech) — 기능 `voice` 가 켜졌을 때만 있다 */
   SPEECH_STATUS: 'speech:status',
-  /** 화면 → 메인 ({ pcm: Int16Array(16kHz mono), language? }) → SpeechReply. 메인이 타입·길이를 다시 본다 */
-  SPEECH_TRANSCRIBE: 'speech:transcribe',
-  /** 화면 → 메인 — 보내 둔 받아쓰기를 전부 취소한다 */
-  SPEECH_CANCEL: 'speech:cancel',
   /** 메인 → 화면 (SpeechStatus) */
   SPEECH_CHANGED: 'speech:changed',
   /** 실시간 받아쓰기 — 화면 → 메인 (language?) → SpeechStreamOpened. 열려 있던 스트림은 버리고 새로 연다 (화면은 한 번에 하나만 녹음한다) */
@@ -360,11 +355,9 @@ export interface LitecodeBridge {
   onAppMcpOpenFile(listener: (directory: string, path: string, line?: number) => void): () => void
   /** AI 가 그 프로젝트의 터미널 칸을 열라고 했다 — 명령은 메인이 이미 채웠다(실행하지 않았다) */
   onAppMcpOpenTerminal(listener: (directory: string) => void): () => void
-  /** 모바일 연결(ctx.remote, 이슈 #56)의 지금 상태 — 켜짐·듣는 주소(또는 못 뜬 사유)·짝짓기 코드·[허용] 을 기다리는 요청·짝지은 기기.
+  /** 모바일 연결(ctx.remote, 이슈 #56)의 지금 상태 — 듣는 주소(또는 못 뜬 사유)·짝짓기 코드·[허용] 을 기다리는 요청·짝지은 기기.
    *  기능 `remote` 가 켜졌을 때만 있다 (꺼져 있으면 이 채널들은 거절된다) */
   remoteStatus(): Promise<RemoteStatus>
-  /** 켜면 이 PC 안에서만 닿는 포트(127.0.0.1)를 연다. 못 뜨면 status.error 에 사유 */
-  setRemoteEnabled(enabled: boolean): Promise<RemoteStatus>
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용, 앞 코드는 버린다). 듣고 있지 않으면 거절 */
   startRemotePairing(): Promise<RemoteStatus>
   cancelRemotePairing(): Promise<RemoteStatus>
@@ -376,11 +369,6 @@ export interface LitecodeBridge {
   /** 음성 입력(ctx.speech)의 지금 상태 — 준비 안 됨(사유)·준비됨·엔진 뜨는 중, 기본 언어 힌트.
    *  기능 `voice` 가 켜졌을 때만 있다 (꺼져 있으면 이 채널들은 거절된다 — 마이크 권한도 거절된다) */
   speechStatus(): Promise<SpeechStatus>
-  /** 녹음을 글로 — pcm 은 16kHz mono PCM16 (최대 120초 = shared/speech.ts SPEECH_MAX_SAMPLES), language 를 빼면 설정 값(없으면 화면 언어).
-   *  던지지 않는다: 실패는 { ok: false, code, message }. 말이 없었으면 ok 에 빈 글. 글은 돌려주기만 한다 (대화에 넣거나 보내지 않는다) */
-  transcribeSpeech(pcm: Int16Array, language?: SpeechLanguage): Promise<SpeechReply>
-  /** 보내 둔 받아쓰기를 취소한다 — 그 transcribeSpeech 는 code 'cancelled' 로 끝난다 */
-  cancelSpeech(): Promise<void>
   onSpeechChanged(listener: (status: SpeechStatus) => void): () => void
   /** 실시간 받아쓰기를 연다 — 녹음 조각을 sendSpeechChunk 로 흘리면 onSpeechPartial 로 확정 글·임시 글이 오고, stopSpeechStream 이 최종 글을 준다.
    *  한 번에 하나: 다른 받아쓰기가 돌면 { ok: false, code: 'busy' }. 녹음 상한(120초)을 넘는 조각은 메인이 버린다 */

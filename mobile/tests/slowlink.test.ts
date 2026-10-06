@@ -40,7 +40,7 @@ interface Harness {
   box: { project: string; cleanups: (() => unknown)[] }
   setUp(): Promise<void>
   tearDown(): Promise<void>
-  start(options?: { http?: boolean }, enabled?: boolean): Promise<Desktop>
+  start(options?: { http?: boolean }): Promise<Desktop>
 }
 const harnessUrl = new URL('../../tests/unit/support/remoteHarness.ts', import.meta.url).href
 const { box, setUp, start, tearDown } = (await import(/* @vite-ignore */ harnessUrl)) as Harness
@@ -104,10 +104,9 @@ function relinkable() {
 
 describe('느린 링크(20KB/s, 조각 185바이트) 위의 모바일 코어 ↔ 진짜 ctx.remote', () => {
   it('짝짓기 → 목록 → 큰 스냅샷 → 보내기 → 누적 진행 이벤트 → 답 → 끊김 → 이어 받기 → 해제', async () => {
-    const desktop = await start({ http: false }, false)
+    const desktop = await start({ http: false })
     const { remote, llm } = desktop
     await desktop.pipeCarrier()
-    await (remote as unknown as { setEnabled(on: boolean): Promise<unknown> }).setEnabled(true)
 
     // 300KB 대화 (말 150개 × 2KB) 와 작은 대화 하나
     const history: HistoryMessage[] = Array.from({ length: 150 }, (_, index) => ({ id: `msg_seed_${index}`, role: index % 2 ? 'assistant' : 'user', text: prose(2000, index + 1) }))
@@ -235,9 +234,8 @@ describe('느린 링크(20KB/s, 조각 185바이트) 위의 모바일 코어 ↔
   }, 120_000)
 
   it('아주 긴 누적 진행(합 ~6MB)도 밀리지 않는다 — 내보내기가 끝나고 곧 마지막 모습이 닿는다', async () => {
-    const desktop = await start({ http: false }, false)
+    const desktop = await start({ http: false })
     await desktop.pipeCarrier()
-    await (desktop.remote as unknown as { setEnabled(on: boolean): Promise<unknown> }).setEnabled(true)
     await desktop.save('c1')
     const pipe = memoryPipe(LINK)
     desktop.attach(pipe.b)

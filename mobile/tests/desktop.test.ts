@@ -35,7 +35,6 @@ interface Desktop {
     startPairing(): DesktopStatus
     answerPair(id: string, allow: boolean): DesktopStatus
     revoke(deviceId: string): Promise<DesktopStatus>
-    setEnabled(enabled: boolean): Promise<DesktopStatus>
   }
   llm: { replies: unknown[][] }
   /** 엔진에 n 번째 턴이 닿을 때까지 */
@@ -45,6 +44,9 @@ interface Desktop {
   pair(deviceName?: string): Promise<{ deviceId: string; token: string }>
   /** http://127.0.0.1:<port> */
   base(): string
+  /** HTTP 운반을 내리고 올린다 — 올리면 새 실행(runId)이다 */
+  httpDown(): Promise<void>
+  httpUp(): Promise<void>
 }
 interface Harness {
   box: { project: string; cleanups: (() => unknown)[] }
@@ -172,8 +174,8 @@ describe('모바일 클라이언트 코어 ↔ ctx.remote', () => {
     await expect(client.hello()).rejects.toMatchObject({ status: 401 })
   })
 
-  it('데스크탑이 연결을 껐다 켜면(새 실행) 폰은 목록과 열린 대화를 다시 받는다', async () => {
-    const { remote, save, pair, turn, ctx, base } = await start({ port: await freePort() })
+  it('데스크탑의 연결이 내려갔다 올라오면(새 실행) 폰은 목록과 열린 대화를 다시 받는다', async () => {
+    const { save, pair, turn, ctx, base, httpDown, httpUp } = await start({ port: await freePort() })
     await save('c1')
     const { token } = await pair()
     const transport = droppable()
@@ -185,12 +187,12 @@ describe('모바일 클라이언트 코어 ↔ ctx.remote', () => {
     await connection.loadConversations(project)
     await connection.openConversation('c1')
 
-    await remote.setEnabled(false)
+    await httpDown()
     await until(() => connection.status.kind === 'reconnecting', 'reconnecting')
     await ctx.chat.send('c1', { text: '그사이' })
     ;(await turn(1)).finish()
     await until(() => ctx.chat.snapshot().c1 === undefined, '턴 끝')
-    await remote.setEnabled(true)
+    await httpUp()
     connection.wake()
     await until(() => connection.state.views.c1!.messages.length === 2, '다시 받은 스냅샷')
     expect(connection.state.resync).toBe(1)

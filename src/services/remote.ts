@@ -44,7 +44,7 @@ import {
 // **운반을 모른다** (이슈 #68, 설계 _workspace/01ab_mobile_bluetooth.md 5절): 이 서비스는 계약·인증·기기·짝짓기·이벤트 링을 쥐고,
 // 요청은 운반 중립 모양(`handle(RemoteRequest, peer, exchange)` — remote/carrier.ts)으로만 받는다. HTTP·블루투스는 이 밑의
 // **운반 플러그인**이다(`inject: ['remote']`, 자기 ctx 키 없음 — remote/http.ts): `ctx.remote.carrier(…)` 로 자신을 올리고 받은 요청을
-// handle 에 넘긴다. 모바일 연결이 켜져 있는 동안만 올라온 운반을 띄운다(start) — 끄면 전부 닫는다(stop).
+// handle 에 넘긴다. 이 서비스가 떠 있는 동안 올라온 운반을 띄운다(start) — 내려가면 전부 닫는다(stop).
 // 리스너·`Origin` 거절·본문 상한처럼 HTTP 에만 있는 것은 HTTP 운반에 있다. 인증 실패 제한의 열쇠는 운반이 준 peer 다.
 //
 // 경계 (01t 3절):
@@ -52,7 +52,7 @@ import {
 // - 그 밖의 모든 요청은 `Authorization: Bearer`. peer(HTTP 면 IP) 당 인증 실패 10회/분 → 5분 차단. 해제하면 그 토큰은 401, 열린 스트림은 `device.revoked` 뒤 끊김
 // - 폰에 열지 않는 것: pty·fs·`!`·`@`·설정·키·MCP·스킬 관리·**전체 권한 모드**(full 모드 대화엔 못 보낸다 — 403).
 //   보낸 글은 그대로 프롬프트다(입력 트리거를 풀지 않는다). 프로젝트는 등록된 것만
-// - 꺼져 있으면(기본) 운반을 띄우지 않는다(포트를 열지 않는다). 서비스가 내려가면(기능 끄기·앱 종료) 닫는다
+// - 켜짐은 하나다: 이 서비스가 떠 있음 = 켜짐 (기능 `remote`, 기본 꺼짐 — #124). 서비스가 내려가면(기능 끄기·앱 종료) 운반을 닫는다(포트를 닫는다)
 // - 느린 운반에서 이벤트가 밀리면 같은 진행 줄(`turn.progress` 의 cid·item.id)은 최신 하나로 합친다 (remote/streamQueue.ts)
 
 declare module 'cordis' {
@@ -77,9 +77,6 @@ const DRAFT_LIMIT = 20
 const DEVICE_NAME_MAX = 64
 
 export interface RemoteServiceOptions {
-  /** 서비스가 떠 있으면 늘 연결을 켠 것으로 본다 — 앱은 기능 스위치(설정 > 기능의 "모바일 연결") 하나로 켜고 끈다 (사용자 2026-10-06:
-   *  설정 > 모바일의 스위치가 기능 카드와 겹쳤다). 저장된 `enabled` 값은 보지 않는다. 안 주면 예전처럼 `setEnabled` 를 따른다(단위 테스트) */
-  alwaysOn?: boolean
   /** 기기 목록 JSON 파일 (앱에서는 userData/remote-devices.json) */
   file: string
   /** hello.name — 기본은 PC 이름 */
@@ -112,11 +109,10 @@ export interface RemoteDeviceInfo {
 
 /** 설정 > 모바일이 그리는 상태 */
 export interface RemoteStatus {
-  enabled: boolean
   port: number
-  /** 듣고 있는 주소 (`ip:port`) — 꺼졌거나 못 떴으면 빈 목록 */
+  /** 듣고 있는 주소 (`ip:port`) — 못 떴으면 빈 목록 */
   addresses: string[]
-  /** 켰는데 못 뜬 사유 (code: EADDRINUSE 등) */
+  /** 운반이 못 뜬 사유 (code: EADDRINUSE 등) */
   error?: { code?: string; message: string }
   /** 지금 쓸 수 있는 짝짓기 코드. uri 는 QR 에 실을 문자열(`litecode://pair?…`) */
   pairing?: { code: string; expiresAt: number; uri: string }
@@ -157,7 +153,7 @@ export class RemoteService extends Service {
   private log: EventLog
   /** 올라온 운반 (플러그인이 carrier() 로 올린다) */
   private carriers = new Set<RemoteCarrier>()
-  /** 그중 연결을 켜면서 띄운 것 */
+  /** 그중 띄운 것 */
   private started = new Set<RemoteCarrier>()
   private code?: ActiveCode
   private pending = new Map<string, PendingPair>()
@@ -166,7 +162,7 @@ export class RemoteService extends Service {
   private sent = new Map<string, Promise<SendMessageResponse>>()
   /** 폰이 만든 새 대화 — 첫 메시지를 보내기 전에는 저장하지 않는다 (데스크탑의 빈 새 대화와 같다: 보관 개수를 차지하지 않는다) */
   private drafts = new Map<string, Conversation>()
-  /** 켜고 끄기를 한 줄로 세운다 — 끄자마자 켜도 포트가 닫힌 뒤 다시 연다 */
+  /** 운반 띄우기·닫기를 한 줄로 세운다 — 내리자마자 올려도 포트가 닫힌 뒤 다시 연다 */
   private queue: Promise<void>
   private disposed = false
 
@@ -201,7 +197,7 @@ export class RemoteService extends Service {
     })
   }
 
-  /** 파일을 읽고 밀린 켜기·끄기가 끝날 때까지 */
+  /** 파일을 읽고 밀린 운반 띄우기·닫기가 끝날 때까지 */
   ready(): Promise<void> {
     return this.queue
   }
@@ -212,7 +208,6 @@ export class RemoteService extends Service {
     const carriers = [...this.carriers].map((carrier) => carrier.status())
     const error = carriers.find((carrier) => carrier.error)?.error
     return {
-      enabled: this.enabled,
       port: carriers.find((carrier) => carrier.port !== undefined)?.port ?? REMOTE_DEFAULT_PORT,
       addresses: this.listening(),
       ...(error && { error }),
@@ -222,7 +217,7 @@ export class RemoteService extends Service {
     }
   }
 
-  /** 운반을 올린다 (운반 플러그인이 ctx.effect 로 건다) — 돌려준 함수가 내린다. 모바일 연결이 켜져 있으면 곧바로 띄우고,
+  /** 운반을 올린다 (운반 플러그인이 ctx.effect 로 건다) — 돌려준 함수가 내린다. 곧바로 띄우고(못 뜨면 status().error),
    *  내리면 닫는다. 설정 화면은 status() 로 운반의 주소·사유를 본다 */
   carrier(carrier: RemoteCarrier): () => void {
     this.carriers.add(carrier)
@@ -236,18 +231,6 @@ export class RemoteService extends Service {
         })
         .catch((error: unknown) => console.error('[remote] 운반 내리기 실패', (error as Error).message))
     }
-  }
-
-  private get enabled(): boolean {
-    return this.opts.alwaysOn === true || this.store.enabled
-  }
-
-  /** 모바일 연결 켜기·끄기 — 켜면 올라온 운반을 띄우고(못 뜨면 status().error), 끄면 닫고 붙어 있던 폰을 끊는다 */
-  async setEnabled(enabled: boolean): Promise<RemoteStatus> {
-    await this.queue
-    await this.store.setEnabled(enabled === true)
-    await this.sync()
-    return this.changed()
   }
 
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용). 앞 코드는 버린다 */
@@ -279,12 +262,12 @@ export class RemoteService extends Service {
     return this.changed()
   }
 
-  // ── 켜고 끄기 ────────────────────────────────────────────────────────────────────────────────
+  // ── 운반 띄우기·닫기 ────────────────────────────────────────────────────────────────────────────────
 
   private sync(): Promise<void> {
     this.queue = this.queue
       .then(async () => {
-        if (!this.enabled || this.disposed) {
+        if (this.disposed) {
           if (this.started.size > 0) await this.close()
           return
         }
@@ -298,7 +281,7 @@ export class RemoteService extends Service {
         }
         if (started && !this.disposed) this.changed()
       })
-      .catch((error: unknown) => console.error('[remote] 켜고 끄기 실패', (error as Error).message))
+      .catch((error: unknown) => console.error('[remote] 운반 띄우기·닫기 실패', (error as Error).message))
     return this.queue
   }
 
@@ -333,7 +316,7 @@ export class RemoteService extends Service {
   // ── 이벤트 ──────────────────────────────────────────────────────────────────────────────────
 
   private emitEvent<K extends RemoteEventName>(event: K, data: RemoteEventMap[K]): void {
-    if (!this.live()) return // 꺼져 있으면 쌓지 않는다 — 다시 켜면 새 실행(runId)이다
+    if (!this.live()) return // 떠 있는 운반이 없으면 쌓지 않는다 — 다시 뜨면 새 실행(runId)이다
     const entry = this.log.append(event, data)
     const text = frame(event, data, entry.seq)
     for (const stream of this.streams) stream.queue.push(text, coalesceKey(event, data))

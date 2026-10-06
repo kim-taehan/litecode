@@ -75,11 +75,11 @@ describe('jsonFile — userData JSON 읽기', () => {
     fs.writeFileSync(file, '{"version":1,"devices":[{"id":"dev_1"')
     const store = new DeviceStore(file)
     await store.load()
-    await store.setEnabled(true)
+    await store.add('Pixel 8', 'android')
     await store.idle()
     const backup = fs.readdirSync(dir).find((name) => name.startsWith('remote-devices.json.corrupt-'))
     expect(fs.readFileSync(path.join(dir, backup ?? 'missing'), 'utf8')).toBe('{"version":1,"devices":[{"id":"dev_1"')
-    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ enabled: true, devices: [] })
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ devices: [{ name: 'Pixel 8' }] })
   })
 })
 

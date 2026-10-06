@@ -2,9 +2,10 @@ import { Context, Service } from 'cordis'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsService } from '../../src/services/settings.ts'
 import { FeaturesService, type FeatureDefinition } from '../../src/services/features.ts'
+import { missingServices } from '../../electron/resilience.ts'
 import { CHOOSABLE_FEATURES, FEATURE_GROUPS, FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
 
 // ctx.features — 기능 묶음을 settings 값으로 올리고 내린다 (이슈 #8). IPC 는 가짜 등록소로 흉내 낸다: ipcMain.handle 처럼
@@ -60,6 +61,7 @@ function definitions(): FeatureDefinition[] {
       bridge.inject = ['fakeTrajectory']
       return {
         id,
+        service: 'fakeTrajectory',
         plugin: (ctx: Context) => {
           ctx.plugin(FakeTrajectory)
           ctx.plugin(bridge)
@@ -77,12 +79,12 @@ function definitions(): FeatureDefinition[] {
   })
 }
 
-async function start(): Promise<{ ctx: Context; settings: SettingsService; features: FeaturesService; seen: FeatureId[][]; fiber: { dispose(): Promise<void> } }> {
+async function start(bundles: FeatureDefinition[] = definitions()): Promise<{ ctx: Context; settings: SettingsService; features: FeaturesService; seen: FeatureId[][]; fiber: { dispose(): Promise<void> } }> {
   const ctx = new Context()
   const seen: FeatureId[][] = []
   ctx.on('features/changed', (enabled) => void seen.push(enabled))
   ctx.plugin(SettingsService, { file })
-  const fiber = ctx.plugin(FeaturesService, definitions())
+  const fiber = ctx.plugin(FeaturesService, bundles)
   const ready = await new Promise<Context>((resolve) => ctx.inject(['settings', 'features'], resolve))
   await ready.features.idle()
   return { ctx, settings: ready.settings, features: ready.features, seen, fiber }
@@ -180,6 +182,42 @@ describe('FeaturesService', () => {
     await features.idle()
     expect(seen.at(-1)).toEqual(DEFAULT_ON)
     expect(channels()).toEqual(ALL)
+  })
+
+  // 전수 검사 #126 오류 4 — 묶음 하나가 못 떠도 뒤 묶음과 features/changed(엔진이 듣는다)는 간다
+  it('묶음 하나가 올라오다 던져도 나머지 묶음은 올라오고 켜진 목록을 알린다 — 실패는 기능 이름과 함께 로그에', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const broken = (): void => {
+        throw new Error('boom')
+      }
+      const bundles = definitions().map((definition) => (definition.id === 'at' ? { ...definition, plugin: broken } : definition))
+      const { settings, features, seen } = await start(bundles)
+      expect(channels()).toEqual(ALL.filter((channel) => channel !== 'at:x'))
+      expect(seen).toEqual([DEFAULT_ON])
+      expect(logged.mock.calls.some((call) => String(call[0]).includes('at'))).toBe(true)
+      // 그 뒤의 켜고 끄기도 그대로 돈다
+      settings.set({ features: { openIn: false } })
+      await features.idle()
+      expect(channels()).toEqual(ALL.filter((channel) => channel !== 'at:x' && channel !== 'openIn:x'))
+      expect(seen).toHaveLength(2)
+    } finally {
+      logged.mockRestore()
+    }
+  })
+
+  // 전수 검사 #126 오류 5 — 부팅 진단(electron/main.ts checkBoot)이 켜진 기능의 서비스도 본다
+  it('켜진 묶음의 서비스 키를 알려 준다 — 꺼진 묶음·서비스 없는 묶음은 빠지고, 못 뜬 서비스는 부팅 진단에 이름이 남는다', async () => {
+    const bundles = definitions().map((definition) => (definition.id === 'notifications' ? { ...definition, service: 'neverComes' } : definition))
+    const { ctx, settings, features } = await start(bundles)
+    expect(features.services()).toEqual(['fakeTrajectory']) // 알림은 기본 꺼짐
+    settings.set({ features: { notifications: true, trajectory: false } })
+    await features.idle()
+    expect(features.services()).toEqual(['neverComes'])
+    settings.set({ features: { notifications: true } })
+    await features.idle()
+    expect(features.services()).toEqual(['fakeTrajectory', 'neverComes'])
+    expect(missingServices(features.services(), (name) => ctx.get(name))).toEqual(['neverComes'])
   })
 
   it('레지스트리를 내리면 켜진 묶음이 다 내려간다 (앱 종료)', async () => {
