@@ -357,7 +357,7 @@
   user-select: none;
 }
 
-/* 줄 이동의 강조 띠 (AI 의 open_file, 이슈 #51) — 그 줄 전체 너비. 글 위에 옅게 덮는다(글은 그대로 읽히고 고를 수 있다) */
+/* 줄 이동의 강조 띠 (AI 의 open(파일), 이슈 #51) — 그 줄 전체 너비. 글 위에 옅게 덮는다(글은 그대로 읽히고 고를 수 있다) */
 .file-preview__mark {
   position: absolute;
   left: 0;

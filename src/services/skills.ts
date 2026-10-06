@@ -107,7 +107,7 @@ export class SkillsService extends Service {
     return (await this.list(directory)).find((skill) => skill.name === name)
   }
 
-  /** 대화로 만든 스킬을 쓴다 (이슈 #145 — 앱 MCP 의 create_skill 이 사용자 승인 뒤에 부른다). 자리는 앱이 정한다: project 는
+  /** 대화로 만든 스킬을 쓴다 (이슈 #145 — 앱 MCP 의 create(kind skill)가 사용자 승인 뒤에 부른다). 자리는 앱이 정한다: project 는
    *  `<프로젝트>/.opencode/skills/<이름>/SKILL.md`, all 은 앱 스킬 폴더. frontmatter(name·description)는 여기서 쓴다. 같은 이름이 그 프로젝트에서
    *  이미 보이거나 그 자리에 파일이 있으면 덮어쓰지 않고 던진다. 프로젝트 폴더에 쓸 때는 링크를 풀어 폴더 안인지 본다.
    *  엔진은 스킬 목록을 폴더별로 기억한다(다시 띄워야 바뀐다) → 도는 턴이 다 끝난 뒤 다시 띄우게 한다 (ctx.llm.reloadWhenIdle).

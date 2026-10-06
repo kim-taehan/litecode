@@ -22,7 +22,7 @@ describe('engineConfig — 스킬', () => {
   it('켬(Claude 끔): 프로젝트 .opencode/skills 를 paths 로 되살리고, customize-opencode 는 전역·에이전트마다 맨 뒤 deny', () => {
     const config = engineConfig([], proxy, { skills: { enabled: true, claude: false } })
     expect(config.skills).toEqual({ paths: ['.opencode/skills', '.opencode/skill'] })
-    expect(config.permission).toEqual({ task: { 'general-ask': 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create_skill: 'deny', litecode_add_mcp_server: 'deny', litecode_add_hook: 'deny', litecode_present: 'deny', webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
+    expect(config.permission).toEqual({ task: { 'general-ask': 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
     const agent = config.agent as Agents
     expect(Object.keys(agent).sort()).toEqual(Object.keys(ENGINE_AGENTS).sort())
     for (const [name, { permission }] of Object.entries(agent)) {
@@ -32,7 +32,7 @@ describe('engineConfig — 스킬', () => {
         ['websearch', 'deny'],
       ]) // 웹 도구 규칙은 그대로
     }
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { 'general-ask': 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'ask', litecode_create_skill: 'ask', litecode_add_mcp_server: 'ask', litecode_add_hook: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { 'general-ask': 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'ask', litecode_create: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
   })
 
   it('Claude 켬: ~/.claude/skills·.claude/skills 를 뒤에 더한다', () => {
@@ -49,14 +49,14 @@ describe('engineConfig — 스킬', () => {
 
   it('웹 도구를 켜도 스킬 규칙은 남는다 (전역 permission 은 하위 작업 규칙 + skill)', () => {
     const config = engineConfig([], proxy, { webTools: true, skills: { enabled: true, claude: false } })
-    expect(config.permission).toEqual({ task: { 'general-ask': 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create_skill: 'deny', litecode_add_mcp_server: 'deny', litecode_add_hook: 'deny', litecode_present: 'deny', skill: { 'customize-opencode': 'deny' } })
+    expect(config.permission).toEqual({ task: { 'general-ask': 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', skill: { 'customize-opencode': 'deny' } })
     expect((config.agent as Agents)[MODE_AGENT.ask]!.permission).toMatchObject({ webfetch: 'ask', skill: { 'customize-opencode': 'deny' } })
   })
 
   it('skills 를 안 주면 스킬 규칙을 안 넣는다 (예전 모양 그대로)', () => {
     const config = engineConfig([], proxy)
     expect(config).not.toHaveProperty('skills')
-    expect(config.permission).toEqual({ task: { 'general-ask': 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create_skill: 'deny', litecode_add_mcp_server: 'deny', litecode_add_hook: 'deny', litecode_present: 'deny', webfetch: 'deny', websearch: 'deny' })
+    expect(config.permission).toEqual({ task: { 'general-ask': 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', webfetch: 'deny', websearch: 'deny' })
   })
 })
 

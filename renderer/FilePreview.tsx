@@ -90,7 +90,7 @@ function Panel({ state }: { state: PanelState }) {
   if (active === undefined) filesVisited.current = true
 
   // 열 때마다(칩·버튼) 패널이 포커스를 잡는다 — Esc 로 닫고, 닫으면 누른 자리(칩)로 돌아간다.
-  // AI 가 연 것(open_file)은 잡지 않는다 — 닫혀 있던 패널이 새로 뜰 때도 (치던 입력창의 글이 끊기지 않게)
+  // AI 가 연 것(open(파일))은 잡지 않는다 — 닫혀 있던 패널이 새로 뜰 때도 (치던 입력창의 글이 끊기지 않게)
   useLayoutEffect(() => {
     if (!panelTakesFocus(state)) return
     if (!root.current?.contains(document.activeElement)) returnFocus.current = document.activeElement
@@ -365,7 +365,7 @@ function TreeLevel({
 
 // ── 파일 탭 하나 — 경로 줄 + 본문 ──
 
-/** jump — 그 줄로 가서 강조한다 (AI 의 open_file). 줄은 원문의 줄이라 마크다운·HTML 도 원문 보기로 바꾼다 */
+/** jump — 그 줄로 가서 강조한다 (AI 의 open(파일)). 줄은 원문의 줄이라 마크다운·HTML 도 원문 보기로 바꾼다 */
 function FileView({ directory, token, jump }: { directory: string; token: string; jump?: { line: number; seq: number } }) {
   const t = useT()
   const [preview, setPreview] = useState<FilePreview | 'loading'>('loading')

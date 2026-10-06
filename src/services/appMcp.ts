@@ -27,9 +27,9 @@ declare module 'cordis' {
     appMcp: AppMcpService
   }
   interface Events {
-    /** open_file — 화면이 그 프로젝트의 오른쪽 패널에 연다. file 은 프로젝트 기준 상대 경로, line 은 1부터 */
+    /** open(파일) — 화면이 그 프로젝트의 오른쪽 패널에 연다. file 은 프로젝트 기준 상대 경로, line 은 1부터 */
     'appMcp/open-file'(directory: string, file: string, line?: number): void
-    /** open_terminal — 화면이 그 프로젝트의 터미널 칸을 편다 (명령은 메인이 이미 채웠다) */
+    /** open(터미널) — 화면이 그 프로젝트의 터미널 칸을 편다 (명령은 메인이 이미 채웠다) */
     'appMcp/open-terminal'(directory: string): void
   }
 }

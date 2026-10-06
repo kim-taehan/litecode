@@ -304,7 +304,7 @@ export class McpService extends Service {
     this.persist()
   }
 
-  /** 대화로 서버를 더하기 전의 검사 (이슈 #145 — 앱 MCP 의 add_mcp_server). 입력 모양·예약 이름·**그 프로젝트에서 이미 보이는 이름**(앱 서버·
+  /** 대화로 서버를 더하기 전의 검사 (이슈 #145 — 앱 MCP 의 create(kind mcp_server)). 입력 모양·예약 이름·**그 프로젝트에서 이미 보이는 이름**(앱 서버·
    *  그 프로젝트 전용·폴더 정의·개인 설정 — save 는 앱 서버끼리만 본다). toFile 이면 프로젝트의 `.mcp.json` 을 고쳐 쓸 수 있는지도 본다.
    *  안 되면 사유를 던진다 */
   checkNew(input: McpServerInput, directory: string, toFile = false): void {

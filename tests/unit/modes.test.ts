@@ -49,15 +49,15 @@ describe('modePermission — 메인 대화', () => {
     expect(row('github_create_issue')).toEqual({ plan: 'deny', build: 'allow', ask: 'ask', full: 'allow' })
   })
 
-  it('앱 MCP 도구: 다른 프로젝트에 보내기는 늘 묻는다(계획엔 없다), 읽기도 늘 묻는다(계획 포함, #137), 목록·결과물·파일 열기는 묻지 않는다, 터미널은 계획에 없다', () => {
+  it('앱 MCP 도구: 다른 프로젝트에 보내기는 늘 묻는다(계획엔 없다), 읽기도 늘 묻는다(계획 포함, #137), 목록·결과물·열기(파일·터미널 한 도구)는 묻지 않는다 — 옛 이름은 보통의 MCP 도구', () => {
     expect(row('litecode_send_to_project')).toEqual({ plan: 'deny', build: 'ask', ask: 'ask', full: 'ask' })
     expect(row('litecode_read_project')).toEqual({ plan: 'ask', build: 'ask', ask: 'ask', full: 'ask' })
     // 없앤 도구 이름은 보통의 MCP 도구로 본다 (특별 규칙 없음)
     expect(row('litecode_start_session')).toEqual(row('github_create_issue'))
-    for (const permission of ['litecode_list_projects', 'litecode_present', 'litecode_open_file']) {
+    for (const permission of ['litecode_list_projects', 'litecode_present', 'litecode_open']) {
       expect(row(permission), permission).toEqual({ plan: 'allow', build: 'allow', ask: 'allow', full: 'allow' })
     }
-    expect(row('litecode_open_terminal')).toEqual({ plan: 'deny', build: 'allow', ask: 'allow', full: 'allow' })
+    for (const old of ['litecode_open_file', 'litecode_open_terminal', 'litecode_create_skill', 'litecode_add_mcp_server', 'litecode_add_hook']) expect(row(old), old).toEqual(row('github_create_issue'))
   })
 
   it('모르는 권한 이름은 묻는다 — 카드를 띄우는 쪽이 안전하다', () => {
@@ -69,7 +69,7 @@ describe('modePermission — 하위 작업 (자식은 부모 모드 권한을 �
   const child = (permission: string, resources?: string[]) => row(permission, { child: true, resources })
 
   it('편집·명령·웹·MCP 도구: 매번 묻기의 하위 작업만 묻는다 — 전체 권한의 하위 작업도 엔진 기본 에이전트라 폴더 밖·.env 는 묻는다', () => {
-    for (const permission of ['edit', 'bash', 'webfetch', 'github_search', 'litecode_open_file', 'litecode_list_projects']) {
+    for (const permission of ['edit', 'bash', 'webfetch', 'github_search', 'litecode_open', 'litecode_list_projects']) {
       expect(child(permission), permission).toMatchObject({ build: 'allow', ask: 'ask', full: 'allow' })
     }
     expect(child('external_directory')).toMatchObject({ build: 'ask', ask: 'ask', full: 'ask' })
@@ -79,13 +79,13 @@ describe('modePermission — 하위 작업 (자식은 부모 모드 권한을 �
   })
 
   it('만들기 도구(스킬·MCP 서버·훅, #145)는 전체 권한에서도 묻는다 — 계획엔 없다', () => {
-    for (const permission of ['litecode_create_skill', 'litecode_add_mcp_server', 'litecode_add_hook']) {
+    for (const permission of ['litecode_create']) {
       expect(row(permission), permission).toEqual({ plan: 'deny', build: 'ask', ask: 'ask', full: 'ask' })
     }
   })
 
   it('하위 작업은 보내기·읽기·결과물·만들기 도구와 task 를 못 쓴다', () => {
-    for (const permission of ['litecode_send_to_project', 'litecode_read_project', 'litecode_present', 'litecode_create_skill', 'litecode_add_mcp_server', 'litecode_add_hook', 'task']) {
+    for (const permission of ['litecode_send_to_project', 'litecode_read_project', 'litecode_present', 'litecode_create', 'task']) {
       expect(child(permission, ['general']), permission).toMatchObject({ build: 'deny', ask: 'deny', full: 'deny' })
     }
   })

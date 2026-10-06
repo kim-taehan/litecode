@@ -17,9 +17,9 @@ export interface PanelState {
   fullscreen: boolean
   /** 열 때마다 오른다 — 같은 칩을 다시 눌러도 패널이 포커스를 잡는다(Esc 로 닫히게) */
   focus: number
-  /** 마지막으로 연 것이 AI 다(open_file) — 패널이 포커스를 잡지 않는다. 치던 입력창의 글이 끊기지 않게 (터미널 칸의 quiet 와 같다) */
+  /** 마지막으로 연 것이 AI 다(open(파일)) — 패널이 포커스를 잡지 않는다. 치던 입력창의 글이 끊기지 않게 (터미널 칸의 quiet 와 같다) */
   quiet?: boolean
-  /** 줄 이동 (이슈 #51 — AI 의 open_file 이 줄을 줬다): 그 탭을 그 줄로 스크롤하고 강조한다. seq 는 줄을 줄 때마다 오른다 — 같은 줄을 다시 열어도 다시 간다.
+  /** 줄 이동 (이슈 #51 — AI 의 open(파일) 이 줄을 줬다): 그 탭을 그 줄로 스크롤하고 강조한다. seq 는 줄을 줄 때마다 오른다 — 같은 줄을 다시 열어도 다시 간다.
    *  줄 없이 그 탭을 다시 열면 지워진다 */
   jump?: { key: string; line: number; seq: number }
 }
@@ -57,7 +57,7 @@ export function tabKey(directory: string, token: string): string {
 }
 
 /** 파일 탭을 열고(이미 있으면 그 탭을) 고른다. line(1부터)을 주면 그 줄로 간다.
- *  quiet — 사용자가 누른 것이 아니다(AI 의 open_file): 탭만 열고 고른다. focus 를 올리지 않아 패널이 포커스를 가져가지 않는다 */
+ *  quiet — 사용자가 누른 것이 아니다(AI 의 open(파일)): 탭만 열고 고른다. focus 를 올리지 않아 패널이 포커스를 가져가지 않는다 */
 export function openFilePreview(directory: string, token: string, line?: number, { quiet = false }: { quiet?: boolean } = {}): void {
   const state = base(directory)
   const key = tabKey(directory, token)
