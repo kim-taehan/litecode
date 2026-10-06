@@ -3,6 +3,7 @@ import type { EngineMcp } from './engine.ts'
 import { hiddenEnvNames } from './engine.ts'
 import { tr } from '../i18n.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
+import { estimateToolTokens } from '../../shared/mcpTools.ts'
 
 // 앱이 MCP 서버에 직접 붙어 도구 목록만 묻는 최소 클라이언트 (이슈 #28). opencode 에는 MCP 도구 목록 API 가 없다 — /experimental/tool 에도
 // MCP 도구는 안 나온다(#28 실측, 1.18.18). 그래서 `+` 메뉴 MCP 팝업(#43)의 "도구 N"·도구 이름·설명과 "연결 테스트"(저장 없이)는 앱이 잠깐 붙어 본다:
@@ -15,6 +16,8 @@ import { keepTail, streamText } from './outputBuffer.ts'
 export interface McpTool {
   name: string
   description?: string
+  /** 이 도구 정의(이름·설명·입력 스키마)가 모델 요청에 싣는 토큰 어림 (이슈 #164 — 스키마는 화면에 보내지 않고 이 값만) */
+  tokens: number
 }
 
 const PROTOCOL_VERSION = '2025-06-18'
@@ -24,7 +27,7 @@ export const MCP_LIST_TIMEOUT_MS = 15_000
 interface RpcMessage {
   jsonrpc?: string
   id?: number
-  result?: { tools?: { name?: unknown; description?: unknown }[]; nextCursor?: string }
+  result?: { tools?: { name?: unknown; description?: unknown; inputSchema?: unknown }[]; nextCursor?: string }
   error?: { message?: string }
 }
 
@@ -42,8 +45,12 @@ export function mcpChildEnv(base: NodeJS.ProcessEnv, environment: Record<string,
 
 function toolsOf(result: RpcMessage['result']): McpTool[] {
   return (result?.tools ?? [])
-    .filter((tool): tool is { name: string; description?: unknown } => typeof tool.name === 'string')
-    .map((tool) => ({ name: tool.name, ...(typeof tool.description === 'string' && tool.description && { description: tool.description }) }))
+    .filter((tool): tool is { name: string; description?: unknown; inputSchema?: unknown } => typeof tool.name === 'string')
+    .map((tool) => ({
+      name: tool.name,
+      ...(typeof tool.description === 'string' && tool.description && { description: tool.description }),
+      tokens: estimateToolTokens({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }),
+    }))
 }
 
 const initialize = (id: number) => ({ jsonrpc: '2.0', id, method: 'initialize', params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO } })

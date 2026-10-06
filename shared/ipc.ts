@@ -19,6 +19,7 @@ import type { DirectoryListing } from '../src/services/fileTree.ts'
 import type { FeatureId } from './features.ts'
 import type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
+import type { McpToolSelection } from './mcpTools.ts'
 import type { HookCandidate, HookDraft, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
@@ -46,6 +47,7 @@ export type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 export type { SkillSource } from './skills.ts'
 export type { McpScope, McpServerInput, McpServerSummary, McpTestResult, McpVarSummary } from '../src/services/mcp.ts'
 export type { McpTool } from '../src/services/mcpClient.ts'
+export type { McpToolSelection } from './mcpTools.ts'
 export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 export type { McpToolRef } from '../src/services/turnProgress.ts'
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
@@ -145,6 +147,8 @@ export const Channel = {
   REMOVE_MCP: 'mcp:remove',
   SET_MCP_ENABLED: 'mcp:set-enabled',
   TEST_MCP: 'mcp:test',
+  /** 화면 → 메인 (name, selection | undefined, directory) — 그 프로젝트에서 MCP 서버 안의 도구를 고른다 (이슈 #164) */
+  SET_MCP_TOOLS: 'mcp:set-tools',
   /** 훅 팝업 (이슈 #102 — `+` 메뉴 > 훅). 기능 `hooks` 가 켜져 있을 때만 걸려 있다. directory 는 지금 프로젝트(등록된 프로젝트만) */
   LIST_HOOKS: 'hooks:list',
   SAVE_HOOK: 'hooks:save',
@@ -340,6 +344,8 @@ export interface LitecodeBridge {
   setMcpEnabled(name: string, enabled: boolean, directory: string): Promise<void>
   /** 저장하지 않고 붙어 본다 — 도구 목록 또는 사유 */
   testMcp(input: McpServerInput, directory?: string): Promise<McpTestResult>
+  /** 그 프로젝트에서만 서버 안의 도구를 고른다 (이슈 #164) — undefined 면 전부 켜짐. 다음 턴부터 꺼진 도구는 모델에 안 보인다 */
+  setMcpTools(name: string, selection: McpToolSelection | undefined, directory: string): Promise<void>
   /** `+` 메뉴의 훅 팝업 (ctx.hooks, 이슈 #102) — **기능 `hooks` 가 켜져 있을 때만 부른다** (꺼져 있으면 채널이 없다).
    *  그 프로젝트에서 본 훅: 모든 프로젝트 것 먼저 → 이 프로젝트만 (도는 순서) */
   listHooks(directory: string): Promise<HookRow[]>

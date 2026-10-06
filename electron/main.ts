@@ -42,6 +42,7 @@ import { hooksBridge } from '../src/services/hooks/bridge.ts'
 import { SkillsService, type SkillScope } from '../src/services/skills.ts'
 import { recordingOpenInHost, systemOpenInHost, type OpenInTestRecord } from './openInHost.ts'
 import { McpService, type McpServerInput } from '../src/services/mcp.ts'
+import type { McpToolSelection } from '../shared/mcpTools.ts'
 import { AppMcpService } from '../src/services/appMcp.ts'
 import { OpenTool } from '../src/services/appMcp/tools/open.ts'
 import { PresentTool } from '../src/services/appMcp/tools/present.ts'
@@ -460,6 +461,9 @@ function mcpBridge(ctx: Context): void {
   handle(ctx, Channel.REMOVE_MCP, async (_event, name: string, directory?: string) => ctx.mcp.remove(name, directory))
   handle(ctx, Channel.SET_MCP_ENABLED, async (_event, name: string, enabled: boolean, directory: string) => ctx.mcp.setEnabled(name, enabled, String(directory)))
   handle(ctx, Channel.TEST_MCP, async (_event, input: McpServerInput, directory?: string) => ctx.mcp.test(input, directory))
+  handle(ctx, Channel.SET_MCP_TOOLS, async (_event, name: string, selection: McpToolSelection | undefined, directory: string) =>
+    ctx.mcp.setTools(String(name), selection ?? undefined, String(directory)),
+  )
 }
 mcpBridge.inject = ['mcp']
 

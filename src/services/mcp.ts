@@ -11,6 +11,7 @@ import { readJsonFileSync } from './jsonFile.ts'
 import { insideOf } from './projectPath.ts'
 import { tr } from '../i18n.ts'
 import { BROWSER_MCP_NAME } from '../../shared/browser.ts'
+import { hiddenTools, toolSelectionOf, type McpToolSelection } from '../../shared/mcpTools.ts'
 import './llm.ts'
 
 // MCP 서버 (ctx.mcp, 이슈 #28). 채팅은 opencode 레거시 경로라 MCP 도구가 네이티브로 실린다 — 이 서비스는 "어떤 서버를 어느 폴더에 붙일지" 만 쥔다.
@@ -45,6 +46,11 @@ import './llm.ts'
 // 길(매 턴 붙이기·프로젝트별 켜기)로 붙인다. 이름 `litecode`(와 브라우저 기능의 `chrome`, #147)는 예약이다 — 사용자는 그 이름으로 저장할 수 없고, 폴더 정의·예전에 저장된 앱 서버는
 // 붙이지 않는다(shadowed). 엔진 설정이 `litecode_*` 도구에 따로 권한을 주므로(계획 모드에서도 허용 등) 남의 서버가 그 이름을 쓰면 안 된다.
 // 팝업에는 "모든 프로젝트" 묶음 맨 끝에 읽기 전용 한 줄(주소·토큰은 화면에 안 준다)
+//
+// 서버 안의 도구 고르기 (이슈 #164): 켜기 값처럼 **프로젝트별**로 mcp-projects.json 의 tools(서버 이름 → {off?, only?}, shared/mcpTools.ts)에 둔다 —
+// 앱 서버("모든 프로젝트" 서버 포함)·폴더 정의·개인 설정 모두. 프로젝트 폴더의 `.mcp.json` 은 고치지 않는다. 내장 서버는 고르지 않는다(코드로 줄였다).
+// 매 턴 붙이기 뒤에 그 폴더에서 숨길 도구 이름(MCP 서버가 준 이름)을 ctx.llm.hideMcpTools 로 넘긴다 — 모델 요청에서 빼는 방법은 ctx.llm 이 안다.
+// only 모양은 서버의 도구 목록이 있어야 나머지를 알 수 있어 그 서버에 붙어 묻는다(정의가 같으면 앱 실행 동안 기억). 못 물으면 그 서버는 숨기지 않는다
 
 declare module 'cordis' {
   interface Context {
@@ -68,6 +74,8 @@ interface McpProjectRecord {
   servers: McpServerRecord[]
   /** 이 프로젝트에서 켜고 끈 값 (서버 이름 → 켜짐). 없는 이름은 기본값 */
   enabled: Record<string, boolean>
+  /** 이 프로젝트에서 서버 안의 도구를 고른 값 (서버 이름 → 선택, 이슈 #164). 없는 이름은 전부 켜짐. 옛 파일엔 없다 */
+  tools: Record<string, McpToolSelection>
 }
 
 /** 로컬 env 하나 또는 원격 헤더 하나 — 저장 모양 (비밀이면 value 없음) */
@@ -115,6 +123,8 @@ export interface McpServerSummary {
   /** 앱이 직접 물은 도구 목록 (연결됨일 때) */
   tools?: McpTool[]
   toolsError?: string
+  /** 이 프로젝트에서 고른 도구 (이슈 #164). 없으면 전부 켜짐 */
+  toolSelection?: McpToolSelection
   /** 프로젝트 서버가 앱 서버와 이름이 겹쳐 붙이지 않았다 (예약 이름 `litecode` 를 쓴 서버도) */
   shadowed?: boolean
 }
@@ -181,6 +191,8 @@ export class McpService extends Service {
   private toolCache = new Map<string, Promise<{ tools?: McpTool[]; error?: string }>>()
   /** 내장 서버 (이름 → 그 폴더용 정의) */
   private builtins = new Map<string, BuiltinMcp>()
+  /** 숨길 도구를 ctx.llm 에 넘긴 폴더 — 기능을 끄면 비운다 */
+  private hiding = new Set<string>()
 
   constructor(
     ctx: Context,
@@ -190,13 +202,17 @@ export class McpService extends Service {
     this.servers = ((opts.file && (readJsonFileSync(opts.file, 'array') as McpServerRecord[] | undefined)) || []).filter((server) => typeof server?.name === 'string')
     this.secrets = (opts.secretsFile && (readJsonFileSync(opts.secretsFile, 'object') as Record<string, Record<string, string>> | undefined)) || {}
     const projects = (opts.projectsFile && (readJsonFileSync(opts.projectsFile, 'object') as Record<string, Partial<McpProjectRecord>> | undefined)) || {}
-    this.projects = Object.fromEntries(Object.entries(projects).map(([dir, entry]) => [dir, { servers: entry?.servers ?? [], enabled: entry?.enabled ?? {} }]))
+    this.projects = Object.fromEntries(Object.entries(projects).map(([dir, entry]) => [dir, { servers: entry?.servers ?? [], enabled: entry?.enabled ?? {}, tools: toolSelections(entry?.tools) }]))
     ctx.on('llm/before-turn', (directory) => this.prepare(directory))
     // 기능을 끄면(묶음이 내려가면) 붙인 앱·프로젝트 서버를 끊는다 — 개인 설정 서버는 opencode 것이라 그대로다
     // 내려가는 중엔 ctx.llm 을 못 꺼낸다 (inactive context) — 올라올 때 쥔다
     ctx.effect(() => {
       const llm = this.ctx.llm
-      return () => this.detachAll(llm)
+      return () => {
+        for (const workdir of this.hiding) llm.hideMcpTools(workdir, {}) // 개인 설정 서버는 남아 있다 — 숨김을 풀어 둔다
+        this.hiding.clear()
+        return this.detachAll(llm)
+      }
     })
   }
 
@@ -248,6 +264,8 @@ export class McpService extends Service {
 
     return Promise.all(
       entries.map(async ({ summary, def }) => {
+        const selection = summary.source !== 'builtin' ? mine?.tools[summary.name] : undefined
+        if (selection) summary.toolSelection = selection
         const state = workdir && !summary.shadowed ? status[summary.name] : undefined
         if (state) Object.assign(summary, { status: state.status, ...(state.error && { error: state.error }) })
         else if (workdir && !summary.enabled) summary.status = 'disabled'
@@ -292,7 +310,12 @@ export class McpService extends Service {
       delete this.secrets[secretKey(existing.name, owner)]
       // 이름을 바꿔도 프로젝트별 켜기 값은 따라간다
       for (const entry of owner ? [this.project(owner)] : Object.values(this.projects)) {
-        if (existing.name === record.name || !(existing.name in entry.enabled)) continue
+        if (existing.name === record.name) continue
+        if (existing.name in entry.tools) {
+          entry.tools[record.name] = entry.tools[existing.name]!
+          delete entry.tools[existing.name]
+        }
+        if (!(existing.name in entry.enabled)) continue
         entry.enabled[record.name] = entry.enabled[existing.name]!
         delete entry.enabled[existing.name]
       }
@@ -343,10 +366,14 @@ export class McpService extends Service {
     if (mine?.servers.some((server) => server.name === name)) {
       mine.servers = mine.servers.filter((server) => server.name !== name)
       delete mine.enabled[name]
+      delete mine.tools[name]
       delete this.secrets[secretKey(name, workdir)]
     } else {
       this.servers = this.servers.filter((server) => server.name !== name)
-      for (const entry of Object.values(this.projects)) delete entry.enabled[name]
+      for (const entry of Object.values(this.projects)) {
+        delete entry.enabled[name]
+        delete entry.tools[name]
+      }
       delete this.secrets[name]
     }
     this.persist() // 붙어 있던 폴더에서는 다음 붙이기가 끊는다 (attached 에 남아 있다)
@@ -355,6 +382,17 @@ export class McpService extends Service {
   /** 그 프로젝트에서만 켜고 끈다 (앱 서버·폴더 정의·개인 설정 모두 — 정의는 안 고친다). 다음 목록 읽기·다음 턴에 붙이거나 끊는다 */
   setEnabled(name: string, enabled: boolean, directory: string): void {
     this.project(realpathOf(directory)).enabled[name] = enabled
+    this.persist()
+  }
+
+  /** 그 프로젝트에서만 서버 안의 도구를 고른다 (이슈 #164 — 정의·`.mcp.json` 은 안 고친다). undefined 면 전부 켜짐. 다음 턴부터 모델에 안 보인다.
+   *  내장 서버는 고르지 않는다 */
+  setTools(name: string, selection: McpToolSelection | undefined, directory: string): void {
+    if (RESERVED_NAMES.includes(name) || this.builtins.has(name)) throw new Error(tr('mcp.error.nameReserved', { name }))
+    const tools = this.project(realpathOf(directory)).tools
+    const chosen = toolSelectionOf(selection)
+    if (chosen) tools[name] = chosen
+    else delete tools[name]
     this.persist()
   }
 
@@ -376,7 +414,14 @@ export class McpService extends Service {
   /** 그 폴더 인스턴스에 그 프로젝트에서 켠 서버(앱·프로젝트 전용·폴더 정의)를 붙이고, 더는 붙일 것이 아닌 것은 끊는다. 폴더마다 한 줄로 돈다 */
   prepare(workdir: string): Promise<void> {
     const previous = this.chains.get(workdir) ?? Promise.resolve()
-    const next = previous.then(() => this.attach(workdir)).catch((error: unknown) => console.error('[mcp] 붙이기 실패', workdir, (error as Error).message))
+    const next = previous
+      .then(() => this.attach(workdir))
+      .catch((error: unknown) => {
+        console.error('[mcp] 붙이기 실패', workdir, (error as Error).message)
+        return new Map<string, EngineMcp>()
+      })
+      .then((wanted) => this.hide(workdir, wanted))
+      .catch((error: unknown) => console.error('[mcp] 도구 숨기기 실패', workdir, (error as Error).message))
     this.chains.set(workdir, next)
     return next
   }
@@ -396,7 +441,8 @@ export class McpService extends Service {
     this.toolCache.clear()
   }
 
-  private async attach(workdir: string): Promise<void> {
+  /** 붙인(붙일) 서버 이름 → 정의를 돌려준다 — 숨길 도구를 고를 때 도구 목록을 묻는 데 쓴다 */
+  private async attach(workdir: string): Promise<Map<string, EngineMcp>> {
     const mine = this.projects[workdir]
     const on = (name: string, fallback: boolean): boolean => mine?.enabled[name] ?? fallback
     const own = mine?.servers ?? []
@@ -417,7 +463,7 @@ export class McpService extends Service {
     const off = Object.keys(mine?.enabled ?? {}).filter((name) => !mine!.enabled[name] && !ours.has(name))
     const paused = this.paused.get(workdir) ?? new Set<string>()
     const record = this.attached.get(workdir) ?? new Map<string, string>()
-    if (wanted.size === 0 && record.size === 0 && off.length === 0 && paused.size === 0) return // 붙일 것도 끊을 것도 없다 — opencode 에 묻지 않는다
+    if (wanted.size === 0 && record.size === 0 && off.length === 0 && paused.size === 0) return wanted // 붙일 것도 끊을 것도 없다 — opencode 에 묻지 않는다
     this.attached.set(workdir, record)
     this.paused.set(workdir, paused)
     const status = await this.ctx.llm.mcpStatus(workdir)
@@ -446,6 +492,27 @@ export class McpService extends Service {
       paused.delete(name)
       if (status[name]?.status === 'disabled') await this.ctx.llm.mcpConnect(workdir, name)
     }
+    return wanted
+  }
+
+  /** 그 프로젝트에서 고른 도구 중 꺼진 것을 ctx.llm 에 넘긴다 (이슈 #164). wanted 는 붙인 서버의 정의 — 없으면(개인 설정) 개인 설정 파일의 정의로 묻는다 */
+  private async hide(workdir: string, wanted: Map<string, EngineMcp>): Promise<void> {
+    const chosen = this.projects[workdir]?.tools ?? {}
+    const hidden: Record<string, string[]> = {}
+    for (const [name, selection] of Object.entries(chosen)) {
+      if (RESERVED_NAMES.includes(name) || this.builtins.has(name)) continue
+      if (!selection.only) {
+        if (selection.off?.length) hidden[name] = [...selection.off]
+        continue
+      }
+      const personal = personalServers(this.opts.env ?? process.env).find((server) => server.name === name)?.def
+      const def = wanted.get(name) ?? (personal && !substituted(personal) ? personal : undefined)
+      if (!def) continue
+      const listed = await this.tools(def, workdir)
+      if (listed.tools) hidden[name] = hiddenTools(selection, listed.tools.map((tool) => tool.name))
+    }
+    this.hiding.add(workdir)
+    this.ctx.llm.hideMcpTools(workdir, hidden)
   }
 
   /** 붙인 것을 모두 끊는다 (기능 끄기). 앱을 끌 때도 불린다 — 엔진이 곧 꺼지므로 기다리는 시간을 짧게 */
@@ -530,7 +597,7 @@ export class McpService extends Service {
 
   /** 그 프로젝트의 기록 — 없으면 만든다 */
   private project(workdir: string): McpProjectRecord {
-    return (this.projects[workdir] ??= { servers: [], enabled: {} })
+    return (this.projects[workdir] ??= { servers: [], enabled: {}, tools: {} })
   }
 
   private persist(): void {
@@ -544,6 +611,15 @@ export class McpService extends Service {
  *  이름엔 `#`·경로 구분자가 못 들어가므로(NAME_PATTERN) 둘이 겹치지 않는다 */
 function secretKey(name: string, owner?: string): string {
   return owner ? `${owner}#${name}` : name
+}
+
+/** 파일의 tools → 서버별 선택 (모양이 다른 값은 버린다 — 전부 켜짐) */
+function toolSelections(value: unknown): Record<string, McpToolSelection> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).flatMap(([name, entry]) => {
+    const selection = toolSelectionOf(entry)
+    return selection ? [[name, selection]] : []
+  }))
 }
 
 /** 프로젝트 기록의 키 — realpath (ctx.projects·ctx.llm 과 같은 값). 폴더가 없어졌으면 받은 그대로 */
