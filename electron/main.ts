@@ -275,6 +275,7 @@ function chatBridge(ctx: Context): void {
   handle(ctx, Channel.DROP_QUEUED, async (_event, conversationId: string, index: number) => ctx.chat.dropQueued(String(conversationId), Number(index)))
   handle(ctx, Channel.CHAT_SNAPSHOT, async () => ctx.chat.snapshot())
   handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => ctx.chat.stop(String(conversationId)))
+  handle(ctx, Channel.COMPACT_CHAT, async (_event, conversationId: string) => ctx.chat.compact(String(conversationId)))
   handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.chat.stopSubtask(String(subtaskId)))
   // target: 지시 보내기 승인 카드에서 고른 받을 대화 (이슈 #67) — 모양만 거른다. 그 대화로 보낼 수 있는지는 도구가 실행할 때 다시 본다
   handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer, target?: unknown) => ctx.chat.reply(sessionId, requestId, answer, attentionTarget(target)))

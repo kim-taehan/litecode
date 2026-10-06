@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
-import type { TriggerQuery, TriggerResult } from '../shared/ipc.ts'
+import type { AppCommand, TriggerQuery, TriggerResult } from '../shared/ipc.ts'
 
 // 입력창 트리거의 화면 쪽 — 어떤 문자가 트리거인지 모르고, 입력·캐럿이 바뀔 때마다 메인(ctx.triggers)에 "이 입력의 후보" 를 묻는다.
 // 상호작용은 dsh ui-input-trigger 를 따른다: 포커스는 입력창에 남고(aria-activedescendant) ↑↓ 이동, Enter·Tab 고르기, 폴더는 Tab 으로
@@ -17,6 +17,8 @@ export interface TriggerOptions {
   onSend(text: string, display: string): void
   /** `!`: 그 폴더에서 command 를 돌려 대화에 결과 카드로 */
   onShell(directory: string, command: string): void
+  /** 앱 명령 (`/compact`·`/clear`) — 못 했으면 그 사유를 준다 (입력은 그대로 두고 한 줄로 알린다) */
+  onApp(command: AppCommand): Promise<string | undefined>
 }
 
 export interface Triggers {
@@ -55,7 +57,7 @@ export function triggerOpen(query: Pick<TriggerQuery, 'span' | 'candidates'> | n
   return !!query && focused && query.candidates.length > 0 && spanKey(query) !== dismissed
 }
 
-export function useTriggers({ directory, conversation, draft, setDraft, onSend, onShell }: TriggerOptions): Triggers {
+export function useTriggers({ directory, conversation, draft, setDraft, onSend, onShell, onApp }: TriggerOptions): Triggers {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [caret, setCaret] = useState(0)
   const [query, setQuery] = useState<TriggerQuery | null>(null)
@@ -113,6 +115,9 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
     else if (result.kind === 'shell') {
       setDraft('')
       onShell(result.directory, result.command)
+    } else if (result.kind === 'app') {
+      // setDraft 는 이 그리기의 대화에 묶여 있다 — `/clear` 로 새 대화로 넘어간 뒤에도 친 대화의 입력을 비운다
+      void onApp(result.command).then((problem) => (problem ? setNotice(problem) : setDraft('')))
     } else setNotice(result.message)
   }
 

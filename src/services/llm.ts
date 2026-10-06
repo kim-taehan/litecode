@@ -541,6 +541,81 @@ export class LlmService extends Service {
     }
   }
 
+  /** 손으로 부르는 요약 (/compact, 이슈 #144) — 그 세션의 지금까지 대화를 요약해 컨텍스트를 줄인다. 자동 요약과 같은 요약 줄(running → done)이
+   *  onProgress 로 흐르고, 답 글은 없다. messageId 는 엔진이 만든 요약 user 메시지의 id (history 의 그 말풍선 id).
+   *  실측 2026-10-06 opencode 1.18.18, 가짜 LLM (docs/opencode-protocol.md): 레거시 `POST /session/{id}/summarize?directory=` 본문
+   *  `{providerID, modelID}` (둘 다 필수 — 빠지면 400. 그래서 모델이 밖으로 샐 길이 없다). 응답 200 `true` 는 요약이 끝나거나 멈춘 **뒤에** 온다 —
+   *  기다리지 않고 /event 로 따라간다: 요약 user(compaction 파트 auto:false, id 는 엔진이 정한다) → 요약 답(summary:true) → session.compacted → idle.
+   *  이음 user 가 없다. 빈 세션도 요약한다(LLM 을 부른다) — 부르는 쪽(ctx.chat)이 막는다.
+   *  **끝나지 않은 요약은 지운다**: 멈추면(abort) 요약 답이 MessageAbortedError 로 남는데, 그 뒤 첫 프롬프트는 답 대신 요약만 돌고 끝난다(3/3 —
+   *  사용자의 글이 답을 못 받는다). 요약 답·요약 user 를 지우면(DELETE /session/{id}/message/{id}) 다음 턴이 정상이다(3/3) */
+  async compact(
+    providerId: string,
+    modelId: string,
+    directory: string,
+    sessionId: string,
+    onProgress?: (item: TurnItem) => void,
+    stop?: AbortSignal,
+  ): Promise<ChatResult & { messageId?: string }> {
+    if (this.busy.has(sessionId)) return { ok: false, sessionId, error: tr('compact.busy') }
+    if (!this.ctx.providers.get(providerId)) return { ok: false, sessionId, error: tr('error.noProvider', { id: providerId }) }
+    this.turns++
+    this.busy.add(sessionId)
+    let conn: EngineConnection | undefined
+    try {
+      conn = await this.ctx.engine.connection()
+      const ready = await this.prepare(conn, providerId, modelId, directory, sessionId, '')
+      if ('error' in ready) return { ok: false, sessionId, error: ready.error }
+      const { workdir } = ready
+      const server = conn
+      let admitted!: (sent: boolean) => void
+      const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
+      const events = this.follow(server, new TurnScope(sessionId), tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), onProgress, new Set(), () => {}, stop)
+      try {
+        await events.connected
+        if (stop?.aborted) {
+          admitted(false)
+          return { ok: false, sessionId, error: tr('error.stopped'), interrupted: true }
+        }
+        const send = fetch(`${server.url}/session/${sessionId}/summarize?${at(workdir)}`, {
+          method: 'POST',
+          headers: { ...server.headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ providerID: providerId, modelID: modelId }),
+        })
+        admitted(true) // 응답은 요약이 끝나야 온다 — 멈춤이 그것을 기다리지 않게
+        const refused = send.then((res) => (res.ok ? undefined : tr('error.compactSend', { status: res.status })))
+        const result = await Promise.race([events.result, refused.then((error) => (error ? { ok: false, text: '', error } : events.result))])
+        if (!result.ok) {
+          await this.dropUnfinishedCompactions(server, sessionId, workdir, send).catch(() => {})
+          return { ok: false, sessionId, error: result.error, ...(result.interrupted && { interrupted: true }) }
+        }
+        const raw = await this.engineMessages(server, sessionId, workdir).catch(() => [])
+        const asked = [...raw].reverse().find((message) => message.info.role === 'user' && message.parts.some((part) => part.type === 'compaction'))
+        return { ok: true, sessionId, text: '', ...(asked && { messageId: asked.info.id }) }
+      } finally {
+        events.stop()
+      }
+    } catch (error) {
+      if (conn?.closed.aborted) return { ok: false, sessionId, error: interruptedError(), interrupted: true }
+      return { ok: false, sessionId, error: tr('error.opencodeConnect', { message: (error as Error).message }) }
+    } finally {
+      this.busy.delete(sessionId)
+      this.turns--
+      this.purgeIfIdle()
+      this.gateIfIdle()
+    }
+  }
+
+  /** 끝나지 않은(멈췄거나 실패한) 손 요약의 메시지를 지운다. 요약 요청(sent)이 돌아올 때까지 기다린다 — 멈춤이 요약 시작보다 빨랐으면 엔진은
+   *  아직 요약을 돌리고 있다, 돌아올 때까지 다시 멈춘다 */
+  private async dropUnfinishedCompactions(conn: EngineConnection, sessionId: string, workdir: string, sent: Promise<unknown>): Promise<void> {
+    const settled = sent.then(() => true, () => true)
+    while (!(await Promise.race([settled, new Promise<false>((resolve) => setTimeout(() => resolve(false), 100))]))) await this.abort(conn, sessionId, workdir)
+    for (const id of unfinishedCompactions(await this.engineMessages(conn, sessionId, workdir))) {
+      await fetch(`${conn.url}/session/${sessionId}/message/${id}?${at(workdir)}`, { method: 'DELETE', headers: conn.headers })
+    }
+  }
+
   /** chat·addContext 에 넘길 새 메시지 id — opencode 형식(`msg_` + 시각·순번 12자리 hex + 무작위 14자)이라 시간 순으로 정렬된다.
    *  opencode 는 메시지를 id 순으로 다루므로(01w 9절) 앱이 정한 id 도 그 순서를 지켜야 한다. `/` 명령처럼 보낸 본문과 보일 글이 다를 때,
    *  앱이 이 id 로 보일 글을 따로 적어 둔다 (01d "말풍선 문제"). 같은 id 를 두 번 보내면 조용히 합쳐지므로 매번 새로 만든다 */
@@ -884,6 +959,7 @@ export class LlmService extends Service {
         if (role === 'user' && event.type === 'message.updated') seenUser = true
         if (role === 'user' && (props['part'] as EnginePart | undefined)?.type === 'compaction') {
           compactionSeen = true
+          seenUser = true // 손으로 부른 요약은 이 요약 user 가 턴의 시작이다 (자동 요약이면 이미 참)
           const item = tracker.compaction((props['part'] as EnginePart).messageID!, 'running')
           if (item) onProgress?.(item)
         }
@@ -1337,6 +1413,16 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
   for (const message of raw) {
     const { info, parts } = message
     if (info.role === 'user') {
+      if (parts.some((part) => part.type === 'compaction' && part.auto === false)) {
+        // 손으로 부른 요약 (/compact, 이슈 #144) — 그 자체가 한 턴이다: 글 없는 내 말(보일 글은 앱이 이 id 로 적어 둔다) + 요약 줄. 이음 user 가 없다
+        closeTurn(false)
+        sentAt = info.time?.created
+        lastStep = undefined
+        const mode = modeOf(info.agent)
+        asked = { id: info.id, role: 'user', text: '', ...(sentAt !== undefined && { at: sentAt }), ...(mode && { mode }) }
+        messages.push(asked, { role: 'assistant', text: '', items: [{ kind: 'compaction', id: `${info.id}:compaction`, status: 'running' }] })
+        continue
+      }
       if (asked && parts.some((part) => part.type === 'compaction')) {
         const reply = currentReply()
         reply.items = [...(reply.items ?? []), { kind: 'compaction', id: `${info.id}:compaction`, status: 'running' }]
@@ -1386,6 +1472,17 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
   }
   closeTurn(true)
   return messages
+}
+
+/** 끝나지 않은 손 요약(compaction 파트 auto:false 인 user — 끝난 요약 답이 없다)의 메시지 id — 지울 순서대로 (요약 답 먼저, 그 user 다음) */
+export function unfinishedCompactions(raw: readonly EngineMessage[]): string[] {
+  return raw
+    .filter((message) => message.info.role === 'user' && message.parts.some((part) => part.type === 'compaction' && part.auto === false))
+    .flatMap((asked) => {
+      const answers = raw.filter((message) => message.info.summary === true && message.info.parentID === asked.info.id)
+      if (answers.some((answer) => !answer.info.error && answer.info.time?.completed !== undefined)) return []
+      return [...answers.map((answer) => answer.info.id), asked.info.id]
+    })
 }
 
 /** 엔진 실패 → 화면 사유. 한도 초과(게이트웨이 오류가 자동 요약으로도 안 줄었다 — opencode 가 ContextOverflowError 로 분류)는 "새 대화로" 안내 */
