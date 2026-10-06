@@ -2,9 +2,9 @@ import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FAKE_PAIR_CODE, startFakeDesktop, type FakeDesktop } from '../dev/fake-desktop.mts'
 import { DEFAULT_ADDRESS, isLoopbackHost, parseAddress } from '../src/app/address.ts'
-import { DesktopLink, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
+import { DesktopLink, failureDetail, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
 import type { AppSession } from '../src/app/session.ts'
-import { createFetchTransport, createNativePinnedNet, RemoteError, type Transport } from '../src/core/index.ts'
+import { createFetchTransport, createNativePinnedNet, NetError, RemoteError, type Transport } from '../src/core/index.ts'
 import { nodePinnedNative } from './nodePinned.ts'
 import { until } from './support.ts'
 
@@ -115,10 +115,10 @@ describe('짝짓기', () => {
     await until(() => desktop.pendingPair() !== undefined, '짝짓기 요청')
     desktop.answerPair(false)
     await denied
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'denied' })
 
     await link.pair(input()) // pairWaitMs 300 — 아무도 답하지 않는다
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'timeout' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'timeout' })
     expect(store.value).toBeUndefined()
   })
 
@@ -126,7 +126,7 @@ describe('짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pair(input({ code: 'AAAA-BBBB-CCCC' }))
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'wrong-code' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'wrong-code' })
     expect(desktop.pendingPair()).toBeUndefined()
   })
 
@@ -154,7 +154,7 @@ describe('짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pair(input({ address: `127.0.0.1:${closed}` }))
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'refused' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'refused' })
   })
 
   it('데스크탑의 답을 사유로: 403(거절·틀린 코드·만료) · 408 · 429 · 그 밖', () => {
@@ -165,6 +165,14 @@ describe('짝짓기', () => {
     expect(pairFailure(new RemoteError(429, 'too many failed attempts'))).toBe('blocked')
     expect(pairFailure(new RemoteError(500, 'boom'))).toBe('failed')
     expect(pairFailure(new TypeError('fetch failed'))).toBe('unreachable')
+  })
+
+  it('진단 글 — 어떤 실패든 [코드 · 예외: 메시지] 를 단다 (네이티브가 준 것, 데스크탑의 답, 그 밖)', () => {
+    expect(failureDetail(new NetError('tls-failed', 'x', undefined, '[ERR_TLS · SSLException: boom]'))).toBe('[ERR_TLS · SSLException: boom]')
+    expect(failureDetail(new RemoteError(403, 'wrong pairing code', 'wrong-code'))).toBe('[HTTP 403 · wrong-code: wrong pairing code]')
+    expect(failureDetail(new RemoteError(500, 'boom'))).toBe('[HTTP 500 · boom]')
+    expect(failureDetail(new TypeError('Network request failed'))).toBe('[unreachable · TypeError: Network request failed]')
+    expect(failureDetail(new NetError('refused', 'connect ECONNREFUSED'))).toBe('[refused · NetError: connect ECONNREFUSED]')
   })
 
   it('403 은 본문의 reason 으로 가른다 — 글이 바뀌어도. reason 이 없으면(옛 데스크탑) 글로', () => {

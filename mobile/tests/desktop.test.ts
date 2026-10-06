@@ -255,14 +255,14 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
 
     const code = remote.startPairing().pairing!.code
     await link.pair({ address, code: 'ZZZZ-ZZZZ-ZZZZ', deviceName: 'Pixel 8' })
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'wrong-code' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'wrong-code' })
 
     const off = ctx.on('remote/changed', (status) => {
       if (status.requests[0]) remote.answerPair(status.requests[0].id, false)
     })
     await link.pair({ address, code, deviceName: 'Pixel 8' })
     off()
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'denied' })
   })
 
   it('계약: 짝짓기 403 의 사유는 본문의 reason 이다 — 진짜 데스크탑이 내는 것을 폰의 클라이언트가 그대로 읽는다', async () => {

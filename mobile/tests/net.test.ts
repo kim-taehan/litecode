@@ -82,6 +82,26 @@ describe('네이티브 다리 (createNativePinnedNet) — 가짜 네이티브', 
     await expect(createNativePinnedNet(fake.native).probe('10.0.0.5:47600', 100)).rejects.toMatchObject({ kind: 'refused' })
   })
 
+  it('TLS 단계 실패(ERR_TLS)·닿은 뒤 끊김(ERR_IO)은 "닿지 못했다" 가 아니다. 진단 글: [코드 · 예외: 메시지] — 지문은 앞 8자만', async () => {
+    const fake = fakeNative()
+    const transport = createNativePinnedNet(fake.native).transport(DESKTOP_FP)
+    fake.failWith(Object.assign(new Error('SSLHandshakeException: Read error: ssl=0x7b: Failure in SSL library, usually a protocol error'), { code: 'ERR_TLS' }))
+    await expect(transport.request({ method: 'GET', url: 'https://h:1/' })).rejects.toMatchObject({
+      kind: 'tls-failed',
+      detail: '[ERR_TLS · SSLHandshakeException: Read error: ssl=0x7b: Failure in SSL library, usually a protocol error]',
+    })
+    fake.failWith(Object.assign(new Error('SocketException: Broken pipe'), { code: 'ERR_IO' }))
+    await expect(transport.request({ method: 'GET', url: 'https://h:1/' })).rejects.toMatchObject({ kind: 'broken', detail: '[ERR_IO · SocketException: Broken pipe]' })
+    fake.failWith(Object.assign(new Error(`certificate fingerprint mismatch: ${OTHER_FP}`), { code: 'ERR_PIN_MISMATCH' }))
+    const mismatch = (await transport.request({ method: 'GET', url: 'https://h:1/' }).catch((caught: unknown) => caught)) as NetError
+    expect(mismatch.actual).toBe(OTHER_FP)
+    expect(mismatch.detail).toBe(`[ERR_PIN_MISMATCH · certificate fingerprint mismatch: ${OTHER_FP.slice(0, 8)}…]`)
+    expect(mismatch.detail).not.toContain(OTHER_FP)
+    fake.failWith(Object.assign(new Error(`SSLException: ${'x'.repeat(300)}`), { code: 'ERR_TLS' }))
+    const long = (await transport.request({ method: 'GET', url: 'https://h:1/' }).catch((caught: unknown) => caught)) as NetError
+    expect(long.detail!.length).toBeLessThan(200)
+  })
+
   it('스트림 이벤트를 id 로 가른다 — 닫은 뒤에는 아무것도 안 받는다, 끊김 code 는 NetError', async () => {
     const fake = fakeNative()
     const transport = createNativePinnedNet(fake.native).transport(DESKTOP_FP)

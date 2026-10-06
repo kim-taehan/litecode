@@ -29,7 +29,10 @@ function classify(error: unknown): Error & { code: string } {
   const message = (error as Error).message ?? String(error)
   if (code === 'ECONNREFUSED') return nativeError('ERR_REFUSED', message)
   if (code === 'ETIMEDOUT' || code === 'ERR_TIMEOUT') return nativeError('ERR_TIMEOUT', message)
-  return nativeError('ERR_UNREACHABLE', message)
+  // Kotlin 과 같게: 경로 없음만 unreachable, TLS 단계는 ERR_TLS, 닿은 뒤 끊긴 것은 ERR_IO
+  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH' || code === 'ENOTFOUND' || code === 'EAI_AGAIN') return nativeError('ERR_UNREACHABLE', message)
+  if (/^ERR_(SSL|TLS)_/.test(code)) return nativeError('ERR_TLS', message)
+  return nativeError('ERR_IO', message)
 }
 
 /** TLS 를 열고 지문을 본다. pin 을 주면 다를 때 끊는다 */

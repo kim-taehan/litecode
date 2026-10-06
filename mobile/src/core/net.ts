@@ -11,18 +11,22 @@ import { RemoteError } from './client.ts'
 import type { StreamHandlers, Transport } from './transport.ts'
 
 /** 닿지 못한 이유. timeout: 답이 없다(다른 망·방화벽·클라이언트 격리) · refused: 그 주소에 아무도 안 듣는다(모바일 연결이 꺼져 있다) ·
- *  pin-mismatch: 인증서 지문이 다르다 · unreachable: 그 밖(경로 없음·주소 틀림) */
-export type NetFailure = 'timeout' | 'refused' | 'pin-mismatch' | 'unreachable'
+ *  pin-mismatch: 인증서 지문이 다르다 · tls-failed: 닿았지만 TLS 핸드셰이크·프로토콜이 깨졌다 · broken: 닿았지만 도중에 끊겼다(reset·EOF 등) ·
+ *  unreachable: 경로가 없다(NoRouteToHost·UnknownHost·ENETUNREACH) */
+export type NetFailure = 'timeout' | 'refused' | 'pin-mismatch' | 'tls-failed' | 'broken' | 'unreachable'
 
 export class NetError extends Error {
   readonly kind: NetFailure
   /** pin-mismatch 일 때 서버가 실제로 낸 지문 */
   readonly actual?: string
-  constructor(kind: NetFailure, message: string, actual?: string) {
+  /** 화면에 그대로 붙일 진단 글 `[<네이티브 코드> · <예외>: <메시지>]` — 네이티브가 낸 실패에만 있다. 지문 전체는 싣지 않는다 */
+  readonly detail?: string
+  constructor(kind: NetFailure, message: string, actual?: string, detail?: string) {
     super(message)
     this.name = 'NetError'
     this.kind = kind
     this.actual = actual
+    this.detail = detail
   }
 }
 
@@ -51,8 +55,8 @@ export interface PinnedNet {
   transport(fingerprint: string): Transport
 }
 
-/** 여러 실패 중 사람에게 말할 하나 — 지문이 다른 곳이 있었으면 그것(가장 위험), 그다음 거부(PC 는 닿았다), 시간 초과, 그 밖 */
-const PRIORITY: NetFailure[] = ['pin-mismatch', 'refused', 'timeout', 'unreachable']
+/** 여러 실패 중 사람에게 말할 하나 — 지문이 다른 곳이 있었으면 그것(가장 위험), 그다음 닿은 곳의 실패(TLS·거부·끊김), 시간 초과, 그 밖 */
+const PRIORITY: NetFailure[] = ['pin-mismatch', 'tls-failed', 'refused', 'broken', 'timeout', 'unreachable']
 
 export function worstFailure(errors: unknown[]): unknown {
   const ranked = errors.map((error) => ({ error, rank: PRIORITY.indexOf(netFailure(error)) }))
@@ -100,7 +104,18 @@ export const NATIVE_ERROR: Record<string, NetFailure> = {
   ERR_PIN_MISMATCH: 'pin-mismatch',
   ERR_TIMEOUT: 'timeout',
   ERR_REFUSED: 'refused',
+  ERR_TLS: 'tls-failed',
+  ERR_IO: 'broken',
   ERR_UNREACHABLE: 'unreachable',
+}
+
+/** 진단 글 한 줄의 메시지 한도 */
+const DETAIL_MAX = 120
+
+/** `[<코드> · <메시지>]` — 메시지 속 지문(43자 base64url)은 앞 8자만 남긴다 */
+export function diagnosticDetail(code: string, message: string): string {
+  const text = message.replace(/[A-Za-z0-9_-]{43}/g, (fingerprint) => `${fingerprint.slice(0, 8)}…`).replace(/\s+/g, ' ').trim()
+  return `[${code} · ${text.length > DETAIL_MAX + 40 ? `${text.slice(0, DETAIL_MAX + 40)}…` : text}]`
 }
 
 export interface NativeStreamEvent {
@@ -128,8 +143,8 @@ export function nativeError(error: unknown): NetError {
   const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown }
   const text = typeof message === 'string' ? message : String(error)
   const kind = typeof code === 'string' ? NATIVE_ERROR[code] : undefined
-  if (!kind) return new NetError(netFailure(error), text)
-  return new NetError(kind, text, kind === 'pin-mismatch' ? /([A-Za-z0-9_-]{43})/.exec(text)?.[1] : undefined)
+  if (!kind) return new NetError(netFailure(error), text, undefined, diagnosticDetail(typeof code === 'string' ? code : 'native', text))
+  return new NetError(kind, text, kind === 'pin-mismatch' ? /([A-Za-z0-9_-]{43})/.exec(text)?.[1] : undefined, diagnosticDetail(code as string, text))
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000

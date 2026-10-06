@@ -11,7 +11,7 @@
 import type { PairRejectReason } from '../../../shared/remote.ts'
 import { confirmCode, normalizePairCode, PAIR_ALPHABET, PAIR_CODE_LENGTH, pairDeviceName } from '../../../shared/remotePairing.ts'
 import type { Transport } from '../core/index.ts'
-import { fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type PinnedNet } from '../core/index.ts'
+import { diagnosticDetail, fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type PinnedNet } from '../core/index.ts'
 import { isLoopbackHost, parseAddress } from './address.ts'
 import { createRemoteSession } from './remoteSession.ts'
 import type { AppSession } from './session.ts'
@@ -45,7 +45,8 @@ export interface DesktopStore {
  * blocked: 여러 번 틀려 잠시 막혔다(429) · net-timeout: 주소가 답하지 않는다(다른 망·방화벽·클라이언트 격리) ·
  * refused: PC 는 닿았는데 그 포트에 아무도 안 듣는다(모바일 연결이 꺼져 있다) · fingerprint-mismatch: QR 의 지문과 서버 인증서가 다르다 ·
  * qr-foreign: litecode 연결 QR 이 아니다 · qr-version: 모르는 QR 형식(앱이 오래됐다) · qr-expired: QR 이 만료됐다 · qr-invalid: QR 이 깨졌다 ·
- * old-android: 이 폰(Android 10 미만)은 사내망(TLS 1.3) 연결을 못 한다 — 시도하지 않는다 · unreachable: 그 밖으로 닿지 못했다 · failed: 그 밖
+ * old-android: 이 폰(Android 10 미만)은 사내망(TLS 1.3) 연결을 못 한다 — 시도하지 않는다 · tls-failed: 닿았지만 암호화 연결(TLS)을 맺지 못했다 ·
+ * connection-broken: 닿았지만 도중에 끊겼다 · unreachable: 경로가 없다 · failed: 그 밖
  */
 export type PairFailure =
   | 'bad-address'
@@ -64,14 +65,17 @@ export type PairFailure =
   | 'qr-expired'
   | 'qr-invalid'
   | 'old-android'
+  | 'tls-failed'
+  | 'connection-broken'
   | 'unreachable'
   | 'failed'
 
 export type LinkState =
   /** 저장된 짝을 읽는 중 (앱을 켠 직후) */
   | { phase: 'loading' }
-  /** 짝이 없다 — 연결 화면. failure: 방금 짝짓기가 안 된 사유, revoked: 데스크탑에서 해제됐다, fingerprintChanged: 저장한 지문과 다른 서버만 있었다 */
-  | { phase: 'unpaired'; failure?: PairFailure; revoked?: boolean; fingerprintChanged?: boolean }
+  /** 짝이 없다 — 연결 화면. failure: 방금 짝짓기가 안 된 사유, revoked: 데스크탑에서 해제됐다, fingerprintChanged: 저장한 지문과 다른 서버만 있었다,
+   *  detail: 그 실패의 진단 글(failureDetail) — 화면이 사유 글 아래 작은 글씨로 늘 보인다 */
+  | { phase: 'unpaired'; failure?: PairFailure; detail?: string; revoked?: boolean; fingerprintChanged?: boolean }
   /**
    * 짝짓는 중. confirm 이 있으면 요청을 보냈고 데스크탑의 [허용] 을 기다린다 — 데스크탑 창에 뜬 것과 같아야 하는 8자.
    * confirmKind: fingerprint = 인증서 지문 앞 8자(https), code = 요청에서 만든 확인 코드(평문). confirm 이 없으면 아직 데스크탑을 찾는 중
@@ -89,7 +93,10 @@ export interface PairInput {
 export function pairFailure(error: unknown): PairFailure {
   if (!(error instanceof RemoteError)) {
     const failure = netFailure(error)
-    return failure === 'timeout' ? 'net-timeout' : failure === 'pin-mismatch' ? 'fingerprint-mismatch' : failure
+    if (failure === 'timeout') return 'net-timeout'
+    if (failure === 'pin-mismatch') return 'fingerprint-mismatch'
+    if (failure === 'broken') return 'connection-broken'
+    return failure
   }
   if (error.status === 408) return 'timeout'
   if (error.status === 429) return 'blocked'
@@ -102,6 +109,20 @@ export function pairFailure(error: unknown): PairFailure {
     return /denied/i.test(error.message) ? 'denied' : 'wrong-code'
   }
   return 'failed'
+}
+
+/**
+ * 실패의 진단 글 `[<코드> · <예외>: <메시지>]` — 실제 폰에서 원인이 사유 글 하나로 뭉개지지 않게 화면에 늘 붙인다 (2026-10-06 진단).
+ * 네이티브가 준 것(NetError.detail)이 있으면 그것, 데스크탑의 답이면 HTTP 상태·사유, 그 밖은 오류 이름·메시지
+ */
+export function failureDetail(error: unknown): string {
+  if (error instanceof NetError && error.detail) return error.detail
+  if (error instanceof RemoteError) return diagnosticDetail(`HTTP ${error.status}`, error.reason ? `${error.reason}: ${error.message}` : error.message)
+  const { name, message, cause } = (error ?? {}) as { name?: unknown; message?: unknown; cause?: unknown }
+  // fetch 는 'fetch failed' 뿐이고 까닭은 cause 에 있다 — 한 겹만 덧붙인다
+  const because = (cause as { message?: unknown } | undefined)?.message
+  const text = `${typeof name === 'string' ? name : 'Error'}: ${typeof message === 'string' ? message : String(error)}${typeof because === 'string' ? ` ← ${because}` : ''}`
+  return diagnosticDetail(error instanceof NetError ? error.kind : netFailure(error), text)
 }
 
 /** 데스크탑의 사내망 연결은 TLS 1.3 만 받는다(src/services/remote/https.ts — 바꾸지 않는다). Android 는 API 29(Android 10)부터 TLS 1.3 이 있다 */
@@ -174,7 +195,7 @@ export class DesktopLink {
     try {
       fingerprint = await this.deps.pinned.probe(target.address, PROBE_TIMEOUT_MS)
     } catch (error) {
-      return fail(pairFailure(error))
+      return this.failWith(error)
     }
     this.set({ phase: 'pairing', confirm: fingerprintCode(fingerprint), confirmKind: 'fingerprint' })
     return this.finish({ transport: this.deps.pinned.transport(fingerprint), fingerprint, address: target.address, baseUrl: target.baseUrl, code, deviceName, fallbackName: target.address })
@@ -202,7 +223,7 @@ export class DesktopLink {
         if (seen !== link.fingerprint) throw new NetError('pin-mismatch', `fingerprint mismatch at ${candidate}`, seen)
       }))
     } catch (error) {
-      return fail(pairFailure(error))
+      return this.failWith(error)
     }
     // QR 의 주소는 호스트가 무엇이든(10.0.2.2 라도) 늘 https + 지문 고정
     return this.finish({
@@ -261,8 +282,13 @@ export class DesktopLink {
       await store.save(saved)
       this.attach(saved)
     } catch (error) {
-      this.set({ phase: 'unpaired', failure: pairFailure(error) })
+      this.failWith(error)
     }
+  }
+
+  /** 짝짓기가 오류로 끝났다 — 사유와 진단 글을 함께 */
+  private failWith(error: unknown): void {
+    this.set({ phase: 'unpaired', failure: pairFailure(error), detail: failureDetail(error) })
   }
 
   private attach(desktop: SavedDesktop): void {

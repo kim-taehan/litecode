@@ -37,6 +37,8 @@ export function ConnectScreen({
   const [, requestCamera] = useCameraPermissions()
   const pairing = state.phase === 'pairing'
   const failure = state.phase === 'unpaired' ? state.failure : undefined
+  // 진단 글 — 실제 폰에서 원인이 사유 글 하나로 뭉개지지 않게 늘 작은 글씨로 (link.ts failureDetail)
+  const detail = state.phase === 'unpaired' ? state.detail : undefined
   const revoked = state.phase === 'unpaired' && state.revoked === true
   const fingerprintChanged = state.phase === 'unpaired' && state.fingerprintChanged === true
   const scroll = useRef<ScrollView>(null)
@@ -99,6 +101,7 @@ export function ConnectScreen({
         {failure !== undefined && !open && (
           <Text accessibilityRole="alert" style={[styles.failure, styles.failureAlone]}>
             {S.pairFailure[failure]}
+            {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
           </Text>
         )}
 
@@ -143,6 +146,7 @@ export function ConnectScreen({
             {failure !== undefined && (
               <Text accessibilityRole="alert" style={styles.failure}>
                 {S.pairFailure[failure]}
+                {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
               </Text>
             )}
 
@@ -242,6 +246,7 @@ const styles = StyleSheet.create({
   code: { fontSize: 18, letterSpacing: 2 },
   failure: { fontSize: 13, lineHeight: 20, color: C.red },
   failureAlone: { marginTop: 12 },
+  detail: { fontFamily: MONO, fontSize: 11, lineHeight: 16, color: C.sub },
   allow: { marginTop: 16, borderRadius: 14, backgroundColor: C.blueBg, paddingVertical: 14, paddingHorizontal: 16, gap: 6 },
   allowTitle: { fontSize: 15, fontWeight: '600', color: C.blueDark },
   allowHint: { fontSize: 13, lineHeight: 20, color: C.text2 },

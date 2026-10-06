@@ -95,7 +95,7 @@ describe('QR 로 짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pairQr(qr({ fingerprint: OTHER_FP }), 'Pixel 8')
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'fingerprint-mismatch' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'fingerprint-mismatch' })
     expect(native.sent).toEqual([])
     expect(desktop.pendingPair()).toBeUndefined()
   })
@@ -111,10 +111,10 @@ describe('QR 로 짝짓기', () => {
     ]
     for (const [text, failure] of cases) {
       await link.pairQr(text, 'Pixel 8')
-      expect(link.state, failure).toEqual({ phase: 'unpaired', failure })
+      expect(link.state, failure).toMatchObject({ phase: 'unpaired', failure })
     }
     await link.pairQr(qr(), '  ')
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'no-name' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'no-name' })
     expect(native.sent).toEqual([])
   })
 
@@ -122,7 +122,7 @@ describe('QR 로 짝짓기', () => {
     const link = newLink()
     await link.restore()
     await link.pairQr(qr({ addresses: [`127.0.0.1:${await closedPort()}`] }), 'Pixel 8')
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'refused' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'refused' })
   })
 
   it('데스크탑에서 거절하면 denied', async () => {
@@ -132,7 +132,7 @@ describe('QR 로 짝짓기', () => {
     await until(() => desktop.pendingPair() !== undefined, '짝짓기 요청')
     desktop.answerPair(false)
     await pairing
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'denied' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'denied' })
   })
 })
 
@@ -154,15 +154,17 @@ describe('직접 입력 (TOFU)', () => {
     expect(store.value?.fingerprint).toBe(DESKTOP_FP)
   })
 
-  it('https 주소에 아무도 안 들으면 refused (요청 없음)', async () => {
+  it('https 주소에 아무도 안 들으면 refused (요청 없음) — 화면에 진단 글 [코드 · 예외: 메시지] 가 같이 간다', async () => {
     const link = newLink()
     await link.restore()
     await link.pair({ address: `https://127.0.0.1:${await closedPort()}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 8' })
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'refused' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'refused', detail: expect.stringMatching(/^\[ERR_REFUSED · .*ECONNREFUSED.*\]$/) })
     expect(native.sent).toEqual([])
   })
 
   it('운반의 실패를 사유로: 시간 초과 · 거부 · 지문 불일치 · 그 밖', () => {
+    expect(pairFailure(new NetError('tls-failed', 'x'))).toBe('tls-failed')
+    expect(pairFailure(new NetError('broken', 'x'))).toBe('connection-broken')
     expect(pairFailure(new NetError('timeout', 'x'))).toBe('net-timeout')
     expect(pairFailure(new NetError('refused', 'x'))).toBe('refused')
     expect(pairFailure(new NetError('pin-mismatch', 'x'))).toBe('fingerprint-mismatch')
@@ -186,9 +188,9 @@ describe('Android 10 미만 — 사내망(TLS 1.3) 연결을 시도하지 않는
     links.push(link)
     await link.restore()
     await link.pairQr(qr(), 'Pixel 2')
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'old-android' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'old-android' })
     await link.pair({ address: `https://${live()}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 2' })
-    expect(link.state).toEqual({ phase: 'unpaired', failure: 'old-android' })
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'old-android' })
     expect(probes).toEqual([])
     expect(native.sent).toEqual([])
 
