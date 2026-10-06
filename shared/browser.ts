@@ -50,13 +50,83 @@ export function browserToolKind(permission: string): BrowserToolKind | undefined
   return within(BROWSER_DENIED_TOOLS) ? 'deny' : within(BROWSER_READ_TOOLS) ? 'read' : within(BROWSER_QUIET_TOOLS) ? 'quiet' : 'ask'
 }
 
-/** 승인 카드에 보일 인자 한 줄 — 가는 주소(navigate·tabs), 넣을 글(type), 실행할 코드(evaluate), 누를 키, 그 밖엔 대상 설명. input 은 승인 요청의 인자 JSON */
-export function browserApprovalDetail(tool: string, input: string | undefined): string | undefined {
+/** 승인 카드의 제목이 되는 동작 — 화면 문구는 `browser.card.<action>` */
+export type BrowserAction = 'navigate' | 'back' | 'tabs' | 'type' | 'fill' | 'click' | 'hover' | 'drag' | 'select' | 'key' | 'evaluate' | 'network'
+
+/** 승인 카드에 보일 것 — 무엇을(action) 어디에(target) 무엇으로(text). 값은 줄이지 않는다 (주소·넣을 글을 가리면 승인의 뜻이 없다) */
+export interface BrowserApprovalDetail {
+  /** 없으면 우리가 모르는 도구다 — 제목 없이 인자만 보인다 */
+  action?: BrowserAction
+  /** 넣는 칸·고르는 목록·스크립트를 돌릴 요소 (모델이 적은 설명) */
+  target?: string
+  /** 열 주소 · 넣을 글 · 대상 설명 · 키 · 스크립트. 도구가 기대한 인자가 없거나 모르는 도구면 인자 JSON 전체 */
+  text?: string
+  /** text 가 코드다 (여러 줄 — 화면이 높이를 묶고 스크롤한다) */
+  code?: true
+}
+
+const filled = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined)
+const joined = (parts: (string | undefined)[], separator: string): string | undefined => parts.filter((part) => part !== undefined).join(separator) || undefined
+
+/** 도구별로 보일 것 — 인자 이름은 playwright-core 의 도구 정의 그대로다 (버전을 올리면 다시 댄다). 모르는 도구는 undefined */
+function browserAction(tool: string, args: Record<string, unknown>): BrowserApprovalDetail | undefined {
+  switch (tool) {
+    case 'browser_navigate':
+      return { action: 'navigate', text: filled(args['url']) }
+    case 'browser_navigate_back':
+      return { action: 'back' }
+    case 'browser_tabs':
+      return { action: 'tabs', text: joined([joined([filled(args['action']), typeof args['index'] === 'number' ? String(args['index']) : undefined], ' '), filled(args['url'])], '\n') }
+    case 'browser_type':
+      return { action: 'type', target: filled(args['element']), text: filled(args['text']) }
+    case 'browser_fill_form': {
+      const fields = Array.isArray(args['fields']) ? (args['fields'] as Record<string, unknown>[]) : []
+      const rows = fields.map((field) => (typeof field?.['name'] === 'string' && typeof field['value'] === 'string' ? `${field['name']}: ${field['value']}` : undefined))
+      return { action: 'fill', text: rows.length > 0 && rows.every((row) => row !== undefined) ? rows.join('\n') : undefined }
+    }
+    case 'browser_click':
+      return { action: 'click', text: filled(args['element']) }
+    case 'browser_hover':
+      return { action: 'hover', text: filled(args['element']) }
+    case 'browser_drag': {
+      const from = filled(args['startElement'])
+      const to = filled(args['endElement'])
+      return { action: 'drag', text: from && to ? `${from} → ${to}` : undefined }
+    }
+    case 'browser_select_option': {
+      const values = Array.isArray(args['values']) ? args['values'].join(', ') : ''
+      return { action: 'select', target: filled(args['element']), text: filled(values) }
+    }
+    case 'browser_press_key':
+      return { action: 'key', text: filled(args['key']) }
+    case 'browser_evaluate':
+      return { action: 'evaluate', target: filled(args['element']), text: filled(args['function']), code: true }
+    case 'browser_network_requests':
+    case 'browser_network_request':
+      return { action: 'network' }
+    default:
+      return undefined
+  }
+}
+
+/** 승인 카드에 보일 것 — 여는 주소(navigate·tabs), 넣을 글(type·fill_form), 대상 설명(click·hover·drag·select_option), 실행할 스크립트(evaluate), 누를 키.
+ *  **숨기지 않는다**: 모르는 `browser_*` 도구·기대한 인자가 없는 호출은 인자 전체를 JSON 으로 보인다. input 은 승인 요청의 인자 JSON (없으면 보일 것이 없다) */
+export function browserApprovalDetail(tool: string, input: string | undefined): BrowserApprovalDetail | undefined {
   if (!tool.startsWith('browser_') || input === undefined) return undefined
+  let args: unknown
   try {
-    const args = JSON.parse(input) as Record<string, unknown>
-    return ['url', 'text', 'function', 'key', 'element'].map((name) => args?.[name]).find((value): value is string => typeof value === 'string' && value !== '')
+    args = JSON.parse(input)
   } catch {
-    return undefined
+    return { text: input }
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return { text: input }
+  const known = browserAction(tool, args as Record<string, unknown>)
+  // 기대한 인자를 못 찾았으면 스크립트로 꾸미지 않는다 — 인자 전체(JSON)다
+  const text = known?.text ?? (Object.keys(args).length > 0 ? JSON.stringify(args, null, 2) : undefined)
+  return {
+    ...(known && { action: known.action }),
+    ...(known?.target && { target: known.target }),
+    ...(text !== undefined && { text }),
+    ...(known?.code && known.text !== undefined && { code: true as const }),
   }
 }

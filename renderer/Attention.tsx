@@ -2,6 +2,7 @@ import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'r
 import type { Attention, AttentionAnswer, AttentionQuestion, AttentionTarget } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
 import { reason } from './ipcError.ts'
+import { BROWSER_MCP_NAME, browserApprovalDetail } from '../shared/browser.ts'
 import { TargetPickerBody, useDelegation } from './Delegation.tsx'
 import { readRequest, targetPicker } from './delegationView.ts'
 import { MakeBody } from './Make.tsx'
@@ -68,6 +69,8 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   // 대상과 같은 길(허용에 실어 메인으로)로 간다 — 그것이 실린 허용만 도구가 받는다
   const make = makeCard(request)
   const [scope, setScope] = useState(make?.scope)
+  // 브라우저 도구 (이슈 #147) — 서버·도구 이름만으로는 무엇을 승인하는지 모른다. 열 주소·넣을 글·실행할 스크립트를 줄이지 않고 보인다
+  const browser = request.mcp?.server === BROWSER_MCP_NAME ? browserApprovalDetail(request.mcp.tool, request.input) : undefined
   const allow = (): void => {
     if (make) return answer('once', { kind: 'scope', scope: scope ?? make.scope })
     if (!delegation) return answer('once')
@@ -102,9 +105,23 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
         {delegation || make ? null : reading !== undefined ? (
           <div className="attention-card__command">{reading}</div>
         ) : request.mcp ? (
-          <div className="attention-card__command" data-mcp={`${request.mcp.server}/${request.mcp.tool}`}>
-            {`${t('mcp.chat')} · ${request.mcp.server} · ${request.mcp.tool}`}
-          </div>
+          <>
+            <div className="attention-card__command" data-mcp={`${request.mcp.server}/${request.mcp.tool}`}>
+              {`${t('mcp.chat')} · ${request.mcp.server} · ${request.mcp.tool}`}
+            </div>
+            {browser && (browser.action || browser.text !== undefined) && (
+              <div className="attention-card__detail" data-browser={browser.action ?? 'other'}>
+                {browser.action && <span className="attention-card__detail-title">{t(`browser.card.${browser.action}`)}</span>}
+                {browser.target && <span className="attention-card__detail-note">{browser.target}</span>}
+                {browser.action === 'network' && <span className="attention-card__detail-note">{t('browser.card.networkNote')}</span>}
+                {browser.text !== undefined && (
+                  <pre className="attention-card__detail-text" data-code={browser.code}>
+                    {browser.text}
+                  </pre>
+                )}
+              </div>
+            )}
+          </>
         ) : (
           request.resources.map((resource) => (
             <div key={resource} className="attention-card__command">
