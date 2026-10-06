@@ -726,6 +726,25 @@
   color: var(--text-tertiary);
 }
 
+/* [기기 연결] 모달 — QR 은 흰 바탕 검은 칸 고정(어두운 테마에서도 카메라가 읽게) */
+.mobile-pair-dialog__qr {
+  display: block;
+  width: 220px;
+  height: 220px;
+  margin: 0 auto 16px;
+  border-radius: 8px;
+}
+
+.mobile-pair-dialog__manual {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.mobile-pair-dialog__remaining {
+  margin-right: auto;
+  align-self: center;
+}
+
 .mobile-device {
   display: flex;
   align-items: center;

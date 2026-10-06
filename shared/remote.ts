@@ -63,7 +63,75 @@ export interface Hello {
   runId: string
   /** 지금까지 낸 마지막 이벤트의 seq */
   seq: number
+  /** 듣는 주소 전부 (`ip:port`, IPv6 는 `[ip]:port`). 스킴은 호스트로 정해진다 — isLoopbackHost 면 평문 http, 아니면 https + 지문 고정 */
   addresses: string[]
+  /** 사내망(TLS) 리스너의 인증서 지문 — SPKI SHA-256 base64url (fingerprintCode 참고). TLS 리스너가 없으면 없다 */
+  fingerprint?: string
+}
+
+// ── 사내망 연결 (TLS + 지문 고정 + QR, 01t 3절) ─────────────────────────────────────────────────────
+// 데스크탑은 평문 http 를 루프백(127.0.0.1)에서만, https(TLS 1.3, 자체 서명)를 사설 IPv4(10/8·172.16/12·192.168/16·100.64/10) 주소마다 연다.
+// 경로·REST·SSE 는 둘이 같다. https 는 인증서 체인을 믿지 않고 **공개키 지문(SPKI SHA-256)** 이 QR·처음 본 값과 같을 때만 붙는다.
+// 포트는 둘 다 기본 47600 (주소가 달라 같은 포트를 쓴다).
+
+/** 주소의 호스트가 루프백인가 — 데스크탑이 알리는 주소(hello·QR·addresses.changed) 중 이것만 평문 http 다 */
+export function isLoopbackHost(host: string): boolean {
+  const bare = host.replace(/^\[|\]$/g, '')
+  return bare === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare)
+}
+
+/** QR 에 싣는 것 — `litecode://pair?v=1&d=…&n=…&a=ip:port,…&fp=…&c=…&x=…` (값은 encodeURIComponent, 순서는 이대로) */
+export interface PairLink {
+  /** v — REMOTE_API_VERSION */
+  version: number
+  /** d — hello.desktopId */
+  desktopId: string
+  /** n — PC 이름 */
+  name: string
+  /** a — https 로 붙을 주소 (`ip:port`, 쉼표로 이음). 루프백은 싣지 않는다 */
+  addresses: string[]
+  /** fp — SPKI SHA-256 base64url */
+  fingerprint: string
+  /** c — 짝짓기 코드 12자 (Crockford base32, 칸 나눔 없음). POST /v1/pair 의 code 에 그대로 */
+  code: string
+  /** x — 코드 만료 (unix 초) */
+  expiresAt: number
+}
+
+export const PAIR_URI_PREFIX = 'litecode://pair?'
+
+export function pairUri(link: PairLink): string {
+  const fields: [string, string][] = [
+    ['v', String(link.version)],
+    ['d', link.desktopId],
+    ['n', link.name],
+    ['a', link.addresses.join(',')],
+    ['fp', link.fingerprint],
+    ['c', link.code],
+    ['x', String(link.expiresAt)],
+  ]
+  return PAIR_URI_PREFIX + fields.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&')
+}
+
+/** QR 글을 읽는다 — 모양이 다르면 undefined. `+` 는 공백으로 읽는다. URLSearchParams 없이 (RN 에서 덜 구현돼 있다) */
+export function parsePairUri(text: string): PairLink | undefined {
+  if (!text.startsWith(PAIR_URI_PREFIX)) return undefined
+  const fields = new Map<string, string>()
+  try {
+    for (const pair of text.slice(PAIR_URI_PREFIX.length).split('&')) {
+      const at = pair.indexOf('=')
+      if (at > 0) fields.set(pair.slice(0, at), decodeURIComponent(pair.slice(at + 1).replace(/\+/g, ' ')))
+    }
+  } catch {
+    return undefined
+  }
+  const version = Number(fields.get('v'))
+  const expiresAt = Number(fields.get('x'))
+  const addresses = (fields.get('a') ?? '').split(',').filter(Boolean)
+  const fingerprint = fields.get('fp') ?? ''
+  const { d: desktopId = '', n: name = '', c: code = '' } = Object.fromEntries(fields)
+  if (!Number.isInteger(version) || !Number.isFinite(expiresAt) || !desktopId || !code || addresses.length === 0 || !/^[A-Za-z0-9_-]{43}$/.test(fingerprint)) return undefined
+  return { version, desktopId, name, addresses, fingerprint, code, expiresAt }
 }
 
 /** GET /v1/projects */
@@ -158,6 +226,7 @@ export interface RemoteEventMap {
   /** 그 프로젝트의 대화 목록을 다시 받아라 */
   'conversations.changed': { project: string }
   'notices.changed': NoticeState
+  /** 듣는 주소가 바뀌었다 (와이파이 전환 등 — 데스크탑이 다시 바인딩했다). hello.addresses 와 같은 모양 */
   'addresses.changed': { addresses: string[] }
   /** 이 기기가 해제됐다 — 직후 연결이 끊기고 토큰은 401 이 된다 */
   'device.revoked': Record<string, never>

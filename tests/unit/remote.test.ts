@@ -141,9 +141,7 @@ describe('짝짓기', () => {
     const { ctx, remote, requestPair, api } = await start()
     const pairing = remote.startPairing().pairing!
     expect(pairing.code).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/)
-    const uri = new URL(pairing.uri)
-    expect(uri.protocol).toBe('litecode:')
-    expect(Object.fromEntries(uri.searchParams)).toMatchObject({ v: '1', n: 'test-pc', a: remote.status().addresses[0], fp: '', c: pairing.code.replace(/-/g, '') })
+    expect(pairing.uri).toBeUndefined() // QR 은 사내망(TLS) 주소가 있을 때만 — 루프백 평문뿐이면 직접 입력만 (remoteTls.test.ts)
 
     const changes: RemoteStatus[] = []
     ctx.on('remote/changed', (status) => void changes.push(status))

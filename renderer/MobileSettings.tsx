@@ -1,12 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RemoteDeviceInfo, RemoteStatus } from '../shared/ipc.ts'
+import { isLoopbackHost } from '../shared/remote.ts'
 import { reason } from './ipcError.ts'
+import { qrPath } from './qrCode.ts'
 import { useSettings, useT } from './settingsStore.ts'
 import { useFocusTrap } from './focusTrap.ts'
 
 // 설정 > 모바일 (이슈 #56) — 폰 앱이 이 PC 에 붙는 문(ctx.remote)의 화면. 기능 `remote` 가 켜졌을 때만 메뉴에 보인다.
-// 일반 페이지의 행(이름 + 회색 설명, 오른쪽 컨트롤)과 버튼을 그대로 쓴다: 기기 연결(주소·코드·남은 시간) → 짝지은 기기. 켜고 끄는 스위치는 여기 없다 — 설정 > 기능의 카드 하나다 (#124).
-// QR 그림은 아직 없다(다음 라운드 — 라이브러리와 함께). 지금은 폰 앱의 "주소·코드 직접 입력" 에 넣을 값만 보인다.
+// 일반 페이지의 행(이름 + 회색 설명, 오른쪽 컨트롤)과 버튼을 그대로 쓴다: 연결 상태(사내망·이 PC 안 주소, 지문, 마지막 수신 시도) → 기기 연결 → 짝지은 기기.
+// 켜고 끄는 스위치는 여기 없다 — 설정 > 기능의 카드 하나다 (#124).
+// [기기 연결] 은 모달이다: QR(사내망 TLS 주소가 있을 때) + 직접 입력(주소·코드·지문 앞 8자) + 남은 시간. 코드를 쓰거나 만료되면 닫힌다.
+// "마지막 수신 시도" 는 진단이다 — 회사 Wi-Fi 의 기기 간 통신 차단·방화벽은 조용히 막아 서버가 알 수 없다. 시도가 없으면 그대로 "없음" 을 보인다.
 // 짝짓기 요청의 [허용]/[거절] 확인은 설정을 닫아도 뜨도록 앱 바탕에 건다 (RemotePairPrompt — App.tsx).
 
 /** 메인이 쥔 모바일 연결 상태 — 처음 한 번 읽고 그 뒤는 메인이 밀어 준다. on 이 false 면(기능 꺼짐) 묻지 않는다 */
@@ -57,6 +61,8 @@ export function MobilePage() {
   const listening = status.addresses.length > 0
   const pairing = secondsLeft > 0 ? status.pairing : undefined
   const date = (at: number) => new Date(at).toLocaleString(language)
+  const lan = status.addresses.filter((address) => !isLoopbackHost(hostOf(address)))
+  const local = status.addresses.filter((address) => isLoopbackHost(hostOf(address)))
   const detail = (device: RemoteDeviceInfo) =>
     [
       PLATFORM[device.platform],
@@ -75,8 +81,36 @@ export function MobilePage() {
         <div className="settings-row__text">
           <div className="settings-row__title">{t('remote.enable')}</div>
           <div className="settings-row__description">{t('remote.enable.description')}</div>
-          {listening && <div className="settings-row__description mobile-page__address">{t('remote.listening', { addresses: status.addresses.join(', ') })}</div>}
-          {status.error && (
+          <dl className="mobile-pairing mobile-page__status">
+            <dt>{t('remote.status.lan')}</dt>
+            <dd>{lan.length > 0 ? <code>{lan.join(', ')}</code> : <span className="mobile-pairing__note">{t('remote.status.noLan')}</span>}</dd>
+            {local.length > 0 && (
+              <>
+                <dt>{t('remote.status.local')}</dt>
+                <dd>
+                  <code>{local.join(', ')}</code>
+                  <span className="mobile-pairing__note">{t('remote.pair.emulator', { port: status.port })}</span>
+                </dd>
+              </>
+            )}
+            {status.fingerprintCode && (
+              <>
+                <dt>{t('remote.status.fingerprint')}</dt>
+                <dd>
+                  <code>{status.fingerprintCode}</code>
+                </dd>
+              </>
+            )}
+            {lan.length > 0 && (
+              <>
+                <dt>{t('remote.status.lastAttempt')}</dt>
+                <dd data-testid="remote-last-attempt">
+                  {status.lastAttemptAt ? date(status.lastAttemptAt) : <span className="mobile-pairing__note">{t('remote.status.noAttempt')}</span>}
+                </dd>
+              </>
+            )}
+          </dl>
+          {status.error && status.error.code !== 'ENOLAN' && (
             <div className="settings-error" role="alert">
               {status.error.code === 'EADDRINUSE' ? t('remote.error.portInUse', { port: status.port }) : t('remote.error.listen', { message: status.error.message })}
             </div>
@@ -88,31 +122,21 @@ export function MobilePage() {
         <div className="settings-row__text">
           <div className="settings-row__title">{t('remote.pair')}</div>
           <div className="settings-row__description">{t('remote.pair.description')}</div>
-          {pairing && (
-            <dl className="mobile-pairing">
-              <dt>{t('remote.pair.address')}</dt>
-              <dd>
-                <code>{status.addresses[0]}</code>
-                <span className="mobile-pairing__note">{t('remote.pair.emulator', { port: status.port })}</span>
-              </dd>
-              <dt>{t('remote.pair.code')}</dt>
-              <dd>
-                <code className="mobile-pairing__code">{pairing.code}</code>
-                <span className="mobile-pairing__note">{t('remote.pair.remaining', { seconds: secondsLeft })}</span>
-              </dd>
-            </dl>
-          )}
         </div>
-        {pairing ? (
-          <button type="button" className="settings-button" onClick={() => run(() => window.litecode.cancelRemotePairing())}>
-            {t('remote.pair.cancel')}
-          </button>
-        ) : (
-          <button type="button" className="settings-button" disabled={!listening} onClick={() => run(() => window.litecode.startRemotePairing())}>
-            {t('remote.pair')}
-          </button>
-        )}
+        <button type="button" className="settings-button" disabled={!listening} onClick={() => run(() => window.litecode.startRemotePairing())}>
+          {t('remote.pair')}
+        </button>
       </div>
+      {pairing && (
+        <PairDialog
+          pairing={pairing}
+          addresses={lan.length > 0 ? lan : local}
+          emulatorPort={lan.length > 0 ? undefined : status.port}
+          fingerprintCode={status.fingerprintCode}
+          secondsLeft={secondsLeft}
+          onCancel={() => run(() => window.litecode.cancelRemotePairing())}
+        />
+      )}
 
       <div className="settings-row settings-row--stacked">
         <div className="settings-row__title">{t('remote.devices')}</div>
@@ -151,6 +175,84 @@ export function MobilePage() {
   )
 }
 
+/** `ip:port`·`[ip]:port` 의 호스트 */
+function hostOf(address: string): string {
+  return address.slice(0, address.lastIndexOf(':'))
+}
+
+/** [기기 연결] 모달 — QR(사내망 주소가 있을 때) + 폰 앱의 "주소·코드 직접 입력" 에 넣을 값 + 지문 앞 8자. Esc·[취소] 는 코드를 버린다 */
+function PairDialog(props: {
+  pairing: NonNullable<RemoteStatus['pairing']>
+  addresses: string[]
+  /** 사내망 주소가 없을 때만 — 에뮬레이터 안내 */
+  emulatorPort?: number
+  fingerprintCode?: string
+  secondsLeft: number
+  onCancel(): void
+}) {
+  const t = useT()
+  const { pairing, addresses, emulatorPort, fingerprintCode, secondsLeft, onCancel } = props
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(dialogRef)
+  const qr = useMemo(() => (pairing.uri ? qrPath(pairing.uri) : undefined), [pairing.uri])
+  return (
+    <div className="confirm-mask">
+      <div
+        className="confirm-dialog mobile-pair-dialog"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remote-pair-dialog-title"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') onCancel()
+        }}
+      >
+        <h2 id="remote-pair-dialog-title" className="confirm-dialog__title">
+          {t('remote.pair')}
+        </h2>
+        {qr ? (
+          <>
+            <p className="confirm-dialog__description">{t('remote.pair.scan')}</p>
+            <svg className="mobile-pair-dialog__qr" viewBox={`0 0 ${qr.size} ${qr.size}`} role="img" aria-label={t('remote.pair.qr')} shapeRendering="crispEdges">
+              <rect width={qr.size} height={qr.size} fill="#fff" />
+              <path d={qr.d} fill="#000" />
+            </svg>
+          </>
+        ) : (
+          <p className="confirm-dialog__description">{t('remote.pair.noQr')}</p>
+        )}
+        <div className="mobile-pair-dialog__manual">{t('remote.pair.manual')}</div>
+        <dl className="mobile-pairing">
+          <dt>{t('remote.pair.address')}</dt>
+          <dd>
+            <code>{addresses.join(', ')}</code>
+            {emulatorPort !== undefined && <span className="mobile-pairing__note">{t('remote.pair.emulator', { port: emulatorPort })}</span>}
+          </dd>
+          <dt>{t('remote.pair.code')}</dt>
+          <dd>
+            <code className="mobile-pairing__code">{pairing.code}</code>
+          </dd>
+          {fingerprintCode && emulatorPort === undefined && (
+            <>
+              <dt>{t('remote.status.fingerprint')}</dt>
+              <dd>
+                <code className="mobile-pairing__code">{fingerprintCode}</code>
+                <span className="mobile-pairing__note">{t('remote.pair.fingerprintNote')}</span>
+              </dd>
+            </>
+          )}
+        </dl>
+        <div className="confirm-dialog__actions">
+          <span className="mobile-pairing__note mobile-pair-dialog__remaining">{t('remote.pair.remaining', { seconds: secondsLeft })}</span>
+          <button type="button" className="settings-button" onClick={onCancel}>
+            {t('remote.pair.cancel')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** 짝짓기 요청의 [허용]/[거절] 확인 — 폰이 코드를 넣으면 뜬다(기기 이름·플랫폼·확인 코드). 코드가 새도 PC 앞의 사람이 눌러야 끝난다.
  *  기본 동작(Esc·바깥 누르기)은 없다 — 허용도 거절도 버튼으로만 한다. 60초 안에 답하지 않으면 요청이 사라진다 */
 export function RemotePairPrompt({ on }: { on: boolean }) {
@@ -173,7 +275,7 @@ export function RemotePairPrompt({ on }: { on: boolean }) {
         <dl className="mobile-pairing">
           <dt>{PLATFORM[request.platform]}</dt>
           <dd>{request.deviceName}</dd>
-          <dt>{t('remote.request.confirm')}</dt>
+          <dt>{request.pinned ? t('remote.status.fingerprint') : t('remote.request.confirm')}</dt>
           <dd>
             <code className="mobile-pairing__code">{request.confirm}</code>
           </dd>
