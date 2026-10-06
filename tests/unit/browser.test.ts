@@ -51,7 +51,9 @@ describe('도구 갈래 — 실측 목록 25개', () => {
   })
 
   it('임의 코드 실행·파일 올리기·놓기는 deny, 읽기는 read, 목록에 없는 chrome_* 는 ask, 다른 서버 도구는 브라우저 도구가 아니다', () => {
-    expect(BROWSER_DENIED_TOOLS).toEqual(['browser_run_code_unsafe', 'browser_file_upload', 'browser_drop'])
+    // 위험해서 막는 셋은 늘 막혀 있다. 나머지는 도구 개수를 줄이려고 모델 목록에서 뺀 것 — 남는 도구는 12개
+    expect(BROWSER_DENIED_TOOLS.slice(0, 3)).toEqual(['browser_run_code_unsafe', 'browser_file_upload', 'browser_drop'])
+    expect(MEASURED.length - BROWSER_DENIED_TOOLS.length).toBe(12)
     for (const tool of BROWSER_DENIED_TOOLS) expect(browserToolKind(named(tool))).toBe('deny')
     expect(browserToolKind('chrome_browser_snapshot')).toBe('read')
     expect(browserToolKind('chrome_browser_navigate')).toBe('ask')
@@ -90,9 +92,9 @@ describe('엔진 권한 규칙 (withBrowserRules)', () => {
 
   it('기본·전체 권한: 페이지를 바꾸거나 밖으로 내보낼 수 있는 것은 ask, 읽기는 allow — 전체 권한의 "*": allow 뒤에 온다', () => {
     for (const agent of [MODE_AGENT.build, MODE_AGENT.full]) {
-      for (const tool of ['browser_navigate', 'browser_tabs', 'browser_evaluate', 'browser_type', 'browser_fill_form', 'browser_network_requests', 'browser_network_request']) expect(rule(config, agent, named(tool)), tool).toBe('ask')
+      for (const tool of ['browser_navigate', 'browser_tabs', 'browser_evaluate', 'browser_type', 'browser_fill_form']) expect(rule(config, agent, named(tool)), tool).toBe('ask')
       // 이미 열린 페이지 안의 조작은 묻지 않는다 (사용자 요청 2026-10-06)
-      for (const tool of ['browser_click', 'browser_hover', 'browser_drag', 'browser_press_key', 'browser_select_option', 'browser_handle_dialog', 'browser_navigate_back']) expect(rule(config, agent, named(tool)), tool).toBe('allow')
+      for (const tool of ['browser_click', 'browser_press_key', 'browser_select_option']) expect(rule(config, agent, named(tool)), tool).toBe('allow')
       for (const tool of ['browser_snapshot', 'browser_take_screenshot', 'browser_console_messages']) expect(rule(config, agent, named(tool)), tool).toBe('allow')
     }
     const order = Object.keys(config.agent[MODE_AGENT.full]!.permission)
