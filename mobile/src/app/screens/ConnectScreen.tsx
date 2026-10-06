@@ -18,9 +18,12 @@ export function ConnectScreen({
   defaultDeviceName,
   onPair,
   onPairQr,
+  lanBlockedApi,
 }: {
   state: Extract<LinkState, { phase: 'unpaired' | 'pairing' }>
   defaultDeviceName: string
+  /** 이 폰의 API 레벨 — 사내망(TLS 1.3) 연결을 못 하는 폰(Android 10 미만)일 때만 준다. 안내를 띄우고 QR 을 막는다(이 컴퓨터 안 평문 입력은 그대로) */
+  lanBlockedApi?: number
   onPair(input: PairInput): void
   onPairQr(text: string, deviceName: string): void
 }) {
@@ -71,11 +74,23 @@ export function ConnectScreen({
           </View>
         )}
 
+        {lanBlockedApi !== undefined && (
+          <View style={styles.revoked}>
+            <Text style={styles.revokedText}>{S.lanUnsupported(lanBlockedApi)}</Text>
+          </View>
+        )}
+
         <View style={styles.qrCard}>
           <View style={styles.qrBox}>
             <QrFrame />
           </View>
-          <Pressable accessibilityRole="button" accessibilityState={{ disabled: pairing }} disabled={pairing} style={[styles.primary, pairing && styles.disabled]} onPress={() => void scan()}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: pairing || lanBlockedApi !== undefined }}
+            disabled={pairing || lanBlockedApi !== undefined}
+            style={[styles.primary, (pairing || lanBlockedApi !== undefined) && styles.disabled]}
+            onPress={() => void scan()}
+          >
             <Text style={styles.primaryText}>{S.scanQr}</Text>
           </Pressable>
         </View>

@@ -45,7 +45,7 @@ export interface DesktopStore {
  * blocked: 여러 번 틀려 잠시 막혔다(429) · net-timeout: 주소가 답하지 않는다(다른 망·방화벽·클라이언트 격리) ·
  * refused: PC 는 닿았는데 그 포트에 아무도 안 듣는다(모바일 연결이 꺼져 있다) · fingerprint-mismatch: QR 의 지문과 서버 인증서가 다르다 ·
  * qr-foreign: litecode 연결 QR 이 아니다 · qr-version: 모르는 QR 형식(앱이 오래됐다) · qr-expired: QR 이 만료됐다 · qr-invalid: QR 이 깨졌다 ·
- * unreachable: 그 밖으로 닿지 못했다 · failed: 그 밖
+ * old-android: 이 폰(Android 10 미만)은 사내망(TLS 1.3) 연결을 못 한다 — 시도하지 않는다 · unreachable: 그 밖으로 닿지 못했다 · failed: 그 밖
  */
 export type PairFailure =
   | 'bad-address'
@@ -63,6 +63,7 @@ export type PairFailure =
   | 'qr-version'
   | 'qr-expired'
   | 'qr-invalid'
+  | 'old-android'
   | 'unreachable'
   | 'failed'
 
@@ -103,6 +104,14 @@ export function pairFailure(error: unknown): PairFailure {
   return 'failed'
 }
 
+/** 데스크탑의 사내망 연결은 TLS 1.3 만 받는다(src/services/remote/https.ts — 바꾸지 않는다). Android 는 API 29(Android 10)부터 TLS 1.3 이 있다 */
+export const LAN_MIN_ANDROID_API = 29
+
+/** 이 폰은 사내망(https) 연결을 못 한다 — 시도하면 핸드셰이크가 깨져 엉뚱한 "닿지 못했습니다" 가 뜬다 (QA W2). 이 컴퓨터 안 평문은 상관없다 */
+export function lanUnsupported(platform: 'android' | 'ios', apiLevel: number | undefined): boolean {
+  return platform === 'android' && apiLevel !== undefined && apiLevel < LAN_MIN_ANDROID_API
+}
+
 /** 핸드셰이크(지문 보기)의 기한 */
 const PROBE_TIMEOUT_MS = 6_000
 
@@ -112,7 +121,8 @@ export class DesktopLink {
   private offSession: (() => void) | undefined
 
   /** transport: 평문(이 컴퓨터 안) 운반 · pinned: 지문 고정 운반 */
-  constructor(private readonly deps: { store: DesktopStore; transport: Transport; pinned: PinnedNet; platform: 'android' | 'ios'; now?: () => number }) {}
+  /** apiLevel: Android 의 API 레벨(Platform.Version) — 29 미만이면 사내망 연결을 시도하지 않는다 */
+  constructor(private readonly deps: { store: DesktopStore; transport: Transport; pinned: PinnedNet; platform: 'android' | 'ios'; apiLevel?: number; now?: () => number }) {}
 
   get state(): LinkState {
     return this.current
@@ -158,6 +168,7 @@ export class DesktopLink {
       return this.finish({ transport: this.deps.transport, address: target.address, baseUrl: target.baseUrl, code, deviceName, fallbackName: target.address })
     }
 
+    if (lanUnsupported(platform, this.deps.apiLevel)) return fail('old-android')
     this.set({ phase: 'pairing' })
     let fingerprint: string
     try {
@@ -174,6 +185,8 @@ export class DesktopLink {
     if (this.current.phase !== 'unpaired') return
     const fail = (failure: PairFailure): void => this.set({ phase: 'unpaired', failure })
 
+    // QR 은 늘 https 다 (10.0.2.2 라도)
+    if (lanUnsupported(this.deps.platform, this.deps.apiLevel)) return fail('old-android')
     const parsed = readPairQr(text, (this.deps.now ?? Date.now)())
     if (!parsed.ok) return fail(parsed.problem === 'not-litecode' ? 'qr-foreign' : parsed.problem === 'version' ? 'qr-version' : parsed.problem === 'expired' ? 'qr-expired' : 'qr-invalid')
     const deviceName = pairDeviceName(deviceNameInput)

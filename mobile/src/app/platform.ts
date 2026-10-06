@@ -44,3 +44,6 @@ export function defaultDeviceName(): string {
 }
 
 export const platform = Platform.OS === 'ios' ? 'ios' : 'android'
+
+/** Android API 레벨 (Android 10 = 29) — 사내망 연결(TLS 1.3)을 쓸 수 있는지 가른다 (link.ts lanUnsupported) */
+export const apiLevel: number | undefined = Platform.OS === 'android' ? Number(Platform.Version) : undefined

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FAKE_PAIR_CODE, startFakeDesktop, type FakeDesktop } from '../dev/fake-desktop.mts'
-import { DesktopLink, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
+import { DesktopLink, lanUnsupported, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
 import { createFetchTransport, createNativePinnedNet, fingerprintCode, NetError, pairUri, type PairLink } from '../src/core/index.ts'
 import { nodePinnedNative, spkiFingerprint, type NodePinnedNative } from './nodePinned.ts'
 import { until } from './support.ts'
@@ -167,6 +167,39 @@ describe('직접 입력 (TOFU)', () => {
     expect(pairFailure(new NetError('refused', 'x'))).toBe('refused')
     expect(pairFailure(new NetError('pin-mismatch', 'x'))).toBe('fingerprint-mismatch')
     expect(pairFailure(new NetError('unreachable', 'x'))).toBe('unreachable')
+  })
+})
+
+describe('Android 10 미만 — 사내망(TLS 1.3) 연결을 시도하지 않는다 (QA W2)', () => {
+  it('판정: android 이고 API 29 미만일 때만', () => {
+    expect(lanUnsupported('android', 28)).toBe(true)
+    expect(lanUnsupported('android', 24)).toBe(true)
+    expect(lanUnsupported('android', 29)).toBe(false)
+    expect(lanUnsupported('android', undefined)).toBe(false)
+    expect(lanUnsupported('ios', 17)).toBe(false)
+  })
+
+  it('QR·https 직접 입력은 old-android 로 — 핸드셰이크도 요청도 없다. 이 컴퓨터 안 평문은 그대로 된다', async () => {
+    const probes: string[] = []
+    const probing = { ...native, probe: (host: string, port: number, timeoutMs: number) => (probes.push(`${host}:${port}`), native.probe(host, port, timeoutMs)) }
+    const link = new DesktopLink({ store: memoryStore(), transport: createFetchTransport(), pinned: createNativePinnedNet(probing), platform: 'android', apiLevel: 28, now: () => NOW })
+    links.push(link)
+    await link.restore()
+    await link.pairQr(qr(), 'Pixel 2')
+    expect(link.state).toEqual({ phase: 'unpaired', failure: 'old-android' })
+    await link.pair({ address: `https://${live()}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 2' })
+    expect(link.state).toEqual({ phase: 'unpaired', failure: 'old-android' })
+    expect(probes).toEqual([])
+    expect(native.sent).toEqual([])
+
+    const plain = await startFakeDesktop({ port: 0, stepMs: 5 })
+    try {
+      await link.pair({ address: `http://127.0.0.1:${plain.port}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 2' })
+      expect(link.state.phase).toBe('linked')
+    } finally {
+      link.dispose()
+      await plain.close()
+    }
   })
 })
 
