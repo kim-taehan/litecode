@@ -314,6 +314,8 @@ describe('add_mcp_server', () => {
     const { llm, run, ctx } = await start()
     llm.caller = approvedBy('project')
     await expect(run(MCP_TOOL, { ...REMOTE, name: 'litecode' })).rejects.toThrow(/litecode/)
+    // 브라우저 기능이 꺼져 있어도(내장 서버가 안 떠 있어도) 그 이름은 예약이다 — 받아 두면 영영 못 붙는 서버가 된다
+    await expect(run(MCP_TOOL, { ...REMOTE, name: 'chrome' })).rejects.toThrow(/chrome/)
     await expect(run(MCP_TOOL, { ...REMOTE, name: 'bad name!' })).rejects.toThrow()
     ctx.mcp.save({ name: 'wiki', type: 'remote', url: 'http://a.internal/mcp', vars: [] })
     await expect(run(MCP_TOOL, REMOTE)).rejects.toThrow(/wiki/)
