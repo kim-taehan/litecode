@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 데스크탑과의 TLS 연결 (지문 고정) — 인터넷 권한은 React Native 가 이미 넣는다 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

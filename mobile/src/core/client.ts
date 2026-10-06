@@ -59,8 +59,9 @@ const PAIR_TIMEOUT_MS = 65_000
 
 export class RemoteClient {
   token: string | undefined
-  private readonly transport: Transport
-  private readonly baseUrl: string
+  /** `http(s)://ip:port` — 주소를 옮겨 다니는 클라이언트(roaming.ts)가 바꾼다 */
+  baseUrl: string
+  protected readonly transport: Transport
   private readonly requestTimeoutMs: number
   private readonly sendRetries: number
   private readonly sendRetryDelayMs: number
