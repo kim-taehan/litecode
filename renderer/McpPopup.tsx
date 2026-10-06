@@ -117,7 +117,7 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
   const t = useT()
   const [open, setOpen] = useState(false)
   const app = server.source === 'app'
-  const target = server.type === 'remote' ? server.url : server.command?.join(' ')
+  const target = maskCredentials(server.type === 'remote' ? server.url : server.command?.join(' '))
   const state = mcpState(server)
   // 출처 배지 — 폴더 정의는 그 파일 이름(시안의 ".mcp.json"), 개인 설정은 "개인 설정". 앱에서 만든 서버는 배지 없음
   // 내장 = 앱 자신의 MCP 서버(이슈 #51) — 읽기 전용, 주소 없음
@@ -230,6 +230,11 @@ interface VarDraft {
 }
 
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL/i
+
+/** 줄에 보이는 명령·주소 안의 `scheme://사용자:비밀번호@` 의 비밀번호를 가린다 (DB 접속 문자열 등이 화면에 그대로 나오지 않게 — 편집 폼에는 원본이 그대로 있다) */
+export function maskCredentials(text: string | undefined): string | undefined {
+  return text?.replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1••••@')
+}
 
 /** server 가 있으면 그 서버를 고치고, 없으면 scope 묶음에 새로 넣는다 */
 function ServerEditor({ server, scope, directory, onDone }: { server?: McpServerSummary; scope?: McpScope; directory: string; onDone(saved: boolean): void }) {
