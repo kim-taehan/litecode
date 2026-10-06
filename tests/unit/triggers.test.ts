@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { detect, TriggerRegistry, type TriggerSource } from '../../src/services/triggers.ts'
 import { AtTrigger, containing, reference } from '../../src/triggers/at.ts'
+import { pathsContaining } from '../../src/services/fileIndex.ts'
 import { expandTemplate, SlashTrigger } from '../../src/triggers/slash.ts'
 import { BangTrigger } from '../../src/triggers/bang.ts'
 import type { EngineCommand, EngineSkill, FileEntry } from '../../src/services/llm.ts'
@@ -186,6 +187,26 @@ describe('@ 파일', () => {
     expect(await triggers.pick(scope, '@', 'src/', 'drill')).toEqual({ kind: 'drill', text: '@src/' })
     expect(reference('sp ace/', true)).toBe('@"sp ace/')
     expect(await triggers.submit(scope, '@src/a.ts 봐 줘')).toBeNull() // 평범한 프롬프트
+  })
+})
+
+describe('프로젝트 전체 포함 검색 (#148)', () => {
+  it('pathsContaining: 이름에 든 것이 먼저, 짧은 경로가 먼저, 대소문자 무시, 상한', () => {
+    const files = ['src/services/chat.ts', 'docs/chatting/readme.md', 'a/b/c/Chat.tsx', 'README.md', 'src/x.ts']
+    expect(pathsContaining(files, 'chat', 10)).toEqual(['a/b/c/Chat.tsx', 'src/services/chat.ts', 'docs/chatting/readme.md'])
+    expect(pathsContaining(files, 'CHAT', 1)).toEqual(['a/b/c/Chat.tsx'])
+    expect(pathsContaining(files, 'zzz', 10)).toEqual([])
+  })
+
+  it('containing: 지금 폴더 → 전체 목록의 파일 → 퍼지, 같은 경로는 한 번', () => {
+    const listed = [{ path: 'src/', type: 'directory' as const }]
+    const found = [{ path: 'deep/src-map.ts', type: 'file' as const }, { path: 'lib/x.ts', type: 'file' as const }]
+    expect(containing(listed, found, 'src', ['very/deep/tree/src.ts', 'deep/src-map.ts']).map((entry) => entry.path)).toEqual([
+      'src/',
+      'very/deep/tree/src.ts',
+      'deep/src-map.ts',
+      'lib/x.ts',
+    ])
   })
 })
 

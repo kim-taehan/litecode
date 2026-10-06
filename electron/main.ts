@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, screen, session, shell, systemPreferences } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
@@ -137,6 +138,14 @@ mounted.push(ctx.plugin(ProviderRegistry, {
     },
   ],
 }))
+/** `@` 메뉴의 전체 파일 목록용 rg — 설치본은 Resources/rg, 개발 실행은 build/vendor/rg/<타깃> (없으면 undefined) */
+function bundledRg(): string | undefined {
+  const name = process.platform === 'win32' ? 'rg.exe' : 'rg'
+  const os = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux'
+  const file = app.isPackaged ? path.join(bundledPaths(process.resourcesPath).rgDir, name) : path.join(__dirname, '../../build/vendor/rg', `${os}-${process.arch}`, name)
+  return fs.existsSync(file) ? file : undefined
+}
+
 // opencode 는 앱이 직접 띄운다 (서버 하나). 사용자가 따로 띄운 opencode 에 붙는 길은 두지 않는다 — 폐쇄망에서는 사용자가
 // `opencode serve` 를 칠 수 없고, 제품이 안 쓰는 분기는 낡는다 (closed-code 결정과 같다). 실물 테스트도 앱이 띄운 것을 쓴다.
 mounted.push(ctx.plugin(EngineService, {
@@ -493,7 +502,8 @@ speechBridge.inject = ['speech']
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게
  *  (web 만 묶음이 없다). service 는 묶음이 올리는 서비스 키 — 부팅 진단이 켜진 기능의 서비스가 떴는지 본다 */
 const features: FeatureDefinition[] = [
-  { id: 'at', plugin: AtTrigger },
+  // 동봉 rg 로 프로젝트 전체 파일 목록을 훑는다 (#148). 개발 실행은 받아 둔 build/vendor 것 — 없으면 포함 검색은 지금 폴더·엔진 결과만
+  { id: 'at', plugin: (ctx) => void ctx.plugin(AtTrigger, { rg: bundledRg() }) },
   { id: 'slash', plugin: SlashTrigger },
   { id: 'bang', plugin: BangTrigger }, // `!명령`(shell) 이 꺼지면 같이 꺼진다 (FEATURE_REQUIRES)
   {
