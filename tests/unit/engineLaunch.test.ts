@@ -132,6 +132,8 @@ describe('EngineService — 뜨는 중에 온 설정 변경', () => {
     engine.setGate(['bash'])
     const next = await engine.connection()
     expect(next).not.toBe(conn)
+    // 옛 서버가 꺼지는 데는 시간이 든다 — 느린 CI(GitHub 러너)에서는 새 연결이 돌아온 뒤에야 닫혔다는 신호가 온다. 신호를 기다린다
+    if (!conn.closed.aborted) await new Promise<void>((resolve) => conn.closed.addEventListener('abort', () => resolve(), { once: true }))
     expect(conn.closed.aborted).toBe(true)
     expect(next.gated('bash')).toBe(true)
     expect(serves()).toBe(2)
