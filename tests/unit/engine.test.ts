@@ -125,14 +125,14 @@ describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
 
   it('계획은 opencode plan 을 덮어써 편집·명령·웹을 막고 계획 프롬프트를 준다', () => {
     expect(MODE_AGENT.plan).toBe('plan')
-    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', litecode_open: 'allow', litecode_list_projects: 'allow', litecode_read_project: 'ask', litecode_present: 'allow', external_directory: 'ask', doom_loop: 'ask' })
+    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', litecode_open: 'allow', litecode_list_projects: 'allow', litecode_read_project: 'allow', litecode_present: 'allow', external_directory: 'ask', doom_loop: 'ask' })
     expect(agent['plan']!.prompt).toMatch(/plan mode/)
   })
 
   it('매번 묻기는 편집·명령·웹을 묻고 질문 도구를 다시 허용한다, 전체 권한은 모두 허용 — 둘 다 primary 에 build 첫 줄 프롬프트', () => {
     expect(agent[MODE_AGENT.ask]).toMatchObject({ mode: 'primary', permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow' } })
     expect(agent[MODE_AGENT.full]).toMatchObject({ mode: 'primary', permission: { '*': 'allow' } })
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'ask', litecode_create: 'ask', litecode_present: 'allow' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow' })
     expect(agent[MODE_AGENT.ask]!.prompt).toMatch(/^You are an AI coding agent\./)
     expect(agent[MODE_AGENT.full]!.prompt).toBe(agent[MODE_AGENT.ask]!.prompt)
   })
@@ -166,7 +166,7 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
         ['websearch', 'deny'],
       ])
     }
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'ask', litecode_create: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny' })
     expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ edit: 'ask', bash: 'ask', question: 'allow' })
   })
 
@@ -193,7 +193,7 @@ describe('engineConfig — MCP 도구 권한 (#28)', () => {
   it('매번 묻기와 그 하위 작업은 MCP 도구를 묻는다, 기본(build)·전체 권한은 와일드카드 규칙이 없다(허용)', () => {
     expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
     expect(agent[SUBAGENT_ASK]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'ask', litecode_create: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny' })
     expect(agent['build']!.permission).not.toHaveProperty('*_*')
   })
 })
@@ -233,7 +233,7 @@ describe('engineConfig — 앱 MCP 도구(litecode_*)의 모드별 권한 (#51)'
 // 그래야 하위 작업(general·explore)·모르는 에이전트의 도구 목록에서 빠지고(9/9), 사람이 고른 모드에서는 보낼 때마다 묻는다. 순서가 계약이다 —
 // 규칙은 뒤가 이긴다: 전체 권한의 `"*":"allow"`·매번 묻기 하위 작업의 `*_*: ask` 뒤에 개별 규칙이 와야 한다.
 // 이슈 #137: 대상이 다른 프로젝트로 바뀌며 이름이 list_projects·read_project·send_to_project 가 됐고, 새 대화를 만드는 도구(start_session)는 없다.
-// 읽기도 보내기와 같은 모양으로 묻는다 (다른 프로젝트의 내용이 이 대화로 들어온다) — 계획 모드에서도 읽기는 묻고 쓴다
+// 읽기는 묻지 않는다(사용자 2026-10-06) — 보내기만 묻는다. 계획 모드에서도 읽기는 쓴다. 매번 묻기는 와일드카드대로 묻는다
 describe('engineConfig — 세션 도구(litecode_*_project)의 모드별 권한 (#55·#137)', () => {
   const SEND = 'litecode_send_to_project'
   const READ = 'litecode_read_project'
@@ -255,14 +255,14 @@ describe('engineConfig — 세션 도구(litecode_*_project)의 모드별 권한
       expect(config.permission).not.toHaveProperty(LIST)
     })
 
-    it(`기본(build): 보내기·읽기는 ask — ${label}`, () => {
-      expect(agent['build']!.permission).toMatchObject({ [SEND]: 'ask', [READ]: 'ask' })
+    it(`기본(build): 보내기는 ask, 읽기는 allow — ${label}`, () => {
+      expect(agent['build']!.permission).toMatchObject({ [SEND]: 'ask', [READ]: 'allow' })
       expect(agent['build']!.permission).not.toHaveProperty(LIST)
     })
 
-    it(`전체 권한: "*": allow 뒤에 보내기·읽기 ask — ${label}`, () => {
+    it(`전체 권한: "*": allow 뒤에 보내기 ask·읽기 allow — ${label}`, () => {
       const full = MODE_AGENT.full
-      expect(agent[full]!.permission).toMatchObject({ '*': 'allow', [SEND]: 'ask', [READ]: 'ask' })
+      expect(agent[full]!.permission).toMatchObject({ '*': 'allow', [SEND]: 'ask', [READ]: 'allow' })
       for (const name of [SEND, READ]) after(full, name, '*')
     })
 
@@ -273,8 +273,8 @@ describe('engineConfig — 세션 도구(litecode_*_project)의 모드별 권한
       for (const name of [SEND, READ]) expect(agent[ask]!.permission).not.toHaveProperty(name)
     })
 
-    it(`계획: 목록은 와일드카드 deny 뒤에 allow, 읽기는 그 뒤에 ask, 보내기 도구는 없다(와일드카드 deny 그대로) — ${label}`, () => {
-      expect(agent['plan']!.permission).toMatchObject({ '*_*': 'deny', [LIST]: 'allow', [READ]: 'ask' })
+    it(`계획: 목록은 와일드카드 deny 뒤에 allow, 읽기는 그 뒤에 allow, 보내기 도구는 없다(와일드카드 deny 그대로) — ${label}`, () => {
+      expect(agent['plan']!.permission).toMatchObject({ '*_*': 'deny', [LIST]: 'allow', [READ]: 'allow' })
       for (const name of [LIST, READ]) after('plan', name, '*_*')
       expect(agent['plan']!.permission).not.toHaveProperty(SEND)
     })

@@ -56,7 +56,7 @@ describe('도구 갈래 — 실측 목록 25개', () => {
     expect(MEASURED.length - BROWSER_DENIED_TOOLS.length).toBe(12)
     for (const tool of BROWSER_DENIED_TOOLS) expect(browserToolKind(named(tool))).toBe('deny')
     expect(browserToolKind('chrome_browser_snapshot')).toBe('read')
-    expect(browserToolKind('chrome_browser_navigate')).toBe('ask')
+    expect(browserToolKind('chrome_browser_navigate')).toBe('quiet')
     expect(browserToolKind('chrome_browser_brand_new')).toBe('ask')
     expect(browserToolKind('github_browser_snapshot')).toBeUndefined()
     expect(browserToolKind('chromeX_browser_snapshot')).toBeUndefined()
@@ -92,7 +92,8 @@ describe('엔진 권한 규칙 (withBrowserRules)', () => {
 
   it('기본·전체 권한: 페이지를 바꾸거나 밖으로 내보낼 수 있는 것은 ask, 읽기는 allow — 전체 권한의 "*": allow 뒤에 온다', () => {
     for (const agent of [MODE_AGENT.build, MODE_AGENT.full]) {
-      for (const tool of ['browser_navigate', 'browser_tabs', 'browser_evaluate', 'browser_type', 'browser_fill_form']) expect(rule(config, agent, named(tool)), tool).toBe('ask')
+      // 주소 열기·탭·글 입력·폼·스크립트도 기본·전체 권한에서는 묻지 않는다 (사용자 2026-10-06). 매번 묻기는 아래에서 전부 묻는다
+      for (const tool of ['browser_navigate', 'browser_tabs', 'browser_evaluate', 'browser_type', 'browser_fill_form']) expect(rule(config, agent, named(tool)), tool).toBe('allow')
       // 이미 열린 페이지 안의 조작은 묻지 않는다 (사용자 요청 2026-10-06)
       for (const tool of ['browser_click', 'browser_press_key', 'browser_select_option']) expect(rule(config, agent, named(tool)), tool).toBe('allow')
       for (const tool of ['browser_snapshot', 'browser_take_screenshot', 'browser_console_messages']) expect(rule(config, agent, named(tool)), tool).toBe('allow')

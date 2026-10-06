@@ -244,15 +244,16 @@ export function engineMcpConfig(def: EngineMcp, hidden: readonly string[]): Reco
 // `"*":"allow"` 뒤의 개별 ask 가 묻게 하고(3/3), 매번 묻기는 `*_*: ask` 가 전역 deny 뒤에 와 묻는다. 계획은 `*_*: deny` 그대로라 보내기 도구가
 // 없고(사용자 결정), 읽기는 그 뒤의 개별 ask 로 묻는다. general-ask 는 자기 `*_*: ask` 가 전역 deny 를 되살리므로 **그 뒤에 개별 deny 가 따로**
 // 있어야 한다 (웹 도구 deny 와 같은 함정). ⚠️ 승인에 `always` 로 답하면 그 폴더의 모든 세션에서 더는 묻지 않는다 — ctx.llm.reply 는 once·reject 만 보낸다.
-// 읽기를 묻는 것은 #137 부터다 — 다른 프로젝트의 내용이 이 대화로 들어온다. ⚠️ 읽기의 "전역 deny + 에이전트 ask"·계획의 "`*_*: deny` 뒤 개별 ask" 는
+// 읽기는 #137 에서 한때 물었으나 지금은 묻지 않는다(위 READ_TOOL_ALLOW). ⚠️ 읽기의 "전역 deny + 에이전트 ask"·계획의 "`*_*: deny` 뒤 개별 ask" 는
 // 따로 실측하지 않았다 — 보내기의 같은 모양(9/9)과 "뒤가 이긴다"(12조합 3/3)에 기댄다
 //
 // 결과물 선언 (present, 이슈 #91): 화면을 조작하지 않는 읽기 전용 선언이라 **네 모드 모두 묻지 않는다**(계획 포함). 하위 작업은 못 쓴다 — 결과물은 메인
 // 대화가 선언한다(카드도 메인 줄만 모은다, dsh 와 같은 결론). 모양은 보내기 도구와 같다: 전역 deny 로 general·explore·모르는 에이전트에서 빼고
 // 모드 에이전트마다 개별 allow, general-ask 는 자기 `*_*: ask` 뒤에 개별 deny. ⚠️ "전역 deny + 에이전트 allow" 는 실측하지 않았다 —
 // 보내기 도구의 "전역 deny + 에이전트 ask"(9/9)와 같은 규칙 순서(뒤가 이긴다)에 기댄다
-const READ_TOOL_ASK = { litecode_read_project: 'ask' }
-const SEND_TOOLS_ASK = { litecode_send_to_project: 'ask', ...READ_TOOL_ASK }
+// 읽기는 묻지 않는다(사용자 2026-10-06 "읽기도 매번 승인해야 되니?") — 같은 PC·같은 사용자의 다른 프로젝트 대화를 읽을 뿐 아무것도 바꾸지 않는다. 매번 묻기 모드(`*_*: ask`)는 그대로 묻는다
+const READ_TOOL_ALLOW = { litecode_read_project: 'allow' }
+const SEND_TOOLS_ASK = { litecode_send_to_project: 'ask', ...READ_TOOL_ALLOW }
 const PRESENT_ALLOW = { litecode_present: 'allow' }
 const PRESENT_DENY = { litecode_present: 'deny' }
 const SEND_TOOLS_DENY = { litecode_send_to_project: 'deny', litecode_read_project: 'deny' }
@@ -263,7 +264,7 @@ const MAKE_TOOLS_ASK = { litecode_create: 'ask' }
 const MAKE_TOOLS_DENY = { litecode_create: 'deny' }
 const LIST_TOOL_ALLOW = { litecode_list_projects: 'allow' }
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
-  plan: { '*_*': 'deny', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ASK, ...PRESENT_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
+  plan: { '*_*': 'deny', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ALLOW, ...PRESENT_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
   [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW },
   [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...PRESENT_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
   [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW },
