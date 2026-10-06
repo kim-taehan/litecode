@@ -3,19 +3,30 @@
 // 상태는 전부 데스크탑에서 온다: 목록·대화·진행 줄·승인·대기열. 여기서 만드는 것은 "보내지 못했다" 같은 안내(notice)뿐이다.
 
 import type { RemoteModel } from '../../../shared/remote.ts'
-import { Connection, newClientMessageId, RemoteClient, RemoteError, type Transport } from '../core/index.ts'
+import { Connection, newClientMessageId, RemoteError, RoamingClient, type Transport } from '../core/index.ts'
 import type { AppSession, DesktopInfo, SessionNotice } from './session.ts'
 
 export interface RemoteSessionOptions {
+  /** https 면 지문 고정 운반 (link.ts 가 고른다) */
   transport: Transport
-  /** `http://host:port` */
+  /** `http(s)://host:port` — 처음 시도할 주소 */
   baseUrl: string
+  /** 주소 후보 `host:port` — 지금 주소가 닿지 않으면 이것들을 병렬로 시도한다 (core/roaming.ts) */
+  addresses?: readonly string[]
   token: string
   desktop: DesktopInfo
+  /** 다른 주소로 옮겼거나 새 주소를 배웠다 */
+  onAddresses?(current: string, addresses: string[]): void
 }
 
 export function createRemoteSession(options: RemoteSessionOptions): AppSession {
-  const client = new RemoteClient({ transport: options.transport, baseUrl: options.baseUrl, token: options.token })
+  const client = new RoamingClient({
+    transport: options.transport,
+    baseUrl: options.baseUrl,
+    token: options.token,
+    addresses: options.addresses ?? [options.baseUrl.replace(/^https?:\/\//, '')],
+    onAddresses: options.onAddresses,
+  })
   const connection = new Connection(client)
   const listeners = new Set<() => void>()
   let models: RemoteModel[] = []
@@ -62,6 +73,13 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     wasConnected = connected
     notify()
   })
+  // 데스크탑이 듣는 주소가 바뀌었다 — 다음에 끊겼을 때 시도할 후보를 넓힌다. (이벤트 이름은 데스크탑 계약 shared/remote.ts 'addresses.changed' —
+  // 이 워크트리의 shared 에는 아직 없어 글로 견준다)
+  const offAddresses = connection.onEvent((event) => {
+    const { event: name, data } = event as { event: string; data: unknown }
+    const addresses = (data as { addresses?: unknown } | undefined)?.addresses
+    if (name === 'addresses.changed' && Array.isArray(addresses)) client.adopt(addresses.filter((address): address is string => typeof address === 'string'))
+  })
   connection.start()
 
   return {
@@ -73,7 +91,9 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    desktop: options.desktop,
+    get desktop() {
+      return { ...options.desktop, address: client.address }
+    },
     get models() {
       return models
     },
@@ -131,6 +151,7 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     dispose() {
       disposed = true
       off()
+      offAddresses()
       connection.stop()
       listeners.clear()
     },

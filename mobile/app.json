@@ -13,6 +13,13 @@
     "plugins": [
       "expo-secure-store",
       "expo-notifications",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "데스크탑의 연결 QR 을 읽으려고 카메라를 씁니다.",
+          "recordAudioAndroid": false
+        }
+      ],
       "./plugins/withLoopbackCleartext.js"
     ]
   }

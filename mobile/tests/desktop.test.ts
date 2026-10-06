@@ -2,7 +2,8 @@ import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Attention } from '../../shared/contract.ts'
 import { DesktopLink, type DesktopStore, type SavedDesktop } from '../src/app/link.ts'
-import { Connection, RemoteClient, createFetchTransport, newClientMessageId, type StreamHandlers, type Transport } from '../src/core/index.ts'
+import { Connection, RemoteClient, createFetchTransport, createNativePinnedNet, newClientMessageId, type StreamHandlers, type Transport } from '../src/core/index.ts'
+import { nodePinnedNative } from './nodePinned.ts'
 
 // 연결 코어(폰 앱이 쓰는 RemoteClient·Connection·리듀서 그대로)를 **진짜 데스크탑 서비스**(ctx.remote, 이슈 #56)에 붙인다.
 // 가짜 데스크탑(dev/fake-desktop.mts)이 아니라 데스크탑 메인 프로세스가 올리는 그 서비스다 — 진짜 ctx.chat·ctx.sessions·ctx.projects 위에서
@@ -207,7 +208,7 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
     await save('c_full', { updatedAt: 2000, mode: 'full' })
     let saved: SavedDesktop | undefined
     const store: DesktopStore = { load: async () => saved, save: async (value) => void (saved = value), clear: async () => void (saved = undefined) }
-    const link = new DesktopLink({ store, transport: createFetchTransport(), platform: 'android' })
+    const link = new DesktopLink({ store, transport: createFetchTransport(), pinned: createNativePinnedNet(nodePinnedNative()), platform: 'android' })
     cleanups.push(() => link.dispose())
     await link.restore()
 
@@ -220,7 +221,7 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
     const pairing = link.pair({ address: base().replace('http://', ''), code: shown.toLowerCase(), deviceName: ' 김의 Pixel 8 ' })
     await until(() => request !== undefined, '데스크탑에 짝짓기 요청')
     off()
-    expect(link.state).toEqual({ phase: 'pairing', confirm: request!.confirm })
+    expect(link.state).toEqual({ phase: 'pairing', confirm: request!.confirm, confirmKind: 'code' })
     expect(request!.deviceName).toBe('김의 Pixel 8')
 
     remote.answerPair(request!.id, true)
@@ -246,7 +247,7 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
   it('데스크탑에서 거절하면 denied, 틀린 코드는 wrong-code', async () => {
     const { ctx, remote, base } = await start()
     const store: DesktopStore = { load: async () => undefined, save: async () => undefined, clear: async () => undefined }
-    const link = new DesktopLink({ store, transport: createFetchTransport(), platform: 'android' })
+    const link = new DesktopLink({ store, transport: createFetchTransport(), pinned: createNativePinnedNet(nodePinnedNative()), platform: 'android' })
     cleanups.push(() => link.dispose())
     await link.restore()
     const address = base().replace('http://', '')

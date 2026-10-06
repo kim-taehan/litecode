@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.litecode'
+version = '0.1.0'
+
+android {
+  namespace "com.litecode.pinnednet"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // React Native 가 이미 싣는 OkHttp 와 같은 줄 (react-native/gradle/libs.versions.toml okhttp = 4.9.2) — APK 에 새로 들어가는 것은 없다
+  implementation "com.squareup.okhttp3:okhttp:4.9.2"
+}
