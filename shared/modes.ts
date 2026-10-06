@@ -60,7 +60,7 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
       return asking || browser === 'ask' ? 'ask' : 'allow'
     }
     if (permission === APP_SEND_TOOL || permission === APP_MAKE_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
-    if (permission === APP_READ_TOOL) return child ? 'deny' : 'ask'
+    if (permission === APP_READ_TOOL) return child ? 'deny' : asking ? 'ask' : 'allow'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'
     if (child) return asking ? 'ask' : 'allow'
     if (permission === 'litecode_list_projects' || permission === 'litecode_open') return 'allow'

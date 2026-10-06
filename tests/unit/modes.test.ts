@@ -51,7 +51,7 @@ describe('modePermission — 메인 대화', () => {
 
   it('앱 MCP 도구: 다른 프로젝트에 보내기는 늘 묻는다(계획엔 없다), 읽기도 늘 묻는다(계획 포함, #137), 목록·결과물·열기(파일·터미널 한 도구)는 묻지 않는다 — 옛 이름은 보통의 MCP 도구', () => {
     expect(row('litecode_send_to_project')).toEqual({ plan: 'deny', build: 'ask', ask: 'ask', full: 'ask' })
-    expect(row('litecode_read_project')).toEqual({ plan: 'ask', build: 'ask', ask: 'ask', full: 'ask' })
+    expect(row('litecode_read_project')).toEqual({ plan: 'allow', build: 'allow', ask: 'ask', full: 'allow' })
     // 없앤 도구 이름은 보통의 MCP 도구로 본다 (특별 규칙 없음)
     expect(row('litecode_start_session')).toEqual(row('github_create_issue'))
     for (const permission of ['litecode_list_projects', 'litecode_present', 'litecode_open']) {
