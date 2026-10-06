@@ -9,7 +9,7 @@ import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
 import { addTurn, type ChatUsage } from '../../shared/usage.ts'
 import { upsertItem } from '../../shared/chatReducer.ts'
-import { chipsOf, queueLabel, titleFrom, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
+import { COMPACT_COMMAND, chipsOf, queueLabel, titleFrom, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
 import type { Mode } from '../../shared/modes.ts'
 import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
@@ -148,6 +148,53 @@ export class ChatService extends Service {
     const ready = await this.begin(cid, item, turn, false)
     if (ready) void this.run(cid, item, turn, ready)
     return { state: 'sent' }
+  }
+
+  /** 지금까지의 대화를 요약해 컨텍스트를 줄인다 (`/compact`, 이슈 #144 — 엔진 쪽은 ctx.llm.compact). 요약도 "도는 턴" 이다: 내 말(친 글)과 함께
+   *  'chat/turn-started' 를 내고, 요약 줄이 진행 줄로 흐르고, 'chat/turn-ended' 로 끝난다 — 도는 중 표시·멈춤(stop)·대기열이 보통 턴과 같다.
+   *  턴이 도는 중이면 거절한다(대기열에 넣지 않는다). 아직 한 번도 안 보낸 대화면 요약할 것이 없다. 모델은 그 대화에 묶인 것.
+   *  프롬프트가 아니라서 턴 앞뒤 확장점('chat/before-send'·'chat/after-turn')은 부르지 않는다 */
+  async compact(cid: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.turns.has(cid)) return { ok: false, error: tr('compact.busy') }
+    const turn = this.open(cid, 'user')
+    const refuse = (error: string): { ok: false; error: string } => {
+      this.abandon(cid, turn)
+      return { ok: false, error }
+    }
+    const conversation = (await this.ctx.sessions.list().catch(() => [])).find((entry) => entry.id === cid)
+    const sessionId = conversation?.engineSessionId
+    if (!conversation || !sessionId) return refuse(tr('compact.empty'))
+    const { model, mode } = conversation
+    if (!model) return refuse(tr('shellCard.shareNoModel'))
+    turn.message = { id: this.ctx.llm.newMessageId(), role: 'user', text: COMPACT_COMMAND, at: turn.startedAt, ...(mode && { mode }) }
+    this.ctx.emit('chat/turn-started', { cid, message: turn.message, origin: 'user', conversation })
+    void this.summarize(cid, turn, conversation, sessionId)
+    return { ok: true }
+  }
+
+  /** 요약 턴 하나를 엔진에 돌리고 끝을 알린다 (run 의 요약 판) — 다시 열어도 친 글이 보이게 엔진의 요약 메시지 id 로 적어 둔다 */
+  private async summarize(cid: string, turn: LiveTurn, conversation: Conversation, sessionId: string): Promise<void> {
+    const model = conversation.model!
+    const result = await this.ctx.llm
+      .compact(model.providerId, model.modelId, conversation.project, sessionId, (progress) => {
+        if (this.turns.get(cid) !== turn) return
+        turn.progress = upsertItem(turn.progress, progress)
+        this.ctx.emit('chat/turn-progress', { cid, item: progress })
+      }, turn.stop.signal)
+      .catch((error: unknown): ChatResult & { messageId?: string } => ({ ok: false, error: (error as Error).message }))
+    if (result.messageId) await this.ctx.sessions.label(cid, result.messageId, COMPACT_COMMAND).catch(() => undefined)
+    const stored = await this.ctx.sessions.patch(cid, () => ({ updatedAt: Date.now() })).catch(() => undefined)
+    const message: HistoryMessage = {
+      role: 'assistant',
+      text: '',
+      ...(!result.ok && { error: String(result.error) }),
+      items: turn.progress,
+      duration: Date.now() - turn.startedAt,
+      ...(result.interrupted && { interrupted: true }),
+    }
+    this.turns.delete(cid)
+    this.ctx.emit('chat/turn-ended', { cid, message, outcome: result.ok ? 'done' : result.interrupted ? 'interrupted' : 'failed', ...(stored && { conversation: stored }) })
+    this.advance(cid)
   }
 
   /** 사용자가 대화 이름을 바꾼다 (이슈 #63) — 도는 중이어도 된다. 고친 목록 정보를 주고 목록 바뀜을 알린다 (다른 손님이 목록을 다시 받게).

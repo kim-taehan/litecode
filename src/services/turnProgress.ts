@@ -118,7 +118,8 @@ export interface EngineMessageInfo {
 
 /** 이 턴(내가 보낸 user 메시지)에 속한 이벤트를 가린다. 답 메시지는 message.updated 의 parentID 로 배운다 — 답의 파트보다 먼저 온다 (01w 실측).
  *  자동 요약: 이 턴 안에서 opencode 가 만든 요약 user(compaction 파트)와 그 뒤 user 하나(Continue·복사본)도 이 턴의 user 로 받는다 —
- *  그 user 들의 답도 이 턴 답이다. 요약 답(summary:true)은 'summary' 로 따로 준다 (글을 답으로 그리면 안 된다) */
+ *  그 user 들의 답도 이 턴 답이다. 요약 답(summary:true)은 'summary' 로 따로 준다 (글을 답으로 그리면 안 된다).
+ *  손으로 부른 요약(이슈 #144)은 내 user 메시지가 없다(userMessageId 없이 만든다) — 엔진이 만든 요약 user 가 이 턴의 시작이다 */
 export class TurnScope {
   /** 내 user 메시지와 이 턴 것으로 받은 user 메시지 */
   private readonly users = new Set<string>()
@@ -133,9 +134,10 @@ export class TurnScope {
 
   constructor(
     readonly sessionId: string,
-    readonly userMessageId: string,
+    readonly userMessageId?: string,
   ) {
-    this.users.add(userMessageId)
+    if (userMessageId) this.users.add(userMessageId)
+    else this.started = true
   }
 
   /** 이 턴의 user 메시지 이벤트면 'user', 답이면 'assistant', 요약 답이면 'summary', 아니면 undefined */

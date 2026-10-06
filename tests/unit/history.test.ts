@@ -195,6 +195,32 @@ describe('historyMessages (레거시 기록)', () => {
     ])
   })
 
+  // 손으로 부른 요약 (/compact, 이슈 #144 실측): user(compaction 파트 auto:false, 글 없음) → 요약 답(summary:true, parentID = 그 user) → idle. 이음 user 가 없다
+  it('손으로 부른 요약은 그 자체가 한 턴이다 — 빈 내 말(보일 글은 앱이 id 로 적어 둔다) + 요약 줄 done, 앞 턴 답에 붙지 않고 다음 user 는 평범한 턴', () => {
+    const manual: EngineMessage = { info: { id: 'msg_m', role: 'user', time: { created: 10 }, agent: 'build' }, parts: [{ type: 'compaction', auto: false }] }
+    const summary = assistant('## Objective', { summary: true, parentID: 'msg_m', agent: 'compaction', time: { created: 10, completed: 14 } })
+    const messages = historyMessages([user('a'), assistant('echo: a'), manual, summary, user('b'), assistant('echo: b')], false)
+    expect(messages.map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: 'user', text: 'a' },
+      { role: 'assistant', text: 'echo: a' },
+      { role: 'user', text: '' },
+      { role: 'assistant', text: '' },
+      { role: 'user', text: 'b' },
+      { role: 'assistant', text: 'echo: b' },
+    ])
+    expect(messages[1]!.items!.some((item) => item.kind === 'compaction')).toBe(false)
+    expect(messages[1]!.duration).toBe(2) // 앞 턴의 걸린 시간에 요약이 섞이지 않는다
+    expect(messages[2]).toMatchObject({ id: 'msg_m', at: 10 })
+    expect(messages[3]).toMatchObject({ items: [{ kind: 'compaction', id: 'msg_m:compaction', status: 'done' }], duration: 4 })
+    expect(messages[3]!.error).toBeUndefined()
+  })
+
+  it('손으로 부른 요약이 아직 도는 중이면 요약 줄은 running', () => {
+    const manual: EngineMessage = { info: { id: 'msg_m', role: 'user', time: { created: 10 } }, parts: [{ type: 'compaction', auto: false }] }
+    const summary = assistant('', { summary: true, parentID: 'msg_m', time: { created: 10 } })
+    expect(historyMessages([user('a'), assistant('echo: a'), manual, summary], true).at(-1)).toMatchObject({ items: [{ kind: 'compaction', status: 'running' }] })
+  })
+
   it('첨부가 없는 user 메시지에는 attachments 가 없다', () => {
     expect(historyMessages([user('hi'), assistant('ok')], false)[0]).not.toHaveProperty('attachments')
   })

@@ -9,6 +9,7 @@ import { expandTemplate, SlashTrigger } from '../../src/triggers/slash.ts'
 import { BangTrigger } from '../../src/triggers/bang.ts'
 import type { EngineCommand, EngineSkill, FileEntry } from '../../src/services/llm.ts'
 import { SkillsService } from '../../src/services/skills.ts'
+import { tr } from '../../src/i18n.ts'
 
 // 입력창 트리거 — ctx.triggers 등록소 + @·/·! 플러그인 (사용자 결정 2026-10-01). 감지 규칙은 closed-code composerMode
 // (`@` 는 낱말·경로 중간이 아닐 때, `/`·`!` 는 입력 첫 글자일 때만), 실행 모양은 01d 권고안을 지킨다.
@@ -215,6 +216,44 @@ describe('/ 명령', () => {
   })
 })
 
+// 앱 명령 (이슈 #144): `/compact`·`/clear` 둘 — 맨 위 "앱" 그룹. 이름이 겹치면 앱 명령 > 엔진 명령 > 스킬. 인자를 받지 않는다
+describe('/ 앱 명령', () => {
+  it('후보의 맨 위 그룹으로 나오고 질의로 걸러진다', async () => {
+    const { ctx, triggers } = await start()
+    ctx.plugin(SlashTrigger)
+    await settle()
+    const all = (await triggers.query(scope, '/', 1))!.candidates
+    expect(all.slice(0, 2).map(({ label, icon, group }) => ({ label, icon, group }))).toEqual([
+      { label: '/compact', icon: 'app', group: tr('trigger.group.app') },
+      { label: '/clear', icon: 'app', group: tr('trigger.group.app') },
+    ])
+    expect(all[0]!.detail).toBe(tr('trigger.app.compact'))
+    expect(all[2]!.group).toBe(tr('trigger.group.commands'))
+    expect((await triggers.query(scope, '/co', 3))!.candidates.map((entry) => entry.label)).toEqual(['/compact'])
+    expect(await triggers.pick(scope, '/', 'compact', 'pick')).toEqual({ kind: 'insert', text: '/compact ' })
+  })
+
+  it('같은 이름의 엔진 명령은 가려진다 — 목록에 한 번만, 내면 앱 명령이다', async () => {
+    const { ctx, triggers, llm } = await start()
+    llm.commands = [...llm.commands, { name: 'clear', description: '프로젝트의 clear', template: 'project clear $ARGUMENTS' }]
+    ctx.plugin(SlashTrigger)
+    await settle()
+    const hits = (await triggers.query(scope, '/clear', 6))!.candidates
+    expect(hits.map(({ label, group }) => ({ label, group }))).toEqual([{ label: '/clear', group: tr('trigger.group.app') }])
+    expect(await triggers.submit(scope, '/clear')).toEqual({ kind: 'app', command: 'clear' })
+  })
+
+  it('내면 앱 동작 결과다 — 인자가 있으면 다른 뜻으로 보내지 않고 막고 알린다', async () => {
+    const { ctx, triggers } = await start()
+    ctx.plugin(SlashTrigger)
+    await settle()
+    expect(await triggers.submit(scope, '/compact')).toEqual({ kind: 'app', command: 'compact' })
+    expect(await triggers.submit(scope, '/clear ')).toEqual({ kind: 'app', command: 'clear' })
+    expect(await triggers.submit(scope, '/compact 짧게 해줘')).toEqual({ kind: 'error', message: tr('error.commandNoArgs', { name: 'compact' }) })
+    expect(await triggers.submit(scope, '/clear all')).toEqual({ kind: 'error', message: tr('error.commandNoArgs', { name: 'clear' }) })
+  })
+})
+
 // 스킬 (이슈 #7): `/` 에 "스킬" 그룹으로 섞는다 — 명령과 이름이 겹치면 명령, 내장(<built-in>)은 없다. 내면 SKILL.md 를 직접 읽어(엔진 본문은
 // 재시작 전까지 옛것) 본문을 붙여 보내고 말풍선엔 친 글. 스킬 기능(ctx.skills)이 꺼져 있으면 후보도 실행도 없다
 describe('/ 스킬', () => {
@@ -232,17 +271,18 @@ describe('/ 스킬', () => {
       { name: 'review-pr', description: 'review a PR', location: await write('cfg/skills', 'review-pr', 'BODY-REVIEW'), content: 'OLD' },
       { name: 'hi', description: 'same name as a command', location: await write('cfg/skills', 'hi', 'BODY-HI') },
       { name: 'proj-only', description: 'from project', location: await write('work/.opencode/skills', 'proj-only', 'BODY-PROJ') },
+      { name: 'compact', description: 'same name as an app command', location: await write('cfg/skills', 'compact', 'BODY-COMPACT') },
     ]
     started.ctx.plugin(SlashTrigger)
     return { ...started, dir }
   }
 
-  it('후보: 명령 다음에 "스킬" 그룹 — 명령과 같은 이름·내장은 빠진다', async () => {
+  it('후보: 명령 다음에 "스킬" 그룹 — 앱 명령·명령과 같은 이름·내장은 빠진다', async () => {
     const { ctx, triggers, dir } = await withSkills()
     ctx.plugin(SkillsService)
     await settle()
     const candidates = (await triggers.query(scope, '/', 1))?.candidates ?? []
-    expect(candidates.map((entry) => `${entry.group}:${entry.label}`)).toEqual(['명령:/init', '명령:/hi', '스킬:/proj-only', '스킬:/review-pr'])
+    expect(candidates.map((entry) => `${entry.group}:${entry.label}`)).toEqual(['앱:/compact', '앱:/clear', '명령:/init', '명령:/hi', '스킬:/proj-only', '스킬:/review-pr'])
     expect(candidates.at(-1)).toMatchObject({ icon: 'skill', detail: 'review a PR' })
     expect(await triggers.pick(scope, '/', 'review-pr', 'pick')).toEqual({ kind: 'insert', text: '/review-pr ' })
     await fs.rm(dir, { recursive: true, force: true })
@@ -268,7 +308,7 @@ describe('/ 스킬', () => {
   it('스킬 기능이 꺼져 있으면(ctx.skills 없음) 후보도 실행도 없다', async () => {
     const { triggers, dir } = await withSkills()
     await settle()
-    expect((await triggers.query(scope, '/', 1))?.candidates.map((entry) => entry.label)).toEqual(['/init', '/hi'])
+    expect((await triggers.query(scope, '/', 1))?.candidates.map((entry) => entry.label)).toEqual(['/compact', '/clear', '/init', '/hi'])
     expect(await triggers.submit(scope, '/review-pr x')).toEqual({ kind: 'error', message: '모르는 명령입니다: /review-pr' })
     await fs.rm(dir, { recursive: true, force: true })
   })

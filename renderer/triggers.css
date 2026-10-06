@@ -46,12 +46,21 @@
   color: var(--text-tertiary);
 }
 
+/* `/` 메뉴 줄(앱·명령·스킬)의 아이콘 — 글자색보다 한 단계 옅게 (이슈 #144 시안 B) */
+.trigger-menu__icon--slash {
+  color: var(--text-secondary);
+}
+
 .trigger-menu__name {
   flex: none;
   max-width: 50%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.trigger-menu__name--slash {
+  font-weight: 500;
 }
 
 .trigger-menu__detail {

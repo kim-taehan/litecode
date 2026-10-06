@@ -34,7 +34,7 @@ export type { Subtask, TurnItem } from '../src/services/turnProgress.ts'
 export type { FileDiff } from '../src/services/toolDiffs.ts'
 export type { Project } from '../src/services/projects.ts'
 export type { Conversation, ShellCard } from '../src/services/sessions.ts'
-export type { TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
+export type { AppCommand, TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
 export type { Appearance, Settings } from '../src/services/settings.ts'
 export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
@@ -106,6 +106,7 @@ export const Channel = {
   TURN_ATTENTION: 'chat:attention',
   REPLY_ATTENTION: 'chat:reply-attention',
   STOP_TURN: 'chat:stop',
+  COMPACT_CHAT: 'chat:compact',
   STOP_SUBTASK: 'chat:stop-subtask',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
@@ -276,6 +277,9 @@ export interface LitecodeBridge {
   /** 답변 중지 — 그 대화의 도는 턴을 멈춘다(엔진 턴도). 그 턴은 "중단됨"(interrupted) 으로 끝난다 (onTurnEnded). 쌓인 대기열은 보내지 않고
    *  붙잡힌다(onQueueChanged 의 held) — takeQueue 로 입력창에 되돌린다. 도는 턴이 없으면 false */
   stopTurn(conversationId: string): Promise<boolean>
+  /** `/compact` — 그 대화를 요약해 컨텍스트를 줄인다. 요약은 한 턴처럼 돈다 (onTurnStarted → 요약 줄 onTurnProgress → onTurnEnded, 멈춤은 stopTurn).
+   *  턴이 도는 중이거나 아직 한 번도 안 보낸 대화면 시작하지 않고 그 사유를 준다 */
+  compactChat(conversationId: string): Promise<{ ok: true } | { ok: false; error: string }>
   /** 도는 턴의 하위 작업 하나만 멈춘다 (subtaskId = 그 하위 작업 진행 줄의 id) — 턴은 이어 간다. 도는 턴의 하위 작업이 아니면 false */
   stopSubtask(subtaskId: string): Promise<boolean>
   /** 답의 인라인 코드 중 그 프로젝트 안의 실제 파일인 것만 (받은 글자 그대로) — 파일 언급 칩 */

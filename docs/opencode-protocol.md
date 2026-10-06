@@ -143,6 +143,14 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     게이트웨이가 큰 max_tokens 를 거절하는지는 미측정. 보고 토큰이 문턱을 넘은 스텝 뒤, 그리고 게이트웨이 한도 초과(`ContextOverflowError`) 뒤에(한도를 비워도) 돈다.
     순서: 요약 user(compaction 파트) → 요약 답(summary:true) → 이음 user(합성 "Continue…" 또는 앞 user 복사본) → `session.compacted` → 그 답 → idle. 요약도 넘치면 이음 없이 idle.
     `ctx.llm` 은 턴 안의 요약·이음 user 를 그 턴 것으로 보고 이음의 답을 그 턴 답으로 쓴다
+  - **손으로 부르는 요약** (#144, 실측 2026-10-06 가짜 LLM): 레거시 `POST /session/{id}/summarize?directory=` 본문 `{providerID, modelID, auto?}` — 둘 다 **필수**(빠지면 400 `Missing key`),
+    추가 필드 불가(messageID 를 못 정한다). 응답 200 `true` 는 요약이 **끝나거나 멈춘 뒤**에 온다(가짜 LLM 2.5초 → 2.55초) — 진행은 `/event` 로 본다.
+    순서: user(엔진이 id 를 정함, 파트 `compaction{auto:false}`, 글 없음) → busy → 요약 답(`summary:true`, agent `compaction`, parentID = 그 user) → `session.compacted` → idle. **이음 user 가 없다.**
+    요약 요청은 도구 없이 `<conversation>` 을 실어 그 모델로 간다(`max_tokens` = limit.output). 빈 세션도 요약한다(LLM 을 부른다) → 앱이 막는다. 요약 뒤 다음 턴은 정상.
+    **멈춘 요약은 다음 프롬프트를 삼킨다 (3/3)**: abort 는 200 `true` → `session.error(MessageAbortedError)` → idle, 요약 답은 그 오류로 남는다. 그 뒤 첫 프롬프트는 답 대신
+    요약 답(parentID = 새 user, summary:true)만 만들고 idle 이다 — 사용자의 글이 답을 못 받는다. `DELETE /session/{id}/message/{id}?directory=`(200 `true`)로 요약 답·요약 user 를 지우면
+    다음 턴이 정상이다(3/3, 요약 user 만 지워도 되지만 고아 요약 답이 기록에 남는다). `ctx.llm.compact` 는 끝나지 않은 손 요약을 늘 지운다. 신규 세대 `POST /api/session/{id}/compact`(204)는 안 쟀다.
+    자동 요약을 멈춘 뒤에도 같은지는 **안 쟀다**
   - **diff** (#20): `apply_patch` 는 모델 id 에 `gpt-` 가 있을 때만 있고 그때는 edit·write 가 없다. edit `metadata.filediff{file(절대), patch}`, write `metadata{filepath, exists}`,
     apply_patch `metadata.files[]{filePath, type, patch}`. git 이 아닌 폴더의 worktree 는 `/` — 경로는 세션 폴더 기준으로 앱이 계산
   - **하위 작업(task)** (#31, 실측 2026-10-02 `_workspace/probe-31/`): 한 메시지의 task 여럿은 동시에 돈다. 자식 세션은 `session.created{info.parentID}`, 부모 task 파트

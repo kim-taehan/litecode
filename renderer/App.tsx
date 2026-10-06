@@ -562,6 +562,13 @@ export function App() {
     setDraft,
     onSend: (text, display) => send({ text, display }),
     onShell: (_directory, command) => void runShell(command),
+    onApp: async (command) => {
+      if (command === 'clear') return void startNewChat()
+      if (!active) return undefined
+      // 아직 한 번도 안 보낸 대화(메인에 없다)도 메인이 "요약할 내용이 없다" 로 답한다
+      const started = await window.litecode.compactChat(active.id)
+      return started.ok ? undefined : started.error
+    },
   })
   /** 음성 입력 (이슈 #109) — 받아쓴 글은 녹음을 시작한 대화의 초안에 넣기만 한다 (VoiceInput.tsx) */
   const voice = useVoiceInput({

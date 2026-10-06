@@ -78,6 +78,9 @@ export interface ChatLive {
 /** 대화 id → 지금 모습. 도는 턴도 대기열도 없는 대화는 빠진다 */
 export type ChatSnapshot = Record<string, ChatLive>
 
+/** 손으로 부른 요약(ctx.chat.compact, 이슈 #144)의 내 말 — 사용자가 친 앱 명령 그대로 */
+export const COMPACT_COMMAND = '/compact'
+
 /** 대화 제목 = 첫 메시지의 첫 줄. 목록 행은 흘러가며·옆 카드는 줄바꿈해 전체를 보이므로 카드가 너무 커지지 않을 만큼만 자른다 */
 export const TITLE_MAX = 80
 
