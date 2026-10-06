@@ -1,0 +1,106 @@
+/* 만들기 도구(스킬·MCP 서버·훅, 이슈 #145 시안 mock-make)의 승인 카드 내용 — 무엇을 등록하는지 보이는 상자. 라디오 줄·경고 상자는 delegation.css */
+.make-card__box {
+  flex: none;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.make-card__box--stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.make-card__box--grid {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: baseline;
+}
+
+.make-card__label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.make-card__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.make-card__value b,
+.make-card__name {
+  font-weight: 600;
+}
+
+.make-card__value[data-mono],
+.make-card__body {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.make-card__var {
+  display: block;
+}
+
+.make-card__secret {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.make-card__command {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--module);
+  white-space: pre-wrap;
+}
+
+.make-card__description {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.make-card__body {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--module);
+  font-size: 12px;
+  line-height: 19px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.make-card__body[data-open] {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.make-card__toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.make-card__toggle:hover {
+  text-decoration: underline;
+}
+
+/* 저장될 자리(경로)는 길 수 있다 — 줄 안에서 줄인다 */
+.make-card__where {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

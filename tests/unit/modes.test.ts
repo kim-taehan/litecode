@@ -78,8 +78,14 @@ describe('modePermission — 하위 작업 (자식은 부모 모드 권한을 �
     for (const permission of ['glob', 'grep']) expect(child(permission, ['*.ts']), permission).toMatchObject({ build: 'allow', ask: 'allow', full: 'allow' })
   })
 
-  it('하위 작업은 보내기·읽기·결과물 도구와 task 를 못 쓴다', () => {
-    for (const permission of ['litecode_send_to_project', 'litecode_read_project', 'litecode_present', 'task']) {
+  it('만들기 도구(스킬·MCP 서버·훅, #145)는 전체 권한에서도 묻는다 — 계획엔 없다', () => {
+    for (const permission of ['litecode_create_skill', 'litecode_add_mcp_server', 'litecode_add_hook']) {
+      expect(row(permission), permission).toEqual({ plan: 'deny', build: 'ask', ask: 'ask', full: 'ask' })
+    }
+  })
+
+  it('하위 작업은 보내기·읽기·결과물·만들기 도구와 task 를 못 쓴다', () => {
+    for (const permission of ['litecode_send_to_project', 'litecode_read_project', 'litecode_present', 'litecode_create_skill', 'litecode_add_mcp_server', 'litecode_add_hook', 'task']) {
       expect(child(permission, ['general']), permission).toMatchObject({ build: 'deny', ask: 'deny', full: 'deny' })
     }
   })

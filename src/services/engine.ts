@@ -255,14 +255,19 @@ const SEND_TOOLS_ASK = { litecode_send_to_project: 'ask', ...READ_TOOL_ASK }
 const PRESENT_ALLOW = { litecode_present: 'allow' }
 const PRESENT_DENY = { litecode_present: 'deny' }
 const SEND_TOOLS_DENY = { litecode_send_to_project: 'deny', litecode_read_project: 'deny' }
+// 만들기 도구 셋 (이슈 #145 — create_skill·add_mcp_server·add_hook): 보내기 도구와 같은 모양이다 — 전역 deny + 기본·전체 권한에 개별 ask, 매번 묻기는
+// 와일드카드 ask, 계획은 `*_*: deny` 그대로(도구가 없다), general-ask 는 맨 뒤 개별 deny. **전체 권한에서도 묻는다** — 훅·MCP 는 이 PC 에서 명령이
+// 도는 일이라 "전체 권한" 이 대신 승인하지 않는다 (사용자 결정 2026-10-06). ⚠️ 따로 실측하지 않았다 — 보내기의 같은 모양(9/9)에 기댄다
+const MAKE_TOOLS_ASK = { litecode_create_skill: 'ask', litecode_add_mcp_server: 'ask', litecode_add_hook: 'ask' }
+const MAKE_TOOLS_DENY = { litecode_create_skill: 'deny', litecode_add_mcp_server: 'deny', litecode_add_hook: 'deny' }
 const LIST_TOOL_ALLOW = { litecode_list_projects: 'allow' }
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
   plan: { '*_*': 'deny', litecode_open_file: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ASK, ...PRESENT_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
-  [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...PRESENT_ALLOW },
+  [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW },
   [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open_file: 'allow', litecode_open_terminal: 'allow', ...LIST_TOOL_ALLOW, ...PRESENT_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
-  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...PRESENT_ALLOW },
+  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW },
   // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
-  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...SEND_TOOLS_DENY },
+  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...MAKE_TOOLS_DENY, ...SEND_TOOLS_DENY },
 }
 
 // 브라우저 도구 (`chrome_*`, 이슈 #147 — 실측·권고 _workspace/01aj_playwright_mcp.md §4, 도구 갈래는 shared/browser.ts). ctx.browser 가 동봉한
@@ -477,7 +482,7 @@ export function engineConfig(
     : Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
   // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
   const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
-  const permission = { ...SUBAGENT_ASK_DENY, ...SEND_TOOLS_DENY, ...PRESENT_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
+  const permission = { ...SUBAGENT_ASK_DENY, ...SEND_TOOLS_DENY, ...MAKE_TOOLS_DENY, ...PRESENT_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
   const ruled: Record<string, { permission: Permission }> = skillRule
     ? Object.fromEntries(Object.entries(agent).map(([name, def]) => [name, { ...def, permission: withLast(def.permission, 'skill', skillRule) as Permission }]))
     : agent

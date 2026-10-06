@@ -49,6 +49,7 @@ import { OpenTerminalTool } from '../src/services/appMcp/tools/openTerminal.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
+import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
@@ -595,6 +596,7 @@ const features: FeatureDefinition[] = [
       ctx.plugin(OpenFileTool)
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
+      ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
       ctx.plugin(appMcpBridge)
     },
   },

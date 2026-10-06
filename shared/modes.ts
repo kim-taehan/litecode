@@ -32,6 +32,8 @@ const ASKING_SUBAGENT = 'general-ask'
 const APP_SEND_TOOL = 'litecode_send_to_project'
 /** 다른 프로젝트의 대화 읽기 — 계획 모드에서도 묻고 쓴다 (이슈 #137) */
 const APP_READ_TOOL = 'litecode_read_project'
+/** 스킬·MCP 서버·훅 만들기 (이슈 #145) — 전체 권한에서도 묻는다, 계획·하위 작업에는 없다 */
+const APP_MAKE_TOOLS = ['litecode_create_skill', 'litecode_add_mcp_server', 'litecode_add_hook']
 
 /** `.env` 파일 읽기 — 엔진 기본이 묻는다 (`.env.example` 은 아니다) */
 function readsEnvFile(resources: readonly string[]): boolean {
@@ -57,7 +59,7 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
       if (mode === 'plan') return browser === 'read' ? 'allow' : 'deny'
       return asking || browser === 'ask' ? 'ask' : 'allow'
     }
-    if (permission === APP_SEND_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
+    if (permission === APP_SEND_TOOL || APP_MAKE_TOOLS.includes(permission)) return child || mode === 'plan' ? 'deny' : 'ask'
     if (permission === APP_READ_TOOL) return child ? 'deny' : 'ask'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'
     if (child) return asking ? 'ask' : 'allow'

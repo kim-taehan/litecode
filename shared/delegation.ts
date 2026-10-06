@@ -5,6 +5,7 @@
 import type { ChatOrigin } from './chat.ts'
 import type { Mode } from './modes.ts'
 import type { AttentionTarget } from './contract.ts'
+import { scopeTarget } from './make.ts'
 
 /** 앱 MCP 서버 이름 (src/services/mcp.ts 의 APP_MCP_NAME 과 같다 — 화면은 서비스 파일을 import 못 한다) */
 export const DELEGATION_SERVER = 'litecode'
@@ -70,5 +71,5 @@ export function widerMode(target: Mode, sender: Mode): boolean {
 export function attentionTarget(value: unknown): AttentionTarget | undefined {
   const target = value as { kind?: unknown; conversationId?: unknown } | null | undefined
   if (target?.kind === 'conversation' && typeof target.conversationId === 'string' && target.conversationId) return { kind: 'conversation', conversationId: target.conversationId }
-  return undefined
+  return scopeTarget(value) // 스킬·MCP 서버·훅 만들기의 "저장할 곳" (이슈 #145)
 }
