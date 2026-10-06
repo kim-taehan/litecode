@@ -14,23 +14,29 @@ export const BROWSER_READ_TOOLS = [
   'browser_wait_for',
 ] as const
 
-/** 페이지 밖으로 나가는 것이 없는 조작 (창 크기·미디어 흉내·페이지 닫기) — 기본·전체 권한에서 묻지 않는다 */
-export const BROWSER_QUIET_TOOLS = ['browser_resize', 'browser_emulate_media', 'browser_close'] as const
+/** 페이지 밖으로 나가는 것이 없는 조작 (창 크기·미디어 흉내·페이지 닫기·이미 열린 페이지 안의 클릭·키·선택) — 기본·전체 권한에서 묻지 않는다 */
+export const BROWSER_QUIET_TOOLS = [
+  'browser_resize',
+  'browser_emulate_media',
+  'browser_close',
+  // 이미 열린 페이지 안의 조작 — 프로젝트 내용을 새 주소로 실어 보낼 수 없다(주소·입력·스크립트는 아래 ASK). 사용자 요청(2026-10-06 "승인을 계속 요청하네"):
+  // 기본·전체 권한에서 묻지 않는다. 로그인해 둔 사이트에서 누르면 그 사이트의 일이 일어난다는 점은 남는다 — 매번 묻기 모드는 전부 묻는다
+  'browser_click',
+  'browser_hover',
+  'browser_drag',
+  'browser_press_key',
+  'browser_select_option',
+  'browser_handle_dialog',
+  'browser_navigate_back',
+] as const
 
 /** 페이지를 바꾸거나 밖으로 내보낼 수 있는 것 — **전체 권한에서도 묻는다**: 페이지 내용은 그대로 모델에 들어가고(프롬프트 주입) 주소·입력·스크립트는
  *  프로젝트 내용을 임의 주소로 실어 보낼 수 있는데, 승인 요청의 patterns 가 `["*"]` 뿐이라 주소별 규칙을 못 건다 (다른 프로젝트에 보내기 도구와 같은 모양) */
 export const BROWSER_ASK_TOOLS = [
   'browser_navigate',
-  'browser_navigate_back',
   'browser_tabs',
-  'browser_click',
-  'browser_hover',
-  'browser_drag',
-  'browser_press_key',
   'browser_type',
   'browser_fill_form',
-  'browser_select_option',
-  'browser_handle_dialog',
   'browser_evaluate',
   // 요청·응답의 헤더와 본문이 모델에 들어간다 — 전용 프로필에 로그인해 두고 쓰므로(쿠키·토큰이 실린다) 읽기지만 묻는다
   'browser_network_requests',
