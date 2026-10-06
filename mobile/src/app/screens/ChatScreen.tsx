@@ -155,7 +155,9 @@ function UserMessage({ message }: { message: HistoryMessage }) {
   return (
     <View style={styles.userTurn}>
       {shape.attachments.length > 0 && <Text style={styles.userMeta}>{shape.attachments.join(' · ')}</Text>}
-      {shape.origin !== undefined && <Text style={styles.userMeta}>{S.delegatedFrom(shape.origin)}</Text>}
+      {shape.origin !== undefined && (
+        <Text style={styles.userMeta}>{shape.originProject ? S.delegatedFromProject(shape.originProject, shape.origin) : S.delegatedFrom(shape.origin)}</Text>
+      )}
       {shape.text !== '' && (
         <View style={styles.bubble}>
           <Text style={styles.bubbleText}>{shape.text}</Text>

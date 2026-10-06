@@ -9,7 +9,7 @@ import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
 import { addTurn, type ChatUsage } from '../../shared/usage.ts'
 import { upsertItem } from '../../shared/chatReducer.ts'
-import { chipsOf, queueLabel, titleFrom, TITLE_MAX, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
+import { chipsOf, queueLabel, titleFrom, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
 import type { Mode } from '../../shared/modes.ts'
 import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
@@ -303,7 +303,7 @@ export class ChatService extends Service {
         id: cid,
         project,
         engineSessionId: existing?.engineSessionId,
-        title: existing ? existing.title : item.title || titleFrom(shown || (files[0]?.name ?? '')), // 글 없이 첨부만 보냈으면 첫 파일 이름
+        title: existing ? existing.title : titleFrom(shown || (files[0]?.name ?? '')), // 글 없이 첨부만 보냈으면 첫 파일 이름
         updatedAt: Date.now(),
         model, // 보낸 대화는 그 모델에 묶인다 — 나중에 다른 대화에서 고른 것을 따라가지 않는다
         mode, // 모드도 — 설정의 기본 모드가 나중에 바뀌어도 이 대화는 그대로
@@ -460,8 +460,7 @@ function clean(input: QueuedSend): QueuedSend {
     ...(typeof input.origin === 'string' && { origin: input.origin }),
     // 보낸 대화는 출처가 다른 대화일 때만 — 사람이 보낸 것에 딱지가 붙지 않게
     ...(typeof input.origin === 'string' && input.origin !== 'user' && typeof input.from?.conversationId === 'string' && typeof input.from.title === 'string' && {
-      from: { conversationId: input.from.conversationId, title: input.from.title },
+      from: { conversationId: input.from.conversationId, title: input.from.title, ...(typeof input.from.project === 'string' && { project: input.from.project }) },
     }),
-    ...(typeof input.title === 'string' && input.title.trim() && { title: input.title.trim().slice(0, TITLE_MAX) }),
   }
 }

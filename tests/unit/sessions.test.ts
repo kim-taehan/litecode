@@ -367,3 +367,42 @@ describe('SessionsService — 대화 이름 바꾸기 (이슈 #63)', () => {
     expect((await again.rename('c1', '두 번째 이름'))!.title).toBe('두 번째 이름')
   })
 })
+
+// 이슈 #137 — 프로젝트마다 사용자가 마지막에 보던 대화. 앱 MCP 의 세션 도구가 "다른 프로젝트의 받을 대화" 로 쓴다
+describe('SessionsService — 마지막에 보던 대화 (이슈 #137)', () => {
+  it('열면 그 프로젝트의 것으로 적힌다 — 프로젝트마다 하나, 다시 켜도 남는다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1'))
+    await sessions.save(conversation('c2'))
+    await sessions.save(conversation('c3', { project: '/work/b' }))
+    expect(await sessions.lastViewed()).toEqual({})
+    await sessions.noteViewed('c1')
+    await sessions.noteViewed('c3')
+    await sessions.noteViewed('c2')
+    expect(await sessions.lastViewed()).toEqual({ '/work/a': 'c2', '/work/b': 'c3' })
+    const again = await start()
+    expect(await again.sessions.lastViewed()).toEqual({ '/work/a': 'c2', '/work/b': 'c3' })
+  })
+
+  it('저장 안 된(빈 새) 대화는 적지 않는다', async () => {
+    const { sessions } = await start()
+    await sessions.save(conversation('c1'))
+    await sessions.noteViewed('c1')
+    await sessions.noteViewed('blank')
+    expect(await sessions.lastViewed()).toEqual({ '/work/a': 'c1' })
+  })
+
+  it('다른 저장·지우기가 덮지 않는다. 보던 대화가 지워져도 다른 대화로 바꾸지 않는다 (가리키는 대화가 목록에 없을 뿐)', async () => {
+    const { sessions } = await start({ limit: 1 })
+    await sessions.save(conversation('c1', { updatedAt: 1 }))
+    await sessions.noteViewed('c1')
+    await sessions.save(conversation('c2', { updatedAt: 2 })) // 보관 개수를 넘어 c1 이 지워진다
+    await sessions.attach('c2', 'ses_2')
+    expect(ids(await sessions.list())).toEqual(['c2'])
+    expect(await sessions.lastViewed()).toEqual({ '/work/a': 'c1' })
+    await sessions.noteViewed('c2')
+    await sessions.remove('c2')
+    await settle()
+    expect(await sessions.lastViewed()).toEqual({ '/work/a': 'c2' })
+  })
+})

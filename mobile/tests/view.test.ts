@@ -76,6 +76,8 @@ describe('view — 상태를 화면 글로', () => {
   it('userMessageView: 다른 대화가 보낸 지시는 딱지를 단다 — 내가 친 글과 가른다', () => {
     expect(userMessageView({ role: 'user', text: '빌드해', origin: { conversationId: 'x', title: '기획' } })).toEqual({ kind: 'bubble', text: '빌드해', attachments: [], origin: '기획' })
     expect(userMessageView({ role: 'user', text: '빌드해', origin: { conversationId: 'x', title: '' } })).toEqual({ kind: 'bubble', text: '빌드해', attachments: [], origin: '새 대화' })
+    // 다른 프로젝트에서 온 지시 (이슈 #137) — 보낸 프로젝트 이름이 같이 온다
+    expect(userMessageView({ role: 'user', text: '빌드해', origin: { conversationId: 'x', title: '기획', project: 'shop-web' } })).toEqual({ kind: 'bubble', text: '빌드해', attachments: [], origin: '기획', originProject: 'shop-web' })
   })
 
   it('questionView: 질문 하나 + 보기 + 하나 고르기만 폰에서 답한다 — 그 밖(보기 없음·여러 질문·여럿 고르기)은 데스크탑으로', () => {

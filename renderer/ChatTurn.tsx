@@ -183,10 +183,10 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   const [open, setOpen] = useState(false)
   const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
-  const { peers } = useDelegation()
+  const { peers, targets } = useDelegation()
   if (item.kind === 'subtask') return <SubtaskRow item={item} directory={directory} turnRunning={turnRunning} />
-  // 다른 대화에 지시 보내기·결과 읽기 (앱 MCP 의 세션 도구, 이슈 #55) — "MCP · 서버 · 도구" 대신 받는 대화의 제목과 지금 상태
-  const delegation = delegationLine(item, peers)
+  // 다른 프로젝트에 지시 보내기·결과 읽기 (앱 MCP 의 세션 도구, 이슈 #55·#137) — "MCP · 서버 · 도구" 대신 받는 프로젝트·대화와 지금 상태
+  const delegation = delegationLine(item, targets, peers)
   if (delegation) return <DelegationRow line={delegation} />
   // 성공한 할 일 목록 쓰기 (이슈 #83) — 도구 줄 대신 "할 일 · 완료 2/5" + 체크리스트
   if (item.kind === 'tool' && item.todos) return <TodoRow todos={item.todos} />

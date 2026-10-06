@@ -5,7 +5,7 @@ import type { EnginePart } from '../../src/services/turnProgress.ts'
 // 부른 대화 찾기 (이슈 #55, 01z 1-2) — 앱 MCP 서버의 호출 요청에는 "누가 불렀나" 가 없다. 그 폴더에서 같은 도구·같은 인자로 running 인
 // 도구 파트를 찾아 세션·callID 를 얻는다. 승인 기록: 사용자가 앱에서 허용한 callID 만 approved 다 (한 번 쓰면 소진)
 
-const TOOL = 'litecode_send_to_session'
+const TOOL = 'litecode_send_to_project'
 const part = (callID: string, status: string, input: unknown, sessionID = 'ses_a', tool = TOOL): EnginePart => ({ type: 'tool', tool, callID, sessionID, state: { status, input } })
 const live = (sessionId: string, workdir = '/p'): LiveCalls => ({ sessionId, workdir, calls: new ToolCalls() })
 const ARGS = { session: 'c-1', message: 'hi' }
@@ -28,7 +28,7 @@ describe('ToolCalls', () => {
     expect(calls.matching(TOOL, { nested: { a: [1, 2] }, message: 'hi', session: 'c-1' })).toHaveLength(1) // 키 순서는 상관없다
     expect(calls.matching(TOOL, { session: 'c-1', message: 'hi', nested: { a: [1, 3] } })).toEqual([])
     expect(calls.matching(TOOL, { session: 'c-1', message: 'hi' })).toEqual([])
-    expect(calls.matching('litecode_start_session', { session: 'c-1', message: 'hi', nested: { a: [1, 2] } })).toEqual([])
+    expect(calls.matching('litecode_read_project', { session: 'c-1', message: 'hi', nested: { a: [1, 2] } })).toEqual([])
   })
 
   it('승인 기록 — 허용한 callID 만 approved 이고, 한 번 쓴 callID 는 다시 짝이 되지 않는다', () => {
@@ -59,7 +59,7 @@ describe('ToolCalls', () => {
     expect(calls.claim('call_1')).toEqual({ approved: true, target: { kind: 'conversation', conversationId: 'c9' } })
     expect(calls.claim('call_1')).toEqual({ approved: false })
     calls.observe(part('call_2', 'running', ARGS), false)
-    calls.approve('call_2', { kind: 'new' })
+    calls.approve('call_2', { kind: 'conversation', conversationId: 'c8' })
     calls.revoke('call_2')
     expect(calls.claim('call_2')).toEqual({ approved: false })
   })
@@ -76,8 +76,8 @@ describe('findCaller', () => {
   it('사용자가 고른 받을 대화가 부른 대화와 함께 온다 (이슈 #67)', () => {
     const a = live('ses_a')
     a.calls.observe(part('call_1', 'running', ARGS), false)
-    a.calls.approve('call_1', { kind: 'new' })
-    expect(findCaller([a], '/p', TOOL, ARGS)).toEqual({ sessionId: 'ses_a', callId: 'call_1', child: false, approved: true, target: { kind: 'new' } })
+    a.calls.approve('call_1', { kind: 'conversation', conversationId: 'c8' })
+    expect(findCaller([a], '/p', TOOL, ARGS)).toEqual({ sessionId: 'ses_a', callId: 'call_1', child: false, approved: true, target: { kind: 'conversation', conversationId: 'c8' } })
   })
 
   it('허용 기록이 없는 호출(엔진 API 로 스스로 허용)은 approved 가 false 다', () => {

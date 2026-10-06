@@ -247,8 +247,8 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           }
           // 앱 MCP 도구의 승인 (01z 1-3): 묻는 이벤트에는 인자가 없고, 그 순간 그 callID 의 파트가 running + input 이다
           if (ending === 'mcpask') {
-            part({ type: 'tool', id: 'prt_b', tool: 'litecode_send_to_session', callID: 'call_1', state: { status: 'running', input: MCP_ARGS } })
-            pending.permission = [{ id: 'per_1', sessionID: 'ses_1', permission: 'litecode_send_to_session', patterns: ['*'], metadata: {}, always: ['*'], tool: { messageID: A, callID: 'call_1' } }]
+            part({ type: 'tool', id: 'prt_b', tool: 'litecode_send_to_project', callID: 'call_1', state: { status: 'running', input: MCP_ARGS } })
+            pending.permission = [{ id: 'per_1', sessionID: 'ses_1', permission: 'litecode_send_to_project', patterns: ['*'], metadata: {}, always: ['*'], tool: { messageID: A, callID: 'call_1' } }]
             emit('permission.asked', { id: 'per_1' })
           }
           // 매번 묻기의 웹 가져오기 (이슈 #107, 01ai): permission.asked 는 요청 전체를 싣고 오지만 정본 목록은 400 이다
@@ -727,7 +727,7 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
 })
 
 describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)', () => {
-  const SEND = { server: 'litecode', tool: 'send_to_session' }
+  const SEND = { server: 'litecode', tool: 'send_to_project' }
 
   it('승인 카드에 그 도구 호출의 인자가 실린다(callID 로 running 파트에서). 앱에서 허용한 호출은 approved 이고 한 번 쓰면 소진된다', async () => {
     const url = await fakeOpencode('mcpask')
@@ -745,7 +745,7 @@ describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)
     })
     expect(result.ok).toBe(true)
     expect(shown[0]).toEqual([
-      { kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'litecode_send_to_session', resources: ['*'], mcp: SEND, input: JSON.stringify(MCP_ARGS) },
+      { kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'litecode_send_to_project', resources: ['*'], mcp: SEND, input: JSON.stringify(MCP_ARGS) },
     ])
     expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: true })
     expect(again).toBeUndefined()

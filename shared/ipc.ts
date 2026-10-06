@@ -80,6 +80,8 @@ export const Channel = {
   REMOVE_PROJECT: 'projects:remove',
   RENAME_PROJECT: 'projects:rename',
   LIST_CONVERSATIONS: 'sessions:list',
+  MARK_VIEWED: 'sessions:viewed',
+  LAST_VIEWED: 'sessions:last-viewed',
   SAVE_CONVERSATION: 'sessions:save',
   PATCH_CONVERSATION: 'sessions:patch',
   RENAME_CONVERSATION: 'sessions:rename',
@@ -231,6 +233,10 @@ export interface LitecodeBridge {
   renameProject(directory: string, name: string): Promise<Project[]>
   /** 저장된 대화 목록 정보 — 모든 프로젝트, 맨 앞이 가장 최근에 만든 것 */
   listConversations(): Promise<Conversation[]>
+  /** 사용자가 그 (저장된) 대화를 열어 보고 있다 — 그 프로젝트의 "마지막에 보던 대화" 로 저장한다 (이슈 #137, ctx.sessions.noteViewed) */
+  markViewed(conversationId: string): Promise<void>
+  /** 프로젝트 경로 → 그 프로젝트에서 마지막에 보던 대화 id (앱을 껐다 켜도 남는다) — 다른 프로젝트에 지시를 보낼 때 받는 대화 */
+  lastViewed(): Promise<Record<string, string>>
   /** 넣거나 고친다. 그 프로젝트가 보관 개수를 넘어 지운 대화 id 를 준다. 보낸 대화의 저장은 메인(ctx.chat)이 한다 — 화면은 `!명령` 만
    *  돌린 새 대화를 목록에 넣을 때만 쓴다 */
   saveConversation(conversation: Conversation): Promise<string[]>

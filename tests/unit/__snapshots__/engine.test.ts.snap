@@ -3,8 +3,8 @@
 exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부): 모드마다 스냅숏 — 계획·기본·매번 묻기·전체 권한 + 하위 에이전트 1`] = `
 {
   "build": [
-    "litecode_send_to_session: "ask"",
-    "litecode_start_session: "ask"",
+    "litecode_send_to_project: "ask"",
+    "litecode_read_project: "ask"",
     "litecode_present: "allow"",
     "bash: "ask"",
     "edit: "ask"",
@@ -37,8 +37,8 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "*_*: "ask"",
     "plan_enter: "deny"",
     "plan_exit: "deny"",
-    "litecode_send_to_session: "deny"",
-    "litecode_start_session: "deny"",
+    "litecode_send_to_project: "deny"",
+    "litecode_read_project: "deny"",
     "litecode_present: "deny"",
   ],
   "general-ask": [
@@ -51,8 +51,8 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "plan_enter: "deny"",
     "plan_exit: "deny"",
     "litecode_present: "deny"",
-    "litecode_send_to_session: "deny"",
-    "litecode_start_session: "deny"",
+    "litecode_send_to_project: "deny"",
+    "litecode_read_project: "deny"",
     "glob: "ask"",
     "grep: "ask"",
     "read: "ask"",
@@ -77,13 +77,12 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "litecode_present: "ask"",
     "litecode_open_file: "ask"",
     "litecode_open_terminal: "ask"",
-    "litecode_list_sessions: "ask"",
-    "litecode_read_session: "ask"",
+    "litecode_list_projects: "ask"",
   ],
   "litecode-full": [
     "*: "allow"",
-    "litecode_send_to_session: "ask"",
-    "litecode_start_session: "ask"",
+    "litecode_send_to_project: "ask"",
+    "litecode_read_project: "ask"",
     "litecode_present: "allow"",
     "bash: "ask"",
     "edit: "ask"",
@@ -103,6 +102,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "websearch: "deny"",
     "task: "deny"",
     "*_*: "deny"",
+    "litecode_read_project: "ask"",
     "external_directory: "ask"",
     "doom_loop: "ask"",
     "glob: "ask"",
@@ -112,8 +112,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "todowrite: "ask"",
     "litecode_present: "ask"",
     "litecode_open_file: "ask"",
-    "litecode_list_sessions: "ask"",
-    "litecode_read_session: "ask"",
+    "litecode_list_projects: "ask"",
   ],
 }
 `;

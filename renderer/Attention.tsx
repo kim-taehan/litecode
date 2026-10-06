@@ -3,7 +3,7 @@ import type { Attention, AttentionAnswer, AttentionQuestion, AttentionTarget } f
 import { useT } from './settingsStore.ts'
 import { reason } from './ipcError.ts'
 import { TargetPickerBody, useDelegation } from './Delegation.tsx'
-import { NEW_TARGET, targetPicker } from './delegationView.ts'
+import { readRequest, targetPicker } from './delegationView.ts'
 import { QuestionDrafts } from './questionDrafts.ts'
 import './attention.css'
 
@@ -52,11 +52,13 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   const t = useT()
   const { busy, error, answer } = useAnswer(onAnswer)
   const known = (ACTIONS as readonly string[]).includes(request.action) ? (request.action as (typeof ACTIONS)[number]) : undefined
-  // 다른 대화에 지시 보내기 (이슈 #55·#67) — 보낼 때마다 받을 대화를 사용자가 고르고(AI 가 고른 대화가 먼저 선택돼 있다) 보낼 글 전문을 본다.
-  // 고른 대상은 허용과 함께 메인으로 간다 — 엔진에는 once 만 간다. "항상 허용" 은 이 도구에 특히 없어야 한다: 엔진의 always 는 그 폴더의
-  // 모든 대화에 걸린다 (01z 1-3)
-  const { peers, self } = useDelegation()
-  const delegation = targetPicker(request, peers, self)
+  // 다른 프로젝트에 지시 보내기 (이슈 #55·#67·#137) — 보낼 때마다 받을 프로젝트를 사용자가 고르고(AI 가 고른 곳이 먼저 선택돼 있다) 보낼 글
+  // 전문을 본다. 고른 대상은 허용과 함께 메인으로 간다 — 엔진에는 once 만 간다. "항상 허용" 은 이 도구에 특히 없어야 한다: 엔진의 always 는
+  // 그 폴더의 모든 대화에 걸린다 (01z 1-3)
+  const { targets, self } = useDelegation()
+  const delegation = targetPicker(request, targets, self)
+  /** 다른 프로젝트의 대화 읽기 (이슈 #137) — 읽을 곳(프로젝트 · 대화)을 보이는 보통의 승인 카드 */
+  const reading = readRequest(request, targets)
   const [picked, setPicked] = useState(delegation?.initial)
   /** 지금 고른 줄 — 고른 대화가 그사이 목록에서 빠졌으면(지워짐) 없다. 없으면 보낼 수 없다 */
   const chosen = delegation?.choices.find((choice) => choice.key === picked)
@@ -73,7 +75,7 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
     else answer('reject')
   }
   return (
-    <div className="attention-card" data-kind="permission" data-delegation={delegation?.kind} aria-busy={busy} onKeyDown={keydown}>
+    <div className="attention-card" data-kind="permission" data-delegation={delegation ? 'send' : undefined} aria-busy={busy} onKeyDown={keydown}>
       <div className="attention-card__strip">
         <span className="attention-card__dot" aria-hidden="true" />
         {t('approval.waiting')}
@@ -84,11 +86,13 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
           <TargetPickerBody picker={delegation} selected={chosen?.key} disabled={busy} onSelect={setPicked} />
         ) : (
           <div className="attention-card__headline">
-            {request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
+            {reading !== undefined ? t('delegate.card.read') : request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
           </div>
         )}
         {/* MCP 도구 요청의 patterns 는 늘 ["*"] 라 서버·도구 이름을 보인다 (이슈 #28) */}
-        {delegation ? null : request.mcp ? (
+        {delegation ? null : reading !== undefined ? (
+          <div className="attention-card__command">{reading}</div>
+        ) : request.mcp ? (
           <div className="attention-card__command" data-mcp={`${request.mcp.server}/${request.mcp.tool}`}>
             {`${t('mcp.chat')} · ${request.mcp.server} · ${request.mcp.tool}`}
           </div>
@@ -111,7 +115,7 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
           {t('approval.reject')}
         </button>
         <button type="button" className="attention-card__button attention-card__button--primary" disabled={busy || (!!delegation && !chosen)} onClick={allow}>
-          {!delegation ? t('approval.allowOnce') : chosen?.key === NEW_TARGET ? t('delegate.pick.sendNew') : t('delegate.pick.send')}
+          {!delegation ? t('approval.allowOnce') : chosen ? t('delegate.pick.send', { project: chosen.project.name }) : t('delegate.pick.sendNone')}
         </button>
       </div>
     </div>

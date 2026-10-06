@@ -21,6 +21,9 @@ export type { Conversation, ShellCard } from '../../shared/contract.ts'
 // 고정한 대화(이슈 #79)는 이 개수에 세지 않고 자동으로 지우지 않는다 — 고정 안 한 것만 limit 개.
 // 지우기(제한·수동 모두)는 목록에서 빼고 엔진 세션도 지운다. 엔진 삭제가 실패해도 목록에선 빼고 orphans 에 남겨 다음 시작 때 다시 지워 본다.
 // 프로젝트를 최근 목록에서 빼도 여기는 그대로다 — 같은 폴더를 다시 열면 대화가 돌아온다.
+//
+// 프로젝트마다 사용자가 마지막에 보던 대화(viewed, 이슈 #137)도 여기 둔다 — 화면이 대화를 열 때 알린다(noteViewed). 앱 MCP 의 세션 도구가
+// "다른 프로젝트의 받을 대화" 로 쓴다. 그 대화가 지워져도 다른 대화로 바꾸지 않는다 — 가리키는 대화가 없으면 그 프로젝트는 대상이 아니다.
 
 declare module 'cordis' {
   interface Context {
@@ -37,6 +40,8 @@ interface Stored {
   conversations: Conversation[]
   /** 목록에선 뺐지만 엔진에서 아직 못 지운 세션 id */
   orphans: string[]
+  /** 프로젝트 경로(대화의 project) → 그 프로젝트에서 마지막에 보던 대화 id */
+  viewed: Record<string, string>
 }
 
 export interface SessionsServiceOptions {
@@ -92,7 +97,7 @@ export class SessionsService extends Service {
         : [next, ...stored.conversations]
       const same = conversations.filter((entry) => entry.project === next.project && !entry.pinned)
       removed = [...same].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, Math.max(0, same.length - limit))
-      return dropping(conversations, stored.orphans, removed)
+      return { ...stored, ...dropping(conversations, stored.orphans, removed) }
     })
     if (removed.length > 0) {
       this.ctx.emit('sessions/removed', removed.map((entry) => entry.id))
@@ -207,9 +212,22 @@ export class SessionsService extends Service {
     return result
   }
 
+  /** 사용자가 그 대화를 열어 보고 있다 (이슈 #137) — 그 프로젝트의 "마지막에 보던 대화" 로 적는다. 저장 안 된(빈 새) 대화면 아무것도 안 한다 */
+  async noteViewed(id: string): Promise<void> {
+    await this.update((stored) => {
+      const conversation = stored.conversations.find((entry) => entry.id === id)
+      return conversation ? { ...stored, viewed: { ...stored.viewed, [conversation.project]: id } } : stored
+    })
+  }
+
+  /** 프로젝트 경로 → 마지막에 보던 대화 id. 그 대화가 지워졌어도 그대로 준다 (쓰는 쪽이 목록에서 찾는다) */
+  async lastViewed(): Promise<Record<string, string>> {
+    return (await this.read()).viewed
+  }
+
   /** 목록에서 빼고 엔진 세션도 지운다. 되돌리기 없음 */
   async remove(id: string): Promise<void> {
-    await this.update((stored) => dropping(stored.conversations, stored.orphans, stored.conversations.filter((entry) => entry.id === id)))
+    await this.update((stored) => ({ ...stored, ...dropping(stored.conversations, stored.orphans, stored.conversations.filter((entry) => entry.id === id)) }))
     this.ctx.emit('sessions/removed', [id])
     void this.sweep()
   }
@@ -278,15 +296,18 @@ export class SessionsService extends Service {
       const parsed = (await readJsonFile(this.opts.file, 'object')) as Partial<Record<keyof Stored, unknown>> | undefined
       const conversations = Array.isArray(parsed?.conversations) ? parsed.conversations.filter(isConversation).map(pick) : []
       const orphans = Array.isArray(parsed?.orphans) ? parsed.orphans.filter((entry): entry is string => typeof entry === 'string') : []
-      return { conversations, orphans }
+      const viewed = Object.fromEntries(
+        Object.entries(typeof parsed?.viewed === 'object' && parsed.viewed ? parsed.viewed : {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+      )
+      return { conversations, orphans, viewed }
     } catch {
-      return { conversations: [], orphans: [] }
+      return { conversations: [], orphans: [], viewed: {} }
     }
   }
 }
 
 /** 지울 대화를 목록에서 빼고 그 엔진 세션을 orphans 에 넣는다 */
-function dropping(conversations: Conversation[], orphans: string[], removed: Conversation[]): Stored {
+function dropping(conversations: Conversation[], orphans: string[], removed: Conversation[]): Pick<Stored, 'conversations' | 'orphans'> {
   return {
     conversations: conversations.filter((entry) => !removed.includes(entry)),
     orphans: [...orphans, ...removed.flatMap((entry) => (entry.engineSessionId ? [entry.engineSessionId] : []))],
