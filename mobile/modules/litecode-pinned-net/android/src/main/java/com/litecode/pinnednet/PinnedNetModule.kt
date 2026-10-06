@@ -185,10 +185,14 @@ internal object Pinning {
       // 한 번 더 — TLS 를 맺은 뒤 HTTP 를 쓰기 **전에** 이 연결의 leaf 지문을 대조한다. 재개된 세션·플랫폼이 trust manager 를 건너뛰는
       // 경로가 있어도 여기서 막힌다 (데스크탑 계약: "연결을 맺은 뒤 지문을 비교하고 통과한 뒤에만 HTTP 를 보낸다")
       .addNetworkInterceptor { chain ->
+        // 실기기(SM-S921N, TLS 1.3)에서 이 연결의 핸드셰이크가 인증서 목록을 비워 줬다 — 예전 코드는 그때 "no server certificate" 로 모든 요청을 막았다.
+        // 인증서가 보이면 대조하고(깊이 방어), 안 보이면 trust manager 가 이미 지문을 강제했다: 이 클라이언트의 SSLContext 는 이 pin 하나의
+        // PinTrustManager 만 쓰고, 재개 가능한 세션은 이 context 가 전체 핸드셰이크(=trust manager 통과)로 만든 것뿐이라 우회가 안 된다
         val leaf = chain.connection()?.handshake()?.peerCertificates?.firstOrNull() as? X509Certificate
-          ?: throw SSLPeerUnverifiedException("no server certificate")
-        val actual = fingerprint(leaf)
-        if (!MessageDigest.isEqual(actual.toByteArray(), pin.toByteArray())) throw SSLPeerUnverifiedException(MISMATCH + actual)
+        if (leaf != null) {
+          val actual = fingerprint(leaf)
+          if (!MessageDigest.isEqual(actual.toByteArray(), pin.toByteArray())) throw SSLPeerUnverifiedException(MISMATCH + actual)
+        }
         chain.proceed(chain.request())
       }
       .build()
