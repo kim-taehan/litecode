@@ -5,12 +5,14 @@ import './chat.ts'
 import './sessions.ts'
 import './projects.ts'
 import './providers.ts'
+import type { KeyCipher } from './providers.ts'
 import './settings.ts'
 import './notifications.ts'
 import { tr } from '../i18n.ts'
 import type { RemoteCarrier, RemoteExchange, RemoteOutcome, RemotePeer, RemoteReply, RemoteRequest, RemoteStreamSink } from './remote/carrier.ts'
 import { DeviceStore, FailureLimiter, type DevicePlatform, type StoredDevice } from './remote/devices.ts'
 import { EventLog } from './remote/eventLog.ts'
+import { loadNoiseIdentity, type NoiseIdentity } from './remote/noiseIdentity.ts'
 import { StreamQueue } from './remote/streamQueue.ts'
 import { confirmCode, groupCode, newPairCode, newShortPairCode, normalizePairCode } from './remote/pairing.ts'
 import { fingerprintCode } from '../../shared/remotePairing.ts'
@@ -90,6 +92,10 @@ export interface RemoteServiceOptions {
   /** 데스크탑 [허용] 을 기다리는 시간 */
   pairWaitMs?: number
   now?: () => number
+  /** 블루투스 Noise 정적 키 파일 (앱에서는 userData/remote-noise-key.json, 이슈 #171) — noiseIdentity() 가 처음 불릴 때 만든다 */
+  noiseKeyFile?: string
+  /** noiseKeyFile 의 비밀키를 봉하는 수단 (safeStorage) */
+  cipher?: KeyCipher
 }
 
 /** 데스크탑 [허용] 을 기다리는 짝짓기 요청 */
@@ -186,6 +192,7 @@ export class RemoteService extends Service {
   private disposed = false
   /** 이 실행에서 마지막으로 알린 주소 목록 (쉼표로 이음) — 바뀌면 addresses.changed */
   private announced?: string
+  private noise?: Promise<NoiseIdentity>
 
   constructor(
     ctx: Context,
@@ -286,6 +293,17 @@ export class RemoteService extends Service {
   /** 운반의 상태가 바뀌었다 (다시 바인딩한 주소·수신 시도) — 운반이 부른다. 주소가 바뀌었으면 폰에 `addresses.changed` 를 보낸다 */
   carrierChanged(): void {
     if (!this.disposed) this.changed()
+  }
+
+  /** 블루투스 Noise 채널의 데스크탑 정적 키쌍 (이슈 #171) — 처음 부를 때 읽거나 만든다. 블루투스 운반(③)이 쓰고 QR 의 bk 에 공개키를 싣는다.
+   *  봉한 키를 못 풀면 거절하고(키 파일은 그대로) 다음 호출에 다시 시도한다 */
+  noiseIdentity(): Promise<NoiseIdentity> {
+    if (!this.opts.noiseKeyFile) return Promise.reject(new Error('no bluetooth key file'))
+    this.noise ??= loadNoiseIdentity(this.opts.noiseKeyFile, this.opts.cipher).catch((error: unknown) => {
+      this.noise = undefined
+      throw error
+    })
+    return this.noise
   }
 
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용). 앞 코드는 버린다 */

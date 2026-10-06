@@ -14,6 +14,9 @@
     "apk": "node scripts/build-apk.mjs"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "expo": "~57.0.26",
     "expo-camera": "~57.0.6",
     "expo-notifications": "~57.0.21",

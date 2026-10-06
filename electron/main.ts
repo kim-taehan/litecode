@@ -583,7 +583,13 @@ const features: FeatureDefinition[] = [
     id: 'remote',
     service: 'remote',
     plugin: (ctx) => {
-      ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
+      ctx.plugin(RemoteService, {
+        file: path.join(userData, 'remote-devices.json'),
+        appVersion: app.getVersion(),
+        // 블루투스 Noise 키 — 블루투스 운반(#171 ③)이 처음 부를 때 만든다. 지금은 아무도 부르지 않는다
+        noiseKeyFile: path.join(userData, 'remote-noise-key.json'),
+        cipher: keyCipher,
+      })
       // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 평문 HTTP(127.0.0.1:47600, 에뮬레이터용)와 사내망 TLS(사설 IPv4 주소마다 :47600,
       // 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다). 블루투스 운반이 이 옆에 올라온다
       ctx.plugin(RemoteHttp)
