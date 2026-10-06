@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { HookCandidate, HookEvent } from '../shared/ipc.ts'
 import { useFocusTrap } from './focusTrap.ts'
 import { candidateFiles, toggled, usesMatcher } from './hooksView.ts'
-import { reason } from './Settings.tsx'
+import { reason } from './ipcError.ts'
 import { useT } from './settingsStore.ts'
 import './hooks.css'
 
@@ -33,12 +33,13 @@ export function HooksImport({ directory, candidates, onClose }: { directory: str
   useFocusTrap(panelRef)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.isComposing) return
       event.preventDefault() // 입력창의 Esc 두 번(답변 중지)은 이미 쓰인 Esc 를 세지 않는다
+      event.stopPropagation() // 아래에 깔린 훅 팝업(PlusDialog)까지 같이 닫히지 않게 — 그래서 잡는 단계에서 먼저 받는다
       onClose(false)
     }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
   }, [onClose])
 
   async function confirm(): Promise<void> {

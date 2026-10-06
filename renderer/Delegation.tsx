@@ -1,10 +1,11 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext } from 'react'
 import type { Mode } from '../shared/ipc.ts'
 import type { MessageOrigin } from '../shared/contract.ts'
 import { DEFAULT_MODE } from '../shared/modes.ts'
 import { useT } from './settingsStore.ts'
 import { formatDuration } from './turnView.ts'
 import { NEW_TARGET, type DelegationLine, type Peer, type TargetPicker } from './delegationView.ts'
+import { useNow } from './useNow.ts'
 import './delegation.css'
 
 // 다른 대화에 지시 보내기의 화면 조각 (이슈 #55 — 시안 _workspace/mock-delegate, 구조는 시안·부품 모양은 기존 줄·카드):
@@ -52,18 +53,6 @@ function ReadIcon() {
       <path d="M7 4.5V7l1.8 1.2" />
     </svg>
   )
-}
-
-/** 1초마다 지금 시각 — on 일 때만 돈다 (ChatTurn 의 useNow 와 같다. 그 파일이 이 파일을 쓰므로 여기 따로 둔다) */
-function useNow(on: boolean): number {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (!on) return
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 1_000)
-    return () => clearInterval(timer)
-  }, [on])
-  return now
 }
 
 /** 그 대화로 가는 제목 — 대화가 지워졌으면 글자만 */

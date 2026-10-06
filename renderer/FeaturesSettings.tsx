@@ -8,7 +8,7 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 // 바꾸면 곧바로 메인(ctx.settings)에 저장하고, 메인(ctx.features)이 재시작 없이 그 기능 묶음을 올리거나 내린다.
 // 필요한 기능이 꺼진 카드(`!` 입력 ← `!명령 실행`)는 스위치를 막고 사유를 적는다.
 // 카드는 중분류(FEATURE_GROUPS — 작업 화면 / AI 도구 / 자동화 / 입력·연결·알림)로 나눠 묶음마다 제목 + 한 줄 설명 아래에 둔다 (사용자 결정 2026-10-06).
-// 고정된 기능(shared/features.ts FEATURE_FIXED — 필수인 입력 트리거·스킬·MCP, 늘 꺼진 웹 도구)은 카드가 없다 (사용자 결정 2026-10-03).
+// 고정된 기능(shared/features.ts FEATURE_FIXED — 필수인 입력 트리거·!명령 실행·스킬·MCP)은 카드가 없다 (사용자 결정 2026-10-03).
 
 export function FeaturesPage() {
   const t = useT()
@@ -45,28 +45,28 @@ export function FeaturesPage() {
           </div>
           <ul className="feature-cards">
             {group.features.map((feature) => {
-          const missing = (FEATURE_REQUIRES[feature] ?? []).find((needed) => !featureOn(stored, needed))
-          const on = featureOn(stored, feature)
-          return (
-            <li key={feature} className="feature-card" data-feature={feature}>
-              <div className="feature-card__head">
-                <span className="feature-card__title">{t(`feature.${feature}`)}</span>
-                <button
-                  type="button"
-                  role="switch"
-                  className="settings-switch"
-                  aria-checked={on}
-                  aria-label={t(`feature.${feature}`)}
-                  disabled={!!missing}
-                  onClick={() => toggle(feature)}
-                >
-                  <span className="settings-switch__thumb" />
-                </button>
-              </div>
-              <p className="feature-card__description">{t(`feature.${feature}.description`)}</p>
-              {missing && <p className="feature-card__requires">{t('settings.features.requires', { name: t(`feature.${missing}`) })}</p>}
-            </li>
-          )
+              const missing = (FEATURE_REQUIRES[feature] ?? []).find((needed) => !featureOn(stored, needed))
+              const on = featureOn(stored, feature)
+              return (
+                <li key={feature} className="feature-card" data-feature={feature}>
+                  <div className="feature-card__head">
+                    <span className="feature-card__title">{t(`feature.${feature}`)}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      className="settings-switch"
+                      aria-checked={on}
+                      aria-label={t(`feature.${feature}`)}
+                      disabled={!!missing}
+                      onClick={() => toggle(feature)}
+                    >
+                      <span className="settings-switch__thumb" />
+                    </button>
+                  </div>
+                  <p className="feature-card__description">{t(`feature.${feature}.description`)}</p>
+                  {missing && <p className="feature-card__requires">{t('settings.features.requires', { name: t(`feature.${missing}`) })}</p>}
+                </li>
+              )
             })}
           </ul>
         </section>

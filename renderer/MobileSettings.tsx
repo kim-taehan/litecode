@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RemoteDeviceInfo, RemoteStatus } from '../shared/ipc.ts'
-import { reason } from './Settings.tsx'
+import { reason } from './ipcError.ts'
 import { useSettings, useT } from './settingsStore.ts'
 import { useFocusTrap } from './focusTrap.ts'
 
 // 설정 > 모바일 (이슈 #56) — 폰 앱이 이 PC 에 붙는 문(ctx.remote)의 화면. 기능 `remote` 가 켜졌을 때만 메뉴에 보인다.
-// 일반 페이지의 행(이름 + 회색 설명, 오른쪽 컨트롤)과 스위치·버튼을 그대로 쓴다: 연결 켜기 → 기기 연결(주소·코드·남은 시간) → 짝지은 기기.
+// 일반 페이지의 행(이름 + 회색 설명, 오른쪽 컨트롤)과 버튼을 그대로 쓴다: 기기 연결(주소·코드·남은 시간) → 짝지은 기기. 켜고 끄는 스위치는 여기 없다 — 설정 > 기능의 카드 하나다 (#124).
 // QR 그림은 아직 없다(다음 라운드 — 라이브러리와 함께). 지금은 폰 앱의 "주소·코드 직접 입력" 에 넣을 값만 보인다.
 // 짝짓기 요청의 [허용]/[거절] 확인은 설정을 닫아도 뜨도록 앱 바탕에 건다 (RemotePairPrompt — App.tsx).
 

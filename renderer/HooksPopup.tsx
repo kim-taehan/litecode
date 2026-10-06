@@ -5,7 +5,7 @@ import { HookBadge, HooksImport } from './HooksImport.tsx'
 import { candidateFiles, defaultSeconds, formDraft, formOf, formUnreachable, recentOf, usesMatcher, type HookForm } from './hooksView.ts'
 import { PlusDialog, PlusGroup } from './PlusDialog.tsx'
 import { byScope } from './plusView.ts'
-import { reason } from './Settings.tsx'
+import { reason } from './ipcError.ts'
 import { useT } from './settingsStore.ts'
 import { clockTime } from './turnView.ts'
 import './hooks.css'
@@ -53,18 +53,6 @@ export function HooksPopup({ project, onClose }: { project: Project; onClose(): 
   }
   const toggle = (row: HookRow): void =>
     void window.litecode.setHookEnabled(row.key, !row.on, directory).then(reload, (failure: unknown) => setError(reason(failure)))
-
-  if (importing)
-    return (
-      <HooksImport
-        directory={directory}
-        candidates={candidates}
-        onClose={(imported) => {
-          setImporting(false)
-          if (imported) void reload()
-        }}
-      />
-    )
 
   const groups = byScope(rows ?? [])
   const group = (scope: HookScope) => (
@@ -138,6 +126,17 @@ export function HooksPopup({ project, onClose }: { project: Project; onClose(): 
       {group('project')}
       {group('all')}
       <p className="plus-dialog__footnote">{t('hooks.popup.footer')}</p>
+      {/* 팝업 위에 겹쳐 그린다 (감사 E15) — 팝업을 내리면 펼쳐 고치던 편집 폼이 처음 값으로 돌아간다 */}
+      {importing && (
+        <HooksImport
+          directory={directory}
+          candidates={candidates}
+          onClose={(imported) => {
+            setImporting(false)
+            if (imported) void reload()
+          }}
+        />
+      )}
     </PlusDialog>
   )
 }
@@ -325,8 +324,8 @@ function HookEditor({ row, directory, onDone }: { row?: HookRow; directory: stri
         <div className="hook-recent">
           <div className="settings-field__label">{t('hooks.form.recent')}</div>
           <ul className="hook-recent__list">
-            {recent.map((record) => (
-              <li key={record.at} className="hook-recent__item" data-outcome={record.outcome}>
+            {recent.map((record, index) => (
+              <li key={`${record.at}:${index}`} className="hook-recent__item" data-outcome={record.outcome}>
                 <time dateTime={new Date(record.at).toISOString()}>{clockTime(record.at)}</time>
                 <span className="hook-recent__outcome">{t(`hooks.outcome.${record.outcome}`)}</span>
                 <span>{t('hooks.popup.seconds', { seconds: record.seconds })}</span>

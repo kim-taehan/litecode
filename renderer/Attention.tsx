@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Attention, AttentionAnswer, AttentionQuestion, AttentionTarget } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
-import { reason } from './Settings.tsx'
+import { reason } from './ipcError.ts'
 import { TargetPickerBody, useDelegation } from './Delegation.tsx'
 import { NEW_TARGET, targetPicker } from './delegationView.ts'
 import { QuestionDrafts } from './questionDrafts.ts'

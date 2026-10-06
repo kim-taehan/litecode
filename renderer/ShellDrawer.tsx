@@ -110,7 +110,7 @@ export function ShellDrawer({ directory, focusSignal, quiet, onClose }: { direct
       <div className="shell-drawer__bar">
         <span className="shell-drawer__title">{t('shell.title')}</span>
         <span className="shell-drawer__path">{directory}</span>
-        <button type="button" className="shell-drawer__close" aria-label={t('shell.close')} title={`${t('shell.close')} (⌘↑)`} onClick={onClose}>
+        <button type="button" className="shell-drawer__close" aria-label={t('shell.close')} title={`${t('shell.close')} (${document.documentElement.dataset.platform === 'darwin' ? '⌘↑' : 'Ctrl+↑'})`} onClick={onClose}>
           ×
         </button>
       </div>

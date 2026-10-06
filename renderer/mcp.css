@@ -162,5 +162,5 @@
 }
 
 .mcp-editor__test[data-ok='false'] {
-  color: #e03131;
+  color: var(--danger);
 }

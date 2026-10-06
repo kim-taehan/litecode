@@ -19,6 +19,7 @@ import { changedFiles } from './changedFiles.ts'
 import { PresentedCard } from './Presented.tsx'
 import { isPresentTool, presentedFiles } from './presented.ts'
 import { stopFeedbackReason } from '../shared/hooks.ts'
+import { useNow } from './useNow.ts'
 import './chat.css'
 import './hooks.css'
 
@@ -361,18 +362,6 @@ function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory
       )}
     </div>
   )
-}
-
-/** 1초마다 지금 시각 — on 일 때만 돈다 */
-export function useNow(on: boolean): number {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (!on) return
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 1_000)
-    return () => clearInterval(timer)
-  }, [on])
-  return now
 }
 
 /** 진행 중 맨 아래 파란 줄 — 보낸 시각부터 초가 올라가고 점이 움직인다 (dsh RunningStatus). 시계는 이 줄만 다시 그린다 */

@@ -5,6 +5,7 @@ import {
   closeFilePreview,
   closeTab,
   openFilePreview,
+  panelTakesFocus,
   openFilesTab,
   revealPanel,
   selectTab,
@@ -88,8 +89,10 @@ function Panel({ state }: { state: PanelState }) {
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
 
-  // 열 때마다(칩·버튼) 패널이 포커스를 잡는다 — Esc 로 닫고, 닫으면 누른 자리(칩)로 돌아간다
+  // 열 때마다(칩·버튼) 패널이 포커스를 잡는다 — Esc 로 닫고, 닫으면 누른 자리(칩)로 돌아간다.
+  // AI 가 연 것(open_file)은 잡지 않는다 — 닫혀 있던 패널이 새로 뜰 때도 (치던 입력창의 글이 끊기지 않게)
   useLayoutEffect(() => {
+    if (!panelTakesFocus(state)) return
     if (!root.current?.contains(document.activeElement)) returnFocus.current = document.activeElement
     root.current?.focus({ preventScroll: true })
   }, [state.focus])

@@ -10,6 +10,7 @@ import { ContextLengthNotes } from './ContextLengthNotes.tsx'
 import { defaultOutputLimit } from '../shared/outputLimit.ts'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
 import { useFocusTrap } from './focusTrap.ts'
+import { reason } from './ipcError.ts'
 import './settings.css'
 
 // 설정 모달 — 틀은 dsh ui-settings-general SettingsRoot(왼쪽 메뉴·오른쪽 머리줄[설정 파일 열기][×]·내용, 가림막 클릭·Esc 로 닫기),
@@ -21,11 +22,8 @@ import './settings.css'
 // dsh 와 다른 점: "모델 가져오기" 는 고르는 창 없이 없는 id 만 목록에 더한다(00_request 성공 기준 4).
 // 처음 여는 페이지는 모델이다 — 일반 페이지가 생기기 전부터 설정 버튼이 모델을 열었다(실물 테스트가 그 동작을 지킨다). dsh 는 일반을 먼저 연다
 
-/** Electron 이 IPC 오류 앞에 붙이는 "Error invoking remote method '…': Error: " 를 떼고 사유만 */
-export function reason(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
-}
+// McpPopup·SkillsPopup 이 아직 여기서 가져간다 — 정본은 ipcError.ts
+export { reason }
 
 type Page = 'general' | 'models' | 'features' | 'mobile'
 
@@ -91,6 +89,7 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
   useFocusTrap(panelRef)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
+      if (event.isComposing) return // 한글 조합 중의 Esc 는 조합 취소다 — 판을 닫아 쓰던 폼을 날리지 않는다
       if (event.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKeyDown)
