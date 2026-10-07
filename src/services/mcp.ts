@@ -7,7 +7,7 @@ import type { EngineMcp } from './engine.ts'
 import { realDirectory, type McpStatus } from './llm.ts'
 import { listMcpTools, type McpTool } from './mcpClient.ts'
 import type { KeyCipher } from './providers.ts'
-import { readJsonFileSync } from './jsonFile.ts'
+import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
 import { insideOf } from './projectPath.ts'
 import { tr } from '../i18n.ts'
 import { BROWSER_MCP_NAME } from '../../shared/browser.ts'
@@ -614,9 +614,9 @@ export class McpService extends Service {
   }
 
   private persist(): void {
-    if (this.opts.file) writeJson(this.opts.file, this.servers)
-    if (this.opts.secretsFile) writeJson(this.opts.secretsFile, this.secrets)
-    if (this.opts.projectsFile) writeJson(this.opts.projectsFile, this.projects)
+    if (this.opts.file) writeJsonFileSync(this.opts.file, this.servers, { mode: 0o600 })
+    if (this.opts.secretsFile) writeJsonFileSync(this.opts.secretsFile, this.secrets, { mode: 0o600 })
+    if (this.opts.projectsFile) writeJsonFileSync(this.opts.projectsFile, this.projects, { mode: 0o600 })
   }
 }
 
@@ -830,9 +830,3 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function writeJson(file: string, value: unknown): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const temp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(temp, JSON.stringify(value), { mode: 0o600 })
-  fs.renameSync(temp, file)
-}

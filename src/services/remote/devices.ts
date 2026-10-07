@@ -1,7 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { readJsonFile } from '../jsonFile.ts'
+import { readJsonFile, writeJsonFile } from '../jsonFile.ts'
 
 // 짝지은 기기 (userData/remote-devices.json) — 토큰은 **해시(SHA-256)만** 둔다. 파일이 새도 토큰을 되살릴 수 없다.
 // 데스크탑 id(폰이 "어느 PC 인가" 를 가리는 값 — 비밀이 아니다)도 같은 파일에 있다. 옛 파일의 `enabled`(설정 > 모바일의 스위치, #124 로 없어졌다)는
@@ -107,10 +105,7 @@ export class DeviceStore {
 
   private write(): Promise<void> {
     const next = this.queue.then(async () => {
-      await fs.mkdir(path.dirname(this.file), { recursive: true })
-      const temp = `${this.file}.${process.pid}.tmp`
-      await fs.writeFile(temp, JSON.stringify(this.stored), { mode: 0o600 })
-      await fs.rename(temp, this.file) // 쓰다 죽어도 이전 파일이 남게
+      await writeJsonFile(this.file, this.stored, { mode: 0o600 }) // 쓰다 죽어도 이전 파일이 남게
     })
     this.queue = next.catch(() => {}) // 한 번 실패해도 다음 쓰기는 돈다
     return next

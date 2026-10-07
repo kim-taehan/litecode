@@ -245,16 +245,16 @@ function bootstrap(ctx: Context): void {
   })
   // 파일 미리보기 패널 — 읽기만. 칩 판정에 더해 폴더가 등록된 프로젝트인지 본다(화면이 오염돼도 아무 폴더나 읽게 두지 않는다)
   handle(ctx, Channel.PREVIEW_FILE, async (_event, directory: string, token: string): Promise<FilePreview> => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     return registered ? previewFile(directory, token) : { status: 'unavailable' }
   })
   // 오른쪽 패널(이슈 #29) — HTML 미리보기 리소스와 Files 탭 목록도 등록된 프로젝트 안만
   handle(ctx, Channel.PREVIEW_ASSETS, async (_event, directory: string, token: string, references: string[]): Promise<HtmlAsset[]> => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     return registered ? readHtmlAssets(directory, token, references) : []
   })
   handle(ctx, Channel.LIST_DIRECTORY, async (_event, directory: string, relative: string): Promise<DirectoryListing> => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     return registered ? listDirectory(directory, relative) : { status: 'unavailable' }
   })
   handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
@@ -460,7 +460,7 @@ function skillsBridge(ctx: Context): void {
   handle(ctx, Channel.LIST_SKILLS, async (_event, directory: string) => ctx.skills.list(directory))
   // "폴더 열기" — 등록된 프로젝트일 때만 (화면이 오염돼도 아무 폴더에나 .opencode/skills 를 만들지 않는다). 경로는 메인이 정한다
   handle(ctx, Channel.OPEN_SKILLS_FOLDER, async (_event, scope: SkillScope, directory: string) => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     const folder = registered ? await ctx.skills.folder(scope === 'project' ? 'project' : 'all', directory) : undefined
     if (!folder || (await shell.openPath(folder))) throw new Error(tr('skills.openFolderError'))
   })

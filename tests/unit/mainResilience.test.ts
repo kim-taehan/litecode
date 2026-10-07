@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from '../../electron/resilience.ts'
 import { restorableBounds, windowMode } from '../../electron/windowBounds.ts'
-import { readJsonFile, readJsonFileSync, writeJsonFileSync } from '../../src/services/jsonFile.ts'
+import { readJsonFile, readJsonFileSync, writeJsonFile, writeJsonFileSync } from '../../src/services/jsonFile.ts'
 import { captureConsole, createLogFile, redactSecrets } from '../../src/services/logFile.ts'
 import { keepEnds, keepTail, streamText } from '../../src/services/outputBuffer.ts'
 import { DeviceStore } from '../../src/services/remote/devices.ts'
@@ -43,6 +43,30 @@ describe('jsonFile — userData JSON 읽기', () => {
     writeJsonFileSync(file, { a: 1 }, { pretty: true })
     expect(fs.readFileSync(file, 'utf8')).toBe('{\n  "a": 1\n}\n')
     expect(fs.readdirSync(path.dirname(file))).toEqual(['b.json'])
+  })
+
+  it('쓰기 권한: mode 를 주면 그 권한(비밀 파일 0600), 안 주면 보통 파일과 같다 — 동기·비동기 둘 다, 이미 있던 파일도 바뀐다', async () => {
+    const dir = folder()
+    const plain = path.join(dir, 'plain')
+    fs.writeFileSync(plain, '')
+    const usual = fs.statSync(plain).mode & 0o777
+    expect(usual).not.toBe(0o600) // 이 대조가 뜻이 있으려면 기본 권한이 0600 이 아니어야 한다
+    for (const [name, write] of [
+      ['sync', async (file: string, value: unknown, mode?: number) => writeJsonFileSync(file, value, { mode })],
+      ['async', (file: string, value: unknown, mode?: number) => writeJsonFile(file, value, { mode })],
+    ] as const) {
+      const open = path.join(dir, 'nested', `${name}-open.json`)
+      const secret = path.join(dir, 'nested', `${name}-secret.json`)
+      await write(open, { a: 1 })
+      expect(fs.statSync(open).mode & 0o777).toBe(usual)
+      expect(fs.readFileSync(open, 'utf8')).toBe('{"a":1}')
+      // 0600 이 없던 시절에 쓴 파일 — 다음 쓰기에서 임시 파일의 권한으로 바뀐다
+      fs.writeFileSync(secret, '{}')
+      await write(secret, { key: 'sealed' }, 0o600)
+      expect(fs.statSync(secret).mode & 0o777).toBe(0o600)
+      expect(fs.readFileSync(secret, 'utf8')).toBe('{"key":"sealed"}')
+    }
+    expect(fs.readdirSync(path.join(dir, 'nested')).sort()).toEqual(['async-open.json', 'async-secret.json', 'sync-open.json', 'sync-secret.json'])
   })
 
   it.each([

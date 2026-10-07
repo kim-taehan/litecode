@@ -1,7 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { readJsonFile } from '../jsonFile.ts'
+import { readJsonFile, writeJsonFile } from '../jsonFile.ts'
 import type { KeyCipher } from '../providers.ts'
 
 // 사내망 리스너의 신원 (01t 3절 "인증서") — ECDSA P-256 키 하나와 그 키로 서명한 자체 서명 인증서.
@@ -52,10 +50,7 @@ export async function loadTlsIdentity(file: string, cipher?: KeyCipher, now: Dat
     const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string
     const sealed = cipher?.available() === true
     const next: StoredKey = { version: 1, key: sealed ? cipher!.encrypt(pem).toString('base64') : pem, sealed }
-    await fs.mkdir(path.dirname(file), { recursive: true })
-    const temp = `${file}.${process.pid}.tmp`
-    await fs.writeFile(temp, JSON.stringify(next), { mode: 0o600 })
-    await fs.rename(temp, file)
+    await writeJsonFile(file, next, { mode: 0o600 })
   }
   return {
     key: privateKey.export({ type: 'pkcs8', format: 'pem' }) as string,
