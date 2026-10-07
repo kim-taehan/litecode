@@ -14,7 +14,7 @@ import './mcp.ts'
 //   서버 프로세스는 엔진이 띄운다: **앱 실행 파일을 node 로**(`ELECTRON_RUN_AS_NODE=1`) — 폐쇄망 PC 에 node 가 없어도 된다. Chrome 은 첫 도구 호출 때 뜬다
 // - 내려갈 때(기능 끄기·앱 종료)와 뜰 때 우리 프로필로 뜬 Chrome 을 닫는다 (browser/cleanup.ts)
 // - 동봉 파일이 없으면 올리지 않고 사유를 쥔다 (내려받지 않는다)
-// 도구 권한(늘 deny·ask·allow)은 엔진 설정에 있다 (engine.ts withBrowserRules, 도구 갈래는 shared/browser.ts). Electron 을 모른다 — 실행 파일·자리는 받는다.
+// 도구 권한(늘 deny·ask·allow)은 엔진 설정에 있다 (engineConfig.ts withBrowserRules, 도구 갈래는 shared/browser.ts). Electron 을 모른다 — 실행 파일·자리는 받는다.
 //
 // 인자 (01aj §1·§5):
 // - `--browser chrome` — PC 에 깔린 Chrome. Windows 에서 Chrome 이 표준 자리에 없으면 `msedge`. 없는 브라우저는 서버가 도구 호출에 "not found at …" 로

@@ -1,0 +1,1081 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같음) > MCP 자식에 덮어 넘길 env 이름 1`] = `
+[
+  "OPENCODE_SERVER_PASSWORD",
+  "LITECODE_X",
+  "GITHUB_TOKEN",
+]
+`;
+
+exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같음) > 기본값 1`] = `
+"{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "empty": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Empty",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/empty",
+        "apiKey": "proxy-token"
+      },
+      "models": {}
+    },
+    "gw": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Gateway",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/gw",
+        "apiKey": "proxy-token"
+      },
+      "models": {
+        "org/big": {
+          "name": "Big",
+          "limit": {
+            "context": 128000,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
+        "small": {
+          "name": "Small",
+          "limit": {
+            "context": 8000,
+            "output": 1000
+          }
+        },
+        "plain": {
+          "name": "Plain"
+        }
+      }
+    }
+  },
+  "agent": {
+    "plan": {
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "*_*": "deny",
+        "litecode_open": "allow",
+        "litecode_list_projects": "allow",
+        "litecode_read_project": "allow",
+        "litecode_present": "allow",
+        "external_directory": "ask",
+        "doom_loop": "ask",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow"
+      }
+    },
+    "build": {
+      "permission": {
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow",
+        "chrome_browser_click": "allow",
+        "chrome_browser_press_key": "allow",
+        "chrome_browser_select_option": "allow",
+        "chrome_browser_navigate": "allow",
+        "chrome_browser_tabs": "allow",
+        "chrome_browser_type": "allow",
+        "chrome_browser_fill_form": "allow",
+        "chrome_browser_evaluate": "allow",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-ask": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "edit": "ask",
+        "bash": "ask",
+        "question": "allow",
+        "task": {
+          "*": "deny",
+          "general-ask": "allow"
+        },
+        "*_*": "ask",
+        "litecode_open": "allow",
+        "litecode_list_projects": "allow",
+        "litecode_present": "allow",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-full": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "*": "allow",
+        "task": {
+          "general-ask": "deny"
+        },
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow",
+        "chrome_browser_click": "allow",
+        "chrome_browser_press_key": "allow",
+        "chrome_browser_select_option": "allow",
+        "chrome_browser_navigate": "allow",
+        "chrome_browser_tabs": "allow",
+        "chrome_browser_type": "allow",
+        "chrome_browser_fill_form": "allow",
+        "chrome_browser_evaluate": "allow",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "general-ask": {
+      "mode": "subagent",
+      "description": "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+      "permission": {
+        "todowrite": "deny",
+        "edit": "ask",
+        "bash": "ask",
+        "*_*": "ask",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "litecode_present": "deny",
+        "litecode_create": "deny",
+        "litecode_send_to_project": "deny",
+        "litecode_read_project": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "chrome_*": "deny"
+      }
+    }
+  },
+  "permission": {
+    "task": {
+      "general-ask": "deny"
+    },
+    "litecode_send_to_project": "deny",
+    "litecode_read_project": "deny",
+    "litecode_create": "deny",
+    "litecode_present": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "chrome_*": "deny"
+  },
+  "snapshot": false,
+  "model": "gw/org/big",
+  "enabled_providers": [
+    "empty",
+    "gw"
+  ],
+  "share": "disabled",
+  "autoupdate": false,
+  "lsp": false,
+  "formatter": false
+}"
+`;
+
+exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같음) > 스킬 끔·전부 게이트(MCP 포함) 1`] = `
+"{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "empty": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Empty",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/empty",
+        "apiKey": "proxy-token"
+      },
+      "models": {}
+    },
+    "gw": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Gateway",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/gw",
+        "apiKey": "proxy-token"
+      },
+      "models": {
+        "org/big": {
+          "name": "Big",
+          "limit": {
+            "context": 128000,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
+        "small": {
+          "name": "Small",
+          "limit": {
+            "context": 8000,
+            "output": 1000
+          }
+        },
+        "plain": {
+          "name": "Plain"
+        }
+      }
+    }
+  },
+  "agent": {
+    "plan": {
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "*_*": "deny",
+        "external_directory": "ask",
+        "doom_loop": "ask",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": "deny",
+        "glob": "ask",
+        "grep": "ask",
+        "read": "ask",
+        "todowrite": "ask",
+        "litecode_read_project": "ask",
+        "litecode_present": "ask",
+        "litecode_open": "ask",
+        "litecode_list_projects": "ask",
+        "chrome_browser_snapshot": "ask",
+        "chrome_browser_console_messages": "ask",
+        "chrome_browser_take_screenshot": "ask",
+        "chrome_browser_wait_for": "ask"
+      }
+    },
+    "build": {
+      "permission": {
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": "deny",
+        "bash": "ask",
+        "edit": "ask",
+        "glob": "ask",
+        "grep": "ask",
+        "read": "ask",
+        "task": {
+          "*": "ask",
+          "general-ask": "deny"
+        },
+        "todowrite": "ask",
+        "*_*": "ask",
+        "plan_exit": "deny",
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "ask",
+        "chrome_browser_console_messages": "ask",
+        "chrome_browser_take_screenshot": "ask",
+        "chrome_browser_wait_for": "ask",
+        "chrome_browser_click": "ask",
+        "chrome_browser_press_key": "ask",
+        "chrome_browser_select_option": "ask",
+        "chrome_browser_navigate": "ask",
+        "chrome_browser_tabs": "ask",
+        "chrome_browser_type": "ask",
+        "chrome_browser_fill_form": "ask",
+        "chrome_browser_evaluate": "ask",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-ask": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "edit": "ask",
+        "bash": "ask",
+        "question": "allow",
+        "*_*": "ask",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": "deny",
+        "glob": "ask",
+        "grep": "ask",
+        "read": "ask",
+        "task": {
+          "*": "deny",
+          "general-ask": "ask"
+        },
+        "todowrite": "ask",
+        "litecode_present": "ask",
+        "litecode_open": "ask",
+        "litecode_list_projects": "ask",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-full": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "*": "allow",
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": "deny",
+        "bash": "ask",
+        "edit": "ask",
+        "glob": "ask",
+        "grep": "ask",
+        "read": "ask",
+        "task": {
+          "*": "ask",
+          "general-ask": "deny"
+        },
+        "todowrite": "ask",
+        "*_*": "ask",
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "ask",
+        "chrome_browser_console_messages": "ask",
+        "chrome_browser_take_screenshot": "ask",
+        "chrome_browser_wait_for": "ask",
+        "chrome_browser_click": "ask",
+        "chrome_browser_press_key": "ask",
+        "chrome_browser_select_option": "ask",
+        "chrome_browser_navigate": "ask",
+        "chrome_browser_tabs": "ask",
+        "chrome_browser_type": "ask",
+        "chrome_browser_fill_form": "ask",
+        "chrome_browser_evaluate": "ask",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "general-ask": {
+      "mode": "subagent",
+      "description": "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+      "permission": {
+        "todowrite": "deny",
+        "edit": "ask",
+        "bash": "ask",
+        "*_*": "ask",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "litecode_present": "deny",
+        "litecode_create": "deny",
+        "litecode_send_to_project": "deny",
+        "litecode_read_project": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": "deny",
+        "glob": "ask",
+        "grep": "ask",
+        "read": "ask",
+        "task": {
+          "*": "ask",
+          "general-ask": "deny"
+        },
+        "chrome_*": "deny"
+      }
+    },
+    "general": {
+      "permission": {
+        "bash": "ask",
+        "edit": "ask",
+        "glob": "ask",
+        "grep": "ask",
+        "read": "ask",
+        "task": {
+          "*": "ask",
+          "general-ask": "deny"
+        },
+        "*_*": "ask",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "litecode_send_to_project": "deny",
+        "litecode_read_project": "deny",
+        "litecode_create": "deny",
+        "litecode_present": "deny",
+        "chrome_*": "deny"
+      }
+    },
+    "explore": {
+      "permission": {
+        "bash": "ask",
+        "glob": "ask",
+        "grep": "ask",
+        "read": "ask",
+        "chrome_*": "deny"
+      }
+    }
+  },
+  "permission": {
+    "task": {
+      "general-ask": "deny"
+    },
+    "litecode_send_to_project": "deny",
+    "litecode_read_project": "deny",
+    "litecode_create": "deny",
+    "litecode_present": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "skill": "deny",
+    "chrome_*": "deny"
+  },
+  "snapshot": false,
+  "model": "gw/org/big",
+  "enabled_providers": [
+    "empty",
+    "gw"
+  ],
+  "share": "disabled",
+  "autoupdate": false,
+  "lsp": false,
+  "formatter": false
+}"
+`;
+
+exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같음) > 앱 기본 기동 — 스킬 켬·웹 끔·게이트 없음 1`] = `
+"{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "empty": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Empty",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/empty",
+        "apiKey": "proxy-token"
+      },
+      "models": {}
+    },
+    "gw": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Gateway",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/gw",
+        "apiKey": "proxy-token"
+      },
+      "models": {
+        "org/big": {
+          "name": "Big",
+          "limit": {
+            "context": 128000,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
+        "small": {
+          "name": "Small",
+          "limit": {
+            "context": 8000,
+            "output": 1000
+          }
+        },
+        "plain": {
+          "name": "Plain"
+        }
+      }
+    }
+  },
+  "agent": {
+    "plan": {
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "*_*": "deny",
+        "litecode_open": "allow",
+        "litecode_list_projects": "allow",
+        "litecode_read_project": "allow",
+        "litecode_present": "allow",
+        "external_directory": "ask",
+        "doom_loop": "ask",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow"
+      }
+    },
+    "build": {
+      "permission": {
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow",
+        "chrome_browser_click": "allow",
+        "chrome_browser_press_key": "allow",
+        "chrome_browser_select_option": "allow",
+        "chrome_browser_navigate": "allow",
+        "chrome_browser_tabs": "allow",
+        "chrome_browser_type": "allow",
+        "chrome_browser_fill_form": "allow",
+        "chrome_browser_evaluate": "allow",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-ask": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "edit": "ask",
+        "bash": "ask",
+        "question": "allow",
+        "task": {
+          "*": "deny",
+          "general-ask": "allow"
+        },
+        "*_*": "ask",
+        "litecode_open": "allow",
+        "litecode_list_projects": "allow",
+        "litecode_present": "allow",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-full": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "*": "allow",
+        "task": {
+          "general-ask": "deny"
+        },
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow",
+        "chrome_browser_click": "allow",
+        "chrome_browser_press_key": "allow",
+        "chrome_browser_select_option": "allow",
+        "chrome_browser_navigate": "allow",
+        "chrome_browser_tabs": "allow",
+        "chrome_browser_type": "allow",
+        "chrome_browser_fill_form": "allow",
+        "chrome_browser_evaluate": "allow",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "general-ask": {
+      "mode": "subagent",
+      "description": "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+      "permission": {
+        "todowrite": "deny",
+        "edit": "ask",
+        "bash": "ask",
+        "*_*": "ask",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "litecode_present": "deny",
+        "litecode_create": "deny",
+        "litecode_send_to_project": "deny",
+        "litecode_read_project": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_*": "deny"
+      }
+    }
+  },
+  "permission": {
+    "task": {
+      "general-ask": "deny"
+    },
+    "litecode_send_to_project": "deny",
+    "litecode_read_project": "deny",
+    "litecode_create": "deny",
+    "litecode_present": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "skill": {
+      "customize-opencode": "deny"
+    },
+    "chrome_*": "deny"
+  },
+  "skills": {
+    "paths": [
+      ".opencode/skills",
+      ".opencode/skill"
+    ]
+  },
+  "snapshot": false,
+  "model": "gw/org/big",
+  "enabled_providers": [
+    "empty",
+    "gw"
+  ],
+  "share": "disabled",
+  "autoupdate": false,
+  "lsp": false,
+  "formatter": false
+}"
+`;
+
+exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같음) > 웹 켬·Claude 스킬·MCP·내장 도구 게이트 1`] = `
+"{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "empty": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Empty",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/empty",
+        "apiKey": "proxy-token"
+      },
+      "models": {}
+    },
+    "gw": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Gateway",
+      "options": {
+        "baseURL": "http://127.0.0.1:9/gw",
+        "apiKey": "proxy-token"
+      },
+      "models": {
+        "org/big": {
+          "name": "Big",
+          "limit": {
+            "context": 128000,
+            "output": 32000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
+        "small": {
+          "name": "Small",
+          "limit": {
+            "context": 8000,
+            "output": 1000
+          }
+        },
+        "plain": {
+          "name": "Plain"
+        }
+      }
+    }
+  },
+  "agent": {
+    "plan": {
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "task": "deny",
+        "*_*": "deny",
+        "litecode_open": "allow",
+        "litecode_list_projects": "allow",
+        "litecode_read_project": "allow",
+        "litecode_present": "allow",
+        "external_directory": "ask",
+        "doom_loop": "ask",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow"
+      }
+    },
+    "build": {
+      "permission": {
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "bash": "ask",
+        "edit": "ask",
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow",
+        "chrome_browser_click": "allow",
+        "chrome_browser_press_key": "allow",
+        "chrome_browser_select_option": "allow",
+        "chrome_browser_navigate": "allow",
+        "chrome_browser_tabs": "allow",
+        "chrome_browser_type": "allow",
+        "chrome_browser_fill_form": "allow",
+        "chrome_browser_evaluate": "allow",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-ask": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "edit": "ask",
+        "bash": "ask",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "question": "allow",
+        "task": {
+          "*": "deny",
+          "general-ask": "allow"
+        },
+        "*_*": "ask",
+        "litecode_open": "allow",
+        "litecode_list_projects": "allow",
+        "litecode_present": "allow",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "litecode-full": {
+      "mode": "primary",
+      "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+      "permission": {
+        "*": "allow",
+        "task": {
+          "general-ask": "deny"
+        },
+        "litecode_send_to_project": "ask",
+        "litecode_read_project": "allow",
+        "litecode_create": "ask",
+        "litecode_present": "allow",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "bash": "ask",
+        "edit": "ask",
+        "chrome_*": "ask",
+        "chrome_browser_snapshot": "allow",
+        "chrome_browser_console_messages": "allow",
+        "chrome_browser_take_screenshot": "allow",
+        "chrome_browser_wait_for": "allow",
+        "chrome_browser_click": "allow",
+        "chrome_browser_press_key": "allow",
+        "chrome_browser_select_option": "allow",
+        "chrome_browser_navigate": "allow",
+        "chrome_browser_tabs": "allow",
+        "chrome_browser_type": "allow",
+        "chrome_browser_fill_form": "allow",
+        "chrome_browser_evaluate": "allow",
+        "chrome_browser_run_code_unsafe": "deny",
+        "chrome_browser_file_upload": "deny",
+        "chrome_browser_drop": "deny",
+        "chrome_browser_find": "deny",
+        "chrome_browser_resize": "deny",
+        "chrome_browser_emulate_media": "deny",
+        "chrome_browser_close": "deny",
+        "chrome_browser_hover": "deny",
+        "chrome_browser_drag": "deny",
+        "chrome_browser_handle_dialog": "deny",
+        "chrome_browser_navigate_back": "deny",
+        "chrome_browser_network_requests": "deny",
+        "chrome_browser_network_request": "deny"
+      }
+    },
+    "general-ask": {
+      "mode": "subagent",
+      "description": "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+      "permission": {
+        "todowrite": "deny",
+        "edit": "ask",
+        "bash": "ask",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "*_*": "ask",
+        "plan_enter": "deny",
+        "plan_exit": "deny",
+        "litecode_present": "deny",
+        "litecode_create": "deny",
+        "litecode_send_to_project": "deny",
+        "litecode_read_project": "deny",
+        "skill": {
+          "customize-opencode": "deny"
+        },
+        "chrome_*": "deny"
+      }
+    },
+    "general": {
+      "permission": {
+        "bash": "ask",
+        "edit": "ask",
+        "chrome_*": "deny"
+      }
+    },
+    "explore": {
+      "permission": {
+        "bash": "ask",
+        "chrome_*": "deny"
+      }
+    }
+  },
+  "permission": {
+    "task": {
+      "general-ask": "deny"
+    },
+    "litecode_send_to_project": "deny",
+    "litecode_read_project": "deny",
+    "litecode_create": "deny",
+    "litecode_present": "deny",
+    "skill": {
+      "customize-opencode": "deny"
+    },
+    "chrome_*": "deny"
+  },
+  "skills": {
+    "paths": [
+      ".opencode/skills",
+      ".opencode/skill",
+      "~/.claude/skills",
+      ".claude/skills"
+    ]
+  },
+  "snapshot": false,
+  "model": "gw/org/big",
+  "enabled_providers": [
+    "empty",
+    "gw"
+  ],
+  "share": "disabled",
+  "autoupdate": false,
+  "lsp": false,
+  "formatter": false,
+  "mcp": {
+    "local": {
+      "type": "local",
+      "command": [
+        "node",
+        "srv.js"
+      ],
+      "environment": {
+        "OPENCODE_SERVER_PASSWORD": "",
+        "LITECODE_X": "",
+        "GITHUB_TOKEN": "",
+        "MODE": "x"
+      },
+      "timeout": 5000
+    },
+    "remote": {
+      "type": "remote",
+      "url": "http://mcp.local/",
+      "headers": {
+        "x-a": "b"
+      },
+      "oauth": false
+    }
+  }
+}"
+`;
