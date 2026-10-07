@@ -4,7 +4,7 @@
 // 바탕(대화·엔진·설정·provider·프로젝트·대화 저장)은 여기에 없다 — 끌 수 없다.
 
 // skills(이슈 #7)는 묶음(ctx.skills — `+` 메뉴의 스킬 팝업 목록(#43)·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
-export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'appMcp', 'hooks', 'voice', 'browser'] as const
+export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'hooks', 'voice', 'browser'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 카드가 없다.
@@ -23,7 +23,7 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
   { id: 'ai', features: ['appMcp', 'web', 'browser'] },
   { id: 'automation', features: ['hooks'] },
-  { id: 'devices', features: ['voice', 'remote', 'notifications'] },
+  { id: 'devices', features: ['voice', 'remote', 'lan', 'bluetooth', 'notifications'] },
 ]
 
 /** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다),
@@ -33,8 +33,10 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
  *  데스크탑 MCP(appMcp, 이슈 #99)는 앱 내장 MCP 서버(ctx.appMcp)와 그 도구 — 끄면 서버가 내려가고 다음 턴부터 엔진에서 `litecode_*` 도구가 빠진다.
  *  훅(hooks, 이슈 #102)은 기본 꺼짐 — 사용자 셸 명령을 AI 의 행동에 걸어 돌리는 기능이라 사용자가 켠다.
  *  음성 입력(voice — ctx.speech)도 기본 꺼짐 — 마이크 권한을 묻고 쓰는 동안 메모리 ~1GB 인 기능이라 사용자가 켠다. 꺼져 있으면 마이크 권한도 거절한다.
- *  브라우저(browser — ctx.browser, 이슈 #147)도 기본 꺼짐 — AI 가 Chrome 창을 조종하고, 켜면 도구 25개의 스키마(26KB)가 매 요청에 실린다 */
-export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser']
+ *  브라우저(browser — ctx.browser, 이슈 #147)도 기본 꺼짐 — AI 가 Chrome 창을 조종하고, 켜면 도구 25개의 스키마(26KB)가 매 요청에 실린다.
+ *  모바일 연결의 길은 둘이다 (이슈 #210, 설계 01ab "연결 수단 고르기" — 길마다 토글): 사내망 연결(lan — TLS 리스너, 기본 켜짐: 모바일 연결을 켜면 전처럼 열린다)과
+ *  블루투스 연결(bluetooth — 기본 꺼짐: 켜는 순간 macOS 가 블루투스 허용을 묻고, 네이티브 모듈을 그때 읽는다). 둘 다 모바일 연결(remote)이 켜져 있어야 한다 */
+export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser', 'bluetooth']
 
 /** 저장된 값이 없을 때의 켜짐 */
 export function featureDefault(feature: FeatureId): boolean {
@@ -42,7 +44,7 @@ export function featureDefault(feature: FeatureId): boolean {
 }
 
 /** 그 기능이 쓰려면 같이 켜져 있어야 하는 기능 — `!` 입력은 `!명령` 실행(ctx.shell)이 돌린다 */
-export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'], browser: ['mcp'] }
+export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'], browser: ['mcp'], lan: ['remote'], bluetooth: ['remote'] }
 
 /** 기능별 켜기 값 — 없는 키는 기본값(featureDefault) */
 export type FeatureSwitches = Partial<Record<FeatureId, boolean>>
