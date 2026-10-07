@@ -15,6 +15,7 @@ import {
   type SpeechStatus,
   type SpeechTranscript,
 } from '../../shared/speech.ts'
+import type { FeatureReason } from '../../shared/features.ts'
 import { checkSpeechAssets, type AssetCheck } from './speech/assets.ts'
 import type { WorkerReply, WorkerRequest } from './speech/audio.ts'
 
@@ -62,6 +63,11 @@ declare module 'cordis' {
     /** status() 가 바뀌었다 */
     'speech/changed'(status: SpeechStatus): void
   }
+}
+
+/** 설정 > 기능의 음성 입력 줄에 보일 문제 (이슈 #224, ctx.features.problem) — 엔진·모델 파일이 없거나 손상됐을 때만. 확인 중·뜨는 중은 문제가 아니다 */
+export function speechProblem(status: SpeechStatus): FeatureReason | undefined {
+  return status.state === 'unavailable' && status.reason !== 'checking' ? { key: 'speech.error.unavailable' } : undefined
 }
 
 /** 차례를 기다리는 요청 (지금 도는 것 말고) */

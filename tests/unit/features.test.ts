@@ -7,6 +7,8 @@ import { SettingsService } from '../../src/services/settings.ts'
 import { FeaturesService, type FeatureDefinition } from '../../src/services/features.ts'
 import { missingServices } from '../../electron/resilience.ts'
 import { CHOOSABLE_FEATURES, FEATURE_GROUPS, FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
+import { bluetoothProblem } from '../../src/services/remote/bluetooth.ts'
+import { speechProblem } from '../../src/services/speech.ts'
 
 // ctx.features — 기능 묶음을 settings 값으로 올리고 내린다 (이슈 #8). IPC 는 가짜 등록소로 흉내 낸다: ipcMain.handle 처럼
 // 같은 채널을 두 번 걸면 던진다 — 끄고 바로 켤 때 옛 핸들러가 다 걷힌 뒤 새로 거는지 본다.
@@ -227,6 +229,168 @@ describe('FeaturesService', () => {
     const { fiber } = await start()
     await fiber.dispose()
     expect(channels()).toEqual([])
+  })
+})
+
+// 이슈 #224 — 켰는데 못 뜬 기능을 설정 > 기능 줄에 "켜지 못함" + 사유로 보인다. 상태가 없는 기능 = 꺼짐
+describe('FeaturesService — 기능 상태', () => {
+  /** at 묶음이 던지는 정의 — 메시지에 둘째 줄(스택 흉내)·홈 경로·키가 섞여 있다 */
+  function brokenAt(message: string): FeatureDefinition[] {
+    return definitions().map((definition) =>
+      definition.id === 'at'
+        ? {
+            ...definition,
+            plugin: () => {
+              throw new Error(message)
+            },
+          }
+        : definition,
+    )
+  }
+
+  async function quiet<T>(run: () => Promise<T>): Promise<T> {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      return await run()
+    } finally {
+      logged.mockRestore()
+    }
+  }
+
+  it('켜진 묶음은 on, 꺼진 기능은 상태가 없다', async () => {
+    const { features } = await start()
+    expect(features.status('terminal')).toEqual({ state: 'on' })
+    expect(features.status('notifications')).toBeUndefined()
+    expect(features.statuses().terminal).toEqual({ state: 'on' })
+    expect('notifications' in features.statuses()).toBe(false)
+  })
+
+  it('묶음이 던지면 failed + 사유 한 줄 — 나머지 묶음은 뜬다', async () => {
+    const { features } = await quiet(() => start(brokenAt('rg 를 못 찾았다\n    at Object.<anonymous> (/x/y.js:1:2)')))
+    expect(features.status('at')).toEqual({ state: 'failed', reason: 'rg 를 못 찾았다' })
+    expect(features.status('terminal')).toEqual({ state: 'on' })
+    expect(channels()).toEqual(ALL.filter((channel) => channel !== 'at:x'))
+  })
+
+  // electron/main.ts 의 묶음은 안에서 ctx.plugin(Service) 를 한다 — 안쪽이 던지면 바깥 fiber 는 멀쩡히 끝난다 (cordis 4 실측 2026-10-07).
+  // 그래서 묶음 아래 어느 fiber 가 실패해도 그 기능의 실패로 본다
+  it('묶음 안쪽 플러그인(서비스 생성자)이 던져도 그 기능이 failed 가 된다', async () => {
+    class Broken extends Service {
+      constructor(ctx: Context) {
+        super(ctx, 'brokenService')
+        throw new Error('service ctor failed')
+      }
+    }
+    const bundles = definitions().map((definition) =>
+      definition.id === 'openIn' ? { ...definition, plugin: (ctx: Context) => void ctx.plugin(Broken) } : definition,
+    )
+    const { features } = await quiet(async () => {
+      const started = await start(bundles)
+      await vi.waitFor(() => expect(started.features.status('openIn')?.state).toBe('failed'))
+      return started
+    })
+    expect(features.status('openIn')).toEqual({ state: 'failed', reason: 'service ctor failed' })
+    expect(features.status('terminal')).toEqual({ state: 'on' })
+  })
+
+  it('사유는 한 줄·길이 상한, 홈 경로는 ~ 로, 키처럼 보이는 값은 가린다', async () => {
+    const home = os.homedir()
+    const long = `${home}/secret/project 에서 실패 key=sk-abcdefghijklmnopqrstuvwxyz0123456789 Bearer abc.def.ghi ${'가'.repeat(400)}`
+    const { features } = await quiet(() => start(brokenAt(long)))
+    const status = features.status('at')
+    expect(status?.state).toBe('failed')
+    const reason = status?.state === 'failed' ? String(status.reason) : ''
+    expect(reason).not.toContain('\n')
+    expect(reason.length).toBeLessThanOrEqual(160)
+    expect(reason).not.toContain(home)
+    expect(reason).toContain('~/secret/project')
+    expect(reason).not.toContain('sk-abcdefghijklmnopqrstuvwxyz0123456789')
+    expect(reason).not.toContain('abc.def.ghi')
+    expect(reason.endsWith('…')).toBe(true)
+  })
+
+  it('던진 묶음을 끄면 상태가 지워지고, 다시 켜면 다시 시도한다', async () => {
+    let fail = true
+    const bundles = definitions().map((definition) =>
+      definition.id === 'terminal'
+        ? {
+            ...definition,
+            plugin: (ctx: Context) => {
+              if (fail) throw new Error('boom')
+              definition.plugin(ctx)
+            },
+          }
+        : definition,
+    )
+    const { settings, features } = await quiet(() => start(bundles))
+    expect(features.status('terminal')).toEqual({ state: 'failed', reason: 'boom' })
+    settings.set({ features: { terminal: false } })
+    await features.idle()
+    expect(features.status('terminal')).toBeUndefined()
+    fail = false
+    settings.set({ features: {} })
+    await features.idle()
+    expect(features.status('terminal')).toEqual({ state: 'on' })
+    expect(channels()).toEqual(ALL)
+  })
+
+  it('묶음이 스스로 문제를 알리고(problem) 풀 수 있다 — 꺼진 기능의 알림은 버리고, 끄면 문제도 지운다', async () => {
+    const { settings, features } = await start()
+    features.problem('terminal', { key: 'remote.bluetooth.unauthorized' })
+    expect(features.status('terminal')).toEqual({ state: 'failed', reason: { key: 'remote.bluetooth.unauthorized' } })
+    features.problem('terminal', undefined)
+    expect(features.status('terminal')).toEqual({ state: 'on' })
+    features.problem('notifications', 'x') // 꺼진 기능
+    expect(features.status('notifications')).toBeUndefined()
+    features.problem('terminal', 'line one\nline two')
+    expect(features.status('terminal')).toEqual({ state: 'failed', reason: 'line one' })
+    settings.set({ features: { terminal: false } })
+    await features.idle()
+    settings.set({ features: {} })
+    await features.idle()
+    expect(features.status('terminal')).toEqual({ state: 'on' })
+  })
+
+  it('상태가 바뀌면 features/status 로 알린다 — 같은 값이면 다시 알리지 않는다', async () => {
+    const ctx = new Context()
+    const seen: unknown[] = []
+    ctx.on('features/status', (statuses) => void seen.push(statuses))
+    ctx.plugin(SettingsService, { file })
+    ctx.plugin(FeaturesService, definitions())
+    const ready = await new Promise<Context>((resolve) => ctx.inject(['settings', 'features'], resolve))
+    await ready.features.idle()
+    expect(seen.length).toBeGreaterThan(0)
+    expect((seen.at(-1) as Record<string, unknown>).terminal).toEqual({ state: 'on' })
+    const before = seen.length
+    ready.features.problem('terminal', 'no radio')
+    expect(seen).toHaveLength(before + 1)
+    expect((seen.at(-1) as Record<string, unknown>).terminal).toEqual({ state: 'failed', reason: 'no radio' })
+    ready.features.problem('terminal', 'no radio')
+    expect(seen).toHaveLength(before + 1)
+    ready.settings.set({ features: { terminal: false } })
+    await ready.features.idle()
+    expect('terminal' in (seen.at(-1) as Record<string, unknown>)).toBe(false)
+  })
+})
+
+describe('featureProblem 매핑 — 묶음이 알리는 문제', () => {
+  it('블루투스 라디오: 광고·켜는 중은 문제가 아니고, 꺼짐·권한·미지원·실패는 문제다', () => {
+    expect(bluetoothProblem(undefined)).toBeUndefined()
+    expect(bluetoothProblem({ state: 'starting', links: 0 })).toBeUndefined()
+    expect(bluetoothProblem({ state: 'advertising', links: 1 })).toBeUndefined()
+    expect(bluetoothProblem({ state: 'poweredOff', links: 0 })).toEqual({ key: 'remote.bluetooth.poweredOff' })
+    expect(bluetoothProblem({ state: 'unauthorized', links: 0 })).toEqual({ key: 'remote.bluetooth.unauthorized' })
+    expect(bluetoothProblem({ state: 'unsupported', links: 0 })).toEqual({ key: 'remote.bluetooth.unsupported' })
+    expect(bluetoothProblem({ state: 'unsupported', reason: 'no prebuild', links: 0 })).toEqual({ key: 'remote.bluetooth.unsupportedReason', vars: { reason: 'no prebuild' } })
+    expect(bluetoothProblem({ state: 'failed', reason: 'key', links: 0 })).toEqual({ key: 'remote.bluetooth.failed', vars: { reason: 'key' } })
+  })
+
+  it('음성: 확인 중·준비됨·뜨는 중은 문제가 아니고, 엔진·모델 파일이 없거나 손상되면 문제다', () => {
+    expect(speechProblem({ state: 'unavailable', reason: 'checking', language: 'ko' })).toBeUndefined()
+    expect(speechProblem({ state: 'ready', language: 'ko' })).toBeUndefined()
+    expect(speechProblem({ state: 'starting', language: 'ko' })).toBeUndefined()
+    expect(speechProblem({ state: 'unavailable', reason: 'missing', language: 'ko' })).toEqual({ key: 'speech.error.unavailable' })
+    expect(speechProblem({ state: 'unavailable', reason: 'mismatch', language: 'ko' })).toEqual({ key: 'speech.error.unavailable' })
   })
 })
 

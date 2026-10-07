@@ -13,7 +13,7 @@ import type { OpenTarget, Toast } from '../src/services/notifications.ts'
 import type { OpenInApp } from '../src/services/openIn.ts'
 import type { FilePreview, HtmlAsset } from '../src/services/filePreview.ts'
 import type { DirectoryListing } from '../src/services/fileTree.ts'
-import type { FeatureId } from './features.ts'
+import type { FeatureId, FeatureStatuses } from './features.ts'
 import type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
 import type { McpToolSelection } from './mcpTools.ts'
@@ -33,7 +33,7 @@ export type { NoticeKind, OpenTarget, Toast } from '../src/services/notification
 export type { OpenInApp } from '../src/services/openIn.ts'
 export type { FilePreview, HtmlAsset } from '../src/services/filePreview.ts'
 export type { DirectoryEntry, DirectoryListing } from '../src/services/fileTree.ts'
-export type { FeatureId, FeatureSwitches } from './features.ts'
+export type { FeatureId, FeatureReason, FeatureStatus, FeatureStatuses, FeatureSwitches } from './features.ts'
 export type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 export type { SkillSource } from './skills.ts'
 export type { McpScope, McpServerInput, McpServerSummary, McpTestResult, McpVarSummary } from '../src/services/mcp.ts'
@@ -136,6 +136,10 @@ export const Channel = {
   GET_FEATURES: 'features:get',
   /** 메인 → 화면 (FeatureId[]) — 켜진 기능이 바뀌었다 (묶음을 다 올리고 내린 뒤) */
   FEATURES_CHANGED: 'features:changed',
+  /** 켜진 기능의 상태 (ctx.features.statuses, 이슈 #224) — FeatureStatuses. 설정 > 기능이 "켜지 못함" 을 그린다 */
+  GET_FEATURE_STATUSES: 'features:statuses',
+  /** 메인 → 화면 (FeatureStatuses) — 기능 상태가 바뀌었다 */
+  FEATURE_STATUSES_CHANGED: 'features:statuses-changed',
   /** 메인 → preload (boolean) — 창이 전체 화면인가. preload 가 html[data-fullscreen] 으로 옮긴다 (화면 코드는 CSS 만 본다) */
   WINDOW_FULLSCREEN: 'window:fullscreen',
   LIST_SKILLS: 'skills:list',
@@ -338,6 +342,9 @@ export interface LitecodeBridge {
   /** 켜진 기능 (ctx.features) — 꺼진 기능의 버튼·탭·메뉴·단축키는 그리지 않는다. 켜고 끄기는 setSettings({ features }) */
   getFeatures(): Promise<FeatureId[]>
   onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void
+  /** 켜진 기능의 상태 (이슈 #224) — 꺼진 기능은 빠진다. failed 면 사유가 있다 */
+  getFeatureStatuses(): Promise<FeatureStatuses>
+  onFeatureStatusesChanged(listener: (statuses: FeatureStatuses) => void): () => void
   /** 그 프로젝트에서 모델이 쓸 수 있는 스킬 (`+` 메뉴의 스킬 팝업, ctx.skills) — 이름순, 묶음(scope)은 위치로, 본문은 파일에서 지금 읽은 것 */
   listSkills(directory: string): Promise<SkillInfo[]>
   /** 스킬 팝업의 "폴더 열기" — 그 묶음의 스킬 폴더를 OS 파일 관리자로 연다 (없으면 만든다). project 는 `<프로젝트>/.opencode/skills`, all 은 앱 스킬 폴더 */

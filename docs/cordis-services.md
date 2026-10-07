@@ -97,6 +97,7 @@ projects ─► openIn
 - 올리고 내리기는 **한 줄(큐)** 로 선다 — 끄자마자 다시 켜도 옛 핸들러가 다 걷힌 뒤 새로 건다(`ipcMain.handle` 은 같은 채널 두 번을 거절한다). 한 묶음이 못 떠도 나머지와 `features/changed` 는 간다.
 - 기본값: `shared/features.ts` — 설정 파일에는 **기본과 다른 값만** 남는다. 고정(`FIXED`)은 저장 값이 있어도 이긴다.
 - `services()` 는 켜진 묶음의 서비스 키 목록 — 부팅 진단이 쓴다.
+- **기능 상태**(#224) — `status(id)`·`statuses()`: 켜진 기능마다 `mounting`·`on`·`failed(reason)`, 꺼진 기능은 상태 없음. 묶음 **아래 어느 fiber** 가 던져도 그 기능의 `failed` 다(묶음이 안에서 `ctx.plugin(Service)` 를 하면 안쪽 실패가 바깥 fiber 로 안 올라온다 — cordis 4 실측, 그래서 `internal/status` 의 FAILED fiber 를 위로 따라가 묶음을 찾는다). 사유는 `failureReason` — 첫 줄만·홈 경로 `~`·`redactSecrets`·160자 상한. 묶음이 스스로 알리는 길은 `problem(id, reason | undefined)`(글 또는 `{ key, vars }` 문구 키, 꺼진 기능의 알림은 버린다) — 지금 블루투스(라디오 꺼짐·권한·미지원·실패)와 음성(엔진·모델 파일 없음/손상)이 쓴다(`electron/main.ts` `bluetoothProblems`·`speechProblems`). 끄면 사유·문제를 지우고, 다시 켜면 다시 올린다.
 
 ## 5. IPC 연결 — 브리지 패턴
 
@@ -132,6 +133,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 | `settings` | `settings/changed` | 설정 변경 → 테마·기능 레지스트리·엔진이 듣는다 |
 | `providers` | `providers/changed` | provider 변경 → 엔진 설정 갱신 |
 | `features` | `features/changed` | 켜진 묶음을 다 올리고 내린 **뒤** — 엔진이 듣고 재시작 |
+| | `features/status` | 기능 상태(`FeatureStatuses` — 켜진 기능만)가 바뀌었다(#224) — 화면(설정 > 기능)이 `features:statuses-changed` 로 받는다 |
 | `remote` | `remote/changed` | 모바일 연결 상태 |
 | `speech` · `notifications` | `speech/changed` · `notifications/changed` `toast` `open` | 상태·토스트 |
 | `shell` · `terminals` | `shell/data` · `terminal/data` `terminal/exit` | 출력 조각 |

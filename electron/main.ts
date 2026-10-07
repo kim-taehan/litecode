@@ -53,7 +53,7 @@ import { PresentTool } from '../src/services/appMcp/tools/present.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
 import { RemoteHttps } from '../src/services/remote/https.ts'
-import { RemoteBluetooth, type BlenoLike } from '../src/services/remote/bluetooth.ts'
+import { RemoteBluetooth, bluetoothProblem, type BlenoLike } from '../src/services/remote/bluetooth.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { attentionTarget } from '../shared/delegation.ts'
@@ -61,7 +61,7 @@ import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
 import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from './resilience.ts'
 import { speechBridgeStreams } from '../src/services/speech/bridge.ts'
-import { SpeechService } from '../src/services/speech.ts'
+import { SpeechService, speechProblem } from '../src/services/speech.ts'
 import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
 import { systemSpeechHost } from './speechHost.ts'
 import { BrowserService } from '../src/services/browser.ts'
@@ -275,6 +275,8 @@ function bootstrap(ctx: Context): void {
   // 켜진 기능 — 화면은 이것을 보고 꺼진 기능의 버튼·탭·단축키를 그리지 않는다. 바뀌면 (묶음을 다 올리고 내린 뒤) 모든 창에
   handle(ctx, Channel.GET_FEATURES, async () => ctx.features.enabled())
   ctx.on('features/changed', (enabled) => broadcast(Channel.FEATURES_CHANGED, enabled))
+  handle(ctx, Channel.GET_FEATURE_STATUSES, async () => ctx.features.statuses())
+  ctx.on('features/status', (statuses) => broadcast(Channel.FEATURE_STATUSES_CHANGED, statuses))
 }
 // 바탕 연결 — 대화·엔진·설정·provider·프로젝트·대화 저장·트리거 등록소. 끌 수 없다. 기능마다의 연결은 아래 기능 묶음에 있어
 // 기능 하나를 빼도(끄거나 서비스가 못 떠도) 이 연결은 그대로 뜬다. 'llm' 은 본문이 안 쓰지만 둔다 — 부팅 진단(checkBoot)이 이 목록으로 ctx.llm 을 본다
@@ -528,6 +530,23 @@ function speechBridge(ctx: Context): void {
 }
 speechBridge.inject = ['speech']
 
+/** 블루투스 라디오의 문제(꺼짐·권한 없음·미지원·실패)를 설정 > 기능의 블루투스 연결 줄에도 알린다 (이슈 #224). 광고·켜는 중은 문제가 아니다.
+ *  묶음이 내려가면 ctx.features 가 문제를 지운다 */
+function bluetoothProblems(ctx: Context): void {
+  const report = (): void => ctx.features.problem('bluetooth', bluetoothProblem(ctx.remote.status().bluetooth))
+  report()
+  ctx.on('remote/changed', report)
+}
+bluetoothProblems.inject = ['remote', 'features']
+
+/** 음성 엔진·모델 파일이 없거나 손상됐으면 설정 > 기능의 음성 입력 줄에 알린다 (이슈 #224) */
+function speechProblems(ctx: Context): void {
+  const report = (): void => ctx.features.problem('voice', speechProblem(ctx.speech.status()))
+  report()
+  ctx.on('speech/changed', report)
+}
+speechProblems.inject = ['speech', 'features']
+
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게
  *  (web 만 묶음이 없다). service 는 묶음이 올리는 서비스 키 — 부팅 진단이 켜진 기능의 서비스가 떴는지 본다 */
 const features: FeatureDefinition[] = [
@@ -628,7 +647,10 @@ const features: FeatureDefinition[] = [
     // 블루투스 연결 (이슈 #210) — 기본 꺼짐. 설정 > 모바일의 "블루투스 연결" 토글. 네이티브 모듈(@stoprocent/bleno)은 켤 때 처음 읽는다 —
     // 안 켜면 로드도 macOS 블루투스 허용 창도 없다. 못 읽으면(프리빌드 없는 플랫폼) 상태 줄에 사유만 남는다
     id: 'bluetooth',
-    plugin: (ctx) => void ctx.plugin(RemoteBluetooth, { load: async () => (await import('@stoprocent/bleno')).default as unknown as BlenoLike }),
+    plugin: (ctx) => {
+      ctx.plugin(RemoteBluetooth, { load: async () => (await import('@stoprocent/bleno')).default as unknown as BlenoLike })
+      ctx.plugin(bluetoothProblems)
+    },
   },
   {
     // 데스크탑 MCP — 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰). ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다.
@@ -665,6 +687,7 @@ const features: FeatureDefinition[] = [
         root: app.isPackaged ? bundledSpeechDir(process.resourcesPath) : devSpeechDir(path.join(__dirname, '../..')),
       })
       ctx.plugin(speechBridge)
+      ctx.plugin(speechProblems)
     },
   },
   {
