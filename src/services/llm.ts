@@ -670,6 +670,64 @@ export class LlmService extends Service {
     }
   }
 
+  /** 한 번 묻고 답 글만 받는다 (자동 대화 제목, 이슈 #215) — 대화와 무관한 **임시 세션**을 그 폴더에 만들어 보내고, 끝나면(성공·실패·멈춤) 그 세션을
+   *  지운다. 턴이 아니다: 'llm/turn-*'·'llm/before-turn'(MCP 붙이기)·승인 카드('llm/attention*'·'llm/pre-tool')·통계·프로젝트 지시문이 없다.
+   *  도구는 전부 끈다 — tools `{"*": false}` 는 세션 permission 을 `*` deny 하나로 바꾼다(#164 실측의 와일드카드. `*` 하나로 전부 빠지는지는 안 쟀다).
+   *  모델·에이전트(기본 모드)는 늘 그렇듯 싣는다. stop 이 걸리면(부르는 쪽의 시간 초과) 엔진 턴을 멈춘다. 재시도 상한은 턴과 같다(#207 — 연결 실패는
+   *  첫 재시도에서 끝난다). 모델 카탈로그·주소 확인은 안 한다 — 부르는 쪽이 방금 같은 모델로 턴을 돌렸다 */
+  async askOnce({ providerId, modelId, directory, prompt, stop }: { providerId: string; modelId: string; directory: string; prompt: string; stop?: AbortSignal }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+    if (!this.ctx.providers.get(providerId)) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
+    this.turns++ // DB 정리·엔진 재시작이 이 요청을 끊지 않게 (끝나면 준다)
+    let conn: EngineConnection | undefined
+    let id: string | undefined
+    try {
+      conn = await this.ctx.engine.connection()
+      const folder = await this.engineFolder(directory)
+      if ('error' in folder) return { ok: false, error: folder.error }
+      const { workdir } = folder
+      if (stop?.aborted) return { ok: false, error: tr('error.stopped') }
+      id = await this.createSession(conn, providerId, modelId, workdir, sessionTitle(prompt))
+      const messageId = this.newMessageId()
+      let admitted!: (sent: boolean) => void
+      const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
+      const events = this.follow(conn, new TurnScope(id, messageId), tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), undefined, new Set(), () => {}, stop)
+      try {
+        await events.connected
+        if (stop?.aborted) {
+          admitted(false)
+          return { ok: false, error: tr('error.stopped') }
+        }
+        const send = await fetch(`${conn.url}/session/${id}/prompt_async?${at(workdir)}`, {
+          method: 'POST',
+          headers: { ...conn.headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ messageID: messageId, model: { providerID: providerId, modelID: modelId }, agent: MODE_AGENT[DEFAULT_MODE], tools: { '*': false }, parts: promptParts(prompt) }),
+        }).catch((error: unknown) => {
+          admitted(false)
+          throw error
+        })
+        if (!send.ok) {
+          admitted(false)
+          return { ok: false, error: tr('error.promptSend', { status: send.status }) }
+        }
+        admitted(true)
+        const result = await events.result
+        return result.ok ? { ok: true, text: result.text } : { ok: false, error: result.error ?? '' }
+      } finally {
+        events.stop()
+      }
+    } catch (error) {
+      if (conn?.closed.aborted) return { ok: false, error: interruptedError() }
+      return { ok: false, error: tr('error.opencodeConnect', { message: (error as Error).message }) }
+    } finally {
+      // 임시 세션은 늘 지운다 — 못 지우면 엔진 DB 에만 남는다 (대화 목록엔 처음부터 없다)
+      if (id) await this.deleteSession(id).catch((error: unknown) => console.warn('[llm] 임시 세션 지우기 실패', (error as Error).message))
+      this.turns--
+      this.purgeIfIdle()
+      this.gateIfIdle()
+      this.reloadIfIdle()
+    }
+  }
+
   /** chat·addContext 에 넘길 새 메시지 id — opencode 형식(`msg_` + 시각·순번 12자리 hex + 무작위 14자)이라 시간 순으로 정렬된다.
    *  opencode 는 메시지를 id 순으로 다루므로(01w 9절) 앱이 정한 id 도 그 순서를 지켜야 한다. `/` 명령처럼 보낸 본문과 보일 글이 다를 때,
    *  앱이 이 id 로 보일 글을 따로 적어 둔다 (01d "말풍선 문제"). 같은 id 를 두 번 보내면 조용히 합쳐지므로 매번 새로 만든다 */

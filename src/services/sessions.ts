@@ -126,6 +126,21 @@ export class SessionsService extends Service {
     return stored.conversations.find((entry) => entry.id === id)
   }
 
+  /** AI 가 정리한 제목으로 바꾼다 (자동 대화 제목, 이슈 #215) — 사용자가 이름을 바꾼 대화(renamed)는 덮지 않는다. 바꿨으면 고친 대화를 준다
+   *  (저장 안 된·이름을 바꾼·같은 제목이면 undefined). renamed 는 안 붙인다 — 자동 제목은 사용자가 지은 이름이 아니다. 시각·순서는 그대로다 */
+  async autoTitle(id: string, title: string): Promise<Conversation | undefined> {
+    let changed = false
+    const stored = await this.update((stored) => ({
+      ...stored,
+      conversations: stored.conversations.map((entry) => {
+        if (entry.id !== id || entry.renamed || entry.title === title) return entry
+        changed = true
+        return { ...entry, title }
+      }),
+    }))
+    return changed ? stored.conversations.find((entry) => entry.id === id) : undefined
+  }
+
   /** 사용자가 대화를 고정하거나 푼다 (이슈 #79) — 고친 대화를 준다 (저장 안 된 대화면 undefined). 시각·순서는 그대로다.
    *  고정한 대화는 보관 개수 제한에서 빠진다 (save). 풀면 다음 저장 때 다시 든다 */
   async pin(id: string, pinned: boolean): Promise<Conversation | undefined> {

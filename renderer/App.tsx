@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Attention, AttentionAnswer, AttentionTarget, AttachmentKind, ChatEvent, Conversation, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend, TurnItem } from '../shared/ipc.ts'
 import { titleFrom, TITLE_MAX } from '../shared/chat.ts'
-import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from './chatState.ts'
+import { applyChat, applyHistory, applyLive, planEnded, switchedMode, withStoredTitles, type ChatFields } from './chatState.ts'
 import { ago } from './ago.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap, useFollowBottom } from './Minimap.tsx'
@@ -278,7 +278,11 @@ export function App() {
       window.litecode.onTurnAttention((cid, requests) => apply({ event: 'turn.attention', data: { cid, requests } })),
       window.litecode.onTurnEnded((data) => apply({ event: 'turn.ended', data })),
       window.litecode.onQueueChanged((data) => apply({ event: 'queue.changed', data })),
-      window.litecode.onConversationsChanged((data) => forgetPruned(data.removed)),
+      window.litecode.onConversationsChanged((data) => {
+        forgetPruned(data.removed)
+        // 메인이 바꾼 제목(자동 대화 제목 #215 등)은 턴 이벤트에 안 실린다 — 목록을 다시 읽어 입힌다
+        void window.litecode.listConversations().then((stored) => setSessions((sessionsNow) => withStoredTitles(sessionsNow, stored)), () => {})
+      }),
     ]
     return () => offs.forEach((off) => off())
   }, [])

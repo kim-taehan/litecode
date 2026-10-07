@@ -178,6 +178,24 @@ export function GeneralPage() {
         </div>
       </div>
 
+      {/* 자동 대화 제목 (이슈 #215, 기본 꺼짐) — 첫 답이 끝나면 메인(autoTitle.ts)이 모델에 한 번 더 물어 제목을 바꾼다 */}
+      <div className="settings-row">
+        <div className="settings-row__text">
+          <div className="settings-row__title">{t('settings.autoTitle')}</div>
+          <div className="settings-row__description">{t('settings.autoTitle.description')}</div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          className="settings-switch"
+          aria-checked={settings.autoTitle === true}
+          aria-label={t('settings.autoTitle')}
+          onClick={() => save({ autoTitle: settings.autoTitle !== true })}
+        >
+          <span className="settings-switch__thumb" />
+        </button>
+      </div>
+
       {/* 창 닫기 = 숨기기 (ctx.quit, 이슈 #92) — Windows·Linux 만. macOS 는 창을 닫아도 원래 앱이 남는다 (플랫폼 표시는 preload 가 html 에 적는다) */}
       {document.documentElement.dataset.platform !== 'darwin' && (
         <div className="settings-row">

@@ -395,6 +395,8 @@ export const ko = {
   'settings.fontSize.unit': 'px',
   'settings.fontSize.increase': '글자 크기 키우기',
   'settings.fontSize.decrease': '글자 크기 줄이기',
+  'settings.autoTitle': '대화 제목 자동 정리',
+  'settings.autoTitle.description': '대화 제목을 AI 가 짧게 정리합니다(첫 답이 끝난 뒤 모델에 한 번 더 요청 — 토큰을 조금 씁니다)',
   'settings.keepRunning': '창을 닫아도 계속 실행',
   'settings.keepRunning.description': '창을 닫으면 알림 영역(트레이)에 남아 대화와 폰 연결이 이어집니다. 끄면 창을 닫을 때 앱이 끝납니다',
   // 종료 확인 · 트레이 (ctx.quit — 네이티브 창·메뉴 문구라 메인이 쓴다)

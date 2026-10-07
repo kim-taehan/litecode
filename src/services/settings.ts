@@ -34,6 +34,8 @@ export interface Settings {
   trayNoticeShown?: boolean
   /** 받아쓰기(음성 입력, ctx.speech) 언어 힌트 — 없으면 화면 언어를 따른다 (shared/speech.ts speechLanguage) */
   speechLanguage?: SpeechLanguage
+  /** "대화 제목을 AI 가 짧게 정리" (설정 > 일반, 이슈 #215) — 첫 턴이 잘 끝나면 모델에 한 번 더 물어 제목을 바꾼다 (autoTitle.ts). 없으면 꺼짐 */
+  autoTitle?: boolean
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 새 대화는 기본 모드(01k §6).
@@ -67,6 +69,7 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   keepRunning: (value): value is boolean => typeof value === 'boolean',
   trayNoticeShown: (value): value is boolean => typeof value === 'boolean',
   speechLanguage: isSpeechLanguage,
+  autoTitle: (value): value is boolean => typeof value === 'boolean',
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

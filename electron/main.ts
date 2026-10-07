@@ -6,6 +6,7 @@ import { Context } from 'cordis'
 import { ProviderRegistry, type KeyCipher, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService, type AttentionAnswer } from '../src/services/llm.ts'
 import { ChatService } from '../src/services/chat.ts'
+import { autoTitle } from '../src/services/autoTitle.ts'
 import { AttachmentsService } from '../src/services/attachmentsService.ts'
 import { systemAttachmentsHost } from './attachmentsHost.ts'
 import { ReportService } from '../src/services/report.ts'
@@ -305,6 +306,8 @@ function chatBridge(ctx: Context): void {
 chatBridge.inject = ['chat']
 mounted.push(ctx.plugin(ChatService))
 mounted.push(ctx.plugin(chatBridge))
+// 자동 대화 제목 (이슈 #215) — 설정(autoTitle)이 켜져 있으면 첫 턴 뒤 제목을 AI 가 짧게 정리한다. 턴 이벤트만 듣는다 (끄면 듣고도 안 묻는다)
+mounted.push(ctx.plugin(autoTitle))
 
 // 첨부 (ctx.attachments, 이슈 #97) — 고르기·놓기·붙여넣기를 칩으로 만들고 붙여넣은 이미지의 임시 파일(userData/pasted-images)을 쥔다.
 // 여기는 채널만 잇는다. 파일 고르기 대화상자는 host 가 요청을 보낸 창에 붙인다 (event.sender)
