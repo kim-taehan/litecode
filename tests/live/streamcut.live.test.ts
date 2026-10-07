@@ -70,20 +70,20 @@ function approveAfter(services: Context, waitMs: number, answer?: 'once') {
 
 describe('세션 SSE 가 끊긴 뒤 (01q)', () => {
   it('끊긴 대화에 다시 보내면 새 질문이 자기 답을 받는다 (이전 턴의 답이 한 칸 밀려 붙지 않는다)', async () => {
-    const first = await short.llm.chat('fake', 'echo', work, '[slow] 첫 질문')
+    const first = await short.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[slow] 첫 질문' })
     expect(first).toMatchObject({ ok: false, interrupted: true, error: tr('error.streamBroken') })
 
-    const second = await short.llm.chat('fake', 'echo', work, '두 번째 질문', first.sessionId)
+    const second = await short.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '두 번째 질문', sessionId: first.sessionId })
     expect(second).toMatchObject({ ok: true, text: 'echo: 두 번째 질문' })
   })
 
   it('승인 대기 중에 끊기면 opencode 턴도 멈춘다 — 그 대화의 다음 턴이 자기 답을 받는다', async () => {
     const waiting = approveAfter(short, 0)
-    const first = await short.llm.chat('fake', 'echo', work, '[bash:pwd] 승인 대기', undefined, undefined, undefined, undefined, 'ask', waiting.onAttention)
+    const first = await short.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[bash:pwd] 승인 대기', mode: 'ask', onAttention: waiting.onAttention })
     expect(waiting.shown[0]?.[0]).toMatchObject({ kind: 'permission' })
     expect(first).toMatchObject({ ok: false, interrupted: true })
 
-    const second = await short.llm.chat('fake', 'echo', work, '다음 질문', first.sessionId)
+    const second = await short.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '다음 질문', sessionId: first.sessionId })
     expect(second).toMatchObject({ ok: true, text: 'echo: 다음 질문' })
   })
 })
@@ -91,18 +91,18 @@ describe('세션 SSE 가 끊긴 뒤 (01q)', () => {
 describe(`제품 설정(무바이트 한도 ${STREAM_IDLE_TIMEOUT_MS}ms)`, () => {
   // 레거시 /event 는 10초마다 heartbeat 를 보낸다 — 한도는 FIN 없이 죽은 연결만 잡고, LLM 이 한도보다 오래 조용해도 턴은 끊기지 않는다 (이슈 #20)
   it(`LLM 이 ${SLOW_MS / 1000}초 동안 첫 바이트를 안 보내도(한도 ${STREAM_IDLE_TIMEOUT_MS / 1000}초 이상) heartbeat 덕에 끝까지 받는다`, async () => {
-    expect(await product.llm.chat('fake', 'echo', work, '[slow] 오래 걸리는 답')).toMatchObject({ ok: true, text: 'echo: [slow] 오래 걸리는 답' })
+    expect(await product.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[slow] 오래 걸리는 답' })).toMatchObject({ ok: true, text: 'echo: [slow] 오래 걸리는 답' })
   }, SLOW_MS + 20_000)
 
   it(`짧은 타임아웃이면 끊기는 승인 대기(${APPROVAL_WAIT_MS}ms)를 지나 끝까지 받는다`, async () => {
     const approving = approveAfter(product, APPROVAL_WAIT_MS, 'once')
-    const result = await product.llm.chat('fake', 'echo', work, '[bash:pwd] 오래 기다린 승인', undefined, undefined, undefined, undefined, 'ask', approving.onAttention)
+    const result = await product.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[bash:pwd] 오래 기다린 승인', mode: 'ask', onAttention: approving.onAttention })
     expect(approving.shown[0]?.[0]).toMatchObject({ kind: 'permission' })
     expect(result).toMatchObject({ ok: true })
     expect(result.text?.split('\n')[0]).toBe(`tool: ${work}`)
   })
 
   it('첫 바이트가 늦은 LLM 답도 끊기지 않는다', async () => {
-    expect(await product.llm.chat('fake', 'echo', work, '[late] 느린 답')).toMatchObject({ ok: true, text: 'echo: [late] 느린 답' })
+    expect(await product.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[late] 느린 답' })).toMatchObject({ ok: true, text: 'echo: [late] 느린 답' })
   })
 })

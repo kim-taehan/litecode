@@ -468,29 +468,29 @@ export class ChatService extends Service {
     if (shown !== undefined) await this.ctx.sessions.label(cid, messageId, shown)
     if (files.length > 0) await this.ctx.sessions.noteAttachments(cid, messageId, files)
     if (item.from) await this.ctx.sessions.noteOrigin(cid, messageId, item.from) // 다시 열어도 "다른 대화에서 온 지시" 로 보이게
-    return this.ctx.llm.chat(
-      model!.providerId,
-      model!.modelId,
-      project,
+    return this.ctx.llm.chat({
+      providerId: model!.providerId,
+      modelId: model!.modelId,
+      directory: project,
       prompt,
       sessionId,
-      (created) => this.ctx.sessions.attach(cid, created),
+      onSession: (created) => this.ctx.sessions.attach(cid, created),
       messageId,
-      (progress) => {
+      onProgress: (progress) => {
         if (this.turns.get(cid) !== turn) return // 끝난 뒤 늦게 온 것은 버린다
         turn.progress = upsertItem(turn.progress, progress)
         this.ctx.emit('chat/turn-progress', { cid, item: progress })
       },
-      isMode(mode) ? mode : undefined,
-      (requests) => {
+      mode: isMode(mode) ? mode : undefined,
+      onAttention: (requests) => {
         if (this.turns.get(cid) !== turn) return
         turn.attention = requests
         this.ctx.emit('chat/turn-attention', { cid, requests })
       },
-      turn.stop.signal, // 답변 중지 — 첫 턴은 아직 엔진 세션이 없어 대화 id 로 쥔다
+      stop: turn.stop.signal, // 답변 중지 — 첫 턴은 아직 엔진 세션이 없어 대화 id 로 쥔다
       images,
-      before.context.join('\n\n') || undefined,
-    )
+      context: before.context.join('\n\n') || undefined,
+    })
   }
 }
 

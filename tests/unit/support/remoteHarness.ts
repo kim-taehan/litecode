@@ -12,7 +12,7 @@ import { serveFramed, type FramedServer } from '../../../src/services/remote/fra
 import type { ByteLink } from '../../../shared/remoteFraming.ts'
 import { SessionsService } from '../../../src/services/sessions.ts'
 import { SettingsService } from '../../../src/services/settings.ts'
-import type { ChatResult } from '../../../src/services/llm.ts'
+import type { ChatOptions, ChatResult } from '../../../src/services/llm.ts'
 import type { Attention, History, HistoryMessage, TurnItem } from '../../../shared/contract.ts'
 import type { ChatEventMap } from '../../../shared/chat.ts'
 import type { PairResponse } from '../../../shared/remote.ts'
@@ -47,19 +47,7 @@ export class FakeLlm extends Service {
   seed(sessionId: string, messages: HistoryMessage[]): void {
     this.transcript.set(sessionId, messages)
   }
-  async chat(
-    _providerId: string,
-    _modelId: string,
-    _directory: string,
-    prompt: string,
-    sessionId?: string,
-    onSession?: (sessionId: string) => Promise<void>,
-    messageId?: string,
-    onProgress?: (item: TurnItem) => void,
-    mode?: string,
-    onAttention?: (requests: Attention[]) => void,
-    stop?: AbortSignal,
-  ): Promise<ChatResult> {
+  async chat({ prompt, sessionId, onSession, messageId, onProgress, mode, onAttention, stop }: ChatOptions): Promise<ChatResult> {
     const id = sessionId ?? `ses_${this.calls.length + 1}`
     if (!sessionId) await onSession?.(id)
     const messages = this.transcript.get(id) ?? []

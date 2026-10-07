@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { describeHttpError, errorDetail, httpStatusOf } from '../../shared/httpError.ts'
 import { turnError } from '../../src/services/contextOverflow.ts'
-import { failureText } from '../../src/services/llm.ts'
+import { failureText } from '../../src/services/history.ts'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 
 // HTTP 실패를 사람이 읽는 문구로 (closed-code httpError + 게이트웨이 오류 체계 — 02x_closed_F). 상태 코드만 말하던 곳:

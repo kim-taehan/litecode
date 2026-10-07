@@ -1,6 +1,6 @@
 import type { Context } from 'cordis'
 import path from 'node:path'
-import { realDirectory } from '../../llm.ts'
+import { realDirectory } from '../../projectPath.ts'
 import { APP_MCP_NAME } from '../../mcp.ts'
 import type { AppMcpTool } from '../rpc.ts'
 import { DEFAULT_MODE } from '../../../../shared/modes.ts'
