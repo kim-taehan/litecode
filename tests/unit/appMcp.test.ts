@@ -84,6 +84,15 @@ describe('open 터미널의 명령 — 채워만 둔다', () => {
     }
     expect(() => terminalCommand({ command: 3 })).toThrow('command must be a string')
   })
+
+  // 이슈 #178 (02x B 4-10): 사용자가 확인할 글자가 실제로 들어가는 글자와 달라 보이면 "채워만 둔다" 의 값이 없다
+  it('C1·방향 제어·보이지 않는 글자도 거절한다', () => {
+    const hidden = ['\u0080', '\u0085', '\u009b', '\u009f', '‪', '‫', '‬', '‭', '‮', '⁦', '⁧', '⁨', '⁩', '‎', '‏', '​', '‌', '‍', '⁠', '﻿']
+    for (const char of hidden) {
+      expect(() => terminalCommand({ command: `ls ${char}x` }), `U+${char.codePointAt(0)!.toString(16)}`).toThrow('Multi-line commands and control characters are rejected')
+    }
+    expect(terminalCommand({ command: 'echo 한글 é ← 😀' })).toBe('echo 한글 é ← 😀') // 보이는 글자는 그대로
+  })
 })
 
 // ── 서버·도구·붙이기 (진짜 HTTP) ──

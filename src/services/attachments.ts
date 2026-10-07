@@ -189,11 +189,20 @@ export async function attachPasted(
   return { picked: result.picked, rejected: [...early, ...result.rejected] }
 }
 
+/** 코드 블록 머리에 쓸 파일 이름 — 밖에서 온 이름이 울타리를 열고 닫지 못하게 (이슈 #178): 개행·제어(C0·DEL·C1)·방향·보이지 않는 글자는
+ *  지우고, 백틱은 `'` 로, 줄 머리의 `~` 는 이스케이프한다(`~~~` 도 울타리다). 보통 이름은 그대로 */
+function blockLabel(name: string): string {
+  return name
+    .replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩​-‏⁠﻿]/g, '')
+    .replace(/`/g, "'")
+    .replace(/^(\s*)~/, '$1\\~')
+}
+
 /** 파일 이름을 머리로 한 코드 블록 — 울타리는 본문의 가장 긴 백틱 줄보다 길게 */
 function fileBlock(name: string, content: string): string {
   const longest = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length))
   const fence = '`'.repeat(Math.max(3, longest + 1))
-  return `${name}:\n${fence}\n${content}${content.endsWith('\n') ? '' : '\n'}${fence}`
+  return `${blockLabel(name)}:\n${fence}\n${content}${content.endsWith('\n') ? '' : '\n'}${fence}`
 }
 
 /** 보낼 글과 이미지 — 프로젝트 안 글 파일은 글 끝에 `@상대경로`, 밖의 글 파일은 그 뒤에 코드 블록으로, 이미지는 읽은 바이트로.
