@@ -398,6 +398,7 @@ export const en = {
   'report.folderDialogTitle': 'Folder for the problem report bundle',
   'report.folderDialogButton': 'Save here',
   'report.bundle': 'Problem report bundle',
+  'report.bundle.menu': 'Problem report bundle',
   'report.bundle.description': 'Saves the app state into one folder. When you report a problem, hand this folder to the person in charge yourself. The app does not send it anywhere.',
   'report.bundle.create': 'Create bundle',
   'report.bundle.included': 'Included',

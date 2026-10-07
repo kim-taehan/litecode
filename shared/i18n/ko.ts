@@ -416,6 +416,7 @@ export const ko = {
   'report.folderDialogTitle': '문제 신고 묶음을 저장할 폴더',
   'report.folderDialogButton': '여기에 저장',
   'report.bundle': '문제 신고 묶음',
+  'report.bundle.menu': '문제 신고 묶음',
   'report.bundle.description': '앱 상태를 폴더 하나로 저장합니다. 문제를 알릴 때 이 폴더를 담당자에게 직접 전달하세요. 앱이 어디로 보내지는 않습니다.',
   'report.bundle.create': '묶음 만들기',
   'report.bundle.included': '들어가는 것',

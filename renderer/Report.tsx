@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useT } from './settingsStore.ts'
 import { reason } from './ipcError.ts'
+import { useFocusTrap } from './focusTrap.ts'
+import './plus.css'
 import './report.css'
 
 // 대화 내보내기 · 문제 신고 묶음 (이슈 #177, 시안 _workspace/mock-report/{Main,Report}.dc.html). 파일 쓰기·대화상자는 메인(ctx.report)이 하고,
@@ -29,11 +32,23 @@ function ExportIcon() {
   )
 }
 
-/** 대화 머리 오른쪽 끝 "더 보기" — 항목은 "대화 내보내기" 하나 (대화 복사는 아직 없는 기능이라 만들지 않았다) */
+/** 느낌표 삼각형 — 문제 신고 */
+function ReportIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 2L14.5 13.5h-13z" />
+      <path d="M8 6.5v3.2" />
+      <path d="M8 11.6v.1" />
+    </svg>
+  )
+}
+
+/** 대화 머리 오른쪽 끝 "더 보기" — 항목은 "대화 내보내기"와 "문제 신고 묶음"(별도 팝업 — 사용자 결정 2026-10-07, 설정이 아니다). 대화 복사는 아직 없는 기능이라 만들지 않았다 */
 export function ConversationMenu({ conversationId }: { conversationId: string }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [reporting, setReporting] = useState(false)
   const [notice, setNotice] = useState<{ ok: boolean; text: string }>()
   const root = useRef<HTMLDivElement>(null)
 
@@ -94,8 +109,21 @@ export function ConversationMenu({ conversationId }: { conversationId: string })
             <ExportIcon />
             <span>{t('report.exportChat')}</span>
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="chat-more__item"
+            onClick={() => {
+              setOpen(false)
+              setReporting(true)
+            }}
+          >
+            <ReportIcon />
+            <span>{t('report.bundle.menu')}</span>
+          </button>
         </div>
       )}
+      {reporting && <ReportDialog onClose={() => setReporting(false)} />}
       {notice && (
         <p className={`chat-more__notice${notice.ok ? '' : ' chat-more__notice--error'}`} role={notice.ok ? 'status' : 'alert'}>
           {notice.text}
@@ -105,7 +133,48 @@ export function ConversationMenu({ conversationId }: { conversationId: string })
   )
 }
 
-/** 설정 > 일반 "문제 신고 묶음" 카드 — 들어가는 것/들어가지 않는 것 두 칸, 저장 뒤 초록 안내 + [폴더 열기] */
+/** 문제 신고 묶음 팝업 — 가림막·닫기 버튼·Esc 는 `+` 메뉴 팝업(PlusDialog)과 같다. 프로젝트 배지는 없다(앱 전체의 일) */
+function ReportDialog({ onClose }: { onClose(): void }) {
+  const t = useT()
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(dialogRef)
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key !== 'Escape' || event.isComposing) return
+      event.preventDefault()
+      onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return createPortal(
+    <div className="settings-overlay" role="presentation">
+      <div className="settings-mask" aria-hidden="true" onClick={onClose} />
+      <div className="plus-dialog report-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <div className="plus-dialog__head">
+          <div className="plus-dialog__titles">
+            <span className="plus-dialog__title" id={titleId}>
+              {t('report.bundle')}
+            </span>
+          </div>
+          <button type="button" className="settings-close plus-dialog__close" aria-label={t('settings.close')} onClick={onClose}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
+              <path d="M3 3L11 11M11 3L3 11" />
+            </svg>
+          </button>
+        </div>
+        <div className="plus-dialog__body">
+          <ReportBundle />
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/** 문제 신고 묶음 카드 — 들어가는 것/들어가지 않는 것 두 칸, 저장 뒤 초록 안내 + [폴더 열기] */
 export function ReportBundle() {
   const t = useT()
   const [busy, setBusy] = useState(false)

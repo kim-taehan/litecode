@@ -7,7 +7,6 @@ import { ConfirmFullAccess } from './ModeChip.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../shared/fontSize.ts'
 import { useFeatures } from './featuresStore.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
-import { ReportBundle } from './Report.tsx'
 
 // 설정 > 일반 — dsh ui-settings-general GeneralSection 의 행 모양(이름 + 회색 설명, 오른쪽 컨트롤, 행 사이 0.5px 선)과
 // 행들(locale LanguageRow · ui-theme AppearanceRow·FontSizeRow · DeveloperToolsRow)을 따른다. 바꾸면 곧바로 메인(ctx.settings)에
@@ -198,11 +197,6 @@ export function GeneralPage() {
           </button>
         </div>
       )}
-
-      {/* 문제 신고 묶음 (이슈 #177) — 로컬 폴더로만 저장한다 (Report.tsx) */}
-      <div className="settings-row settings-row--stacked" data-setting="report">
-        <ReportBundle />
-      </div>
 
       {/* 맨 아래 한 줄 — dsh CurrentVersionRow. 못 받으면 줄째 없다 */}
       {version && <div className="settings-version">{t('settings.currentVersion', { version })}</div>}
