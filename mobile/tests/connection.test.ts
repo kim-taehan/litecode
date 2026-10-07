@@ -184,6 +184,44 @@ describe('연결 상태', () => {
     expect(connection.state).toMatchObject({ runId: 'B', seq: 2, views: { c1: { seq: 2 } } })
   })
 
+  // #187 B4 — 404 는 다시 해도 404 다. 다시 받기를 끝내지 못하면 그 뒤 이벤트(진행 줄은 초당 수십)마다 목록·모든 열린 대화를 또 부른다
+  it('다시 받을 때 열린 대화가 404(데스크탑에서 지움)면 그 대화를 닫고 다시 받기를 끝낸다 — 그 뒤 이벤트마다 다시 받지 않는다', async () => {
+    const { transport, server, connection, connect } = setup()
+    await connect()
+    await connection.loadConversations('/p')
+    await connection.openConversation('c1')
+    const respond = transport.respond
+    transport.respond = (request) => (new URL(request.url).pathname === '/v1/conversations/c1' ? { status: 404, body: '{"error":"no such conversation"}' } : respond(request))
+
+    server.runId = 'B'
+    server.seq = 10
+    transport.last.handlers.onData(sse('reset', { runId: 'B', seq: 10 }))
+    await flush()
+    const afterReset = transport.requests.length
+    expect(connection.state.views['c1']).toBeUndefined()
+
+    // 다른 대화(c2)의 진행 이벤트 20개
+    for (let seq = 11; seq <= 30; seq++) {
+      transport.last.handlers.onData(sse('turn.progress', { cid: 'c2', item: { kind: 'text', id: 'p', text: String(seq) } }, seq))
+      await flush()
+    }
+    expect(transport.requests.length).toBe(afterReset)
+    expect(connection.state.seq).toBe(30)
+  })
+
+  it('다시 받기의 404 가 아닌 실패(끊김)는 그대로 실패다 — 열린 대화를 닫지 않는다', async () => {
+    const { transport, server, connection, connect } = setup()
+    await connect()
+    await connection.openConversation('c1')
+    const respond = transport.respond
+    transport.respond = (request) => (new URL(request.url).pathname === '/v1/conversations/c1' ? { status: 500, body: '{"error":"x"}' } : respond(request))
+
+    server.runId = 'B'
+    transport.last.handlers.onData(sse('reset', { runId: 'B', seq: 2 }))
+    await flush()
+    expect(connection.state.views['c1']).toBeDefined()
+  })
+
   it('다시 붙었는데 hello 의 runId 가 바뀌었으면(데스크탑 재시작) 새 run 으로 구독하고 스냅샷을 다시 받는다', async () => {
     const { transport, server, connection, connect } = setup()
     await connect()
