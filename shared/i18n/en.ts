@@ -783,6 +783,7 @@ export const en = {
   'remote.error.portInUse': 'Port {port} is in use by another program. Quit it, then turn this on again',
   'remote.error.listen': 'Could not start listening: {message}',
   'remote.error.notListening': 'The mobile connection is not on',
+  'remote.fullAccessBlocked': "Not sent: this conversation is in full access mode, so messages from a phone don't run. Take it back on the phone or send it from the desktop",
   'remote.pair': 'Connect a device',
   'remote.pair.description': 'Shows a QR code and the address and code for the phone app. The code works once, for 2 minutes',
   'remote.pair.scan': 'Scan this with "Scan QR" in the phone app. The phone and this PC must be on the same company network',

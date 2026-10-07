@@ -807,6 +807,7 @@ export const ko = {
   'remote.error.portInUse': '포트 {port} 을(를) 다른 프로그램이 쓰고 있어 열지 못했습니다. 그 프로그램을 끄고 다시 켜세요',
   'remote.error.listen': '열지 못했습니다: {message}',
   'remote.error.notListening': '모바일 연결이 켜져 있지 않습니다',
+  'remote.fullAccessBlocked': '전체 권한 모드 대화라 폰에서 보낸 글은 보내지 않았습니다 — 폰에서 되돌리거나 데스크탑에서 보내세요',
   'remote.pair': '기기 연결',
   'remote.pair.description': '폰 앱에서 읽을 QR 과 주소·코드를 보입니다. 코드는 2분 동안 한 번만 쓸 수 있습니다',
   'remote.pair.scan': '폰 앱의 "QR 스캔" 으로 읽으세요. 폰과 이 PC 가 같은 사내망에 있어야 합니다',
