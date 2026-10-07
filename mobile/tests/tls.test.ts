@@ -91,6 +91,24 @@ describe('QR 로 짝짓기', () => {
     expect(native.sent.filter((line) => line.endsWith('/v1/pair'))).toEqual([`POST https://${live()}/v1/pair`])
   })
 
+  it('QR 의 bk(블루투스 키)·d 를 저장한다 — 블루투스를 고르면 이것으로 붙는다 (이슈 #211). bk 없는 QR 이면 키 없음', async () => {
+    const bk = 'B'.repeat(42) + 'A'
+    const store = memoryStore()
+    const link = newLink(store)
+    await link.restore()
+    const pairing = link.pairQr(qr({ bluetoothKey: bk }), 'Pixel 8')
+    await allowWhenAsked()
+    await pairing
+    expect(phase(link, 'linked').desktop).toMatchObject({ bluetoothKey: bk, desktopId: 'fake-desktop' })
+    expect(store.value?.bluetoothKey).toBe(bk)
+
+    await link.disconnect()
+    const again = link.pairQr(qr(), 'Pixel 8')
+    await allowWhenAsked()
+    await again
+    expect(phase(link, 'linked').desktop.bluetoothKey).toBeUndefined()
+  })
+
   it('QR 의 지문과 서버 인증서가 다르면 fingerprint-mismatch — 페어링 코드를 보내지 않는다', async () => {
     const link = newLink()
     await link.restore()

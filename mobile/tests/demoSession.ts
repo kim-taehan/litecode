@@ -217,6 +217,11 @@ export function createDemoSession(): AppSession {
     openConversation: () => undefined, // 견본은 전부 받아 둔 채로 시작한다
     closeConversation: () => undefined,
     wake: () => undefined,
+    carrier: 'wifi',
+    hasConnected: () => true,
+    getFailure: () => undefined,
+    receivedBytes: () => 0,
+    retry: () => undefined,
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

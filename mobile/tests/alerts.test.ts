@@ -215,7 +215,7 @@ describe('Preferences — 알림·연결 유지 스위치', () => {
     const store = memory()
     const first = new Preferences(store)
     await first.restore()
-    expect(first.value).toEqual({ notifications: true, keepAlive: false })
+    expect(first.value).toEqual({ notifications: true, keepAlive: false, carrier: 'wifi' })
     const listener = vi.fn()
     first.subscribe(listener)
     first.set({ keepAlive: true })
@@ -223,11 +223,24 @@ describe('Preferences — 알림·연결 유지 스위치', () => {
 
     const again = new Preferences(store)
     await again.restore()
-    expect(again.value).toEqual({ notifications: true, keepAlive: true })
+    expect(again.value).toEqual({ notifications: true, keepAlive: true, carrier: 'wifi' })
+  })
+
+  it('연결 방법: 기본 Wi-Fi, 고른 것을 기억한다. 모르는 값이면 Wi-Fi (이슈 #211)', async () => {
+    const store = memory()
+    const first = new Preferences(store)
+    await first.restore()
+    first.set({ carrier: 'bluetooth' })
+    const again = new Preferences(store)
+    await again.restore()
+    expect(again.value.carrier).toBe('bluetooth')
+    const odd = new Preferences(memory('{"carrier":"usb"}'))
+    await odd.restore()
+    expect(odd.value.carrier).toBe('wifi')
   })
 
   it('깨진 저장·모르는 값은 기본값으로', async () => {
-    for (const raw of ['{not json', '{"notifications":"yes","keepAlive":1}', 'null']) {
+    for (const raw of ['{not json', '{"notifications":"yes","keepAlive":1,"carrier":3}', 'null']) {
       const prefs = new Preferences(memory(raw))
       await prefs.restore()
       expect(prefs.value, raw).toEqual(DEFAULT_PREFS)

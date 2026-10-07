@@ -61,6 +61,7 @@ describe('view — 상태를 화면 글로', () => {
     expect(statusBanner({ kind: 'reconnecting', attempt: 2, retryAt: NOW + 1_200 }, NOW)).toBe('다시 연결 중 · 2초')
     expect(statusBanner({ kind: 'unresponsive', attempt: 1, retryAt: NOW }, NOW)).toBe('데스크탑 응답 없음 (잠자기?)')
     expect(statusBanner({ kind: 'revoked' }, NOW)).toBe('연결이 해제됐습니다')
+    expect(statusBanner({ kind: 'needs-action' }, NOW)).toBe('연결하려면 확인이 필요합니다')
   })
 
   it('userMessageView: 훅이 이어 보낸 글은 말풍선이 아니라 훅 줄 — 머리("Stop hook feedback:")는 떼고 사유만', () => {

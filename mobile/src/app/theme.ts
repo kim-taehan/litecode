@@ -23,6 +23,11 @@ export const C = {
   amberText: '#6b4300',
   green: '#2c7a4b',
   red: '#b3261e',
+  // 안 될 때 상자 (시안 mock-ble Fail)
+  redBg: '#fdf0ee',
+  redBorder: '#e3b4af',
+  redTitle: '#8f1f19',
+  redText: '#5a1a16',
 } as const
 
 export const MONO = 'monospace'

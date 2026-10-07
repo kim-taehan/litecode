@@ -18,6 +18,29 @@ export function useNotice(session: AppSession): SessionNotice | undefined {
   return useSyncExternalStore(session.subscribe, session.getNotice)
 }
 
+/** 마지막으로 붙지 못한 까닭 (연결 화면의 사유) */
+export function useFailure(session: AppSession): unknown {
+  return useSyncExternalStore(session.subscribe, session.getFailure)
+}
+
+/** 이 세션이 한 번이라도 붙었나 (아직이면 연결 화면) */
+export function useHasConnected(session: AppSession): boolean {
+  return useSyncExternalStore(session.subscribe, session.hasConnected)
+}
+
+/** active 인 동안 링크로 받은 바이트 — active 가 켜진 때부터 센다(0.5초마다). 블루투스로 긴 대화를 받는 진행 표시 */
+export function useReceivedSince(session: AppSession, active: boolean): number {
+  const [bytes, setBytes] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const from = session.receivedBytes()
+    setBytes(0)
+    const timer = setInterval(() => setBytes(session.receivedBytes() - from), 500)
+    return () => clearInterval(timer)
+  }, [session, active])
+  return bytes
+}
+
 /** 데스크탑과의 짝이 지금 어느 단계인가 */
 export function useLinkState(link: DesktopLink): LinkState {
   return useSyncExternalStore(

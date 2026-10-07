@@ -4,7 +4,8 @@ import { fetch as expoFetch } from 'expo/fetch'
 import * as SecureStore from 'expo-secure-store'
 import { Platform } from 'react-native'
 import { pinnedNet as nativePinnedNet } from '../../modules/litecode-pinned-net/index.ts'
-import { createFetchTransport, isFingerprint, type FetchLike, type PinnedNet, type Transport } from '../core/index.ts'
+import { createFetchTransport, isFingerprint, type BleDriver, type FetchLike, type PinnedNet, type Transport } from '../core/index.ts'
+import { createBleManagerDriver } from './bleManagerDriver.ts'
 import type { DesktopStore, SavedDesktop } from './link.ts'
 import type { PrefsStore } from './prefs.ts'
 
@@ -25,7 +26,8 @@ export const desktopStore: DesktopStore = {
     const complete = [value.address, value.baseUrl, value.deviceId, value.token, value.desktopName].every((field) => typeof field === 'string' && field !== '')
     const fingerprintOk = value.fingerprint === undefined || isFingerprint(value.fingerprint)
     const addressesOk = value.addresses === undefined || (Array.isArray(value.addresses) && value.addresses.every((address) => typeof address === 'string'))
-    return complete && fingerprintOk && addressesOk ? (value as SavedDesktop) : undefined
+    const bluetoothOk = [value.desktopId, value.bluetoothKey].every((field) => field === undefined || typeof field === 'string')
+    return complete && fingerprintOk && addressesOk && bluetoothOk ? (value as SavedDesktop) : undefined
   },
   save: (desktop) => SecureStore.setItemAsync(KEY, JSON.stringify(desktop)),
   clear: () => SecureStore.deleteItemAsync(KEY),
@@ -47,3 +49,6 @@ export const platform = Platform.OS === 'ios' ? 'ios' : 'android'
 
 /** Android API 레벨 (Android 10 = 29) — 사내망 연결(TLS 1.3)을 쓸 수 있는지 가른다 (link.ts lanUnsupported) */
 export const apiLevel: number | undefined = Platform.OS === 'android' ? Number(Platform.Version) : undefined
+
+/** 블루투스 라디오 (react-native-ble-manager) — 블루투스를 골라 붙을 때만 권한을 묻고 켠다 */
+export const bluetooth: BleDriver = createBleManagerDriver(apiLevel)

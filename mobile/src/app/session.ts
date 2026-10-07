@@ -22,6 +22,9 @@ export interface DesktopInfo {
  */
 export type SessionNotice = 'desktop-only' | 'answer-desktop-only' | 'send-failed' | 'elsewhere' | 'failed'
 
+/** 데스크탑에 붙는 길 — 사용자가 고른 것만 쓴다. 자동으로 다른 길로 넘어가지 않는다 (사용자 2026-10-07 "선택할 수 있게") */
+export type Carrier = 'wifi' | 'bluetooth'
+
 export interface AppSession {
   getState(): RemoteState
   getStatus(): ConnectionStatus
@@ -32,6 +35,16 @@ export interface AppSession {
   onEvent(listener: (event: RemoteEvent) => void): () => void
   readonly desktop: DesktopInfo
   readonly models: readonly RemoteModel[]
+  /** 이 세션이 쓰는 길 — 길을 바꾸면 세션을 새로 만든다 (link.ts chooseCarrier) */
+  readonly carrier: Carrier
+  /** 이 세션이 한 번이라도 붙었나 — 아직이면 앱은 연결 화면(수단 고르기·안 될 때)을 보인다 */
+  hasConnected(): boolean
+  /** 마지막으로 붙지 못한 까닭(운반이 던진 것) — 붙어 있으면 undefined (view.ts gateView 가 문구로) */
+  getFailure(): unknown
+  /** 링크로 받은 바이트 누계 — 블루투스만 센다(Wi-Fi 는 0). 긴 대화를 받는 진행 표시 */
+  receivedBytes(): number
+  /** [다시 시도] — 기다리던 재연결이나 사람을 기다리며 멈춘 연결(needs-action)을 지금 */
+  retry(): void
   /** 대화를 받아 두고 이벤트를 따라가게 한다 (대화 화면에 들어갈 때). 나갈 때 close */
   openConversation(cid: string): void
   closeConversation(cid: string): void
