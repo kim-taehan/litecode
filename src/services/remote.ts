@@ -225,6 +225,11 @@ export class RemoteService extends Service {
     })
     ctx.on('chat/queue-changed', ({ cid, items }) => this.emitEvent('queue.changed', { cid, items }))
     ctx.on('chat/conversations-changed', ({ project }) => this.emitEvent('conversations.changed', { project }))
+    // 전체 권한은 폰에 열지 않는다 — 보낼 때(POST …/messages) 한 번 본 것으로는 대기열에 쌓인 사이 데스크탑이 full 로 바꾼 것을 못 막는다 (#186 B1).
+    // 엔진에 넘기기 직전에 한 번 더 본다: 막힌 폰 글은 훅이 막은 글과 같이 대기열 맨 앞에 붙잡히고(폰이 되돌리기로 가져간다) 그 턴은 사유와 함께 실패로 끝난다
+    ctx.on('chat/before-send', (send) => {
+      if (send.mode === 'full' && send.origin.startsWith('device:')) send.blocked = tr('remote.fullAccessBlocked')
+    })
     // 알림 기능이 꺼져 있으면 이 이벤트는 오지 않는다 (없어도 동작한다 — 진행 중·답 필요는 위 ctx.chat 이벤트로 나간다)
     ctx.on('notifications/changed', (state) => this.emitNotices(state))
 
@@ -669,6 +674,11 @@ export class RemoteService extends Service {
         Object.values(this.ctx.chat.snapshot()).some((live) => live.turn?.attention.some((request) => request.sessionId === sessionId && request.id === requestId))
       const elsewhere: Reply = [200, { handled: 'elsewhere' } satisfies AttentionReplyResponse]
       if (!waiting()) return elsewhere
+      // 전체 권한 대화의 승인은 데스크탑에서만 (#186 B2) — full 에서도 묻는 도구(litecode_create 등)를 폰이 허용하지 못하게.
+      // 그 턴이 full 로 시작했거나(내 말의 mode) 대화가 지금 full 이면 막는다
+      const [cid, live] = Object.entries(this.ctx.chat.snapshot()).find(([, entry]) => entry.turn?.attention.some((request) => request.sessionId === sessionId && request.id === requestId))!
+      const conversation = (await this.ctx.sessions.list()).find((entry) => entry.id === cid)
+      if (live.turn?.message.mode === 'full' || conversation?.mode === 'full') return [403, { error: 'conversations in full access mode are desktop-only' }]
       try {
         await this.ctx.chat.reply(sessionId, requestId, answer)
         return [200, { handled: 'ok' } satisfies AttentionReplyResponse]

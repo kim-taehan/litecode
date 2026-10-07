@@ -200,7 +200,7 @@ export interface QueueTakeResponse {
   text: string
 }
 
-/** POST /v1/attention/{sessionId}/{requestId} — 본문은 { answer: AttentionAnswer } */
+/** POST /v1/attention/{sessionId}/{requestId} — 본문은 { answer: AttentionAnswer }. 전체 권한 모드 대화의 요청이면 403 (데스크탑에서만 답한다) */
 export interface AttentionReplyResponse {
   /** elsewhere: 다른 기기가 먼저 답했다 (오류가 아니다) */
   handled: 'ok' | 'elsewhere'
