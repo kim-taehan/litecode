@@ -35,7 +35,12 @@
         "com.oppo.launcher.permission.WRITE_SETTINGS",
         "me.everything.badger.permission.BADGE_COUNT_READ",
         "me.everything.badger.permission.BADGE_COUNT_WRITE"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-foreground.png",
+        "monochromeImage": "./assets/adaptive-monochrome.png",
+        "backgroundColor": "#4176E6"
+      }
     },
     "plugins": [
       "expo-secure-store",
@@ -49,6 +54,7 @@
       ],
       "./plugins/withLoopbackCleartext.js",
       "./plugins/withBluetoothCentral.js"
-    ]
+    ],
+    "icon": "./assets/icon.png"
   }
 }
