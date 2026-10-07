@@ -58,6 +58,8 @@ export interface PairResponse {
   deviceId: string
   /** 기기 토큰 — 이후 모든 요청의 `Authorization: Bearer` */
   token: string
+  /** 블루투스 연결이 켜져 있으면 데스크탑의 Noise 정적 공개키(X25519, base64url) — QR 없이 2자리 코드로 짝지은 폰이 블루투스 키를 TLS 안에서 받는다 (이슈 #171) */
+  bluetoothKey?: string
 }
 
 /** GET /v1/hello — 재연결 첫 호출. addresses(`ip:port`)로 폰이 새 주소를 배운다 */
