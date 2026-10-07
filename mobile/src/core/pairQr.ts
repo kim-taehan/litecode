@@ -1,6 +1,7 @@
 // 사내망 짝짓기(TLS·QR)에서 폰이 데스크탑에 기대는 계약을 한곳에 모은다. 순수 TS(Node·RN 둘 다).
 //
-//   QR:   litecode://pair?v=1&d=<desktopId>&n=<PC이름>&a=<ip:port,…>&fp=<SPKI sha256 b64url>&c=<12자 코드>&x=<만료 unix 초>
+//   QR:   litecode://pair?v=1&d=<desktopId>&n=<PC이름>&a=<ip:port,…>&fp=<SPKI sha256 b64url>&c=<12자 코드>&x=<만료 unix 초>[&bk=<블루투스 키>]
+//         bk 가 있으면 a·fp 가 없어도 된다(블루투스 단독 QR, 이슈 #229 — 주소는 빈 목록, 지문은 없다)
 //   지문: 서버 인증서의 SubjectPublicKeyInfo(DER) SHA-256, base64url(`=` 없음, 43자). 체인은 보지 않는다
 //   사람이 맞춰 보는 8자: 그 해시의 앞 40bit 를 Crockford base32 로 — `XXXX-XXXX` (데스크탑 [허용] 창의 "지문" 과 같다)
 

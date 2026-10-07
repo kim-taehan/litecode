@@ -7,6 +7,7 @@ import { DEFAULT_ADDRESS } from '../address.ts'
 import { ChevronDown, ChevronRight, QrFrame } from '../icons.tsx'
 import type { LinkState, PairInput } from '../link.ts'
 import { S } from '../strings.ts'
+import { pairFailureText } from '../view.ts'
 import { C, MONO } from '../theme.ts'
 
 // 1 연결 (시안 Main). 짝이 없으면 이 화면뿐이다 — 앱은 데스크탑 없이 대화를 쥐지 않는다.
@@ -37,6 +38,8 @@ export function ConnectScreen({
   const [, requestCamera] = useCameraPermissions()
   const pairing = state.phase === 'pairing'
   const failure = state.phase === 'unpaired' ? state.failure : undefined
+  // 블루투스로 짝지으려다 못 붙은 사유(권한·꺼짐·못 찾음 — 연결 화면과 같은 문구, 이슈 #229)
+  const bluetoothFailure = state.phase === 'unpaired' ? state.bluetooth : undefined
   // 진단 글 — 실제 폰에서 원인이 사유 글 하나로 뭉개지지 않게 늘 작은 글씨로 (link.ts failureDetail)
   const detail = state.phase === 'unpaired' ? state.detail : undefined
   const revoked = state.phase === 'unpaired' && state.revoked === true
@@ -100,7 +103,7 @@ export function ConnectScreen({
         {cameraDenied && <Text style={styles.failure}>{S.cameraDenied}</Text>}
         {failure !== undefined && !open && (
           <Text accessibilityRole="alert" style={[styles.failure, styles.failureAlone]}>
-            {S.pairFailure[failure]}
+            {pairFailureText(failure, bluetoothFailure)}
             {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
           </Text>
         )}
@@ -148,7 +151,7 @@ export function ConnectScreen({
 
             {failure !== undefined && (
               <Text accessibilityRole="alert" style={styles.failure}>
-                {S.pairFailure[failure]}
+                {pairFailureText(failure, bluetoothFailure)}
                 {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
               </Text>
             )}

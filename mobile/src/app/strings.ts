@@ -37,6 +37,7 @@ export const S = {
     'connection-broken': '데스크탑에는 닿았지만 연결이 도중에 끊겼습니다. 다시 시도해 주세요.',
     unreachable: '데스크탑에 닿지 못했습니다. 데스크탑의 설정 › 기능에서 "모바일 연결" 이 켜져 있는지, 주소가 맞는지 확인해 주세요.',
     failed: '연결하지 못했습니다. 다시 시도해 주세요.',
+    bluetooth: '블루투스로 데스크탑에 연결하지 못했습니다. 데스크탑 가까이에서 다시 시도해 주세요.',
   },
   notice: {
     'desktop-only': '이 대화는 전체 권한 모드라 데스크탑에서만 보낼 수 있습니다.',
@@ -77,6 +78,7 @@ export const S = {
   retry: '다시 시도',
   cannotReach: { wifi: 'Wi-Fi 로 닿지 않습니다', bluetooth: '블루투스로 연결하지 못했습니다' },
   wifiFailure: (address: string) => `${address} 에 연결하지 못했습니다. 같은 네트워크인지, 데스크탑의 "사내망 연결" 이 켜져 있는지 확인해 주세요.`,
+  wifiNoAddress: '블루투스로만 짝지어 Wi-Fi(사내망) 주소를 모릅니다. Wi-Fi 로 쓰려면 데스크탑에서 "사내망 연결" 을 켜고 QR 로 다시 짝지어 주세요.',
   bluetoothFailure: {
     'no-key': '이 짝에는 블루투스 키가 없습니다. 데스크탑에서 블루투스 연결을 켜고 QR 로 다시 짝지어야 합니다.',
     unsupported: '이 폰은 블루투스 저전력(BLE)을 쓸 수 없습니다.',

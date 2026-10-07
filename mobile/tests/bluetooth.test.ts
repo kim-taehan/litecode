@@ -6,11 +6,12 @@ import type { HistoryMessage } from '../../shared/contract.ts'
 import { bluetoothPrologue, encodeNoiseKey, generateNoiseKeyPair, type NoiseKeyPair } from '../../shared/noiseNK.ts'
 import { secureResponder } from '../../shared/noiseRecord.ts'
 import { FRAME, FrameChannel, utf8, type ByteLink, type FrameMessage } from '../../shared/remoteFraming.ts'
+import { confirmCode } from '../../shared/remotePairing.ts'
 import { DesktopLink, type CarrierChoice, type DesktopStore, type SavedDesktop } from '../src/app/link.ts'
 import { installRandomValues } from '../src/app/randomValues.ts'
 import type { AppSession, Carrier } from '../src/app/session.ts'
 import { S } from '../src/app/strings.ts'
-import { gateView, showsGate } from '../src/app/view.ts'
+import { gateView, pairFailureText, showsGate } from '../src/app/view.ts'
 import { BluetoothError, connectBluetooth, fflateCodec, NetError, type BleDriver, type PinnedNet, type Transport } from '../src/core/index.ts'
 import { until } from './support.ts'
 
@@ -411,24 +412,30 @@ interface Turn {
   finish(): void
 }
 interface DesktopStatus {
-  pairing?: { code: string }
-  requests: { id: string }[]
+  pairing?: { code: string; uri?: string }
+  requests: { id: string; confirm: string; pinned?: true }[]
 }
 interface Desktop {
   ctx: { chat: { send(cid: string, input: { text: string }): Promise<unknown> } }
-  remote: { startPairing(): DesktopStatus; answerPair(id: string, allow: boolean): DesktopStatus; status(): DesktopStatus }
+  remote: {
+    startPairing(): DesktopStatus
+    answerPair(id: string, allow: boolean): DesktopStatus
+    status(): DesktopStatus
+    noiseIdentity(): Promise<NoiseKeyPair & { publicKeyText: string }>
+    readonly desktopId: string
+  }
   llm: { calls: Turn[] }
-  pipeCarrier(): Promise<void>
-  attach(link: ByteLink, key?: string): unknown
+  pipeCarrier(id?: string): Promise<void>
+  attach(link: ByteLink, key?: string, carrier?: string): unknown
   seed(id: string, messages: HistoryMessage[]): Promise<void>
   save(id: string, extra?: Record<string, unknown>): Promise<unknown>
   turn(n: number): Promise<Turn>
 }
 interface Harness {
-  box: { project: string }
+  box: { project: string; root: string }
   setUp(): Promise<void>
   tearDown(): Promise<void>
-  start(options?: { http?: boolean }): Promise<Desktop>
+  start(options?: { http?: boolean; noiseKeyFile?: string }): Promise<Desktop>
 }
 const harnessUrl = new URL('../../tests/unit/support/remoteHarness.ts', import.meta.url).href
 const harness = (await import(/* @vite-ignore */ harnessUrl)) as Harness
@@ -510,4 +517,160 @@ describe('진짜 ctx.remote 에 블루투스로 — hello · 목록 · 긴 대�
     expect(sessionOf(link).carrier).toBe('wifi')
     await until(() => wifi.calls > 0, 'Wi-Fi 로 시도')
   }, 30_000)
+})
+
+// ── 블루투스만으로 짝짓기 (이슈 #229) — Wi-Fi 가 전혀 없는 곳 ──────────────────────────────────────────────
+
+describe('블루투스만으로 짝짓기 — 진짜 ctx.remote 의 블루투스 단독 QR, Wi-Fi 호출 0번', () => {
+  beforeEach(() => harness.setUp())
+  afterEach(() => harness.tearDown())
+
+  /** 사내망 없이 블루투스만 켠 데스크탑 + 그 광고를 흉내 내는 가짜 라디오 (연결마다 Noise 응답자 → ctx.remote) */
+  async function bluetoothDesktop(options: { prepare?: () => void } = {}) {
+    const desktop = await harness.start({ http: false, noiseKeyFile: `${harness.box.root}/remote-noise-key.json` })
+    await desktop.pipeCarrier('bluetooth')
+    const identity = await desktop.remote.noiseIdentity()
+    const desktopId = desktop.remote.desktopId
+    let served = 0
+    const ble = fakeBle(
+      bluetoothServiceUuid(desktopId),
+      (desk) => {
+        served += 1
+        void secureResponder(desk, identity, { prologue: bluetoothPrologue(desktopId) }).then((secure) => void desktop.attach(secure, `bt-${served}`, 'bluetooth'), () => undefined)
+      },
+      { prepare: options.prepare },
+    )
+    return { desktop, identity, desktopId, ble }
+  }
+  function pairingLink(ble: FakeBle, carrier = choice('wifi')) {
+    const wifi = deadWifi()
+    const store = memoryStore()
+    const link = new DesktopLink({ store, transport: wifi.transport, pinned: wifi.pinned, platform: 'android', bluetooth: ble.driver, carrier })
+    links.push(link)
+    return { link, wifi, store, carrier }
+  }
+  /** QR 의 c 를 다른 (모양은 맞는) 코드로 */
+  const withCode = (uri: string, code: string): string => uri.replace(/([?&]c=)[^&]+/, `$1${code}`)
+
+  it('QR(a·fp 없음) → 블루투스 링크로 POST /v1/pair → 확인 코드가 폰·데스크탑 [허용] 창에 같다 → 허용 → 토큰·키 저장, 블루투스로 붙는다', async () => {
+    const { desktop, identity, desktopId, ble } = await bluetoothDesktop()
+    const status = desktop.remote.startPairing()
+    const uri = status.pairing!.uri!
+    expect(uri).not.toContain('&a=')
+    const { link, wifi, store, carrier } = pairingLink(ble)
+    await link.restore()
+
+    const pairing = link.pairQr(uri, ' Pixel 8 ')
+    await until(() => desktop.remote.status().requests.length === 1, '짝짓기 요청')
+    const request = desktop.remote.status().requests[0]!
+    // 확인 코드: 블루투스로 온 요청은 지문이 없다 → 요청에서 만든 8자(confirmCode). 폰은 자기가 보낸 것으로 같은 글을 낸다
+    expect(request.pinned).toBeUndefined()
+    expect(request.confirm).toBe(confirmCode(status.pairing!.code.replace(/-/g, ''), 'Pixel 8', 'android'))
+    expect(link.state).toEqual({ phase: 'pairing', confirm: request.confirm, confirmKind: 'code' })
+    desktop.remote.answerPair(request.id, true)
+    await pairing
+
+    expect(link.state).toMatchObject({ phase: 'linked', carrier: 'bluetooth' })
+    expect(store.value).toMatchObject({ desktopId, bluetoothKey: identity.publicKeyText, desktopName: 'test-pc', address: '' })
+    expect(store.value!.fingerprint).toBeUndefined()
+    expect(carrier.value).toBe('bluetooth') // 블루투스로 짝지었다 — 마지막 선택
+    const session = sessionOf(link)
+    await until(() => session.getStatus().kind === 'connected', '블루투스로 붙음', 10_000)
+    expect(wifi.calls).toBe(0) // Wi-Fi 는 한 번도 시도하지 않았다
+    expect(ble.connections).toBe(2) // 짝짓기 링크 하나(닫았다) + 세션 링크 하나
+  }, 20_000)
+
+  it('데스크탑에서 [거절] 하면 denied — Wi-Fi 호출 없음', async () => {
+    const { desktop, ble } = await bluetoothDesktop()
+    const uri = desktop.remote.startPairing().pairing!.uri!
+    const { link, wifi } = pairingLink(ble)
+    await link.restore()
+    const pairing = link.pairQr(uri, 'Pixel 8')
+    await until(() => desktop.remote.status().requests.length === 1, '짝짓기 요청')
+    desktop.remote.answerPair(desktop.remote.status().requests[0]!.id, false)
+    await pairing
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'denied' })
+    expect(wifi.calls).toBe(0)
+    expect(ble.log.at(-1)).toBe('disconnect') // 짝짓기 링크를 닫았다
+  })
+
+  it('틀린 코드 3번이면 짝짓기 세션이 버려진다 — 그 뒤엔 맞는 코드도 wrong-code (사내망과 같은 규칙)', async () => {
+    const { desktop, ble } = await bluetoothDesktop()
+    const uri = desktop.remote.startPairing().pairing!.uri!
+    const { link, wifi } = pairingLink(ble)
+    await link.restore()
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await link.pairQr(withCode(uri, 'ZZZZZZZZZZZZ'), 'Pixel 8')
+      expect(link.state, `시도 ${attempt + 1}`).toMatchObject({ phase: 'unpaired', failure: 'wrong-code' })
+    }
+    expect(desktop.remote.status().pairing).toBeUndefined()
+    await link.pairQr(uri, 'Pixel 8')
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'wrong-code' })
+    expect(desktop.remote.status().requests).toHaveLength(0)
+    expect(wifi.calls).toBe(0)
+  })
+
+  it('"근처 기기" 권한을 거절하면 짝짓기 화면에 연결 화면과 같은 문구 — 꺼짐·못 찾음도', async () => {
+    let problem: BluetoothError | undefined = new BluetoothError('permission')
+    const { desktop, ble } = await bluetoothDesktop({ prepare: () => { if (problem) throw problem } })
+    const uri = desktop.remote.startPairing().pairing!.uri!
+    const { link, wifi } = pairingLink(ble)
+    await link.restore()
+
+    await link.pairQr(uri, 'Pixel 8')
+    expect(link.state).toMatchObject({ phase: 'unpaired', failure: 'bluetooth', bluetooth: 'permission' })
+    const shown = link.state as Extract<typeof link.state, { phase: 'unpaired' }>
+    expect(pairFailureText(shown.failure!, shown.bluetooth)).toBe(S.bluetoothFailure.permission)
+    expect(shown.detail).toContain('permission')
+
+    problem = new BluetoothError('bluetooth-off')
+    await link.pairQr(uri, 'Pixel 8')
+    expect(link.state).toMatchObject({ failure: 'bluetooth', bluetooth: 'bluetooth-off' })
+
+    problem = undefined
+    ble.advertising = false
+    await link.pairQr(uri, 'Pixel 8')
+    expect(link.state).toMatchObject({ failure: 'bluetooth', bluetooth: 'not-found' })
+    expect(pairFailureText('bluetooth', 'not-found')).toBe(S.bluetoothFailure['not-found'])
+    expect(desktop.remote.status().requests).toHaveLength(0)
+    expect(desktop.remote.status().pairing).toBeDefined() // 코드는 쓰지 않았다
+    expect(wifi.calls).toBe(0)
+  })
+
+  it('사내망·블루투스가 둘 다 실린 QR — 마지막 선택이 블루투스면 블루투스로 짝짓고 a·fp 도 저장한다(나중에 Wi-Fi 를 고를 수 있게)', async () => {
+    const { desktop, identity, ble } = await bluetoothDesktop()
+    const plain = desktop.remote.startPairing().pairing!.uri!
+    const fp = 'q'.repeat(43)
+    const uri = plain.replace('&c=', `&a=${encodeURIComponent('192.168.0.10:47600')}&fp=${fp}&c=`)
+    const { link, wifi, store } = pairingLink(ble, choice('bluetooth'))
+    await link.restore()
+    const pairing = link.pairQr(uri, 'Pixel 8')
+    await until(() => desktop.remote.status().requests.length === 1, '짝짓기 요청')
+    desktop.remote.answerPair(desktop.remote.status().requests[0]!.id, true)
+    await pairing
+    expect(link.state).toMatchObject({ phase: 'linked', carrier: 'bluetooth' })
+    expect(store.value).toMatchObject({ fingerprint: fp, address: '192.168.0.10:47600', baseUrl: 'https://192.168.0.10:47600', bluetoothKey: identity.publicKeyText })
+    expect(wifi.calls).toBe(0)
+  })
+})
+
+describe('연결 화면 기본 선택 (이슈 #229)', () => {
+  const BT_ONLY: SavedDesktop = { address: '', baseUrl: `bt://${DESKTOP_ID}`, deviceId: 'dev_1', token: 'tok', desktopName: 'PC', desktopId: DESKTOP_ID, bluetoothKey: 'B'.repeat(42) + 'A' }
+
+  it('사내망 주소가 없는 짝(블루투스 단독)은 고른 적이 없으면 블루투스로, 주소가 있으면 Wi-Fi', async () => {
+    const ble = fakeBle(SERVICE, () => undefined)
+    const wifi = deadWifi()
+    const btOnly = new DesktopLink({ store: memoryStore(BT_ONLY), transport: wifi.transport, pinned: wifi.pinned, platform: 'android', bluetooth: ble.driver })
+    const lan = new DesktopLink({ store: memoryStore(SAVED), transport: wifi.transport, pinned: wifi.pinned, platform: 'android', bluetooth: ble.driver })
+    links.push(btOnly, lan)
+    await btOnly.restore()
+    await lan.restore()
+    expect(btOnly.state).toMatchObject({ phase: 'linked', carrier: 'bluetooth' })
+    expect(lan.state).toMatchObject({ phase: 'linked', carrier: 'wifi' })
+  })
+
+  it('블루투스 단독 짝에서 Wi-Fi 를 고르면(자동 전환 없음) 주소가 없다는 안내', () => {
+    const view = gateView({ kind: 'reconnecting', attempt: 1, retryAt: 0 }, new NetError('unreachable', 'no address'), 'wifi', '')
+    expect(view).toMatchObject({ kind: 'failed', title: S.cannotReach.wifi, body: S.wifiNoAddress })
+  })
 })

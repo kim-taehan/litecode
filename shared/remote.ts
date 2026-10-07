@@ -76,6 +76,9 @@ export interface Hello {
   addresses: string[]
   /** 사내망(TLS) 리스너의 인증서 지문 — SPKI SHA-256 base64url (fingerprintCode 참고). TLS 리스너가 없으면 없다 */
   fingerprint?: string
+  /** 블루투스 연결이 켜져 있으면 Noise 정적 공개키(QR 의 bk 와 같다, 이슈 #229). Wi-Fi 로 짝지은 폰이 이것을 배워 다시 짝짓지 않고 블루투스를 고를 수 있다.
+   *  폰은 지문으로 고정한 TLS 로 받은 hello 의 것만 저장한다 — 평문(루프백)·블루투스로 받은 것은 믿지 않는다 */
+  bluetoothKey?: string
 }
 
 // ── 사내망 연결 (TLS + 지문 고정 + QR, 01t 3절) ─────────────────────────────────────────────────────
@@ -89,7 +92,9 @@ export function isLoopbackHost(host: string): boolean {
   return bare === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare)
 }
 
-/** QR 에 싣는 것 — `litecode://pair?v=1&d=…&n=…&a=ip:port,…&fp=…&c=…&x=…[&bk=…]` (값은 encodeURIComponent, 순서는 이대로) */
+/** QR 에 싣는 것 — `litecode://pair?v=1&d=…&n=…[&a=ip:port,…&fp=…]&c=…&x=…[&bk=…]` (값은 encodeURIComponent, 순서는 이대로).
+ *  사내망 경로(a·fp)와 블루투스 경로(bk) 중 하나는 있어야 한다. a·fp 는 둘 다 있거나 둘 다 없다 — 둘 다 없으면 블루투스 단독 QR 이다 (이슈 #229,
+ *  Wi-Fi 가 없는 곳에서 짝짓기). v 는 그대로 1: 이것을 모르는 옛 폰은 a·fp 가 없는 QR 을 "내용이 올바르지 않다"(qr-invalid)로 거절한다 */
 export interface PairLink {
   /** v — REMOTE_API_VERSION */
   version: number
@@ -97,10 +102,10 @@ export interface PairLink {
   desktopId: string
   /** n — PC 이름 */
   name: string
-  /** a — https 로 붙을 주소 (`ip:port`, 쉼표로 이음). 루프백은 싣지 않는다 */
+  /** a — https 로 붙을 주소 (`ip:port`, 쉼표로 이음). 루프백은 싣지 않는다. 블루투스 단독 QR 이면 빈 목록 */
   addresses: string[]
-  /** fp — SPKI SHA-256 base64url */
-  fingerprint: string
+  /** fp — SPKI SHA-256 base64url. 블루투스 단독 QR 이면 없다 */
+  fingerprint?: string
   /** c — 짝짓기 코드 12자 (Crockford base32, 칸 나눔 없음). POST /v1/pair 의 code 에 그대로 */
   code: string
   /** x — 코드 만료 (unix 초) */
@@ -112,13 +117,19 @@ export interface PairLink {
 
 export const PAIR_URI_PREFIX = 'litecode://pair?'
 
+/** 블루투스 단독 QR(주소·지문이 없다)이면 a·fp 를 아예 싣지 않는다 */
 export function pairUri(link: PairLink): string {
+  const lan = link.addresses.length > 0 || link.fingerprint !== undefined
   const fields: [string, string][] = [
     ['v', String(link.version)],
     ['d', link.desktopId],
     ['n', link.name],
-    ['a', link.addresses.join(',')],
-    ['fp', link.fingerprint],
+    ...(lan
+      ? [
+          ['a', link.addresses.join(',')] as [string, string],
+          ['fp', link.fingerprint ?? ''] as [string, string],
+        ]
+      : []),
     ['c', link.code],
     ['x', String(link.expiresAt)],
     ...(link.bluetoothKey !== undefined ? [['bk', link.bluetoothKey] as [string, string]] : []),
@@ -143,9 +154,12 @@ export function parsePairUri(text: string): PairLink | undefined {
   const addresses = (fields.get('a') ?? '').split(',').filter(Boolean)
   const fingerprint = fields.get('fp') ?? ''
   const { d: desktopId = '', n: name = '', c: code = '', bk: bluetoothKey } = Object.fromEntries(fields)
-  if (!Number.isInteger(version) || !Number.isFinite(expiresAt) || !desktopId || !code || addresses.length === 0 || !/^[A-Za-z0-9_-]{43}$/.test(fingerprint)) return undefined
+  if (!Number.isInteger(version) || !Number.isFinite(expiresAt) || !desktopId || !code) return undefined
   if (bluetoothKey !== undefined && !/^[A-Za-z0-9_-]{43}$/.test(bluetoothKey)) return undefined
-  return { version, desktopId, name, addresses, fingerprint, code, expiresAt, ...(bluetoothKey !== undefined && { bluetoothKey }) }
+  // 사내망 경로는 a·fp 가 둘 다 있어야 한다. 둘 다 없어도 되는 것은 bk 가 있을 때뿐(블루투스 단독)
+  const lan = addresses.length > 0 || fingerprint !== ''
+  if ((lan || bluetoothKey === undefined) && (addresses.length === 0 || !/^[A-Za-z0-9_-]{43}$/.test(fingerprint))) return undefined
+  return { version, desktopId, name, addresses, ...(lan && { fingerprint }), code, expiresAt, ...(bluetoothKey !== undefined && { bluetoothKey }) }
 }
 
 /** GET /v1/projects */

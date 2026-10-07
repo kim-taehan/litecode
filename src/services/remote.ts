@@ -136,7 +136,7 @@ export interface RemoteStatus {
   /** 마지막으로 바깥(사내망 리스너)에서 접속이 들어온 시각 — 막힌 접속도 센다. 한 번도 없으면 없다 (진단: 클라이언트 격리·방화벽) */
   lastAttemptAt?: number
   /** 지금 쓸 수 있는 짝짓기 코드. code 는 긴 코드(QR·옛 폰), shortCode 는 직접 입력용 숫자 2자리 — 한 세션이다.
-   *  uri 는 QR 에 실을 문자열(`litecode://pair?…`) — 사내망(TLS) 주소가 있을 때만 */
+   *  uri 는 QR 에 실을 문자열(`litecode://pair?…`) — 사내망(TLS) 주소나 블루투스가 있을 때만 (블루투스만이면 a·fp 없는 블루투스 단독 QR, 이슈 #229) */
   pairing?: { code: string; shortCode: string; expiresAt: number; uri?: string }
   requests: RemotePairRequest[]
   devices: RemoteDeviceInfo[]
@@ -597,6 +597,8 @@ export class RemoteService extends Service {
         seq: this.log.seq,
         addresses: this.listening(),
         ...(this.fingerprint() && { fingerprint: this.fingerprint() }),
+        // 블루투스가 켜져 있으면 공개키 — Wi-Fi 로 짝지은 폰이 다시 짝짓지 않고 블루투스 키를 배운다 (이슈 #229). 폰은 TLS 로 받은 것만 믿는다
+        ...(this.bluetoothKey() && { bluetoothKey: this.bluetoothKey() }),
       } satisfies Hello,
     ],
 
@@ -766,20 +768,23 @@ export class RemoteService extends Service {
     return this.code
   }
 
-  /** QR 에 실을 문자열 (01t 3절) — 지문으로 고정되는 운반(TLS)이 떠 있을 때만, 그 운반의 주소만. 평문 루프백 주소는 싣지 않는다 */
+  /** QR 에 실을 문자열 (01t 3절) — 지문으로 고정되는 운반(TLS)이 떠 있으면 그 운반의 주소·지문을, 블루투스가 켜져 있으면 bk 를 싣는다.
+   *  평문 루프백 주소는 싣지 않는다. 사내망이 없고 블루투스만 있으면 a·fp 없는 블루투스 단독 QR (이슈 #229). 둘 다 없으면 QR 이 없다 */
   private pairUri(code: ActiveCode): string | undefined {
     const fingerprint = this.fingerprint()
-    const addresses = [...this.carriers].map((carrier) => carrier.status()).flatMap((status) => (status.up && status.fingerprint === fingerprint ? status.addresses : []))
-    if (!fingerprint || addresses.length === 0) return undefined
+    const addresses = fingerprint ? [...this.carriers].map((carrier) => carrier.status()).flatMap((status) => (status.up && status.fingerprint === fingerprint ? status.addresses : [])) : []
+    const lan = fingerprint !== undefined && addresses.length > 0
+    const bluetoothKey = this.bluetoothKey()
+    if (!lan && !bluetoothKey) return undefined
     return pairUri({
       version: REMOTE_API_VERSION,
       desktopId: this.store.desktopId,
       name: this.opts.name ?? os.hostname(),
-      addresses,
-      fingerprint,
+      addresses: lan ? addresses : [],
+      ...(lan && { fingerprint }),
       code: code.code,
       expiresAt: Math.floor(code.expiresAt / 1000),
-      ...(this.bluetoothKey() && { bluetoothKey: this.bluetoothKey() }),
+      ...(bluetoothKey && { bluetoothKey }),
     })
   }
 }

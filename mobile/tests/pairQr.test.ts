@@ -60,6 +60,14 @@ describe('QR 읽기 (readPairQr — 폰이 더 보는 것)', () => {
     expect(readPairQr(edit('n', undefined), NOW)).toMatchObject({ ok: true, link: { name: '' } })
   })
 
+  it('블루투스 단독 QR(bk 가 있고 a·fp 가 없다)도 읽는다 — 주소는 빈 목록, 지문은 없다 (이슈 #229)', () => {
+    const bk = 'B'.repeat(42) + 'A'
+    const text = pairUri({ ...link, addresses: [], fingerprint: undefined, bluetoothKey: bk })
+    expect(readPairQr(text, NOW)).toEqual({ ok: true, link: { version: 1, desktopId: 'desk_1', name: '김의 MacBook', addresses: [], code: 'ABCD2345WXYZ', expiresAt: link.expiresAt, bluetoothKey: bk } })
+    // bk 가 없는 채로 a·fp 가 빠지면 여전히 invalid (위의 "필드가 빠지면")
+    expect(readPairQr(pairUri({ ...link, addresses: [], fingerprint: undefined }), NOW)).toEqual({ ok: false, problem: 'invalid' })
+  })
+
   it('변조·깨짐은 invalid — 지문 길이·글자, 주소 모양·포트, 코드(12자 Crockford), 만료 숫자, 퍼센트 인코딩', () => {
     const bad = [
       edit('fp', FP.slice(0, 42)),

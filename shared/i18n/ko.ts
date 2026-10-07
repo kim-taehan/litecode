@@ -877,6 +877,7 @@ export const ko = {
   'remote.pair': '기기 연결',
   'remote.pair.description': '폰 앱에서 읽을 QR 과 주소·코드를 보입니다. 코드는 2분 동안 한 번만 쓸 수 있습니다',
   'remote.pair.scan': '폰 앱의 "QR 스캔" 으로 읽으세요. 폰과 이 PC 가 같은 사내망에 있어야 합니다',
+  'remote.pair.scanBluetooth': '폰 앱의 "QR 스캔" 으로 읽으세요. 사내망 없이 블루투스로 짝짓습니다 — 폰을 이 PC 가까이(약 10m) 두세요',
   'remote.pair.qr': '짝짓기 QR 코드',
   'remote.pair.noQr': '이 PC 에 사내망 주소가 없어 QR 이 없습니다. 아래 주소는 Android 에뮬레이터에서만 닿습니다',
   'remote.pair.manual': '또는 "주소·코드 직접 입력" 에',

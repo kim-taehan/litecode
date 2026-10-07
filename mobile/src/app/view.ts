@@ -3,8 +3,8 @@
 import type { Attention, ConversationStatus, HistoryMessage, QuestionAttention, TurnItem } from '../../../shared/contract.ts'
 import { stopFeedbackReason } from '../../../shared/hooks.ts'
 import type { RemoteConversation } from '../../../shared/remote.ts'
-import { BluetoothError, diagnosticDetail, type ConnectionStatus, type ConversationView } from '../core/index.ts'
-import { failureDetail } from './link.ts'
+import { BluetoothError, diagnosticDetail, type BluetoothFailure, type ConnectionStatus, type ConversationView } from '../core/index.ts'
+import { failureDetail, type PairFailure } from './link.ts'
 import type { Carrier } from './session.ts'
 import { S } from './strings.ts'
 
@@ -207,7 +207,13 @@ export function gateView(status: ConnectionStatus, failure: unknown, carrier: Ca
   if (!waiting || failure === undefined) return { kind: 'choose', connecting: status.kind === 'connecting' || waiting }
   if (failure instanceof BluetoothError) return { kind: 'failed', title: S.cannotReach.bluetooth, body: S.bluetoothFailure[failure.reason], detail: diagnosticDetail(failure.reason, failure.message) }
   if (carrier === 'bluetooth') return { kind: 'failed', title: S.cannotReach.bluetooth, body: S.bluetoothLost, detail: failureDetail(failure) }
-  return { kind: 'failed', title: S.cannotReach.wifi, body: S.wifiFailure(address), detail: failureDetail(failure) }
+  // 블루투스 단독으로 짝지은 데스크탑은 사내망 주소가 없다 (이슈 #229)
+  return { kind: 'failed', title: S.cannotReach.wifi, body: address ? S.wifiFailure(address) : S.wifiNoAddress, detail: failureDetail(failure) }
+}
+
+/** 짝짓기 실패의 글 — 블루투스로 못 붙었으면 연결 화면과 같은 블루투스 사유 문구 (이슈 #229) */
+export function pairFailureText(failure: PairFailure, bluetooth?: BluetoothFailure): string {
+  return failure === 'bluetooth' && bluetooth ? S.bluetoothFailure[bluetooth] : S.pairFailure[failure]
 }
 
 /** 받은 바이트 → "186 KB 받는 중" */
