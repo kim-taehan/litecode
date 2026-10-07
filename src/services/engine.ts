@@ -580,6 +580,14 @@ function prepareInstallMarkers(configDir: string, env: NodeJS.ProcessEnv): void 
 
 /** 자식에 물려주지 않는 env 이름 — 앱이 정한 OPENCODE_* 는 engineEnv 가 다시 넣는다 (01x 2-8 "망·외부 켜기"·"설정 주입") */
 const INHERITED_ENGINE_ENV = /^(OPENCODE_|OTEL_|EXA_API_KEY$|PARALLEL_API_KEY$)/i
+/** 사용자 셸의 비밀 — opencode 의 bash 도구가 `env` 로 그대로 본다 (이슈 #178, 02x B 4-9, 사용자 결정 "처리해 줘"). 이름 패턴으로 뺀다.
+ *  AUTH 는 AUTHOR 를 뺀다 — GIT_AUTHOR_NAME·EMAIL 은 비밀이 아니고 모델의 git 커밋에 쓰인다. 한계는 docs/status.md engine 줄 */
+const SECRET_ENGINE_ENV = /^(AWS_|AZURE_|GITHUB_|GITLAB_|GOOGLE_APPLICATION_CREDENTIALS$|NPM_TOKEN$|SSH_AUTH_SOCK$)|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|PRIVATE_KEY|AUTH(?!OR)/i
+
+/** opencode 자식에 물려주지 않는 env 이름인가 (대소문자 무시) */
+export function withheldEngineEnv(name: string): boolean {
+  return INHERITED_ENGINE_ENV.test(name) || SECRET_ENGINE_ENV.test(name)
+}
 
 const LOOPBACK_NO_PROXY = ['127.0.0.1', 'localhost']
 
@@ -592,7 +600,7 @@ export function engineEnv(
     // 물려받은 opencode 설정 env 는 버린다 (01x 7, 이슈 #19) — OPENCODE_EXPERIMENTAL 하나로 레거시에 exa 검색·lsp 도구가 생기고, OTEL_* 는
     // trace 를 내보내고, OPENCODE_CONFIG_CONTENT 등은 앱 설정을 흔든다. 개발 셸에만 OPENCODE_DISABLE_* 가 있어 개발·테스트와 Finder 실행본이
     // 달랐다 — 앱이 아래에 정한 것만 남긴다. OPENCODE_SERVER_USERNAME 도 여기서 빠진다(Basic 사용자명은 기본값 opencode 로 고정)
-    ...Object.fromEntries(Object.entries(base).filter(([name]) => !INHERITED_ENGINE_ENV.test(name))),
+    ...Object.fromEntries(Object.entries(base).filter(([name]) => !withheldEngineEnv(name))),
     OPENCODE_CONFIG_DIR: opts.configDir,
     OPENCODE_DB: opts.db,
     OPENCODE_SERVER_PASSWORD: opts.password,

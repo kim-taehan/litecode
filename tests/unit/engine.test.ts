@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isGated, isOurServer, MODE_AGENT, plantInstallMarkers, SUBAGENT_ASK, toolGate } from '../../src/services/engine.ts'
+import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isGated, isOurServer, MODE_AGENT, plantInstallMarkers, SUBAGENT_ASK, toolGate, withheldEngineEnv } from '../../src/services/engine.ts'
 import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
@@ -647,6 +647,31 @@ describe('engineEnv — opencode 자식 프로세스 env', () => {
     )
     expect(env['OPENCODE_DISABLE_SHARE']).toBe('1')
     expect(env).not.toHaveProperty('OPENCODE_DISABLE_PROJECT_CONFIG') // blockProjectConfig 를 안 켰다
+  })
+
+  // 이슈 #178 (02x B 4-9): 사용자 셸의 비밀이 opencode 로 넘어가면 모델의 bash 도구가 `env` 로 본다 — 이름 패턴으로 뺀다 (사용자 결정 "처리해 줘")
+  it('withheldEngineEnv — 비밀로 보이는 이름은 빼고(대소문자 무시) 실행에 필요한 이름은 남긴다', () => {
+    const withheld = [
+      'GITHUB_TOKEN', 'gh_token', 'NPM_TOKEN', 'npm_config__authToken', 'SLACK_BOT_TOKEN',
+      'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_PROFILE', 'aws_region', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
+      'GOOGLE_APPLICATION_CREDENTIALS', 'GITHUB_ACTIONS', 'GITLAB_HOST', 'gitlab_private_token',
+      'DB_PASSWORD', 'MYSQL_PWD_PASSWD', 'CLIENT_SECRET', 'DOCKER_CREDENTIAL_HELPER', 'OPENAI_API_KEY', 'stripe_api_key',
+      'SSH_PRIVATE_KEY', 'SSH_AUTH_SOCK', 'BASIC_AUTH', 'OAUTH_CLIENT', 'X_AUTH_HEADER',
+      'OPENCODE_EXPERIMENTAL', 'opencode_permission', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'EXA_API_KEY', 'PARALLEL_API_KEY',
+    ]
+    const kept = [
+      'PATH', 'Path', 'HOME', 'USER', 'LANG', 'LC_ALL', 'SHELL', 'TERM', 'TMPDIR', 'TEMP', 'PWD',
+      'HTTP_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'ALL_PROXY',
+      'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'EDITOR', 'NODE_OPTIONS', 'JAVA_HOME', 'LITECODE_TEST_LANGUAGE', 'KEYCHAIN_PATH',
+    ]
+    expect(withheld.filter((name) => !withheldEngineEnv(name))).toEqual([])
+    expect(kept.filter((name) => withheldEngineEnv(name))).toEqual([])
+    const env = engineEnv({ PATH: '/bin', GITHUB_TOKEN: 'ghp', AWS_SECRET_ACCESS_KEY: 's', SSH_AUTH_SOCK: '/tmp/agent' }, { configDir: '/c', db: '/d.db', password: 'pw' })
+    expect(env['PATH']).toBe('/bin')
+    expect(env).not.toHaveProperty('GITHUB_TOKEN')
+    expect(env).not.toHaveProperty('AWS_SECRET_ACCESS_KEY')
+    expect(env).not.toHaveProperty('SSH_AUTH_SOCK')
+    expect(env['OPENCODE_SERVER_PASSWORD']).toBe('pw') // 앱이 정한 것은 뒤에 다시 넣는다
   })
 
   // 01x 표 21 + #19 실측(2026-10-02): 레거시는 ~/.claude/CLAUDE.md·~/.claude/skills·~/.agents/skills(+ 프로젝트 CLAUDE.md·.claude/skills)를

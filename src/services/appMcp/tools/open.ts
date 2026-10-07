@@ -22,7 +22,9 @@ import '../../terminals.ts'
 
 export const OPEN_TOOL = 'open'
 
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+// C0·DEL·C1 + 방향 제어(LRE~RLO·LRI~PDI·LRM/RLM)·보이지 않는 글자(ZWSP·ZWNJ·ZWJ·WJ·BOM) — 뒤의 둘은 사용자가 확인하는 글자를 실제와 달라
+// 보이게 한다 (이슈 #178, 02x B 4-10)
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩‎‏​-‍⁠﻿]/
 
 export interface OpenFileTarget {
   /** 프로젝트 기준 상대 경로 (`/` 구분) — 화면은 이 모양으로 탭을 연다 */
