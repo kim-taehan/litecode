@@ -57,10 +57,24 @@ export function triggerOpen(query: Pick<TriggerQuery, 'span' | 'candidates'> | n
   return !!query && focused && query.candidates.length > 0 && spanKey(query) !== dismissed
 }
 
+/** 후보와 그 후보를 물은 입력 — 구간(span)은 asked 의 글 기준이다 */
+export type AskedQuery = TriggerQuery & { asked: { draft: string; caret: number } }
+
+/** 후보가 지금 입력·캐럿에 대해 물은 것인가 — 아니면 새 후보가 오는 중이다 (이슈 #196) */
+export function queryFresh(query: Pick<AskedQuery, 'asked'>, draft: string, caret: number): boolean {
+  return query.asked.draft === draft && query.asked.caret === caret
+}
+
+/** 구간을 text 로 바꾼 입력과 캐럿. 물은 뒤 입력이 바뀌었으면 null — 옛 구간으로 자르면 친 글자가 남거나 지워진다 (이슈 #196) */
+export function replaceSpan(query: Pick<AskedQuery, 'span' | 'asked'>, draft: string, text: string): { draft: string; caret: number } | null {
+  if (query.asked.draft !== draft) return null
+  return { draft: draft.slice(0, query.span.start) + text + draft.slice(query.span.end), caret: query.span.start + text.length }
+}
+
 export function useTriggers({ directory, conversation, draft, setDraft, onSend, onShell, onApp }: TriggerOptions): Triggers {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [caret, setCaret] = useState(0)
-  const [query, setQuery] = useState<TriggerQuery | null>(null)
+  const [query, setQuery] = useState<AskedQuery | null>(null)
   const [active, setActive] = useState(0)
   const [notice, setNotice] = useState<string>()
   const [dismissed, setDismissed] = useState<string>()
@@ -69,6 +83,9 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
   const generation = useRef(0)
   /** 고른 뒤 놓을 캐럿 — 그린 다음에 입력창에 건다 */
   const nextCaret = useRef<number>(undefined)
+  /** 지금 입력 — 고르기 IPC 가 돌아왔을 때 그 사이 친 글을 옛 입력으로 덮지 않게 (이슈 #196) */
+  const latestDraft = useRef(draft)
+  latestDraft.current = draft
 
   // 대화(프로젝트)가 바뀌면 입력창의 글이 그 대화의 초안으로 바뀐다 — 앞 대화의 캐럿 자리·닫은 표시로 묻지 않는다
   useLayoutEffect(() => {
@@ -83,7 +100,7 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
     void window.litecode.queryTrigger({ directory }, draft, caret).then(
       (result) => {
         if (ask !== generation.current) return
-        setQuery(result)
+        setQuery(result && { ...result, asked: { draft, caret } })
         setActive(0)
       },
       () => ask === generation.current && setQuery(null),
@@ -102,15 +119,16 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
   const key = query && spanKey(query)
   const open = triggerOpen(query, dismissed, focused)
 
-  function replaceSpan(text: string): void {
-    if (!query) return
-    setDraft(draft.slice(0, query.span.start) + text + draft.slice(query.span.end))
-    nextCaret.current = query.span.start + text.length
+  function replaceQuerySpan(text: string): void {
+    const next = query && replaceSpan(query, latestDraft.current, text)
+    if (!next) return // 그 사이 입력이 바뀌었다 — 바뀐 입력으로 새 후보가 온다
+    setDraft(next.draft)
+    nextCaret.current = next.caret
   }
 
   function apply(result: TriggerResult): void {
     // 넣은 글은 공백으로 끝나 구간이 닫힌다 — 메뉴가 저절로 닫힌다. 들어가기(drill)는 구간이 이어져 새 후보로 다시 열린다
-    if (result.kind === 'insert' || result.kind === 'drill') replaceSpan(result.text)
+    if (result.kind === 'insert' || result.kind === 'drill') replaceQuerySpan(result.text)
     else if (result.kind === 'send') onSend(result.text, result.display)
     else if (result.kind === 'shell') {
       setDraft('')
@@ -165,7 +183,8 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         setActive((active + (event.key === 'ArrowDown' ? 1 : count - 1)) % count)
       } else if ((event.key === 'Enter' && !event.shiftKey) || (event.key === 'Tab' && !event.shiftKey)) {
-        choose(active, event.key === 'Tab' && query.candidates[active]?.drill ? 'drill' : 'pick')
+        // 새 후보가 오기 전 — 보이는 메뉴는 옛 입력의 것이라 고르지 않고, 메뉴를 보고 친 Enter 라 보내지도 않는다 (이슈 #196)
+        if (queryFresh(query, draft, caret)) choose(active, event.key === 'Tab' && query.candidates[active]?.drill ? 'drill' : 'pick')
       } else if (event.key === 'Escape' || (event.key === 'Tab' && event.shiftKey)) {
         dismiss()
       } else return false
