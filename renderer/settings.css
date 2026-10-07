@@ -593,7 +593,7 @@
   color: var(--danger);
 }
 
-/* 기능 페이지 (이슈 #8) — dsh ui-settings-plugin-inventory 카드 목록의 치수: 두 칸 격자·간격 10, 카드 12×14·0.5px 선·반경 12 */
+/* 기능 페이지 (이슈 #8) — 처음엔 dsh ui-settings-plugin-inventory 의 두 칸 카드였고, 2026-10-07 에 한 줄 목록 + 펼침으로 바꿨다 (아래 .feature-rows) */
 .features-page {
   display: flex;
   flex-direction: column;
@@ -608,13 +608,17 @@
   color: var(--text-tertiary);
 }
 
-.feature-cards {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+/* 묶음마다 둥근 테두리 목록 한 장, 한 줄에 기능 하나 (2026-10-07, 시안 _workspace/mock-features Main·Detail) */
+.feature-rows {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   padding: 0;
   list-style: none;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  overflow: hidden;
 }
 
 .feature-group + .feature-group {
@@ -641,46 +645,107 @@
   color: var(--text-secondary);
 }
 
-.feature-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  min-height: 52px;
-  padding: 12px 14px;
-  border: 0.5px solid var(--border-strong);
-  border-radius: 12px;
-  background: var(--surface);
+.feature-row + .feature-row {
+  border-top: 0.5px solid var(--border);
 }
 
-.feature-card__head {
+.feature-row[data-expanded] {
+  background: var(--fill-hover);
+}
+
+.feature-row__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  padding: 0 16px 0 0;
 }
 
-.feature-card__title {
+/* 펼침 버튼 — ▸ + 이름 + 한 줄 요약. 스위치와 따로 눌린다(버튼 안에 버튼을 두지 않는다) */
+.feature-row__toggle {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: center;
+  padding: 8px 0 8px 16px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
   color: var(--text);
 }
 
-.feature-card__description {
-  margin: 0;
-  display: -webkit-box;
+.feature-row__chevron {
+  color: var(--text-tertiary);
+  transition: transform 120ms;
+}
+
+.feature-row__toggle[aria-expanded='true'] .feature-row__chevron {
+  transform: rotate(90deg);
+  color: var(--text-secondary);
+}
+
+.feature-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.feature-row__title {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.feature-row__summary {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   line-height: 18px;
-  color: var(--text-tertiary);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  color: var(--text-secondary);
+}
+
+.feature-row__toggle[aria-expanded='true'] .feature-row__summary {
+  white-space: normal;
+}
+
+/* 펼친 아래 — 자세한 설명 문단 + 불릿 + 알약 칩. 왼쪽은 이름 글자 줄에 맞춘다(16 + 14 + 10) */
+.feature-row__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 16px 16px 40px;
+  font-size: 12.5px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.feature-row__paragraph {
+  margin: 0;
+}
+
+.feature-row__bullets {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.feature-row__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feature-row__chip {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--fill-active);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
 }
 
 .settings-switch:disabled {
