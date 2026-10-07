@@ -2,7 +2,7 @@
 // transport 를 받아 쓴다. 앱은 expo/fetch 로 만든 것을, 테스트는 Node fetch 로 만든 것을 넘긴다).
 // 상태는 전부 데스크탑에서 온다: 목록·대화·진행 줄·승인·대기열. 여기서 만드는 것은 "보내지 못했다" 같은 안내(notice)뿐이다.
 
-import type { RemoteModel } from '../../../shared/remote.ts'
+import type { Hello, RemoteModel } from '../../../shared/remote.ts'
 import { Connection, newClientMessageId, RemoteClient, RemoteError, RoamingClient, type Transport } from '../core/index.ts'
 import type { AppSession, Carrier, DesktopInfo, SessionNotice } from './session.ts'
 
@@ -25,6 +25,8 @@ export interface RemoteSessionOptions {
   receivedBytes?(): number
   /** 세션을 거둘 때 운반도 거둔다 (블루투스 링크를 끊는다) */
   release?(): void
+  /** 붙을 때마다 받은 hello (이슈 #229 — 짝이 블루투스 키를 배운다) */
+  onHello?(hello: Hello): void
 }
 
 export function createRemoteSession(options: RemoteSessionOptions): AppSession {
@@ -41,6 +43,12 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
         })
       : undefined
   const client = roaming ?? new RemoteClient({ transport: options.transport, baseUrl: options.baseUrl, token: options.token, requestTimeoutMs: options.requestTimeoutMs })
+  const { onHello } = options
+  if (onHello) {
+    // 붙을 때 첫 호출이 hello 다(Connection.connect) — 받은 것을 짝에게도 보인다
+    const hello = client.hello.bind(client)
+    client.hello = () => hello().then((answer) => (onHello(answer), answer))
+  }
   const connection = new Connection(client)
   const listeners = new Set<() => void>()
   let models: RemoteModel[] = []

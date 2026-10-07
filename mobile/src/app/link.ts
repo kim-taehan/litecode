@@ -9,10 +9,13 @@
 // 붙은 뒤에는 저장한 지문으로만 붙는다. 지문이 바뀌었으면 자동으로 믿지 않고 연결 화면으로 돌아가 다시 짝짓게 한다.
 // 길(이슈 #211): 붙을 때는 사용자가 고른 길(Wi-Fi | 블루투스 — prefs 에 기억)로만 붙는다. 안 되면 사유를 보이고 다른 길은 버튼으로만 권한다 —
 // 여기서 다른 길로 넘어가지 않는다. 짝짓기는 사내망(TLS)으로 하고, 블루투스 키는 QR 의 bk(없으면 짝짓기 응답의 bluetoothKey)를 저장해 둔다.
+// Wi-Fi 가 없는 곳(이슈 #229): QR 에 사내망 경로가 없거나(블루투스 단독 QR) 마지막으로 고른 길이 블루투스면 짝짓기도 블루투스 채널 안에서 한다.
+// Wi-Fi 로 짝지은 폰은 지문으로 고정한 TLS 의 hello 에서 bluetoothKey 를 배운다 — 다시 짝짓지 않고 블루투스를 고를 수 있다.
 
-import type { PairRejectReason } from '../../../shared/remote.ts'
+import { decodeNoiseKey } from '../../../shared/noiseNK.ts'
+import type { Hello, PairRejectReason } from '../../../shared/remote.ts'
 import { confirmCode, isPairCode, normalizePairCode, pairDeviceName } from '../../../shared/remotePairing.ts'
-import type { Transport } from '../core/index.ts'
+import type { BluetoothFailure, FramedTransport, PairLink, Transport } from '../core/index.ts'
 import { BluetoothError, connectBluetooth, createBluetoothTransport, diagnosticDetail, fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type BleDriver, type PinnedNet } from '../core/index.ts'
 import { allowsPlainHttp, parseAddress } from './address.ts'
 import { createRemoteSession } from './remoteSession.ts'
@@ -52,9 +55,11 @@ export interface DesktopStore {
  * refused: PC 는 닿았는데 그 포트에 아무도 안 듣는다(모바일 연결이 꺼져 있다) · fingerprint-mismatch: QR 의 지문과 서버 인증서가 다르다 ·
  * qr-foreign: litecode 연결 QR 이 아니다 · qr-version: 모르는 QR 형식(앱이 오래됐다) · qr-expired: QR 이 만료됐다 · qr-invalid: QR 이 깨졌다 ·
  * old-android: 이 폰(Android 10 미만)은 사내망(TLS 1.3) 연결을 못 한다 — 시도하지 않는다 · tls-failed: 닿았지만 암호화 연결(TLS)을 맺지 못했다 ·
- * connection-broken: 닿았지만 도중에 끊겼다 · unreachable: 경로가 없다 · failed: 그 밖
+ * connection-broken: 닿았지만 도중에 끊겼다 · unreachable: 경로가 없다 · failed: 그 밖 ·
+ * bluetooth: 블루투스로 짝지으려다 데스크탑에 붙지 못했다 — 자세한 사유는 상태의 bluetooth (연결 화면과 같은 문구, 이슈 #229)
  */
 export type PairFailure =
+  | 'bluetooth'
   | 'bad-address'
   | 'not-loopback'
   | 'bad-code'
@@ -80,8 +85,8 @@ export type LinkState =
   /** 저장된 짝을 읽는 중 (앱을 켠 직후) */
   | { phase: 'loading' }
   /** 짝이 없다 — 연결 화면. failure: 방금 짝짓기가 안 된 사유, revoked: 데스크탑에서 해제됐다, fingerprintChanged: 저장한 지문과 다른 서버만 있었다,
-   *  detail: 그 실패의 진단 글(failureDetail) — 화면이 사유 글 아래 작은 글씨로 늘 보인다 */
-  | { phase: 'unpaired'; failure?: PairFailure; detail?: string; revoked?: boolean; fingerprintChanged?: boolean }
+   *  detail: 그 실패의 진단 글(failureDetail) — 화면이 사유 글 아래 작은 글씨로 늘 보인다. bluetooth: failure 가 'bluetooth' 일 때 그 사유 */
+  | { phase: 'unpaired'; failure?: PairFailure; bluetooth?: BluetoothFailure; detail?: string; revoked?: boolean; fingerprintChanged?: boolean }
   /**
    * 짝짓는 중. confirm 이 있으면 요청을 보냈고 데스크탑의 [허용] 을 기다린다 — 데스크탑 창에 뜬 것과 같아야 하는 8자.
    * confirmKind: fingerprint = 인증서 지문 앞 8자(https), code = 요청에서 만든 확인 코드(평문). confirm 이 없으면 아직 데스크탑을 찾는 중
@@ -229,34 +234,38 @@ export class DesktopLink {
     return this.finish({ transport: this.deps.pinned.transport(fingerprint), fingerprint, address: target.address, baseUrl: target.baseUrl, code, deviceName, fallbackName: target.address })
   }
 
-  /** QR 로 — 카메라가 읽은 글 그대로. 지문은 QR 의 것으로 고정하고, 주소 후보 중 그 지문의 서버가 먼저 답한 곳으로 */
+  /** QR 로 — 카메라가 읽은 글 그대로. 지문은 QR 의 것으로 고정하고, 주소 후보 중 그 지문의 서버가 먼저 답한 곳으로.
+   *  QR 에 사내망 경로(a·fp)가 없거나(블루투스 단독) 마지막으로 고른 길이 블루투스면 블루투스로 짝짓는다 — Wi-Fi 는 시도하지 않는다 (이슈 #229) */
   async pairQr(text: string, deviceNameInput: string): Promise<void> {
     if (this.current.phase !== 'unpaired') return
     const fail = (failure: PairFailure): void => this.set({ phase: 'unpaired', failure })
 
-    // QR 은 늘 https 다 (10.0.2.2 라도)
-    if (lanUnsupported(this.deps.platform, this.deps.apiLevel)) return fail('old-android')
     const parsed = readPairQr(text, (this.deps.now ?? Date.now)())
+    const viaBluetooth = parsed.ok && (parsed.link.fingerprint === undefined || (parsed.link.bluetoothKey !== undefined && this.deps.carrier?.get() === 'bluetooth'))
+    // QR 의 사내망 경로는 늘 https 다 (10.0.2.2 라도). 블루투스는 TLS 와 상관없다
+    if (!viaBluetooth && lanUnsupported(this.deps.platform, this.deps.apiLevel)) return fail('old-android')
     if (!parsed.ok) return fail(parsed.problem === 'not-litecode' ? 'qr-foreign' : parsed.problem === 'version' ? 'qr-version' : parsed.problem === 'expired' ? 'qr-expired' : 'qr-invalid')
     const deviceName = pairDeviceName(deviceNameInput)
     if (!deviceName) return fail('no-name')
     const { link } = parsed
+    if (viaBluetooth) return this.pairBluetooth(link, deviceName)
+    const fingerprint = link.fingerprint!
 
-    this.set({ phase: 'pairing', confirm: fingerprintCode(link.fingerprint), confirmKind: 'fingerprint' })
+    this.set({ phase: 'pairing', confirm: fingerprintCode(fingerprint), confirmKind: 'fingerprint' })
     let address: string
     try {
       // 핸드셰이크만 — 페어링 코드는 일회용이라 여러 곳에 보내지 않는다
       ;({ address } = await firstReachable(link.addresses, async (candidate) => {
         const seen = await this.deps.pinned.probe(candidate, PROBE_TIMEOUT_MS)
-        if (seen !== link.fingerprint) throw new NetError('pin-mismatch', `fingerprint mismatch at ${candidate}`, seen)
+        if (seen !== fingerprint) throw new NetError('pin-mismatch', `fingerprint mismatch at ${candidate}`, seen)
       }))
     } catch (error) {
       return this.failWith(error)
     }
     // QR 의 주소는 호스트가 무엇이든(10.0.2.2 라도) 늘 https + 지문 고정
     return this.finish({
-      transport: this.deps.pinned.transport(link.fingerprint),
-      fingerprint: link.fingerprint,
+      transport: this.deps.pinned.transport(fingerprint),
+      fingerprint,
       address,
       baseUrl: `https://${address}`,
       addresses: link.addresses,
@@ -265,6 +274,38 @@ export class DesktopLink {
       fallbackName: link.name || address,
       desktopId: link.desktopId,
       bluetoothKey: link.bluetoothKey,
+    })
+  }
+
+  /**
+   * 블루투스로 짝짓기 (이슈 #229 — Wi-Fi 가 없는 곳). QR 의 d·bk 로 데스크탑을 찾아 Noise 채널을 맺고, 그 안에서 POST /v1/pair → [허용] → 토큰.
+   * 경로·규칙은 사내망과 같다(코드 1회용·틀린 시도 3회·PairRejectReason). 확인 코드는 요청에서 만든 8자(confirmCode) — 블루투스로 온 요청에는
+   * 지문이 없어 데스크탑도 같은 값을 낸다(src/services/remote.ts pair). 짝짓기 링크는 저장 뒤·붙기 전에 닫는다 — 세션이 자기 링크를 새로 연다
+   */
+  private async pairBluetooth(link: PairLink, deviceName: string): Promise<void> {
+    const { bluetooth, apiLevel, platform } = this.deps
+    this.set({ phase: 'pairing' }) // 데스크탑을 찾는 중 — 여기서 "근처 기기" 권한을 묻는다
+    let transport: FramedTransport
+    try {
+      transport = await connectBluetooth(bluetooth ?? unsupportedDriver, link, { legacyLocation: apiLevel !== undefined && apiLevel <= 30 })
+    } catch (error) {
+      return this.failWith(error)
+    }
+    this.set({ phase: 'pairing', confirm: confirmCode(link.code, deviceName, platform), confirmKind: 'code' })
+    const address = link.addresses[0]
+    return this.finish({
+      transport,
+      // 블루투스 프레임 운반은 주소의 호스트를 보지 않는다 — 경로만 싣는다
+      ...(address !== undefined && link.fingerprint !== undefined
+        ? { fingerprint: link.fingerprint, address, baseUrl: `https://${address}`, addresses: link.addresses }
+        : { address: '', baseUrl: `bt://${link.desktopId}` }),
+      code: link.code,
+      deviceName,
+      fallbackName: link.name || link.desktopId,
+      desktopId: link.desktopId,
+      bluetoothKey: link.bluetoothKey,
+      viaBluetooth: true,
+      release: () => transport.close(),
     })
   }
 
@@ -307,12 +348,17 @@ export class DesktopLink {
     /** QR 의 d·bk */
     desktopId?: string
     bluetoothKey?: string
+    /** 블루투스로 짝지었다 — 그 길을 마지막 선택으로 기억한다 (이슈 #229) */
+    viaBluetooth?: boolean
+    /** 짝짓기에만 쓴 운반을 거둔다 — 저장 뒤·붙기 전(또는 실패 때) */
+    release?(): void
   }): Promise<void> {
     const { platform, store } = this.deps
     const client = new RemoteClient({ transport: request.transport, baseUrl: request.baseUrl })
     try {
       const paired = await client.pair({ code: request.code, deviceName: request.deviceName, platform })
       const hello = await client.hello().catch(() => undefined)
+      request.release?.()
       const saved: SavedDesktop = {
         address: request.address,
         baseUrl: request.baseUrl,
@@ -331,19 +377,23 @@ export class DesktopLink {
         saved.addresses = [...new Set([request.address, ...told, ...(request.addresses ?? [])])].slice(0, MAX_ADDRESSES)
       }
       await store.save(saved)
+      if (request.viaBluetooth) this.deps.carrier?.set('bluetooth')
       this.attach(saved)
     } catch (error) {
+      request.release?.()
       this.failWith(error)
     }
   }
 
-  /** 짝짓기가 오류로 끝났다 — 사유와 진단 글을 함께 */
+  /** 짝짓기가 오류로 끝났다 — 사유와 진단 글을 함께. 블루투스로 못 붙었으면 그 사유도(연결 화면과 같은 문구를 쓴다) */
   private failWith(error: unknown): void {
+    if (error instanceof BluetoothError) return this.set({ phase: 'unpaired', failure: 'bluetooth', bluetooth: error.reason, detail: diagnosticDetail(error.reason, error.message) })
     this.set({ phase: 'unpaired', failure: pairFailure(error), detail: failureDetail(error) })
   }
 
   private attach(desktop: SavedDesktop): void {
-    const carrier = this.deps.carrier?.get() ?? 'wifi'
+    // 마지막으로 고른 길. 고른 적이 없으면 사내망 주소가 있으면 Wi-Fi, 없으면(블루투스 단독 짝, 이슈 #229) 블루투스
+    const carrier = this.deps.carrier?.get() ?? (desktop.address ? 'wifi' : 'bluetooth')
     const session = carrier === 'bluetooth' ? this.bluetoothSession(desktop) : this.wifiSession(desktop)
     // 데스크탑에서 해제됐다(device.revoked·401) — 토큰은 죽었다. 지문이 바뀌었다 — 믿지 않는다. 둘 다 저장을 지우고 연결 화면으로
     this.offSession = session.subscribe(() => {
@@ -381,16 +431,34 @@ export class DesktopLink {
       addresses: desktop.addresses ?? [desktop.address],
       token: desktop.token,
       desktop: { name: desktop.desktopName, address: desktop.address, fingerprint: desktop.fingerprint && fingerprintCode(desktop.fingerprint) },
-      // 옮겼거나 새 주소를 배웠다 — 다음에 켤 때 그 주소부터
+      // 옮겼거나 새 주소를 배웠다 — 다음에 켤 때 그 주소부터 (지금 짝에서 — 그사이 배운 블루투스 키를 잃지 않게)
       onAddresses: (address, addresses) => {
         if (this.current.phase !== 'linked' || this.current.session !== session) return
-        const moved: SavedDesktop = { ...desktop, address, baseUrl: desktop.baseUrl.replace(/\/\/.*$/, `//${address}`), addresses }
-        this.current = { ...this.current, desktop: moved }
-        void this.deps.store.save(moved).catch(() => undefined)
-        this.notify()
+        const now = this.current.desktop
+        this.update({ ...now, address, baseUrl: now.baseUrl.replace(/\/\/.*$/, `//${address}`), addresses })
       },
+      // 블루투스 키를 배운다 (이슈 #229) — **지문으로 고정한 TLS 로 받은 hello 에서만**: 그 채널은 짝지을 때 믿기로 한 인증서로 인증돼 있어
+      // 이 키는 QR 의 bk 와 같은 무게다. 평문(이 컴퓨터 안)의 hello 는 가로챌 수 있어 믿지 않는다. 이미 키가 있으면 덮지 않는다 —
+      // 다른 키가 와도(데스크탑이 키를 새로 만들었다) 저절로 바꾸지 않는다: 블루투스 핸드셰이크가 실패하고 "QR 로 다시 짝지어" 안내가 뜬다
+      ...(desktop.fingerprint && {
+        onHello: (hello: Hello) => {
+          if (this.current.phase !== 'linked' || this.current.session !== session) return
+          const now = this.current.desktop
+          const key = hello.bluetoothKey
+          if (now.bluetoothKey !== undefined || typeof key !== 'string' || !decodeNoiseKey(key)) return
+          this.update({ ...now, bluetoothKey: key, desktopId: now.desktopId ?? hello.desktopId })
+        },
+      }),
     })
     return session
+  }
+
+  /** 붙은 짝의 저장을 바꾼다 (세션은 그대로) */
+  private update(desktop: SavedDesktop): void {
+    if (this.current.phase !== 'linked') return
+    this.current = { ...this.current, desktop }
+    void this.deps.store.save(desktop).catch(() => undefined)
+    this.notify()
   }
 
   private detach(): void {

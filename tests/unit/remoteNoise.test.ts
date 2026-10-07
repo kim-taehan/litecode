@@ -107,3 +107,38 @@ describe('QR 의 bk — 선택 필드', () => {
     expect(parsePairUri(`${pairUri(link)}&bk=${'+'.repeat(43)}`)).toBeUndefined()
   })
 })
+
+describe('블루투스 단독 QR — bk 가 있으면 a·fp 는 선택 (이슈 #229)', () => {
+  const bk = encodeNoiseKey(generateNoiseKeyPair().publicKey)
+  const both: PairLink = { version: 1, desktopId: 'abcdef0123456789', name: 'PC', addresses: ['192.168.0.10:47600'], fingerprint: 'q'.repeat(43), code: 'AB10110Z9XYZ', expiresAt: 1_800_000_000, bluetoothKey: bk }
+  const bluetoothOnly: PairLink = { version: 1, desktopId: 'abcdef0123456789', name: 'PC', addresses: [], code: 'AB10110Z9XYZ', expiresAt: 1_800_000_000, bluetoothKey: bk }
+
+  it('블루투스 단독: a·fp 를 싣지 않고, 읽으면 주소 없음·지문 없음 — v 는 그대로 1', () => {
+    const uri = pairUri(bluetoothOnly)
+    expect(uri).toBe(`${PAIR_URI_PREFIX}v=1&d=abcdef0123456789&n=PC&c=AB10110Z9XYZ&x=1800000000&bk=${bk}`)
+    const parsed = parsePairUri(uri)!
+    expect(parsed).toEqual(bluetoothOnly)
+    expect('fingerprint' in parsed).toBe(false)
+  })
+
+  it('둘 다·사내망 단독은 지금 글자 그대로 라운드트립', () => {
+    expect(parsePairUri(pairUri(both))).toEqual(both)
+    const { bluetoothKey: _, ...lanOnly } = both
+    expect(parsePairUri(pairUri(lanOnly))).toEqual(lanOnly)
+  })
+
+  it('bk 가 없으면 a·fp 는 여전히 필수 — 블루투스 단독 모양에서 bk 만 빼면 읽지 않는다', () => {
+    expect(parsePairUri(pairUri({ ...bluetoothOnly, bluetoothKey: undefined }))).toBeUndefined()
+  })
+
+  it('a 만 있고 fp 가 없거나, fp 만 있고 a 가 없으면 bk 가 있어도 거절 (사내망 경로가 반쪽)', () => {
+    expect(parsePairUri(pairUri({ ...both, fingerprint: undefined }))).toBeUndefined()
+    expect(parsePairUri(pairUri({ ...both, addresses: [] }))).toBeUndefined()
+    expect(parsePairUri(pairUri({ ...both, fingerprint: 'short' }))).toBeUndefined()
+  })
+
+  it('bk 모양이 틀리면 블루투스 단독 QR 도 읽지 않는다', () => {
+    expect(parsePairUri(pairUri({ ...bluetoothOnly, bluetoothKey: bk.slice(1) }))).toBeUndefined()
+    expect(parsePairUri(pairUri({ ...bluetoothOnly, bluetoothKey: '' }))).toBeUndefined()
+  })
+})

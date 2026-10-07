@@ -161,7 +161,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 - 토글 = 플러그인 올리기/내리기 → 포트 닫기·광고 멈춤이 fiber dispose 로 정리된다. 네이티브 모듈(블루투스) 로드 실패가 `ctx.remote`·HTTP 를 건드리지 않는다.
 - 길마다 토글이 따로다 (#210): `remote`(서비스 + 루프백 HTTP) 아래 `lan`(TLS)·`bluetooth`(BLE) 가 각각 기능 묶음이다. 설정 > 모바일의 두 토글이 이 두 기능 값을 바꾼다.
 - 라디오 운반의 상태(꺼짐·권한 없음 등)는 `status().error`(리스너 못 뜸)가 아니라 `status().radio` 에 둔다 — `ctx.remote.status().bluetooth` 로 화면에 간다. 기기마다 지금 운반은 `devices[].via`(붙은 스트림의 운반, 없으면 이 실행의 마지막 요청).
-- 블루투스 운반 (`remote/bluetooth.ts`): `load()`(앱은 `import('@stoprocent/bleno')`)를 **start 때 처음** 부르고, `ctx.remote.noiseIdentity()` 도 그때 처음 부른다 — 이 운반이 올라와 있고 키를 읽어 둔 때만 짝짓기 응답·QR 에 `bluetoothKey`/`bk` 가 실린다. 광고는 서비스 UUID 하나(이름 없음), 폰 2대·핸드셰이크 10초. bleno 의 notify 신호는 Linux 만 → Mac·Windows 는 속도 상한(`BLUETOOTH_PACE_BYTES_PER_SECOND`, 실측 전 값)이 되밀림이다. macOS 는 끊김 신호·끊기가 없다 — tx 구독 해제를 끊김으로 보고, 우리가 끊은 연결은 구독 해제까지 쓰기를 무시한다.
+- 블루투스 운반 (`remote/bluetooth.ts`): `load()`(앱은 `import('@stoprocent/bleno')`)를 **start 때 처음** 부르고, `ctx.remote.noiseIdentity()` 도 그때 처음 부른다 — 이 운반이 올라와 있고 키를 읽어 둔 때만 짝짓기 응답·QR·`hello` 에 `bluetoothKey`/`bk` 가 실린다. 사내망(TLS) 경로가 없으면 QR 은 `a`·`fp` 없는 블루투스 단독 QR 이다(#229). 광고는 서비스 UUID 하나(이름 없음), 폰 2대·핸드셰이크 10초. bleno 의 notify 신호는 Linux 만 → Mac·Windows 는 속도 상한(`BLUETOOTH_PACE_BYTES_PER_SECOND`, 실측 전 값)이 되밀림이다. macOS 는 끊김 신호·끊기가 없다 — tx 구독 해제를 끊김으로 보고, 우리가 끊은 연결은 구독 해제까지 쓰기를 무시한다.
 
 ## 9. 새 서비스를 더할 때
 

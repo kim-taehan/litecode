@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { featureDefault, featureOn, type FeatureId } from '../shared/features.ts'
 import type { RemoteDeviceInfo, RemoteStatus } from '../shared/ipc.ts'
-import { isLoopbackHost } from '../shared/remote.ts'
+import { isLoopbackHost, parsePairUri } from '../shared/remote.ts'
 import { reason } from './ipcError.ts'
 import { qrPath } from './qrCode.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
@@ -12,7 +12,7 @@ import { useFocusTrap } from './focusTrap.ts'
 // 모바일 연결 전체를 켜고 끄는 스위치는 여기 없다 — 설정 > 기능의 카드 하나다 (#124). 그 안의 길(사내망·블루투스)마다의 토글은 여기 있다
 // (이슈 #210, 시안 _workspace/mock-ble/Desk.dc.html): 카드 하나에 `사내망 연결`·`블루투스 연결` 줄(상태 한 줄 + 토글 — 기능 lan·bluetooth 와 같은 값),
 // 기기 줄에는 지금 연결 방법 배지(Wi-Fi / 블루투스 / 끊김 — 붙어 있으면 그 스트림의 운반).
-// [기기 연결] 은 모달이다: QR(사내망 TLS 주소가 있을 때) + 직접 입력(주소·코드·지문 앞 8자) + 남은 시간. 코드를 쓰거나 만료되면 닫힌다.
+// [기기 연결] 은 모달이다: QR(사내망 TLS 주소나 블루투스가 있을 때 — 블루투스만이면 블루투스 단독 QR, #229) + 직접 입력(주소·코드·지문 앞 8자) + 남은 시간. 코드를 쓰거나 만료되면 닫힌다.
 // "마지막 수신 시도" 는 진단이다 — 회사 Wi-Fi 의 기기 간 통신 차단·방화벽은 조용히 막아 서버가 알 수 없다. 시도가 없으면 그대로 "없음" 을 보인다.
 // 짝짓기 요청의 [허용]/[거절] 확인은 설정을 닫아도 뜨도록 앱 바탕에 건다 (RemotePairPrompt — App.tsx).
 
@@ -69,7 +69,8 @@ export function MobilePage() {
       () => setError(undefined),
       (failure: unknown) => setError(reason(failure)),
     )
-  const listening = status.addresses.length > 0
+  // 주소로 듣거나 블루투스로 광고 중이면 폰이 붙을 수 있다 — 블루투스만이어도 짝짓기를 시작한다 (블루투스 단독 QR, 이슈 #229)
+  const listening = status.addresses.length > 0 || status.bluetooth?.state === 'advertising'
   const pairing = secondsLeft > 0 ? status.pairing : undefined
   const date = (at: number) => new Date(at).toLocaleString(language)
   const lan = status.addresses.filter((address) => !isLoopbackHost(hostOf(address)))
@@ -260,6 +261,8 @@ function PairDialog(props: {
   const dialogRef = useRef<HTMLDivElement>(null)
   useFocusTrap(dialogRef)
   const qr = useMemo(() => (pairing.uri ? qrPath(pairing.uri) : undefined), [pairing.uri])
+  // 지문(fp)이 없는 QR 은 블루투스 단독이다 — "같은 사내망" 안내가 맞지 않는다 (이슈 #229)
+  const bluetoothOnly = useMemo(() => (pairing.uri ? parsePairUri(pairing.uri)?.fingerprint === undefined : false), [pairing.uri])
   return (
     <div className="confirm-mask">
       <div
@@ -277,7 +280,7 @@ function PairDialog(props: {
         </h2>
         {qr ? (
           <>
-            <p className="confirm-dialog__description">{t('remote.pair.scan')}</p>
+            <p className="confirm-dialog__description">{t(bluetoothOnly ? 'remote.pair.scanBluetooth' : 'remote.pair.scan')}</p>
             <svg className="mobile-pair-dialog__qr" viewBox={`0 0 ${qr.size} ${qr.size}`} role="img" aria-label={t('remote.pair.qr')} shapeRendering="crispEdges">
               <rect width={qr.size} height={qr.size} fill="#fff" />
               <path d={qr.d} fill="#000" />

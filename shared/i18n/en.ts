@@ -852,6 +852,7 @@ export const en = {
   'remote.pair': 'Connect a device',
   'remote.pair.description': 'Shows a QR code and the address and code for the phone app. The code works once, for 2 minutes',
   'remote.pair.scan': 'Scan this with "Scan QR" in the phone app. The phone and this PC must be on the same company network',
+  'remote.pair.scanBluetooth': 'Scan this with "Scan QR" in the phone app. It pairs over Bluetooth, no company network needed — keep the phone near this PC (about 10 m)',
   'remote.pair.qr': 'Pairing QR code',
   'remote.pair.noQr': 'This PC has no company network address, so there is no QR code. The address below works only from the Android emulator',
   'remote.pair.manual': 'Or type it in under "Enter address and code"',

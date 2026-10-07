@@ -223,6 +223,69 @@ describe('Android 10 미만 — 사내망(TLS 1.3) 연결을 시도하지 않는
   })
 })
 
+describe('hello 의 bluetoothKey 를 배운다 — Wi-Fi 로 짝지은 폰도 다시 짝짓지 않고 블루투스를 고른다 (이슈 #229)', () => {
+  const BK = 'K'.repeat(42) + 'A'
+  /** bk 를 hello 에 싣는 데스크탑에 QR 로 짝지어 붙을 때까지 (extra: QR 에 더 실을 것) */
+  async function pairWith(options: { bluetoothKey?: string; tls?: boolean }, extra: Partial<PairLink> = {}) {
+    const keyed = await startFakeDesktop({ port: 0, stepMs: 5, ...(options.tls !== false && { tls: DESKTOP_TLS }), ...(options.bluetoothKey !== undefined && { bluetoothKey: options.bluetoothKey }) })
+    const store = memoryStore()
+    const link = newLink(store)
+    await link.restore()
+    if (options.tls === false) await link.pair({ address: `http://127.0.0.1:${keyed.port}`, code: FAKE_PAIR_CODE, deviceName: 'Pixel 8' })
+    else await link.pairQr(qr({ addresses: [`127.0.0.1:${keyed.port}`], ...extra }), 'Pixel 8')
+    const { session } = phase(link, 'linked')
+    await until(() => session.getStatus().kind === 'connected' && session.models.length > 0, '붙음')
+    return { keyed, store, link }
+  }
+
+  it('저장된 짝에 bk 가 없으면 지문 고정 TLS 의 hello 에서 저장한다 — 지금 짝(화면·블루투스 고르기)에도 바로', async () => {
+    const { keyed, store, link } = await pairWith({ bluetoothKey: BK })
+    try {
+      await until(() => store.value?.bluetoothKey === BK, 'bk 저장')
+      expect(store.value).toMatchObject({ desktopId: 'fake-desktop', fingerprint: DESKTOP_FP })
+      expect(phase(link, 'linked').desktop.bluetoothKey).toBe(BK)
+    } finally {
+      link.dispose()
+      await keyed.close()
+    }
+  })
+
+  it('이미 bk 가 있으면 덮지 않는다 — hello 의 것이 달라도 (신뢰는 짝지을 때 정한 것)', async () => {
+    const mine = 'M'.repeat(42) + 'A'
+    const { keyed, store, link } = await pairWith({ bluetoothKey: BK }, { bluetoothKey: mine })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(store.value?.bluetoothKey).toBe(mine)
+      expect(phase(link, 'linked').desktop.bluetoothKey).toBe(mine)
+    } finally {
+      link.dispose()
+      await keyed.close()
+    }
+  })
+
+  it('데스크탑의 블루투스가 꺼져 있으면(hello 에 필드 없음) 키 없음 그대로', async () => {
+    const { keyed, store, link } = await pairWith({})
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(store.value && 'bluetoothKey' in store.value).toBe(false)
+    } finally {
+      link.dispose()
+      await keyed.close()
+    }
+  })
+
+  it('평문(이 컴퓨터 안) hello 의 bk 는 믿지 않는다 — TLS 로 인증된 hello 에서만 배운다', async () => {
+    const { keyed, store, link } = await pairWith({ bluetoothKey: BK, tls: false })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(store.value?.bluetoothKey).toBeUndefined()
+    } finally {
+      link.dispose()
+      await keyed.close()
+    }
+  })
+})
+
 describe('저장·복원 — 같은 지문으로만', () => {
   async function pairedStore(): Promise<ReturnType<typeof memoryStore>> {
     const store = memoryStore()

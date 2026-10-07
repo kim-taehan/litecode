@@ -268,7 +268,7 @@ describe('QR 글', () => {
     expect(uri).toContain('&a=192.168.0.10%3A47600%2C100.70.1.2%3A47600&fp=')
     expect(parsePairUri(uri)).toEqual(link)
     // URLSearchParams 로 만든 글(+ 공백)도 읽는다
-    const viaSearchParams = `${PAIR_URI_PREFIX}${new URLSearchParams({ v: '1', d: link.desktopId, n: link.name, a: link.addresses.join(','), fp: link.fingerprint, c: link.code, x: String(link.expiresAt) })}`
+    const viaSearchParams = `${PAIR_URI_PREFIX}${new URLSearchParams({ v: '1', d: link.desktopId, n: link.name, a: link.addresses.join(','), fp: link.fingerprint!, c: link.code, x: String(link.expiresAt) })}`
     expect(parsePairUri(viaSearchParams)).toEqual(link)
   })
 

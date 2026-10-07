@@ -261,16 +261,17 @@ export async function start(options: Partial<RemoteServiceOptions> & RemoteHttpO
     await until(() => llm.calls.length >= n, `턴 ${n}`)
     return llm.calls[n - 1]!
   }
-  /** 링크(메모리 파이프의 한쪽 끝)를 프레임 운반으로 ctx.remote 에 잇는다 — 블루투스 운반이 연결마다 하는 일 */
-  const attach = (link: ByteLink, key = 'link'): FramedServer => {
-    const server = serveFramed(link, remote, { carrier: 'pipe', key })
+  /** 링크(메모리 파이프의 한쪽 끝)를 프레임 운반으로 ctx.remote 에 잇는다 — 블루투스 운반이 연결마다 하는 일. carrier 는 요청에 붙는 운반 id */
+  const attach = (link: ByteLink, key = 'link', carrier = 'pipe'): FramedServer => {
+    const server = serveFramed(link, remote, { carrier, key })
     cleanups.push(() => server.close())
     return server
   }
-  /** 주소 없이 늘 떠 있는 운반을 올린다 (HTTP 없이 ctx.remote 를 살린다 — attach 로 링크를 잇는다) */
-  const pipeCarrier = async (): Promise<void> => {
+  /** 주소 없이 늘 떠 있는 운반을 올린다 (HTTP 없이 ctx.remote 를 살린다 — attach 로 링크를 잇는다).
+   *  id 를 'bluetooth' 로 주면 ctx.remote 가 블루투스 운반으로 본다 — 키(noiseIdentity)를 읽어 두면 QR·짝짓기 응답·hello 에 bk 가 실린다 */
+  const pipeCarrier = async (id = 'pipe'): Promise<void> => {
     let up = false
-    remote.carrier({ id: 'pipe', start: async () => void (up = true), stop: async () => void (up = false), status: () => ({ up, addresses: [] }) })
+    remote.carrier({ id, start: async () => void (up = true), stop: async () => void (up = false), status: () => ({ up, addresses: [] }) })
     await remote.ready()
   }
   /** 엔진 기록이 있는 저장된 대화 하나 */

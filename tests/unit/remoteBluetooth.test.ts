@@ -448,3 +448,54 @@ describe('짝짓기 응답·QR 의 bluetoothKey', () => {
     expect('bluetoothKey' in (await desktop.pair('third'))).toBe(false)
   })
 })
+
+describe('블루투스 단독 QR — 사내망이 꺼져 있어도 블루투스가 켜져 있으면 (이슈 #229)', () => {
+  it('사내망(TLS) 끔 + 블루투스 켬 → QR 이 있다: a·fp 없이 d·c·x·bk', async () => {
+    const desktop = await start({ noiseKeyFile: noiseKeyFile() }) // 평문 루프백(에뮬레이터용)만 — 사내망 연결 꺼짐
+    expect(desktop.remote.startPairing().pairing!.uri).toBeUndefined() // 블루투스도 꺼져 있으면 지금처럼 없다
+    desktop.remote.cancelPairing()
+
+    await bluetooth(desktop, new FakeBleno())
+    const identity = await desktop.remote.noiseIdentity()
+    const pairing = desktop.remote.startPairing().pairing!
+    expect(pairing.uri).toBeDefined()
+    const link = parsePairUri(pairing.uri!)!
+    expect(link).toEqual({ version: 1, desktopId: desktop.remote.desktopId, name: 'test-pc', addresses: [], code: pairing.code.replace(/-/g, ''), expiresAt: Math.floor(pairing.expiresAt / 1000), bluetoothKey: identity.publicKeyText })
+    expect(pairing.uri).not.toContain('&a=')
+    expect(pairing.uri).not.toContain('&fp=')
+  })
+
+  it('블루투스만 떠 있어도(HTTP 운반 없음) 짝짓기를 시작할 수 있고 QR 이 나온다', async () => {
+    const desktop = await start({ http: false, noiseKeyFile: noiseKeyFile() })
+    await bluetooth(desktop, new FakeBleno())
+    await until(() => desktop.remote.status().bluetooth?.state === 'advertising', '광고')
+    expect(parsePairUri(desktop.remote.startPairing().pairing!.uri!)).toMatchObject({ addresses: [], bluetoothKey: (await desktop.remote.noiseIdentity()).publicKeyText })
+  })
+
+  it('사내망·블루투스 둘 다 켜져 있으면 한 장에 둘 다', async () => {
+    const desktop = await start({ noiseKeyFile: noiseKeyFile(), tls: { addresses: () => ['127.0.0.1'], allowPeer: () => true } })
+    await bluetooth(desktop, new FakeBleno())
+    const link = parsePairUri(desktop.remote.startPairing().pairing!.uri!)!
+    expect(link.fingerprint).toBe(desktop.remote.status().fingerprint)
+    expect(link.addresses.length).toBeGreaterThan(0)
+    expect(link.bluetoothKey).toBe((await desktop.remote.noiseIdentity()).publicKeyText)
+  })
+})
+
+describe('hello 의 bluetoothKey — Wi-Fi 로 짝지은 폰이 키를 배운다 (이슈 #229)', () => {
+  it('블루투스가 켜져 있으면 hello 에 공개키, 꺼져 있으면 필드가 없다', async () => {
+    const desktop = await start({ noiseKeyFile: noiseKeyFile() })
+    const { token } = await desktop.pair()
+    const before = await desktop.api('GET', '/v1/hello', { token })
+    expect(before.status).toBe(200)
+    expect('bluetoothKey' in before.body).toBe(false)
+
+    const { fiber } = await bluetooth(desktop, new FakeBleno())
+    const identity = await desktop.remote.noiseIdentity()
+    expect((await desktop.api('GET', '/v1/hello', { token })).body.bluetoothKey).toBe(identity.publicKeyText)
+
+    await fiber.dispose()
+    await desktop.remote.ready()
+    expect('bluetoothKey' in (await desktop.api('GET', '/v1/hello', { token })).body).toBe(false)
+  })
+})
