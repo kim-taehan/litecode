@@ -1,7 +1,7 @@
 import { Context, Service } from 'cordis'
 import { providerIdFor } from '../../shared/providerId.ts'
 import { tr } from '../i18n.ts'
-import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
+import { readJsonFileSync, unreadableFileError, writeJsonFileSync } from './jsonFile.ts'
 import { describeHttpError, errorDetail } from '../../shared/httpError.ts'
 
 // 모델 provider 설정 — dsh 의 Settings > Models 화면과 같은 모양을 따른다.
@@ -83,15 +83,27 @@ export class ProviderRegistry extends Service {
   private entries = new Map<string, ProviderConfig>()
   /** id → 암호문(base64) */
   private keys: Record<string, string> = {}
+  /** 두 파일 중 하나를 못 읽었다(권한 등 — 없는 것과 다르다). 기본값으로 뜨되 저장을 거절한다 — 덮으면 등록한 provider·키가 사라진다 (이슈 #195) */
+  private unreadable?: Error
 
   constructor(
     ctx: Context,
     private opts: ProviderRegistryOptions = {},
   ) {
     super(ctx, 'providers')
-    const stored = opts.file ? (readJsonFileSync(opts.file, 'array') as ProviderConfig[] | undefined) : undefined
+    // 생성자에서 던지면 서비스가 영영 안 뜬다 (CLAUDE.md 함정 4) — 못 읽으면 기본값으로
+    const read = (file: string, shape: 'array' | 'object'): unknown => {
+      try {
+        return readJsonFileSync(file, shape)
+      } catch (error) {
+        this.unreadable ??= unreadableFileError(file, error)
+        console.warn(`[providers] ${this.unreadable.message}`)
+        return undefined
+      }
+    }
+    const stored = opts.file ? (read(opts.file, 'array') as ProviderConfig[] | undefined) : undefined
     for (const config of stored?.filter((config) => typeof config?.id === 'string') ?? opts.defaults ?? []) this.entries.set(config.id, config)
-    this.keys = (opts.keysFile && (readJsonFileSync(opts.keysFile, 'object') as Record<string, string> | undefined)) || {}
+    this.keys = (opts.keysFile && (read(opts.keysFile, 'object') as Record<string, string> | undefined)) || {}
   }
 
   /** 되돌릴 수 있는 등록 — 호출부가 반환값을 불러 해제한다 (Cordis effect 원칙). 파일에는 안 쓴다 */
@@ -113,6 +125,7 @@ export class ProviderRegistry extends Service {
   }
 
   save(input: ProviderInput): ProviderSummary[] {
+    if (this.unreadable) throw this.unreadable
     const displayName = input.displayName.trim()
     const baseURL = input.baseURL.trim()
     if (!displayName) throw new Error(tr('error.displayNameRequired'))
@@ -155,6 +168,7 @@ export class ProviderRegistry extends Service {
   }
 
   remove(id: string): ProviderSummary[] {
+    if (this.unreadable) throw this.unreadable
     this.entries.delete(id)
     delete this.keys[id]
     this.persist()

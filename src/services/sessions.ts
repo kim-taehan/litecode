@@ -1,7 +1,7 @@
 import { Context, Service } from 'cordis'
 import type { History } from './llm.ts'
 import { shellContext } from './shell.ts'
-import { readJsonFile, writeJsonFile } from './jsonFile.ts'
+import { readJsonFile, unreadableFileError, writeJsonFile } from './jsonFile.ts'
 import { isMode } from '../../shared/modes.ts'
 import { TITLE_MAX } from '../../shared/chat.ts'
 import './llm.ts'
@@ -68,7 +68,7 @@ export class SessionsService extends Service {
 
   /** 모든 프로젝트의 대화 (맨 앞이 가장 최근에 만든 것) */
   async list(): Promise<Conversation[]> {
-    return (await this.read()).conversations
+    return (await this.readOrEmpty()).conversations
   }
 
   /** 새로 넣거나 그 자리에서 고친다. 그 프로젝트가 제한을 넘으면 마지막 활동이 가장 오래된 것부터 지우고 지운 대화 id 를 준다.
@@ -220,7 +220,7 @@ export class SessionsService extends Service {
 
   /** 프로젝트 경로 → 마지막에 보던 대화 id. 그 대화가 지워졌어도 그대로 준다 (쓰는 쪽이 목록에서 찾는다) */
   async lastViewed(): Promise<Record<string, string>> {
-    return (await this.read()).viewed
+    return (await this.readOrEmpty()).viewed
   }
 
   /** 목록에서 빼고 엔진 세션도 지운다. 되돌리기 없음 */
@@ -260,7 +260,11 @@ export class SessionsService extends Service {
   private sweep(): Promise<void> {
     this.sweeping = this.sweeping.then(async () => {
       let deleted = false
-      for (const engineSessionId of (await this.read()).orphans) {
+      const orphans = await this.read().then(
+        (stored) => stored.orphans,
+        () => [], // 못 읽는 파일 — 이번엔 안 지운다 (orphans 를 고쳐 쓸 수도 없다)
+      )
+      for (const engineSessionId of orphans) {
         try {
           await this.ctx.llm.deleteSession(engineSessionId)
         } catch {
@@ -285,19 +289,29 @@ export class SessionsService extends Service {
     return next
   }
 
-  /** 파일이 없거나 손상됐으면 빈 목록 — 앱 시작을 막지 않는다 (내용은 opencode DB 에 그대로 있다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts) */
+  /** 파일이 없거나 손상됐으면 빈 목록 (내용은 opencode DB 에 그대로 있다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts).
+   *  읽기 자체가 실패하면(권한 등) 던진다 — 빈 목록 위에 고쳐 쓰면 원본이 사라진다 (이슈 #195). 그래서 update 는 쓰지 않고 실패한다 */
   private async read(): Promise<Stored> {
+    let parsed: Partial<Record<keyof Stored, unknown>> | undefined
     try {
-      const parsed = (await readJsonFile(this.opts.file, 'object')) as Partial<Record<keyof Stored, unknown>> | undefined
-      const conversations = Array.isArray(parsed?.conversations) ? parsed.conversations.filter(isConversation).map(pick) : []
-      const orphans = Array.isArray(parsed?.orphans) ? parsed.orphans.filter((entry): entry is string => typeof entry === 'string') : []
-      const viewed = Object.fromEntries(
-        Object.entries(typeof parsed?.viewed === 'object' && parsed.viewed ? parsed.viewed : {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-      )
-      return { conversations, orphans, viewed }
-    } catch {
-      return { conversations: [], orphans: [], viewed: {} }
+      parsed = (await readJsonFile(this.opts.file, 'object')) as Partial<Record<keyof Stored, unknown>> | undefined
+    } catch (error) {
+      throw unreadableFileError(this.opts.file, error)
     }
+    const conversations = Array.isArray(parsed?.conversations) ? parsed.conversations.filter(isConversation).map(pick) : []
+    const orphans = Array.isArray(parsed?.orphans) ? parsed.orphans.filter((entry): entry is string => typeof entry === 'string') : []
+    const viewed = Object.fromEntries(
+      Object.entries(typeof parsed?.viewed === 'object' && parsed.viewed ? parsed.viewed : {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    )
+    return { conversations, orphans, viewed }
+  }
+
+  /** 보여 주기만 하는 읽기 — 못 읽는 파일이면 빈 목록으로 (앱 시작을 막지 않는다). 쓰는 길은 read 로 던진다 */
+  private readOrEmpty(): Promise<Stored> {
+    return this.read().catch((error: unknown) => {
+      console.warn(`[sessions] ${(error as Error).message}`)
+      return { conversations: [], orphans: [], viewed: {} }
+    })
   }
 }
 

@@ -499,6 +499,7 @@ export const en = {
   'error.opencodeExitedEarly': 'opencode exited before it was ready — {message}',
   'error.opencodeNotReady': 'opencode was not ready within {seconds}s (last response: {last})',
   'error.settingInvalid': 'Invalid setting value: {name}',
+  'error.fileUnreadable': 'Could not read {name} ({code}), so nothing was saved — writing it would erase what it holds. Check the file permissions and restart the app',
   'error.displayNameRequired': 'Enter a display name',
   'error.baseUrlInvalid': 'Base URL must be an http(s) address',
   'error.contextLength': 'Context length must be a whole number of 1 or more',

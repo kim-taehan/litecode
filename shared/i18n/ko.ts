@@ -521,6 +521,7 @@ export const ko = {
   'error.opencodeExitedEarly': 'opencode 가 준비 전에 끝났습니다 — {message}',
   'error.opencodeNotReady': 'opencode 가 {seconds}초 안에 준비되지 않았습니다 (마지막 응답: {last})',
   'error.settingInvalid': '설정 값이 올바르지 않습니다: {name}',
+  'error.fileUnreadable': '{name} 파일을 읽지 못해({code}) 저장하지 않았습니다 — 덮어쓰면 원래 내용이 사라집니다. 파일 권한을 확인하고 앱을 다시 시작하세요',
   'error.displayNameRequired': '표시 이름을 입력하세요',
   'error.baseUrlInvalid': 'Base URL 은 http(s) 주소여야 합니다',
   'error.contextLength': '컨텍스트 길이는 1 이상의 정수로 입력하세요',

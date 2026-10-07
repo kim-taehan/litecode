@@ -680,7 +680,13 @@ function sendFullScreen(win: BrowserWindow): void {
 const windowFile = path.join(userData, 'window.json')
 
 function createWindow(): BrowserWindow {
-  const stored = readJsonFileSync(windowFile, 'object')
+  // 못 읽는 파일(권한 등)은 기본 크기로 — 창 자리는 덮여도 잃을 게 없다. 읽기 실패를 던지게 한 뒤(#195) 창이 안 뜨지 않게
+  let stored: ReturnType<typeof readJsonFileSync> | undefined
+  try {
+    stored = readJsonFileSync(windowFile, 'object')
+  } catch {
+    stored = undefined
+  }
   const saved = restorableBounds(stored, screen.getAllDisplays().map((display) => display.workArea))
   const win = new BrowserWindow({
     ...(saved ?? { width: 1280, height: 800 }),
