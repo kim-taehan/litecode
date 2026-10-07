@@ -215,3 +215,45 @@ describe('붙여넣은 이미지의 임시 파일 정리', () => {
     expect(ctx.get('attachments')).toBeUndefined()
   })
 })
+
+describe('preview — 첨부 이미지 썸네일·크게 보기 (이슈 #214)', () => {
+  const dataUrl = `data:image/png;base64,${PNG.toString('base64')}`
+
+  it('이 서비스가 칩으로 내준 이미지 경로만 data: 주소로 — 고른 것·붙여넣은 것', async () => {
+    const image = write('thumb.png', PNG)
+    const { attachments } = await start([image])
+    await attachments.pick('image', root, 0)
+    const pasted = (await attachments.drop('c1', { blobs: [{ name: 'image.png', data: new Uint8Array(PNG) }] }, undefined, model)).picked[0]!.path
+    expect(await attachments.preview(image)).toBe(dataUrl)
+    expect(await attachments.preview(pasted)).toBe(dataUrl)
+  })
+
+  it('내준 적 없는 경로·글 파일 칩·모양이 틀린 입력은 undefined (화면이 아무 파일이나 읽게 두지 않는다)', async () => {
+    const stranger = write('stranger.png', PNG)
+    const text = write('chip.md', 'x')
+    const { attachments } = await start([text])
+    await attachments.pick('file', root, 0)
+    expect(await attachments.preview(stranger)).toBeUndefined()
+    expect(await attachments.preview(text)).toBeUndefined()
+    expect(await attachments.preview(42)).toBeUndefined()
+  })
+
+  it('칩을 빼거나 보낸 뒤(chat/attachments-read)에는 더 주지 않는다', async () => {
+    const removed = write('removed.png', PNG)
+    const sent = write('sent.png', PNG)
+    const { ctx, attachments } = await start([removed, sent])
+    await attachments.pick('image', root, 0)
+    await attachments.discard([removed])
+    expect(await attachments.preview(removed)).toBeUndefined()
+    ctx.emit('chat/attachments-read', [sent])
+    expect(await attachments.preview(sent)).toBeUndefined()
+  })
+
+  it('칩이 된 뒤 파일이 이미지가 아니게 바뀌면 undefined', async () => {
+    const image = write('changed.png', PNG)
+    const { attachments } = await start([image])
+    await attachments.pick('image', root, 0)
+    fs.writeFileSync(image, 'now text')
+    expect(await attachments.preview(image)).toBeUndefined()
+  })
+})

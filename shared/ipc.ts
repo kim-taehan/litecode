@@ -65,6 +65,8 @@ export const Channel = {
   /** 붙여넣거나 끌어다 놓은 파일 (이슈 #80) — 본문은 preload 가 File 객체에서 만든다 (화면이 경로 문자열을 실어 보낼 길이 없다) */
   ATTACH_DROPPED: 'chat:attach-dropped',
   DISCARD_ATTACHMENTS: 'chat:discard-attachments',
+  /** 이미지 칩의 썸네일·크게 보기 (이슈 #214) — 메인이 칩으로 내준 경로만 data: 주소로 */
+  ATTACHMENT_PREVIEW: 'chat:attachment-preview',
   LIST_PROJECTS: 'projects:list',
   OPEN_PROJECT: 'projects:open',
   PICK_PROJECT_FOLDER: 'projects:pick-folder',
@@ -129,6 +131,8 @@ export const Channel = {
   NOTIFICATION_OPEN: 'notifications:open',
   OPEN_IN_APPS: 'openIn:apps',
   OPEN_IN: 'openIn:open',
+  /** 패널의 PDF 를 OS 기본 앱으로 (이슈 #214) */
+  OPEN_IN_FILE: 'openIn:open-file',
   GET_FEATURES: 'features:get',
   /** 메인 → 화면 (FeatureId[]) — 켜진 기능이 바뀌었다 (묶음을 다 올리고 내린 뒤) */
   FEATURES_CHANGED: 'features:changed',
@@ -218,6 +222,9 @@ export interface LitecodeBridge {
   attachFiles(conversationId: string, files: File[], held: Record<AttachmentKind, number>, model: ChatModel | undefined): Promise<AttachmentPick>
   /** 초안에서 뺀 칩을 알린다 — 붙여넣은 이미지의 임시 파일을 지운다 (메인이 만든 것만 지운다. 고른 파일은 건드리지 않는다) */
   discardAttachments(paths: string[]): Promise<void>
+  /** 이미지 칩의 미리보기 (이슈 #214) — 메인이 이미지 칩으로 내준(아직 빼거나 보내지 않은) 경로면 data:image/png|jpeg 주소, 아니면 undefined.
+   *  화면은 이것을 <img> 로만 그린다 */
+  attachmentPreview(path: string): Promise<string | undefined>
   /** 최근 프로젝트 — 맨 앞이 마지막으로 연 프로젝트 */
   listProjects(): Promise<Project[]>
   /** 그 폴더를 열어 최근 목록 맨 앞에 올린다 */
@@ -326,6 +333,8 @@ export interface LitecodeBridge {
   openInApps(): Promise<OpenInApp[]>
   /** 그 프로젝트 폴더를 그 앱으로 연다. 목록 밖 앱·등록 안 된 폴더·실행 실패면 지금 언어의 사유로 거절 */
   openIn(appId: string, directory: string): Promise<void>
+  /** 오른쪽 패널의 PDF 를 OS 기본 앱으로 (이슈 #214) — 등록된 프로젝트 안의 .pdf(머리 %PDF-)만. 그 밖·실행 실패는 지금 언어의 사유로 거절 */
+  openFileIn(directory: string, token: string): Promise<void>
   /** 켜진 기능 (ctx.features) — 꺼진 기능의 버튼·탭·메뉴·단축키는 그리지 않는다. 켜고 끄기는 setSettings({ features }) */
   getFeatures(): Promise<FeatureId[]>
   onFeaturesChanged(listener: (enabled: FeatureId[]) => void): () => void
