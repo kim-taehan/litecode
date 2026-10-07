@@ -195,7 +195,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
     if (!item.text.trim()) return null
     return (
       <div className="turn-row turn-row--text" data-kind="text">
-        <Markdown text={item.text.trim()} directory={directory} />
+        <Markdown text={item.text.trim()} directory={directory} streaming={turnRunning} />
       </div>
     )
   }

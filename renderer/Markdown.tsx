@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type * as Md from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmFromMarkdown } from 'mdast-util-gfm'
@@ -6,8 +6,9 @@ import { gfm } from 'micromark-extension-gfm'
 import { isWebUrl } from '../shared/webUrl.ts'
 import { cjkStrong } from './cjkStrong.ts'
 import { openFilePreview } from './filePreviewStore.ts'
-import { Tokens, useHighlight } from './Highlighted.tsx'
+import { Tokens, useHighlight, useSeen } from './Highlighted.tsx'
 import { languageOf } from './highlight.ts'
+import { IncrementalMarkdown } from './incrementalMarkdown.ts'
 import { useT } from './settingsStore.ts'
 import { looksLikePath } from './turnView.ts'
 import './markdown.css'
@@ -22,13 +23,50 @@ import './markdown.css'
 const FileMentions = createContext<{ directory: string; files: ReadonlySet<string> } | undefined>(undefined)
 
 /** 답 원문 하나를 그린다. 빈 줄이 몇 개든 문단 사이는 CSS 간격 하나다.
- *  directory 를 주면 인라인 코드 중 그 프로젝트의 실제 파일을 칩으로 그린다 (판정은 메인 — dsh fileMentions 처럼 추측하지 않는다) */
-export function Markdown({ text, directory }: { text: string; directory?: string }) {
-  const root = useMemo(() => parse(text), [text])
-  const definitions = useMemo(() => collectDefinitions(root), [root])
+ *  directory 를 주면 인라인 코드 중 그 프로젝트의 실제 파일을 칩으로 그린다 (판정은 메인 — dsh fileMentions 처럼 추측하지 않는다).
+ *  streaming: 글이 뒤로 자라는 중(답이 오는 중) — 끝 블록만 다시 파싱하고 앞 블록은 얼려 다시 그리지 않는다 (이슈 #175) */
+export function Markdown({ text, directory, streaming = false }: { text: string; directory?: string; streaming?: boolean }) {
+  const root = useMarkdownRoot(text, streaming)
+  const definitions = useDefinitions(root)
   const files = useFileMentions(root, directory)
-  const body = <div className="md">{renderBlocks(root.children, definitions)}</div>
+  const body = (
+    <div className="md">
+      {root.children.flatMap((node, index) => {
+        const block = <Block key={index} node={node} defs={definitions} />
+        return index === 0 ? [block] : ['\n', block] // renderBlocks 와 같은 블록 사이 줄바꿈
+      })}
+    </div>
+  )
   return directory && files.size > 0 ? <FileMentions.Provider value={{ directory, files }}>{body}</FileMentions.Provider> : body
+}
+
+/** 스트리밍 중엔 증분 파서, 끝나면(streaming 이 꺼지면) 전체를 한 번 다시 — 증분이 놓친 참조 링크 같은 어긋남을 바로잡는다 */
+function useMarkdownRoot(text: string, streaming: boolean): Md.Root {
+  const incremental = useRef<IncrementalMarkdown>(undefined)
+  return useMemo(() => {
+    if (!streaming) {
+      incremental.current = undefined
+      return parseMarkdown(text)
+    }
+    incremental.current ??= new IncrementalMarkdown(parseMarkdown)
+    return incremental.current.update(text)
+  }, [text, streaming])
+}
+
+/** 맨 위 블록 하나 — 얼린 블록은 같은 노드라 다시 그리지 않는다 */
+const Block = memo(function Block({ node, defs }: { node: Md.RootContent; defs: Definitions }) {
+  return render(node, 0, defs)
+})
+
+/** 참조 링크 정의 — 내용(id → 주소)이 같으면 같은 Map 을 지킨다. 조각마다 새 Map 이면 얼린 블록도 다시 그려진다 */
+function useDefinitions(root: Md.Root): Definitions {
+  const last = useRef<Definitions>(undefined)
+  return useMemo(() => {
+    const found = collectDefinitions(root)
+    const previous = last.current
+    if (previous && previous.size === found.size && [...found].every(([id, node]) => previous.get(id)?.url === node.url)) return previous
+    return (last.current = found)
+  }, [root])
 }
 
 const NO_FILES: ReadonlySet<string> = new Set()
@@ -59,7 +97,8 @@ function inlineCodes(node: Md.Parent, found: string[] = []): string[] {
   return found
 }
 
-function parse(text: string): Md.Root {
+/** 원문 전체를 한 번에 파싱한다 (증분 파서도 꼬리 조각을 이걸로 파싱한다) */
+export function parseMarkdown(text: string): Md.Root {
   return fromMarkdown(text, { extensions: [gfm(), cjkStrong], mdastExtensions: [gfmFromMarkdown()] })
 }
 
@@ -217,9 +256,11 @@ function BlockedImage({ alt, url }: { alt: string; url: string }) {
 const COPIED_MS = 1_500
 
 /** 코드 블록 — 머리(언어, 없으면 "코드 블록") + 오른쪽 아이콘 버튼 둘(줄바꿈 토글·복사) + 고정폭 본문 (dsh CodeBlock·CodeToolbar).
- *  줄바꿈은 dsh 처럼 켠 채로 시작한다. 아는 언어면 글자에 문법 색 — 모르는 언어·언어 표시 없음·너무 큰 블록은 색 없이 */
+ *  줄바꿈은 dsh 처럼 켠 채로 시작한다. 아는 언어면 글자에 문법 색 — 모르는 언어·언어 표시 없음·너무 큰 블록은 색 없이.
+ *  색은 블록이 화면에 처음 들어올 때부터 칠한다 (이슈 #175 — 긴 대화의 화면 밖 블록은 칠하지 않는다) */
 function CodeBlock({ lang, code }: { lang?: string; code: string }) {
-  const tokens = useHighlight(code, languageOf(lang))
+  const box = useRef<HTMLDivElement>(null)
+  const tokens = useHighlight(code, languageOf(lang), useSeen(box))
   const [copied, setCopied] = useState(false)
   const [wrap, setWrap] = useState(true)
   const t = useT()
@@ -230,7 +271,7 @@ function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   }, [copied])
   const copyLabel = copied ? t('markdown.copied') : t('markdown.copy')
   return (
-    <div className="md-code" data-wrap={wrap}>
+    <div ref={box} className="md-code" data-wrap={wrap}>
       <div className="md-code__head">
         <span className="md-code__lang">{lang || t('markdown.codeBlock')}</span>
         <span className="md-code__tools">
