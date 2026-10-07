@@ -13,6 +13,8 @@ import { instructionsNote, projectInstructions } from './instructions.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { failureText, historyMessages, interruptedError, modeOf, unfinishedCompactions } from './history.ts'
 import { realDirectory } from './projectPath.ts'
+import { turnError } from './contextOverflow.ts'
+import { httpStatusOf } from '../../shared/httpError.ts'
 import { describeEnginePlugins, findEnginePlugins } from './enginePlugins.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
@@ -220,6 +222,19 @@ export const AGENT_LIST_TIMEOUT_MS = 10_000
 /** 한 턴에 자동 요약이 이만큼 넘게 돌면 멈춘다 — 레거시는 요약 뒤 스스로 "Continue" 턴을 돌리고, 모델 한도가 작으면(한도 − 출력 한도가 프롬프트보다
  *  작으면 — renderer/compaction.ts) 요약 → 다시 넘침이 끝없이 돈다 (01w 자동 요약 행, 가짜 LLM 30초에 10회 이상). 출력 한도를 넣은 뒤(#27)로는 안전망. 요약 줄·이음 답은 TurnScope */
 export const MAX_COMPACTIONS_PER_TURN = 3
+/** 한 스텝의 재시도가 이만큼 넘으면(attempt > 이 값) 앱이 멈추고 실패로 끝낸다 (이슈 #207). opencode 1.18.18 은 일시 오류를 5번까지
+ *  지수 백오프(2·4·8·16·30초 상한)로 재시도해 꺼진 게이트웨이에 1분 반을 기다린다 (바이너리 SessionRetry: RETRY_MAX_RETRIES=5).
+ *  attempt 는 한 스텝(한 번의 모델 호출) 안의 순번이다 — 재시도 사이 busy 에도 이어지고, 다음 스텝은 1 부터 다시 */
+export const MAX_RETRIES_PER_TURN = 3
+/** 연결 자체가 안 되는 재시도 사유 — 서버가 꺼져 있으면 몇 초 더 기다려도 안 켜진다 → 1번째 알림에서 멈춘다. retry status 의 message 는
+ *  게이트웨이 오류 본문의 error.message 다 (바이너리 SessionRetry.retryable: APIError 면 e.data.message) — 키 프록시가 "(ECONNREFUSED)" 처럼 코드를 싣는다 */
+const UNREACHABLE = /\b(?:ECONNREFUSED|ENOTFOUND|EHOSTUNREACH)\b/i
+/** 키 프록시가 게이트웨이 연결 실패를 답하는 상태 (keyProxy.ts — tr('error.proxyGateway')) */
+const UNREACHABLE_STATUS = 502
+
+export function connectionRefused(message: string): boolean {
+  return UNREACHABLE.test(message)
+}
 /** MCP 호출 요청을 받고 그 running 도구 파트를 기다리는 한도 — 이벤트는 요청 1~3ms 뒤에 온다 (01z 1-2, 10/10) */
 export const CALLER_WAIT_MS = 2_000
 /** 승인 요청을 받고 그 running 도구 파트(도구 이름·인자)를 기다리는 한도 — 묻는 순간 이미 running 이다 (01z 1-3, 3/3). 넘기면 요청에 실린 것으로 */
@@ -1039,8 +1054,18 @@ export class LlmService extends Service {
       if (props['sessionID'] !== sessionId) return
       if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal(event.type, props)
       if (event.type === 'session.status' && seenUser) {
-        const item = tracker.status(props['status'] as Parameters<TurnTracker['status']>[0])
+        const status = props['status'] as Parameters<TurnTracker['status']>[0]
+        const item = tracker.status(status)
         if (item) onProgress?.(item)
+        // 재시도 상한 (이슈 #207): 엔진의 재시도를 끝까지 기다리지 않는다 — 연결 실패는 첫 알림에서, 그 밖은 MAX_RETRIES_PER_TURN 을 넘으면
+        if (status?.type === 'retry') {
+          const message = status.message ?? ''
+          const unreachable = connectionRefused(message)
+          if (unreachable || (status.attempt ?? 1) > MAX_RETRIES_PER_TURN) {
+            void this.abort(conn, sessionId, workdir)
+            finish(outcome({ ok: false, error: turnError(message, unreachable ? (httpStatusOf(message) ?? UNREACHABLE_STATUS) : undefined) }))
+          }
+        }
         return
       }
       if (event.type === 'session.error') {
