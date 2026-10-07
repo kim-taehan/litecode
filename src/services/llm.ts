@@ -1,22 +1,22 @@
 import { Context, Service } from 'cordis'
 import { randomInt } from 'node:crypto'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Agent } from 'undici'
 import { normalizeBaseURL } from './providers.ts'
 import { MODE_AGENT, type EngineConnection, type EngineMcp } from './engine.ts'
-import { DEFAULT_MODE, MODES, modePermission, type Mode } from '../../shared/modes.ts'
+import { DEFAULT_MODE, modePermission, type Mode } from '../../shared/modes.ts'
 import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
-import { mcpToolOf, messageItems, sanitizeMcpName, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolRef, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
+import { mcpToolOf, sanitizeMcpName, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolRef, type McpToolResolver, type TurnItem } from './turnProgress.ts'
 import { awaitCaller, findCaller, ToolCalls, type ToolCaller } from './toolCalls.ts'
 import { instructionsNote, projectInstructions } from './instructions.ts'
-import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
+import { failureText, historyMessages, interruptedError, modeOf, unfinishedCompactions } from './history.ts'
+import { realDirectory } from './projectPath.ts'
 import { describeEnginePlugins, findEnginePlugins } from './enginePlugins.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
-import type { Attachment, Attention, AttentionSubtask, AttentionQuestion, AttentionAnswer, AttentionTarget, HistoryMessage, History } from '../../shared/contract.ts'
+import type { Attention, AttentionSubtask, AttentionQuestion, AttentionAnswer, AttentionTarget, History } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { Attention, PermissionAttention, QuestionAttention, AttentionSubtask, AttentionQuestion, AttentionAnswer, HistoryMessage, History } from '../../shared/contract.ts'
@@ -149,6 +149,23 @@ export interface ChatImage {
   data: Buffer
 }
 
+/** chat() 의 인자 — 각 필드의 뜻은 chat() 주석 (이슈 #182: 위치 인자 13개였다) */
+export interface ChatOptions {
+  providerId: string
+  modelId: string
+  directory: string
+  prompt: string
+  sessionId?: string
+  onSession?: (sessionId: string) => Promise<void>
+  messageId?: string
+  onProgress?: (item: TurnItem) => void
+  mode?: Mode
+  onAttention?: (requests: Attention[]) => void
+  stop?: AbortSignal
+  images?: readonly ChatImage[]
+  context?: string
+}
+
 /** 레거시 GET /session/{id}/message 의 항목 (01w 실측 — 감싸지 않은 배열, 오래된 것부터) */
 export interface EngineMessage {
   info: EngineMessageInfo
@@ -209,11 +226,6 @@ export const CALLER_WAIT_MS = 2_000
 export const PRE_TOOL_WAIT_MS = 300
 /** 구독을 걸고 server.connected 를 기다리는 한도 — 헤더와 함께 바로 온다(01w) */
 const CONNECT_TIMEOUT_MS = 10_000
-/** 엔진 재시작·크래시로 끊긴 턴의 사유 — 지금 언어로 (그래서 상수가 아니다. 중단 판정은 문구가 아니라 interrupted 로 한다) */
-export function interruptedError(): string {
-  return tr('error.interrupted')
-}
-
 /** /event 의 무바이트 한도 기본값 — 레거시 /event 는 10초마다 heartbeat 를 보낸다(01w). 세 번 연달아 안 오면 연결이 FIN 없이 죽은 것으로 보고
  *  "중단됨" 으로 끝낸다 (끊긴 연결을 기다리며 턴이 영원히 도는 것을 막는다 — 01q 와 같은 정책) */
 export const STREAM_IDLE_TIMEOUT_MS = 30_000
@@ -329,21 +341,21 @@ export class LlmService extends Service {
    *  세션이 아직 없을 때(첫 턴)도 멈출 수 있게 세션 id 가 아니라 신호로 받는다.
    *  images 는 이 입력에 붙일 이미지 — 글 뒤에 file 파트(data: URI)로 싣는다 (promptParts). 그 모델이 이미지를 받는지는 부르는 쪽이 본다.
    *  context 는 이 턴에만 실을 맥락 글 — 프로젝트 지시문 뒤에 붙여 system 으로 보낸다 (그 요청에만 실린다, 01w 3-1) */
-  async chat(
-    providerId: string,
-    modelId: string,
-    directory: string,
-    prompt: string,
-    sessionId?: string,
-    onSession?: (sessionId: string) => Promise<void>,
-    messageId?: string,
-    onProgress?: (item: TurnItem) => void,
-    mode: Mode = DEFAULT_MODE,
-    onAttention?: (requests: Attention[]) => void,
-    stop?: AbortSignal,
-    images: readonly ChatImage[] = [],
-    context?: string,
-  ): Promise<ChatResult> {
+  async chat({
+    providerId,
+    modelId,
+    directory,
+    prompt,
+    sessionId,
+    onSession,
+    messageId,
+    onProgress,
+    mode = DEFAULT_MODE,
+    onAttention,
+    stop,
+    images = [],
+    context,
+  }: ChatOptions): Promise<ChatResult> {
     this.turns++
     /** busy: 이 턴이 쥔 세션(addContext 를 막는다), sessionId: 받아들여진 턴의 세션 — 그때만 turn-started/ended 를 낸다 */
     const admitted: { busy?: string; sessionId?: string } = {}
@@ -1359,11 +1371,6 @@ function attentionTitle(request: Attention): string {
   return request.kind === 'permission' ? `${request.action} ${request.resources.join(', ')}`.trim() : (request.questions[0]?.question ?? '')
 }
 
-/** opencode 에이전트 → 모드 (모르는 에이전트면 없음) */
-function modeOf(agent: string | undefined): Mode | undefined {
-  return agent === undefined ? undefined : MODES.find((mode) => MODE_AGENT[mode] === agent)
-}
-
 /** 새 세션의 제목 — 앱이 따로 들고 있어 쓰이지 않는다. 주는 이유는 opencode 의 제목 LLM 호출을 막는 것 (01w) */
 function sessionTitle(text: string): string {
   return text.trim().split('\n')[0]?.slice(0, 80) || 'litecode'
@@ -1423,137 +1430,6 @@ export function promptParts(text: string, images: readonly ChatImage[] = []): Re
   ]
 }
 
-/** 레거시 메시지(asc) → 말풍선. 한 턴의 assistant 여럿(도구 스텝)은 한 답으로 합치고 텍스트만 쓴다 — 실시간 턴이 글 줄만 모으는 것과 같은 모양.
- *  끊긴 턴: 엔진 재시작 뒤 그 턴은 완료 시각 없는 assistant(+ running 도구)로 남는다(01w) — 그 세션이 돌고 있지 않은데 마지막이 답 없는 user 이거나
- *  완료 시각 없는 assistant 면 끝에 "중단됨" 을 단다. 마지막이 아닌 턴도 같은 모양이면 중단이다. 사용자가 멈춘 턴은 MessageAbortedError 다.
- *  자동 요약(L2): 요약 user(compaction 파트)는 그 턴 답의 요약 줄(끝나면 done — 화면은 구분선)이고, 요약 답(summary:true)의 글은 답이 아니다.
- *  요약 뒤 user 하나(합성 Continue·한도 초과 뒤 앞 user 의 복사본)는 말풍선이 아니라 이음이다 — 그 답은 같은 턴 답에 붙는다 (TurnScope 와 같은 규칙).
- *  첨부(01y 5절): user 의 file 파트는 칩 정보(종류·이름)만 싣는다 — url(data: 통째)은 안 넘긴다. opencode 가 덧붙인 synthetic 글은 내 말이 아니다.
- *  root 는 세션 폴더 — 바꾼 파일 경로를 그 기준 상대로 보인다. children 은 task 파트가 띄운 자식 세션의 기록 — 하위 작업 줄 안에 넣는다 (#31) */
-export function historyMessages(raw: readonly EngineMessage[], running: boolean, root = '', mcp?: McpToolResolver, children?: SubtaskHistory): HistoryMessage[] {
-  const messages: HistoryMessage[] = []
-  let sentAt: number | undefined
-  let asked: HistoryMessage | undefined
-  /** 지금 답의 마지막 assistant — 다음 user 가 오면 그 턴이 끝났는지 본다 */
-  let lastStep: EngineMessage | undefined
-  /** 요약 user 를 봤다 — 다음 user 는 이음이다 (요약이 실패하면 이음이 없다) */
-  let awaitingContinuation = false
-  /** 지금 턴의 지시문 항목 (이슈 #176) — 답 말풍선을 만들 때 진행 줄 맨 앞에 둔다 */
-  let note: TurnItem | undefined
-  const closeTurn = (final: boolean): void => {
-    if (final && running) return
-    const reply = messages.at(-1)
-    if (!asked) return
-    if (reply?.role === 'assistant') {
-      if (lastStep && !lastStep.info.time?.completed && !reply.error && !reply.declined) Object.assign(reply, { error: interruptedError(), interrupted: true })
-    } else if (final) messages.push({ role: 'assistant', text: '', error: interruptedError(), interrupted: true })
-  }
-  /** 지금 턴의 답 말풍선 — 없으면 만든다 */
-  const currentReply = (): HistoryMessage => {
-    const previous = messages.at(-1)
-    if (previous?.role === 'assistant') return previous
-    const reply: HistoryMessage = { role: 'assistant', text: '', items: note ? [note] : [] }
-    note = undefined
-    messages.push(reply)
-    return reply
-  }
-  const finishedAt = (completed: number | undefined, reply: HistoryMessage): void => {
-    if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
-    else delete reply.duration // 마지막 스텝이 안 끝났다
-  }
-  for (const message of raw) {
-    const { info, parts } = message
-    if (info.role === 'user') {
-      if (parts.some((part) => part.type === 'compaction' && part.auto === false)) {
-        // 손으로 부른 요약 (/compact, 이슈 #144) — 그 자체가 한 턴이다: 글 없는 내 말(보일 글은 앱이 이 id 로 적어 둔다) + 요약 줄. 이음 user 가 없다
-        closeTurn(false)
-        sentAt = info.time?.created
-        lastStep = undefined
-        const mode = modeOf(info.agent)
-        asked = { id: info.id, role: 'user', text: '', ...(sentAt !== undefined && { at: sentAt }), ...(mode && { mode }) }
-        messages.push(asked, { role: 'assistant', text: '', items: [{ kind: 'compaction', id: `${info.id}:compaction`, status: 'running' }] })
-        continue
-      }
-      if (asked && parts.some((part) => part.type === 'compaction')) {
-        const reply = currentReply()
-        reply.items = [...(reply.items ?? []), { kind: 'compaction', id: `${info.id}:compaction`, status: 'running' }]
-        awaitingContinuation = true
-        continue
-      }
-      if (awaitingContinuation) {
-        awaitingContinuation = false
-        continue
-      }
-      const text = parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
-      const attachments = parts
-        .filter((part) => part.type === 'file')
-        .map((part): Attachment => ({ kind: part.mime?.startsWith('image/') ? 'image' : 'file', name: part.filename ?? '' }))
-      if (!parts.some((part) => part.type === 'text' && !part.synthetic) && attachments.length === 0) continue // 합성 글뿐
-      closeTurn(false)
-      sentAt = info.time?.created
-      lastStep = undefined
-      const mode = modeOf(info.agent)
-      asked = { id: info.id, role: 'user', text, ...(sentAt !== undefined && { at: sentAt }), ...(mode && { mode }), ...(attachments.length > 0 && { attachments }) }
-      const noted = instructionsNote(info.system, root)
-      note = noted ? { kind: 'context', id: `${info.id}:instructions`, text: noted } : undefined
-      messages.push(asked)
-      continue
-    }
-    if (info.summary === true) {
-      const reply = currentReply()
-      const id = `${info.parentID ?? ''}:compaction`
-      const status = info.error ? 'failed' : info.time?.completed !== undefined ? 'done' : 'running'
-      reply.items = (reply.items ?? []).map((item) => (item.kind === 'compaction' && item.id === id ? { ...item, status } : item))
-      if (info.error) {
-        awaitingContinuation = false
-        reply.error = failureText(info.error)
-      }
-      lastStep = message
-      finishedAt(info.time?.completed, reply)
-      continue
-    }
-    const reply = currentReply()
-    reply.text += parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
-    reply.items = [...(reply.items ?? []), ...messageItems(parts, root, mcp, children)]
-    lastStep = message
-    finishedAt(info.time?.completed, reply)
-    if (info.error?.name === 'MessageAbortedError') Object.assign(reply, { error: tr('error.stopped'), interrupted: true })
-    else if (info.error) reply.error = failureText(info.error)
-    // 턴의 마지막 답 메시지가 정한다 — 앞 스텝의 실패한 도구는 다음 스텝이 이어 덮는다
-    if (!info.error && endedByDecline(parts)) reply.declined = true
-    else delete reply.declined
-  }
-  closeTurn(true)
-  return messages
-}
-
-/** 끝나지 않은 손 요약(compaction 파트 auto:false 인 user — 끝난 요약 답이 없다)의 메시지 id — 지울 순서대로 (요약 답 먼저, 그 user 다음) */
-export function unfinishedCompactions(raw: readonly EngineMessage[]): string[] {
-  return raw
-    .filter((message) => message.info.role === 'user' && message.parts.some((part) => part.type === 'compaction' && part.auto === false))
-    .flatMap((asked) => {
-      const answers = raw.filter((message) => message.info.summary === true && message.info.parentID === asked.info.id)
-      if (answers.some((answer) => !answer.info.error && answer.info.time?.completed !== undefined)) return []
-      return [...answers.map((answer) => answer.info.id), asked.info.id]
-    })
-}
-
-/** 엔진 실패 → 화면 사유. 한도 초과(게이트웨이 오류가 자동 요약으로도 안 줄었다 — opencode 가 ContextOverflowError 로 분류)는 "새 대화로" 안내 */
-export function failureText(error: EngineMessageInfo['error']): string {
-  const message = error?.data?.message
-  // 레거시 APIError 는 상태 코드를 따로 싣는다 (01w: session.error{APIError, statusCode}) — 사람이 읽는 문구는 turnError 가 붙인다
-  const status = typeof error?.data?.statusCode === 'number' ? error.data.statusCode : undefined
-  if (error?.name === 'ContextOverflowError' && status !== 413) return tr('error.contextOverflow')
-  return message ? turnError(message, status) : tr('error.unknown')
-}
-
-/** 답 메시지의 마지막 파트가 오류로 끝난 도구인가 — 턴의 마지막 메시지가 이러면 승인·질문 거절이다: 거절하면 그 도구가 error 로 끝나고 다음 스텝
- *  없이 idle 이 온다 (01w). 그 밖의 도구 오류는 다음 스텝이 이어 덮는다 (step-finish 는 거르고 본다) */
-function endedByDecline(parts: readonly EnginePart[]): boolean {
-  const last = parts.filter((part) => part.type !== 'step-finish' && part.type !== 'step-start' && part.type !== 'patch').at(-1)
-  return last?.type === 'tool' && last.state?.status === 'error'
-}
-
 /** 끝 이벤트 없이 스트림이 끊겼을 때의 사유. 서버가 끝나면 소켓이 exit 보다 먼저 닫혀(실측 2026-09-30, 앱 실물 테스트에서
  *  "terminated" 가 먼저 왔다) closed 가 아직 안 걸렸을 수 있다 — 잠깐 기다려 원인을 가린다. 어느 쪽이든 턴은 "중단됨" 이다 */
 async function interruption(closed: AbortSignal): Promise<string> {
@@ -1564,18 +1440,4 @@ async function interruption(closed: AbortSignal): Promise<string> {
     })
   }
   return closed.aborted ? interruptedError() : tr('error.streamBroken')
-}
-
-/** 폴더면 realpath 를, 아니면(없는 경로·파일·상대 경로) undefined 를 준다.
- *  opencode 는 없는 경로로도 세션을 200 으로 만들지만 그 세션은 모든 요청이 500 이고, 그 경로는 서버 재시작 전까지
- *  계속 500 이다 (폴더를 나중에 만들어도) — 사용자 opencode 를 오염시키므로 opencode 에 닿기 전에 거른다.
- *  realpath 인 이유: opencode 는 경로를 문자열 그대로 저장·비교한다 (2026-09-30 실측, 01_probe Q3). */
-export async function realDirectory(directory: string): Promise<string | undefined> {
-  if (!path.isAbsolute(directory)) return undefined
-  try {
-    const real = await fs.realpath(directory)
-    return (await fs.stat(real)).isDirectory() ? real : undefined
-  } catch {
-    return undefined
-  }
 }

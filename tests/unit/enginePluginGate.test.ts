@@ -90,7 +90,7 @@ describe('플러그인 파일이 걸린 폴더 — 엔진에 요청이 하나도
     const seen: string[] = []
     ctx.on('llm/turn-started', () => void seen.push('started'))
     ctx.on('llm/before-turn', () => void seen.push('before-turn'))
-    const result = await llm.chat('p', 'm', project, 'hi')
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory: project, prompt: 'hi' })
     expect(result.ok).toBe(false)
     expect(result.error).toContain(file)
     expect(seen).toEqual([])
@@ -202,7 +202,7 @@ describe('깨끗한 폴더', () => {
     const before = requests.length
     const file = plantPlugin()
     await expect(llm.listCommands(project)).rejects.toThrow(file)
-    expect((await llm.chat('p', 'm', project, 'hi')).error).toContain(file)
+    expect((await llm.chat({ providerId: 'p', modelId: 'm', directory: project, prompt: 'hi' })).error).toContain(file)
     expect(requests.length).toBe(before)
     fs.rmSync(file)
     await llm.listCommands(project)

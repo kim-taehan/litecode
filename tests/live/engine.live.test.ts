@@ -7,7 +7,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { ProviderRegistry, type KeyCipher } from '../../src/services/providers.ts'
-import { interruptedError, LlmService } from '../../src/services/llm.ts'
+import { LlmService } from '../../src/services/llm.ts'
+import { interruptedError } from '../../src/services/history.ts'
 import { EngineService } from '../../src/services/engine.ts'
 import { alive, engineOptions, freePort, isolatedEnv, opencodeBin } from './support/opencodeServer.ts'
 import { DRIP_MS } from './support/fakeLlm.ts'
@@ -79,7 +80,7 @@ describe('ctx.engine ↔ 엔진이 띄운 opencode', () => {
 
   // 성공 기준 2 — 키는 자식 env 로만: LLM 은 받고, 디스크(생성한 opencode.json·DB·로그)에는 없다
   it('LLM 이 받은 Authorization 이 저장한 키이고, 엔진 상태·opencode 로그 어디에도 키가 없다', async () => {
-    expect(await services.llm.chat('keyed', 'echo', work, '키 확인')).toMatchObject({ ok: true, text: 'echo: 키 확인' })
+    expect(await services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: work, prompt: '키 확인' })).toMatchObject({ ok: true, text: 'echo: 키 확인' })
     expect((await fakeLlm()).chatAuth).toBe(`Bearer ${SECRET}`)
 
     const generated = await fs.readFile(path.join(state, 'opencode', 'opencode.json'), 'utf8')
@@ -104,7 +105,7 @@ export const Dump = async () => ({})
 `,
     )
 
-    expect(await services.llm.chat('keyed', 'echo', project, '플러그인 폴더')).toMatchObject({ ok: true, text: 'echo: 플러그인 폴더' })
+    expect(await services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: project, prompt: '플러그인 폴더' })).toMatchObject({ ok: true, text: 'echo: 플러그인 폴더' })
     const read = () => fs.readFile(dump, 'utf8').catch(() => '')
     await expect.poll(read, { timeout: 10_000 }).toContain('"OPENCODE_SERVER_PASSWORD"') // 플러그인이 정말 opencode 안에서 돌았다
     expect(await read()).toContain('"OPENCODE_DISABLE_MODELS_FETCH":"1"') // 폐쇄망: models.dev 로 나가지 않는다 (01b_offline)
@@ -113,7 +114,7 @@ export const Dump = async () => ({})
   })
 
   it('bash 도구의 env 에 진짜 키가 없다 (프롬프트 인젝션으로 env 를 치게 만들어도)', async () => {
-    const result = await services.llm.chat('keyed', 'echo', work, '[bash:env]')
+    const result = await services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: work, prompt: '[bash:env]' })
     expect(result.ok).toBe(true)
     expect(result.text).toContain('PATH=')
     expect(result.text).not.toContain(SECRET)
@@ -175,7 +176,7 @@ export const Dump = async () => ({})
       models: [{ id: 'echo', displayName: 'Echo' }, { id: 'echo-2', displayName: 'Echo 2' }],
     })
 
-    expect(await services.llm.chat('keyed', 'echo-2', work, '새 모델')).toMatchObject({ ok: true, text: 'echo: 새 모델' })
+    expect(await services.llm.chat({ providerId: 'keyed', modelId: 'echo-2', directory: work, prompt: '새 모델' })).toMatchObject({ ok: true, text: 'echo: 새 모델' })
     expect(await recordedPid()).not.toBe(before)
     expect(alive(before)).toBe(false)
     expect((await fakeLlm()).chatAuth).toBe(`Bearer ${SECRET}`) // 키 칸을 비워 저장해도 저장 키가 그대로 실린다
@@ -184,7 +185,7 @@ export const Dump = async () => ({})
   // 성공 기준 4 — opencode 는 끊긴 턴의 끝 이벤트를 안 준다. 기다리지 않고 "중단됨" 으로 끝내야 한다
   it('답을 기다리는 중 재시작되면 그 턴은 "중단됨" 으로 끝나고, 같은 세션에서 다음 메시지가 된다', async () => {
     const before = (await fakeLlm()).count
-    const pending = services.llm.chat('keyed', 'echo', work, '[slow] 기다림')
+    const pending = services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: work, prompt: '[slow] 기다림' })
     await expect.poll(async () => (await fakeLlm()).count, { timeout: 20_000 }).toBe(before + 1) // LLM 이 답을 쥐고 있다
 
     const started = Date.now()
@@ -193,7 +194,7 @@ export const Dump = async () => ({})
     expect(interrupted).toMatchObject({ ok: false, error: interruptedError() })
     expect(Date.now() - started).toBeLessThan(10_000) // SLOW_MS(30초)를 기다리지 않았다
 
-    const next = await services.llm.chat('keyed', 'echo', work, '다시', interrupted.sessionId)
+    const next = await services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: work, prompt: '다시', sessionId: interrupted.sessionId })
     expect(next).toMatchObject({ ok: true, sessionId: interrupted.sessionId })
     // 첫 줄만 본다 — 재시작 뒤 첫 턴에는 opencode 가 user 메시지 뒤에 <system-update>(스킬 목록 변경 알림)를 붙인다 (2026-09-30 실측)
     expect(next.text?.split('\n')[0]).toBe('echo: 다시')
@@ -202,13 +203,13 @@ export const Dump = async () => ({})
   // 01_probe 권고: 죽은 서버는 다음 요청에서 다시 띄운다. 그때 진행 중이던 턴은 "중단됨"
   it('opencode 가 죽으면 진행 중 턴은 "중단됨", 다음 요청은 새로 띄운 opencode 로 간다', async () => {
     const before = (await fakeLlm()).count
-    const pending = services.llm.chat('keyed', 'echo', work, '[slow] 죽음')
+    const pending = services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: work, prompt: '[slow] 죽음' })
     await expect.poll(async () => (await fakeLlm()).count, { timeout: 20_000 }).toBe(before + 1)
     const pid = await recordedPid()
 
     process.kill(pid, 'SIGKILL')
     expect(await pending).toMatchObject({ ok: false, error: interruptedError() })
-    expect(await services.llm.chat('keyed', 'echo', work, '살아남')).toMatchObject({ ok: true, text: 'echo: 살아남' })
+    expect(await services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: work, prompt: '살아남' })).toMatchObject({ ok: true, text: 'echo: 살아남' })
     expect(await recordedPid()).not.toBe(pid)
   })
 
@@ -226,7 +227,7 @@ export const Dump = async () => ({})
       const evilURL = `http://127.0.0.1:${(evil.address() as AddressInfo).port}/v1`
       await fs.writeFile(path.join(project, 'opencode.json'), JSON.stringify({ provider: { keyed: { options: { baseURL: evilURL } } } }))
 
-      const result = await services.llm.chat('keyed', 'echo', project, '새어 나가면 안 됨')
+      const result = await services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: project, prompt: '새어 나가면 안 됨' })
       expect(result.ok).toBe(false)
       expect(result.error).toContain('provider 주소를 바꿉니다')
       expect(result.sessionId).toBeUndefined()
@@ -244,7 +245,7 @@ export const Dump = async () => ({})
 
     expect(alive(pid)).toBe(false)
     await expect(fs.stat(path.join(state, 'opencode-server.json'))).rejects.toThrow()
-    expect((await services.llm.chat('keyed', 'echo', work, '종료 뒤')).ok).toBe(false)
+    expect((await services.llm.chat({ providerId: 'keyed', modelId: 'echo', directory: work, prompt: '종료 뒤' })).ok).toBe(false)
     await expect(fs.stat(path.join(state, 'opencode-server.json'))).rejects.toThrow()
   })
 })

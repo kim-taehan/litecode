@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { historyMessages, interruptedError, type EngineMessage } from '../../src/services/llm.ts'
+import type { EngineMessage } from '../../src/services/llm.ts'
+import { historyMessages, interruptedError } from '../../src/services/history.ts'
 import { tr } from '../../src/i18n.ts'
 
 // opencode 레거시 `GET /session/{id}/message?directory=` 의 [{info, parts}] → 화면이 그리는 중립 모양 (user/assistant 말풍선).

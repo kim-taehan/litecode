@@ -69,7 +69,7 @@ afterAll(async () => {
 
 describe('ctx.llm ↔ 실물 opencode', () => {
   it('새 세션에서 한 턴을 끝까지 돌고 텍스트를 돌려준다', async () => {
-    const result = await services.llm.chat('fake', 'echo', work, '안녕')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '안녕' })
 
     expect(result).toMatchObject({ ok: true, text: 'echo: 안녕' })
     expect(result.sessionId).toMatch(/^ses_/)
@@ -80,14 +80,14 @@ describe('ctx.llm ↔ 실물 opencode', () => {
   it('새 세션은 넘긴 provider/모델로 만들어져 매 턴이 가짜 LLM 에 닿는다', async () => {
     const before = await fakeLlmRequests()
     for (let i = 1; i <= 3; i++) {
-      expect(await services.llm.chat('fake', 'echo', work, `모델 확인 ${i}`)).toMatchObject({ ok: true, text: `echo: 모델 확인 ${i}` })
+      expect(await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: `모델 확인 ${i}` })).toMatchObject({ ok: true, text: `echo: 모델 확인 ${i}` })
     }
     expect(await fakeLlmRequests()).toBe(before + 3)
   })
 
   it('sessionId 를 넘기면 같은 세션에서 이어서 대화한다', async () => {
-    const first = await services.llm.chat('fake', 'echo', work, '첫 번째')
-    const second = await services.llm.chat('fake', 'echo', work, '두 번째', first.sessionId)
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '첫 번째' })
+    const second = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '두 번째', sessionId: first.sessionId })
 
     expect(second).toMatchObject({ ok: true, sessionId: first.sessionId, text: 'echo: 두 번째' })
   })
@@ -95,7 +95,7 @@ describe('ctx.llm ↔ 실물 opencode', () => {
   // 없는 providerID/모델로도 opencode 는 세션을 200 으로 만들고, 프롬프트는 SSE 에 아무 이벤트 없이 멈춘다
   // (로그에만 ModelUnavailableError — 2026-09-30 실측). 멈추지 말고 카탈로그 대기 기한 안에 사유를 돌려줘야 한다.
   it('opencode 에 없는 모델이면 세션을 만들지 않고 기한 안에 ok:false 와 사유를 돌려준다', async () => {
-    const result = await services.llm.chat('fake', 'no-such-model', work, '안녕')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'no-such-model', directory: work, prompt: '안녕' })
 
     expect(result.ok).toBe(false)
     expect(result.error).toContain('fake/no-such-model')
@@ -105,11 +105,11 @@ describe('ctx.llm ↔ 실물 opencode', () => {
   // 레거시는 프롬프트마다 model 을 싣는다(빼면 마지막 user 의 모델을 따라간다 — 01w). 이어가는 대화에서 다른 모델을 넘기면 그 턴부터
   // 그 모델로 돌고, 앞 턴 맥락은 그대로 실린다
   it('이어가는 대화에서 다른 모델을 넘기면 그 모델로 보내고, 앞 턴 맥락이 실린다', async () => {
-    const first = await services.llm.chat('fake', 'echo-b', work, '첫 턴 알파')
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo-b', directory: work, prompt: '첫 턴 알파' })
     expect(first).toMatchObject({ ok: true, text: 'echo: 첫 턴 알파' })
     expect((await lastChat()).model).toBe('echo-b')
 
-    const second = await services.llm.chat('fake', 'echo', work, '둘째 턴 베타', first.sessionId)
+    const second = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '둘째 턴 베타', sessionId: first.sessionId })
     expect(second).toMatchObject({ ok: true, sessionId: first.sessionId, text: 'echo: 둘째 턴 베타' })
     const sent = await lastChat()
     expect(sent.model).toBe('echo')
@@ -122,21 +122,21 @@ describe('ctx.llm ↔ 실물 opencode', () => {
 
   // 없는 모델은 보내기 전에 카탈로그로 거른다 — 화면에 알맞은 사유("모델 없음")를 주고 LLM 요청이 0 이다
   it('이어가는 대화를 없는 모델로 보내려 하면 보내지 않고 ok:false 이고, 그 세션은 이전 모델로 계속 쓸 수 있다', async () => {
-    const first = await services.llm.chat('fake', 'echo-b', work, '바꾸기 전')
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo-b', directory: work, prompt: '바꾸기 전' })
     expect(first.ok).toBe(true)
     const before = await fakeLlmRequests()
 
-    const refused = await services.llm.chat('fake', 'no-such-model', work, '없는 모델로', first.sessionId)
+    const refused = await services.llm.chat({ providerId: 'fake', modelId: 'no-such-model', directory: work, prompt: '없는 모델로', sessionId: first.sessionId })
     expect(refused).toMatchObject({ ok: false, sessionId: first.sessionId })
     expect(refused.error).toContain('fake/no-such-model')
     expect(await fakeLlmRequests()).toBe(before)
 
-    expect(await services.llm.chat('fake', 'echo-b', work, '이어서', first.sessionId)).toMatchObject({ ok: true, text: 'echo: 이어서' })
+    expect(await services.llm.chat({ providerId: 'fake', modelId: 'echo-b', directory: work, prompt: '이어서', sessionId: first.sessionId })).toMatchObject({ ok: true, text: 'echo: 이어서' })
     expect((await lastChat()).model).toBe('echo-b')
   }, MODEL_CATALOG_TIMEOUT_MS + 30_000)
 
   it('LLM 이 실패하면 session.error·assistant error 를 잡아 ok:false 와 사유를 돌려준다', async () => {
-    const result = await services.llm.chat('fake', 'echo', work, '[fail] 일부러')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[fail] 일부러' })
 
     expect(result.ok).toBe(false)
     expect(result.error).toBeTruthy()
@@ -163,8 +163,8 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
     const b = await folder('beta')
 
     const [ra, rb] = await Promise.all([
-      services.llm.chat('fake', 'echo', a, '[bash:pwd]'),
-      services.llm.chat('fake', 'echo', b, '[bash:pwd]'),
+      services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: a, prompt: '[bash:pwd]' }),
+      services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: b, prompt: '[bash:pwd]' }),
     ])
 
     expect(ra.ok).toBe(true)
@@ -179,7 +179,7 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
     const link = path.join(root, 'link')
     await fs.symlink(real, link)
 
-    const result = await services.llm.chat('fake', 'echo', link, '링크')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: link, prompt: '링크' })
 
     expect(result).toMatchObject({ ok: true, text: 'echo: 링크' })
     expect((await opencodeSession(result.sessionId!, real)).directory).toBe(real)
@@ -190,7 +190,7 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
   it('없는 폴더면 opencode 에 세션을 만들지 않고 ok:false 와 사유를 돌려준다', async () => {
     const missing = path.join(root, 'missing')
 
-    const result = await services.llm.chat('fake', 'echo', missing, '안녕')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: missing, prompt: '안녕' })
 
     expect(result.ok).toBe(false)
     expect(result.error).toContain(missing)
@@ -210,7 +210,7 @@ describe('ctx.llm ↔ 실물 opencode (작업 디렉터리)', () => {
     )
     const before = await fakeLlmRequests()
 
-    const result = await services.llm.chat('fake', 'folder-echo', dir, '폴더 모델')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'folder-echo', directory: dir, prompt: '폴더 모델' })
     expect(result.ok).toBe(false)
     expect(result.error).toBeTruthy()
     expect(await fakeLlmRequests()).toBe(before)
@@ -242,7 +242,7 @@ describe('ctx.llm ↔ 막 뜬 opencode (카탈로그 로드 중)', () => {
     // 이 시나리오를 재현하지 못한 것이다 — 실패가 아니라 건너뛴다 (확률적 테스트, 2026-10-01)
     if (first.data.length !== 0) return context.skip(`첫 조회가 이미 ${first.data.length}개 — 가운데 목록 구간을 못 만들었다`)
 
-    expect(await freshServices.llm.chat('fake', 'echo', work, '로드 중')).toMatchObject({ ok: true, text: 'echo: 로드 중' })
+    expect(await freshServices.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '로드 중' })).toMatchObject({ ok: true, text: 'echo: 로드 중' })
   })
 })
 
@@ -250,7 +250,7 @@ describe('ctx.llm ↔ 막 뜬 opencode (카탈로그 로드 중)', () => {
 // 가짜 LLM 은 요청마다 FAKE_USAGE 를 돌려준다: opencode 매핑으로 input 700(1000−300)·cache.read 300·output 50
 describe('ctx.llm 턴 사용량', () => {
   it('도구 턴은 스텝 2개이고, 토큰은 가짜 LLM usage 를 스텝마다 더한 값이다', async () => {
-    const result = await services.llm.chat('fake', 'echo', work, '[bash:echo 사용량]')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[bash:echo 사용량]' })
     expect(result).toMatchObject({ ok: true, text: expect.stringContaining('tool: 사용량') })
     const usage = result.usage!
     expect(usage.steps).toBe(2)
@@ -263,8 +263,8 @@ describe('ctx.llm 턴 사용량', () => {
   })
 
   it('이어가는 턴의 사용량은 그 턴 것만이다 (이전 턴 재생분을 더하지 않는다)', async () => {
-    const first = await services.llm.chat('fake', 'echo', work, '[bash:echo 하나]')
-    const second = await services.llm.chat('fake', 'echo', work, '둘', first.sessionId)
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '[bash:echo 하나]' })
+    const second = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '둘', sessionId: first.sessionId })
     expect(second.usage).toMatchObject({ steps: 1, tokens: { input: 700, output: 50, cacheRead: 300 } })
   })
 })
@@ -280,10 +280,10 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
   it('지난 대화를 중립 모양 말풍선으로 돌려준다 — 도구 턴은 한 답, 실패 턴은 사유', async () => {
     const dir = await folder('history')
     let attached: string | undefined
-    const first = await services.llm.chat('fake', 'echo', dir, '[bash:echo 기록]', undefined, async (id) => void (attached = id))
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '[bash:echo 기록]', onSession: async (id) => void (attached = id) })
     expect(attached).toBe(first.sessionId) // 새 세션은 프롬프트 전에 알린다
-    await services.llm.chat('fake', 'echo', dir, '[fail] 실패', first.sessionId)
-    await services.llm.chat('fake', 'echo', dir, '셋째', first.sessionId)
+    await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '[fail] 실패', sessionId: first.sessionId })
+    await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '셋째', sessionId: first.sessionId })
 
     const history = await services.llm.history(dir, first.sessionId!)
     expect(history.error).toBeUndefined()
@@ -300,7 +300,7 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
 
   // 세션 삭제는 레거시 DELETE 뿐 (01c Q3). 이미 없는 세션을 다시 지워도 실패로 보지 않는다
   it('세션을 지우면 opencode 에서 사라지고, 다시 지워도 오류가 아니다', async () => {
-    const result = await services.llm.chat('fake', 'echo', work, '지울 것')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '지울 것' })
     await services.llm.deleteSession(result.sessionId!)
     expect((await opencodeGet(`/session/${result.sessionId}?directory=${encodeURIComponent(work)}`)).status).toBe(404)
     await services.llm.deleteSession(result.sessionId!)
@@ -310,7 +310,7 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
   // 서버가 그 경로를 캐시하고 있으면 200 이 나므로 재시작으로 캐시를 비운다. 폴더를 되살린 뒤 내용이 오면 없을 때 묻지 않은 것이다
   it('작업 폴더가 없으면 opencode 에 묻지 않고 missingFolder — 폴더를 되살리면 그대로 불러진다', async () => {
     const dir = await folder('vanishing')
-    const result = await services.llm.chat('fake', 'echo', dir, '사라질 폴더')
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '사라질 폴더' })
     await fs.rm(dir, { recursive: true })
     await services.engine.restart()
 
@@ -326,7 +326,7 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
   it('긴 대화(메시지 120개)도 엔진 재시작 뒤 첫 메시지부터 다 불러온다', async () => {
     const dir = await folder('long')
     let id: string | undefined
-    for (let turn = 1; turn <= 60; turn++) id = (await services.llm.chat('fake', 'echo', dir, `긴 ${turn}`, id)).sessionId
+    for (let turn = 1; turn <= 60; turn++) id = (await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: `긴 ${turn}`, sessionId: id })).sessionId
     await services.engine.restart()
 
     const history = await services.llm.history(dir, id!)
@@ -340,14 +340,14 @@ describe('ctx.llm 지난 대화·세션 삭제', () => {
   // 정리는 opencode 실행 파일을 BUN_BE_BUN=1 로 쓴다(문서화 안 된 bun 동작, 1.18.18 에서 확인) — 안 먹으면 여기가 깨진다
   it('엔진을 띄우기 직전에 지운 대화의 본문을 DB·-wal·-shm 에서 걷어낸다', async () => {
     const mark = `ZQXSTART${Date.now()}`
-    const result = await services.llm.chat('fake', 'echo', work, mark)
+    const result = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: mark })
     await services.llm.deleteSession(result.sessionId!) // 지우기만 — 정리는 안 부른다
     const db = path.join(root, 'state', 'opencode.db')
     expect(await occurrences(db, mark)).toBeGreaterThan(0)
 
     await services.engine.restart()
     expect(await occurrences(db, mark)).toBe(0)
-    expect((await services.llm.chat('fake', 'echo', work, '정리 뒤')).text).toBe('echo: 정리 뒤')
+    expect((await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: work, prompt: '정리 뒤' })).text).toBe('echo: 정리 뒤')
   })
 })
 
@@ -364,8 +364,8 @@ describe('ctx.llm 레거시 경로', () => {
   // 같은 세션에 다른 클라이언트가 보내면 opencode 는 같은 루프에 줄 세우고 idle 은 둘 다 끝난 뒤 한 번이다 (01w 1/1) — 답은 parentID 로 가른다
   it('도는 턴에 다른 클라이언트가 같은 세션으로 보내도 이 턴의 답은 이 턴 것만이다 (parentID)', async () => {
     const dir = await folder('two-clients')
-    const first = await services.llm.chat('fake', 'echo', dir, '처음')
-    const mine = services.llm.chat('fake', 'echo', dir, '[late] 내 질문', first.sessionId)
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '처음' })
+    const mine = services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '[late] 내 질문', sessionId: first.sessionId })
     await expect.poll(async () => (await requests()).lastChatText, { timeout: 10_000 }).toContain('[late] 내 질문')
     const conn = await services.engine.connection()
     const other = await fetch(`${conn.url}/session/${first.sessionId}/prompt_async?directory=${encodeURIComponent(dir)}`, {
@@ -384,13 +384,13 @@ describe('ctx.llm 레거시 경로', () => {
     const dir = await folder('stop-next')
     const stop = new AbortController()
     let sessionId: string | undefined
-    const turn = services.llm.chat('fake', 'echo', dir, '[slow] 멈출 질문', undefined, async (id) => void (sessionId = id), undefined, undefined, undefined, undefined, stop.signal)
+    const turn = services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '[slow] 멈출 질문', onSession: async (id) => void (sessionId = id), stop: stop.signal })
     await expect.poll(async () => (await requests()).lastChatText, { timeout: 10_000 }).toContain('[slow] 멈출 질문')
     stop.abort()
     expect(await turn).toMatchObject({ ok: false, interrupted: true })
     await expect.poll(async () => (await requests()).cut, { timeout: 10_000 }).toContain('[slow] 멈출 질문')
 
-    expect(await services.llm.chat('fake', 'echo', dir, '바로 다음', sessionId)).toMatchObject({ ok: true, text: 'echo: 바로 다음' })
+    expect(await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '바로 다음', sessionId })).toMatchObject({ ok: true, text: 'echo: 바로 다음' })
     const history = await services.llm.history(dir, sessionId!)
     expect(history.messages[1]).toMatchObject({ role: 'assistant', interrupted: true })
     expect(history.messages.slice(2).map((message) => message.text)).toEqual(['바로 다음', 'echo: 바로 다음'])
@@ -400,25 +400,25 @@ describe('ctx.llm 레거시 경로', () => {
   it('엔진 재시작으로 끊긴 턴은 중단됨이고, 다시 열어도 중단됨이며, 다음 턴은 자기 답을 받는다', async () => {
     const dir = await folder('restart-mid')
     let sessionId: string | undefined
-    const turn = services.llm.chat('fake', 'echo', dir, '[slow] 재시작될 질문', undefined, async (id) => void (sessionId = id))
+    const turn = services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '[slow] 재시작될 질문', onSession: async (id) => void (sessionId = id) })
     await expect.poll(async () => (await requests()).lastChatText, { timeout: 10_000 }).toContain('[slow] 재시작될 질문')
     await services.engine.restart()
     expect(await turn).toMatchObject({ ok: false, interrupted: true })
     const history = await services.llm.history(dir, sessionId!)
     expect(history.messages.at(-1)).toMatchObject({ role: 'assistant', interrupted: true })
-    expect(await services.llm.chat('fake', 'echo', dir, '재시작 뒤', sessionId)).toMatchObject({ ok: true, text: 'echo: 재시작 뒤' })
+    expect(await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '재시작 뒤', sessionId })).toMatchObject({ ok: true, text: 'echo: 재시작 뒤' })
   })
 
   // `!` 카드의 "AI 에게 보내기" — noReply 로 넣은 글은 LLM 을 돌리지 않고 다음 턴 맥락에 실린다 (01w 2회)
   it('addContext 로 넣은 글은 LLM 요청 없이 저장되고 다음 턴 맥락에 실린다', async () => {
     const dir = await folder('add-context')
-    const first = await services.llm.chat('fake', 'echo', dir, '맥락 앞')
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '맥락 앞' })
     const before = await fakeLlmRequests()
     const marker = `CTX-MARK-${Date.now()}`
     expect(await services.llm.addContext('fake', 'echo', dir, `$ echo ${marker}\n${marker}`, services.llm.newMessageId(), first.sessionId)).toMatchObject({ ok: true })
     await new Promise((resolve) => setTimeout(resolve, 500))
     expect(await fakeLlmRequests()).toBe(before)
-    expect(await services.llm.chat('fake', 'echo', dir, '맥락 뒤', first.sessionId)).toMatchObject({ ok: true, text: 'echo: 맥락 뒤' })
+    expect(await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '맥락 뒤', sessionId: first.sessionId })).toMatchObject({ ok: true, text: 'echo: 맥락 뒤' })
     expect((await requests()).lastChatText).toContain(marker)
   })
 })
@@ -432,12 +432,12 @@ describe('ctx.llm 프로젝트 지시문 주입 (프로젝트 설정 차단 아�
     const file = path.join(dir, 'AGENTS.md')
     await fs.writeFile(file, '# 규칙\nRULE-ALPHA\n')
     const lastText = async () => ((await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { lastChatText: string }).lastChatText
-    const first = await services.llm.chat('fake', 'echo', dir, '지시문 첫 턴')
+    const first = await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '지시문 첫 턴' })
     expect(first).toMatchObject({ ok: true, text: 'echo: 지시문 첫 턴' })
     expect(await lastText()).toContain(`Instructions from: ${file}\n# 규칙\nRULE-ALPHA`) // 마지막 요청 messages 의 글에 system 이 들어 있다
 
     await fs.writeFile(file, '# 규칙\nRULE-BETA\n')
-    expect(await services.llm.chat('fake', 'echo', dir, '지시문 둘째 턴', first.sessionId)).toMatchObject({ ok: true })
+    expect(await services.llm.chat({ providerId: 'fake', modelId: 'echo', directory: dir, prompt: '지시문 둘째 턴', sessionId: first.sessionId })).toMatchObject({ ok: true })
     const second = await lastText()
     expect(second).toContain('RULE-BETA')
     expect(second).not.toContain('RULE-ALPHA')

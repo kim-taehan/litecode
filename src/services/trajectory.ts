@@ -1,5 +1,7 @@
 import { Context, Service } from 'cordis'
-import { failureText, realDirectory, type EngineMessage } from './llm.ts'
+import type { EngineMessage } from './llm.ts'
+import { failureText } from './history.ts'
+import { realDirectory } from './projectPath.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
 import { toolDiffs, type FileDiff } from './toolDiffs.ts'

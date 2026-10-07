@@ -27,7 +27,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `settings` | `src/services/settings.ts` | 앱 설정(`settings.json`) — 언어·테마·글자 크기·기능 켜기. 잘못된 값은 그 값만 기본값으로. `settings/changed` | — |
 | `providers` | `providers.ts` | 모델 provider 목록·키(키는 `safeStorage` 로 봉인). `providers/changed` | — |
 | `engine` | `engine.ts`·`engineConfig.ts` | opencode 서버 하나를 띄우고 설정(`opencode.json`)을 **기동마다 새로 만든다**, 키 프록시, MCP·권한 규칙 | `providers` |
-| `llm` | `llm.ts` | 엔진과의 대화 — 턴·구독·승인·질문·기록. `model`·`agent` 를 매 턴 명시. 엔진 지식은 `llm` 과 `engine` 에만 | `providers`, `engine` |
+| `llm` | `llm.ts` `history.ts` | 엔진과의 대화 — 턴·구독·승인·질문·기록. `model`·`agent` 를 매 턴 명시. 엔진 지식은 `llm` 과 `engine` 에만 | `providers`, `engine` |
 | `projects` | `projects.ts` | 최근 프로젝트 목록 | — |
 | `sessions` | `sessions.ts` | 대화 목록(제목·시각·모델·통계·고정·마지막에 보던 대화). 내용의 정본은 opencode DB | `llm` |
 | `triggers` | `triggers.ts` | 입력창 트리거(`@` `/` `!`) 등록소 — 트리거 플러그인이 effect 로 등록 | — |

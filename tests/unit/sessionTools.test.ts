@@ -9,11 +9,11 @@ import { ProjectsService } from '../../src/services/projects.ts'
 import { APP_MCP_NAME } from '../../src/services/mcp.ts'
 import type { AppMcpTool } from '../../src/services/appMcp/rpc.ts'
 import { agoText, clip, lastTurns, projectLine, SessionTools } from '../../src/services/appMcp/tools/sessions.ts'
-import type { ChatResult } from '../../src/services/llm.ts'
+import type { ChatOptions, ChatResult } from '../../src/services/llm.ts'
 import type { ToolCaller } from '../../src/services/toolCalls.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { attentionTarget, DELEGATION_SERVER, MAX_SENDS_PER_TURN, projectId, QUEUE_LIMIT, shortIds, widerMode, wrapInstruction } from '../../shared/delegation.ts'
-import type { Attention, Conversation, History, HistoryMessage, TurnItem } from '../../shared/contract.ts'
+import type { Attention, Conversation, History, HistoryMessage } from '../../shared/contract.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
 // 세션 도구 셋 (이슈 #55·#137, 01z 3-3·3-4) — list_projects·read_project·send_to_project. 대상은 다른 프로젝트 각각에서 사용자가 마지막에 보던 대화 하나.
@@ -45,19 +45,7 @@ class FakeLlm extends Service {
   newMessageId(): string {
     return `msg_${++this.ids}`
   }
-  async chat(
-    providerId: string,
-    modelId: string,
-    directory: string,
-    prompt: string,
-    sessionId?: string,
-    onSession?: (sessionId: string) => Promise<void>,
-    messageId?: string,
-    _onProgress?: (item: TurnItem) => void,
-    mode?: string,
-    onAttention?: (requests: Attention[]) => void,
-    stop?: AbortSignal,
-  ): Promise<ChatResult> {
+  async chat({ providerId, modelId, directory, prompt, sessionId, onSession, messageId, mode, onAttention, stop }: ChatOptions): Promise<ChatResult> {
     const id = sessionId ?? `ses_${this.turns.length + 1}`
     if (!sessionId) await onSession?.(id)
     return new Promise<ChatResult>((resolve) => {

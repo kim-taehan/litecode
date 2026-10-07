@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ChatService } from '../../src/services/chat.ts'
 import { SessionsService } from '../../src/services/sessions.ts'
-import type { ChatImage, ChatResult } from '../../src/services/llm.ts'
+import type { ChatImage, ChatOptions, ChatResult } from '../../src/services/llm.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import type { Attention, AttentionAnswer, TurnItem, TurnUsage } from '../../shared/contract.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
@@ -41,20 +41,7 @@ class FakeLlm extends Service {
   newMessageId(): string {
     return `msg_${++this.ids}`
   }
-  async chat(
-    providerId: string,
-    modelId: string,
-    directory: string,
-    prompt: string,
-    sessionId?: string,
-    onSession?: (sessionId: string) => Promise<void>,
-    messageId?: string,
-    onProgress?: (item: TurnItem) => void,
-    mode?: string,
-    onAttention?: (requests: Attention[]) => void,
-    stop?: AbortSignal,
-    images: readonly ChatImage[] = [],
-  ): Promise<ChatResult> {
+  async chat({ providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, mode, onAttention, stop, images = [] }: ChatOptions): Promise<ChatResult> {
     const id = sessionId ?? `ses_${this.calls.length + 1}`
     if (!sessionId) await onSession?.(id)
     this.peak = Math.max(this.peak, ++this.open)
