@@ -159,7 +159,8 @@ describe('EngineService — 뜨는 중에 온 설정 변경', () => {
     await wait(250) // 첫 기동이 설정을 읽었다(게이트 없음), 둘째는 아직 읽기 전
     engine.setGate(['bash'])
     const conn = await second
-    await wait(300)
+    // 고정 시간 대신 값이 반영될 때까지 기다린다 — 느린 CI(GitHub 러너)에서는 300ms 로 모자랐다
+    for (let tries = 0; tries < 250 && !conn.gated('bash'); tries++) await wait(20)
     expect(conn.gated('bash')).toBe(true)
     expect(serves()).toBe(2)
     expect(await engine.connection()).toBe(conn)
