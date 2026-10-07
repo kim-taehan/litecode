@@ -10,7 +10,7 @@ import { messageTokens, TurnMeter, type TurnUsage } from './turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from './opencodePty.ts'
 import { mcpToolOf, messageItems, sanitizeMcpName, subtaskSessions, TurnScope, TurnTracker, type EngineMessageInfo, type EnginePart, type McpToolRef, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
 import { awaitCaller, findCaller, ToolCalls, type ToolCaller } from './toolCalls.ts'
-import { projectInstructions } from './instructions.ts'
+import { instructionsNote, projectInstructions } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { describeEnginePlugins, findEnginePlugins } from './enginePlugins.ts'
@@ -496,7 +496,8 @@ export class LlmService extends Service {
       admittedTurn.busy = id
       const declined = new Set<string>()
       const userMessageId = messageId ?? this.newMessageId()
-      const system = [await projectInstructions(workdir), context].filter(Boolean).join('\n\n')
+      const instructions = await projectInstructions(workdir)
+      const system = [instructions, context].filter(Boolean).join('\n\n')
       // 레거시 전환 전에 쌓인 대화면 옛 글을 이 입력 앞에 한 번 넣는다 (migrate.ts, #21). 새로 만든 세션은 옛 기록이 없다
       if (sessionId) await carryOver(conn, id, workdir, { providerID: providerId, modelID: modelId }, userMessageId)
 
@@ -515,6 +516,9 @@ export class LlmService extends Service {
           admitted(false)
           return { ok: false, sessionId: id, error: tr('error.stopped'), interrupted: true } // 구독하는 사이에 멈췄다 — 보내지 않는다
         }
+        // 개인 지시문(.local.md)이 실렸거나 지시문이 잘렸으면 진행 줄 맨 앞에 알린다 (이슈 #176 — 다시 열면 historyMessages 가 info.system 으로 같은 줄)
+        const note = instructionsNote(instructions, workdir)
+        if (note) onProgress?.({ kind: 'context', id: `${userMessageId}:instructions`, text: note })
         const send = await fetch(`${conn.url}/session/${id}/prompt_async?${at(workdir)}`, {
           method: 'POST',
           headers: { ...conn.headers, 'content-type': 'application/json' },
@@ -1434,6 +1438,8 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
   let lastStep: EngineMessage | undefined
   /** 요약 user 를 봤다 — 다음 user 는 이음이다 (요약이 실패하면 이음이 없다) */
   let awaitingContinuation = false
+  /** 지금 턴의 지시문 항목 (이슈 #176) — 답 말풍선을 만들 때 진행 줄 맨 앞에 둔다 */
+  let note: TurnItem | undefined
   const closeTurn = (final: boolean): void => {
     if (final && running) return
     const reply = messages.at(-1)
@@ -1446,7 +1452,8 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
   const currentReply = (): HistoryMessage => {
     const previous = messages.at(-1)
     if (previous?.role === 'assistant') return previous
-    const reply: HistoryMessage = { role: 'assistant', text: '', items: [] }
+    const reply: HistoryMessage = { role: 'assistant', text: '', items: note ? [note] : [] }
+    note = undefined
     messages.push(reply)
     return reply
   }
@@ -1487,6 +1494,8 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
       lastStep = undefined
       const mode = modeOf(info.agent)
       asked = { id: info.id, role: 'user', text, ...(sentAt !== undefined && { at: sentAt }), ...(mode && { mode }), ...(attachments.length > 0 && { attachments }) }
+      const noted = instructionsNote(info.system, root)
+      note = noted ? { kind: 'context', id: `${info.id}:instructions`, text: noted } : undefined
       messages.push(asked)
       continue
     }

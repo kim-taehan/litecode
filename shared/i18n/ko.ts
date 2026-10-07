@@ -89,6 +89,8 @@ export const ko = {
   'chat.think': '생각',
   'chat.skill': '스킬',
   'chat.skillInstructions': '지침',
+  'chat.instructionsLocal': '개인 지시문(.local.md)도 AI 에게 보냄 · {files}',
+  'chat.instructionsTruncated': '지시문이 길어 잘림 · {total}바이트 중 {kept}바이트만 보냄',
   'chat.thinking': '생각하는 중',
   'chat.toolPreparing': '준비 중',
   'chat.seconds': '{s}초',

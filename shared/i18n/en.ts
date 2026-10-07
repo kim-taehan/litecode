@@ -84,6 +84,8 @@ export const en = {
   'chat.think': 'Thinking',
   'chat.skill': 'Skill',
   'chat.skillInstructions': 'Instructions',
+  'chat.instructionsLocal': 'Personal instructions (.local.md) also sent to the AI · {files}',
+  'chat.instructionsTruncated': 'Instructions too long, truncated · sent {kept} of {total} bytes',
   'chat.thinking': 'Thinking…',
   'chat.toolPreparing': 'Preparing',
   'chat.seconds': '{s}s',
