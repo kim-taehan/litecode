@@ -1,6 +1,6 @@
 // Expo config plugin — 평문 http 를 **이 컴퓨터 안(루프백) 주소로만** 허용한다 (이슈 #62).
 // 데스크탑은 아직 127.0.0.1 에 평문으로만 연다(에뮬레이터에서는 10.0.2.2). 그 밖의 주소로는 OS 가 평문 연결 자체를 막는다 —
-// 앱 코드(src/app/address.ts isLoopbackHost)가 먼저 거르고, 이것이 한 번 더 막는다. 호스트 목록은 address.ts LOOPBACK_HOSTS 와 같아야 한다.
+// 앱 코드(src/app/address.ts allowsPlainHttp)가 먼저 거르고, 이것이 한 번 더 막는다. 호스트 목록은 address.ts LOOPBACK_HOSTS 와 같아야 한다.
 // 사내망(LAN)은 TLS·지문 고정 라운드에서 연다 — 그때 이 목록을 넓히지 말고 TLS 로 간다.
 //
 // prebuild 가 하는 일: res/xml/network_security_config.xml 을 쓰고, AndroidManifest 의 <application> 에

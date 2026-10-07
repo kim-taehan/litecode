@@ -31,10 +31,10 @@ export function parseAddress(input: string): DesktopAddress | undefined {
   const host = match[2]!.toLowerCase()
   const port = match[3] === undefined ? DEFAULT_PORT : Number(match[3])
   if (port < 1 || port > 65535) return undefined
-  const scheme = match[1] === undefined ? (isLoopbackHost(host) ? 'http' : 'https') : (match[1].toLowerCase() as 'http' | 'https')
+  const scheme = match[1] === undefined ? (allowsPlainHttp(host) ? 'http' : 'https') : (match[1].toLowerCase() as 'http' | 'https')
   return { host, port, address: `${host}:${port}`, scheme, baseUrl: `${scheme}://${host}:${port}` }
 }
 
-export function isLoopbackHost(host: string): boolean {
+export function allowsPlainHttp(host: string): boolean {
   return LOOPBACK_HOSTS.includes(host.toLowerCase())
 }

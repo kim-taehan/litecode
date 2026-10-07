@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import './chat.ts'
 import './sessions.ts'
@@ -9,6 +9,7 @@ import type { KeyCipher } from './providers.ts'
 import './settings.ts'
 import './notifications.ts'
 import { tr } from '../i18n.ts'
+import { sameSecret } from './httpUtil.ts'
 import type { RemoteCarrier, RemoteExchange, RemoteOutcome, RemotePeer, RemoteReply, RemoteRequest, RemoteStreamSink } from './remote/carrier.ts'
 import { DeviceStore, FailureLimiter, type DevicePlatform, type StoredDevice } from './remote/devices.ts'
 import { EventLog } from './remote/eventLog.ts'
@@ -492,7 +493,7 @@ export class RemoteService extends Service {
     if (!active) return { status: 403, body: { error: 'no pairing in progress', reason: 'no-code' } satisfies PairRejected }
     // 긴 코드(QR)든 짧은 코드(직접 입력)든 — 둘은 한 세션이다
     const given = normalizePairCode(input.code)
-    if (!sameText(given, active.code) && !sameText(given, active.shortCode)) {
+    if (!sameSecret(given, active.code) && !sameSecret(given, active.shortCode)) {
       if (++active.failures >= PAIR_MAX_FAILURES) this.code = undefined // 3회째 — 세션을 버린다(긴 코드·짧은 코드 모두). 새로 [기기 연결] 을 눌러야 한다
       this.changed()
       return { status: 403, body: { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected }
@@ -710,7 +711,7 @@ export class RemoteService extends Service {
   }
 
   private async registered(project: string): Promise<boolean> {
-    return (await this.ctx.projects.list()).some((entry) => entry.path === project)
+    return this.ctx.projects.has(project)
   }
 
   /** 폰이 닿을 수 있는 대화 — 등록된 프로젝트의 저장된 대화, 또는 폰이 만든 새 대화 */
@@ -759,12 +760,6 @@ function toRemote({ id, project, engineSessionId, title, updatedAt, model, mode 
 
 function isAnswer(value: unknown): value is AttentionAnswer {
   return value === 'once' || value === 'reject' || (Array.isArray(value) && value.every((entry) => Array.isArray(entry) && entry.every((label) => typeof label === 'string')))
-}
-
-function sameText(given: string, expected: string): boolean {
-  const a = Buffer.from(given)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
 }
 
 function frame(event: string, data: unknown, id?: number): string {

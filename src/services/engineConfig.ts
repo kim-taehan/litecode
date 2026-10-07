@@ -4,6 +4,7 @@ import type { Mode } from '../../shared/modes.ts'
 import { matchesTool, UNGATED_TOOLS } from '../../shared/hooks.ts'
 import { BROWSER_DENIED_TOOLS, BROWSER_MCP_NAME, BROWSER_QUIET_TOOLS, BROWSER_READ_TOOLS } from '../../shared/browser.ts'
 import { engineLimit } from '../../shared/outputLimit.ts'
+import { PROJECT_SKILLS_DIR } from '../../shared/skills.ts'
 
 // ctx.engine 이 생성하는 opencode.json 의 규칙 표와 순수 생성 함수 (이슈 #183 에서 engine.ts 에서 옮겼다 — 본문은 그대로).
 // 프로세스 수명·키 프록시·재시작·자식 env 는 engine.ts 에 있다. 바깥은 지금도 engine.ts 의 재내보내기로 이 이름들을 받는다
@@ -73,7 +74,7 @@ function withWebDenied(permission: Permission): Permission {
 //   ("Claude Code 스킬 함께 쓰기", 기본 꺼짐 — 사용자 결정). `~/.agents/skills` 는 안 읽는다
 // - 내장 customize-opencode(opencode 설정 안내 16KB)는 `permission.skill["customize-opencode"]="deny"` 로 프롬프트에서 빠진다. 전역만으로는
 //   litecode-full 의 "*":allow 가 되살린다 → 웹 도구 deny 처럼 에이전트마다 맨 뒤에도 붙인다. `skill: "deny"` 면 도구·목록이 통째로 빠진다(기능 끔)
-const PROJECT_SKILL_PATHS = ['.opencode/skills', '.opencode/skill']
+const PROJECT_SKILL_PATHS = [PROJECT_SKILLS_DIR, '.opencode/skill']
 const CLAUDE_SKILL_PATHS = ['~/.claude/skills', '.claude/skills']
 const HIDDEN_SKILLS = { 'customize-opencode': 'deny' }
 

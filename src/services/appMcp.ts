@@ -1,11 +1,12 @@
 import { Context, Service } from 'cordis'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
-import type { EngineMcp } from './engine.ts'
+import type { EngineMcp } from './engineConfig.ts'
 import { APP_MCP_NAME, type McpService } from './mcp.ts'
 import { handleRpc, type AppMcpTool } from './appMcp/rpc.ts'
+import { readBody, sameSecret, sendJson as send } from './httpUtil.ts'
 
 // 앱 MCP 서버 (ctx.appMcp, 이슈 #51 — 설계·실측 _workspace/01z_desktop_mcp.md). AI 가 이 앱의 화면을 조작하는 문:
 // 메인 프로세스가 작은 MCP 서버를 띄우고, 엔진에 붙이기는 사용자 서버와 같은 길(ctx.mcp — 매 턴 그 폴더에)로 한다.
@@ -131,7 +132,7 @@ export class AppMcpService extends Service {
     const pathname = (request.url ?? '').split('?')[0]!
     const directory = pathname.startsWith(PATH_PREFIX) ? this.directories.get(pathname.slice(PATH_PREFIX.length)) : undefined
     if (!directory) return send(response, 404, { error: 'not_found' })
-    const body = await readBody(request)
+    const body = await readBody(request, MAX_BODY_BYTES)
     if (body === undefined) return send(response, 413, { error: 'too_large' })
     let message: unknown
     try {
@@ -148,25 +149,6 @@ export class AppMcpService extends Service {
   }
 
   private authorized(header: string | undefined): boolean {
-    const expected = Buffer.from(`Bearer ${this.token}`)
-    const given = Buffer.from(header ?? '')
-    return given.length === expected.length && timingSafeEqual(given, expected)
+    return sameSecret(header ?? '', `Bearer ${this.token}`)
   }
-}
-
-function send(response: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
-  const text = JSON.stringify(body)
-  response.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text), ...headers })
-  response.end(text)
-}
-
-/** 본문 — 상한을 넘으면 undefined. 넘친 뒤에는 쌓지 않고 흘려보내기만 한다(끝까지 받아야 응답을 곱게 보낸다) */
-async function readBody(request: http.IncomingMessage): Promise<string | undefined> {
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const chunk of request) {
-    size += (chunk as Buffer).length
-    if (size <= MAX_BODY_BYTES) chunks.push(chunk as Buffer)
-  }
-  return size > MAX_BODY_BYTES ? undefined : Buffer.concat(chunks).toString('utf8')
 }

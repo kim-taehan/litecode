@@ -3,6 +3,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { REMOTE_DEFAULT_PORT, type RemoteService } from '../remote.ts'
 import type { RemoteCarrierStatus, RemotePeer, RemoteReply, RemoteStreamSink } from './carrier.ts'
+import { readBody, sendJson } from '../httpUtil.ts'
 
 // HTTP 운반 (이슈 #68) — ctx.remote 밑의 운반 플러그인 하나다 (`inject: ['remote']`, 자기 ctx 키 없음). 리스너를 열고,
 // 받은 요청을 운반 중립 모양으로 바꿔 ctx.remote.handle 에 넘기고, 답을 HTTP 로 싣는다. 계약·인증·짝짓기·이벤트는 모른다.
@@ -32,7 +33,7 @@ export interface RemoteHttpOptions {
 export function remoteHandler(remote: RemoteService, peer: (request: http.IncomingMessage) => RemotePeer): http.RequestListener {
   async function serve(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
     if (request.headers.origin !== undefined) return send(response, { status: 403, body: { error: 'requests with an Origin header are refused' } })
-    const raw = await readBody(request)
+    const raw = await readBody(request, MAX_BODY_BYTES)
     if (raw === undefined) return send(response, { status: 413, body: { error: 'body too large' } })
     const url = new URL(request.url ?? '/', 'http://remote')
     const abort = new AbortController()
@@ -142,20 +143,7 @@ function isLoopback(host: string): boolean {
 
 function send(response: http.ServerResponse, { status, body, headers }: RemoteReply): void {
   if (response.headersSent || response.destroyed) return
-  const text = JSON.stringify(body)
-  response.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text), ...headers })
-  response.end(text)
-}
-
-/** 본문 — 상한을 넘으면 undefined. 넘친 뒤에는 쌓지 않고 흘려보내기만 한다(끝까지 받아야 응답을 곱게 보낸다) */
-async function readBody(request: http.IncomingMessage): Promise<string | undefined> {
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const chunk of request) {
-    size += (chunk as Buffer).length
-    if (size <= MAX_BODY_BYTES) chunks.push(chunk as Buffer)
-  }
-  return size > MAX_BODY_BYTES ? undefined : Buffer.concat(chunks).toString('utf8')
+  sendJson(response, status, body, headers)
 }
 
 export function closeServer(server: http.Server): Promise<void> {

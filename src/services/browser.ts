@@ -5,7 +5,7 @@ import { BROWSER_MCP_NAME } from '../../shared/browser.ts'
 import { tr } from '../i18n.ts'
 import { browserCli, checkBrowserAssets } from './browser/assets.ts'
 import { closeBrowsers } from './browser/cleanup.ts'
-import type { EngineMcp } from './engine.ts'
+import type { EngineMcp } from './engineConfig.ts'
 import './mcp.ts'
 
 // 브라우저 (ctx.browser, 기능 `browser` · 기본 꺼짐, 이슈 #147 — 사용자 결정 2026-10-06 "Playwright MCP 로", "별도 코디스 기능", "브라우저 창 보이게").

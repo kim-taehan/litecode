@@ -1,6 +1,7 @@
 import type { Attention } from '../shared/ipc.ts'
 import type { HookEvent } from '../shared/hooks.ts'
 import { CREATE_TOOL, hookRequest, MAKE_SERVER, makeKind, mcpRequest, SECRET_MASK, skillRequest, type MakeScope } from '../shared/make.ts'
+import { PROJECT_SKILLS_DIR } from '../shared/skills.ts'
 
 // 만들기 도구(스킬·MCP 서버·훅, 이슈 #145 — 시안 _workspace/mock-make)의 승인 카드가 그릴 것. 순수 함수다 (React·IPC 없음).
 // 인자는 메인과 같은 함수(shared/make.ts)로 읽는다 — 틀린 요청은 메인이 카드를 띄우기 전에 막으므로 여기까지 오면 읽힌다.
@@ -70,7 +71,7 @@ export function makeCard(request: PermissionRequest): MakeCard | undefined {
         body: skill.body,
         preview: lines.slice(0, PREVIEW_LINES).join('\n'),
         more: Math.max(0, lines.length - PREVIEW_LINES),
-        file: `.opencode/skills/${skill.name}/SKILL.md`,
+        file: `${PROJECT_SKILLS_DIR}/${skill.name}/SKILL.md`,
       }
     }
     if (kind === 'mcp_server') {

@@ -12,7 +12,7 @@ import type { PairRejectReason } from '../../../shared/remote.ts'
 import { confirmCode, isPairCode, normalizePairCode, pairDeviceName } from '../../../shared/remotePairing.ts'
 import type { Transport } from '../core/index.ts'
 import { diagnosticDetail, fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type PinnedNet } from '../core/index.ts'
-import { isLoopbackHost, parseAddress } from './address.ts'
+import { allowsPlainHttp, parseAddress } from './address.ts'
 import { createRemoteSession } from './remoteSession.ts'
 import type { AppSession } from './session.ts'
 
@@ -177,7 +177,7 @@ export class DesktopLink {
     const target = parseAddress(input.address)
     if (!target) return fail('bad-address')
     // 평문으로 코드·토큰이 나가는 길은 이 컴퓨터 안으로만
-    if (target.scheme === 'http' && !isLoopbackHost(target.host)) return fail('not-loopback')
+    if (target.scheme === 'http' && !allowsPlainHttp(target.host)) return fail('not-loopback')
     const code = normalizePairCode(input.code)
     // 숫자 2자리(지금 데스크탑) 또는 12자(옛 데스크탑)
     if (!isPairCode(code)) return fail('bad-code')
