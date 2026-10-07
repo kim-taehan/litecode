@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { emptyChatView, reduceChat, withHistory, withLive, type ChatView } from '../../shared/chatReducer.ts'
 import { queueLabel, titleFrom, TITLE_MAX, type ChatEvent } from '../../shared/chat.ts'
-import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from '../../renderer/chatState.ts'
+import { applyChat, applyHistory, applyLive, planEnded, switchedMode, withStoredTitles, type ChatFields } from '../../renderer/chatState.ts'
 import type { Attention, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
 // 화면 상태 리듀서 (이슈 #52) — 화면은 ctx.chat 의 이벤트·스냅샷·불러온 기록만으로 말풍선·진행 줄·대기열을 그린다.
@@ -179,5 +179,18 @@ describe('대화 화면의 판정 (App.tsx 에서 옮김)', () => {
     expect(planEnded([plan, answered('', { declined: true })])).toBe(false)
     expect(planEnded([asked('m1', 'x', { mode: 'build' }), answered('답')])).toBe(false)
     expect(planEnded([plan])).toBe(false)
+  })
+})
+
+describe('withStoredTitles — 메인이 바꾼 제목 (자동 대화 제목 #215·다른 손님의 이름 바꾸기)', () => {
+  const session = (id: string, title: string, renamed?: true) => ({ id, title, ...(renamed && { renamed }) })
+  it('메인 목록의 제목·이름 바꿈 표시를 그 대화에 입힌다 — 목록에 없는 대화(빈 새 대화)·같은 제목은 그대로(같은 객체)', () => {
+    const blank = session('new', '')
+    const same = session('b', 'B')
+    const next = withStoredTitles([session('a', 'old'), blank, same], [{ id: 'a', title: 'Fix login bug' }, { id: 'b', title: 'B' }])
+    expect(next[0]).toEqual({ id: 'a', title: 'Fix login bug' })
+    expect(next[1]).toBe(blank)
+    expect(next[2]).toBe(same)
+    expect(withStoredTitles([session('a', 'old')], [{ id: 'a', title: 'Mine', renamed: true }])[0]).toEqual({ id: 'a', title: 'Mine', renamed: true })
   })
 })

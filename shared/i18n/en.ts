@@ -378,6 +378,8 @@ export const en = {
   'settings.fontSize.unit': 'px',
   'settings.fontSize.increase': 'Increase font size',
   'settings.fontSize.decrease': 'Decrease font size',
+  'settings.autoTitle': 'Auto-title conversations',
+  'settings.autoTitle.description': 'AI writes a short title for each conversation (one more request to the model after the first answer — uses a few tokens)',
   'settings.keepRunning': 'Keep running when the window is closed',
   'settings.keepRunning.description': 'Closing the window keeps the app in the notification area (tray), so chats and the phone connection continue. Turn off to quit when the window is closed',
   'quit.message': 'Quit litecode?',

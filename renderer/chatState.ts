@@ -73,6 +73,17 @@ export function applyChat<S extends ChatFields>(session: S, event: ChatEvent): S
   return next
 }
 
+/** 메인이 저장한 제목을 입힌다 — 'conversations.changed' 뒤에 다시 읽은 목록으로 (자동 대화 제목 #215, 다른 손님의 이름 바꾸기).
+ *  목록에 없는 대화(빈 새 대화)·제목이 같은 대화는 그대로 둔다 */
+export function withStoredTitles<S extends { id: string; title: string; renamed?: boolean }>(sessions: S[], stored: readonly { id: string; title: string; renamed?: boolean }[]): S[] {
+  const byId = new Map(stored.map((entry) => [entry.id, entry]))
+  return sessions.map((session) => {
+    const entry = byId.get(session.id)
+    if (!entry || (entry.title === session.title && !!entry.renamed === !!session.renamed)) return session
+    return { ...session, title: entry.title, ...(entry.renamed && { renamed: true }) }
+  })
+}
+
 /** 화면이 (다시) 뜰 때 — 메인이 쥔 도는 턴·대기열을 입힌다 */
 export function applyLive<S extends ChatFields>(session: S, live: ChatLive | undefined): S {
   return live ? { ...withView(session, withLive(viewOf(session), live)), queueSources: live.queue.sources } : session

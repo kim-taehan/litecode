@@ -50,6 +50,8 @@ let release: () => void = () => {}
 let calls: string[] = []
 /** 받은 DELETE /session/ses_1/message/{id} 의 id (순서대로) */
 let deleted: string[] = []
+/** 받은 DELETE /session/ses_1 수 */
+let sessionDeletes = 0
 /** 받은 모든 요청의 URL (쿼리 포함) — 레거시 호출의 ?directory= 를 본다 */
 let urls: string[] = []
 /** 신규 세대 기록(레거시 전환 전에 쌓인 대화, GET /api/session/{id}/message). 비어 있지 않으면 레거시 기록(GET /session/{id}/message)도
@@ -77,6 +79,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
   calls = []
   urls = []
   deleted = []
+  sessionDeletes = 0
   const legacy: { info: { id: string; [key: string]: unknown }; parts: unknown[] }[] = []
   /** 도는 손 요약을 닫는다 (요약 답을 끝내고 POST …/summarize 에 답한다) — error 를 주면 그 오류로 */
   let summarizing: ((error?: { name: string; data: { message: string } }) => void) | undefined
@@ -198,6 +201,11 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           }, 30)
         }
       })
+    }
+    // 세션 지우기 (askOnce 의 임시 세션, 이슈 #215)
+    if (req.method === 'DELETE' && route === '/session/ses_1') {
+      sessionDeletes++
+      return void res.end('true')
     }
     const removed = req.method === 'DELETE' && /^\/session\/ses_1\/message\/(\w+)$/.exec(route)
     if (removed) {
@@ -567,6 +575,55 @@ describe('ctx.llm 재시도 상한', () => {
     stop.abort()
     expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped') })
     expect(seen.at(-1)).toBe(`ended ses_1@${directory} interrupted (${tr('error.stopped')})`)
+  })
+})
+
+// 한 번 묻기 (자동 대화 제목, 이슈 #215) — 임시 세션에 도구 없이 한 번 묻고 답 글만 받은 뒤 그 세션을 지운다. 턴이 아니다
+describe('ctx.llm.askOnce (임시 세션에 한 번 묻기)', () => {
+  it('임시 세션을 만들어 모델·에이전트·도구 끔(tools "*": false)을 싣고 보내고, 답 글을 준 뒤 그 세션을 지운다 — 턴 이벤트·MCP 준비·지시문은 없다', async () => {
+    const { llm, seen, ctx } = await start(await fakeOpencode('done'))
+    const prepared: string[] = []
+    ctx.on('llm/before-turn', (dir) => void prepared.push(dir))
+    fs.writeFileSync(path.join(directory, 'AGENTS.md'), 'SECRET RULES')
+    try {
+      expect(await llm.askOnce({ providerId: 'p', modelId: 'm', directory, prompt: 'title please' })).toEqual({ ok: true, text: 'echo: hi' })
+    } finally {
+      fs.rmSync(path.join(directory, 'AGENTS.md'))
+    }
+    expect(seen).toEqual([])
+    expect(prepared).toEqual([])
+    expect(sessionDeletes).toBe(1)
+    const created = calls.find((call) => call.startsWith('/session '))!
+    expect(JSON.parse(created.slice('/session '.length))).toMatchObject({ model: { providerID: 'p', id: 'm' }, title: 'title please' })
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toMatchObject({ model: { providerID: 'p', modelID: 'm' }, agent: 'build', tools: { '*': false }, parts: [{ type: 'text', text: 'title please' }] })
+    expect(prompts[0]).not.toHaveProperty('system')
+  })
+
+  it('게이트웨이에 연결 못 하면(#207) 첫 재시도에서 멈추고(abort) 실패를 준다 — 임시 세션은 지운다', async () => {
+    const { llm, seen } = await start(await fakeOpencode('refused'))
+    expect(await llm.askOnce({ providerId: 'p', modelId: 'm', directory, prompt: 'x' })).toMatchObject({ ok: false })
+    await expect.poll(() => calls).toContain('/session/ses_1/abort')
+    expect(sessionDeletes).toBe(1)
+    expect(seen).toEqual([])
+  })
+
+  it('stop 이 걸리면(부르는 쪽의 시간 초과) 엔진 턴을 멈추고 실패를 준다 — 임시 세션은 지운다', async () => {
+    const { llm } = await start(await fakeOpencode('retrystop'))
+    const stop = new AbortController()
+    const asked = llm.askOnce({ providerId: 'p', modelId: 'm', directory, prompt: 'x', stop: stop.signal })
+    await expect.poll(() => prompts.length).toBe(1)
+    stop.abort()
+    expect(await asked).toMatchObject({ ok: false })
+    expect(calls).toContain('/session/ses_1/abort')
+    expect(sessionDeletes).toBe(1)
+  })
+
+  it('없는 폴더·모르는 provider 면 세션을 만들지 않는다 (engineFolder 문)', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    expect(await llm.askOnce({ providerId: 'p', modelId: 'm', directory: path.join(directory, 'missing'), prompt: 'x' })).toMatchObject({ ok: false })
+    expect(await llm.askOnce({ providerId: 'nope', modelId: 'm', directory, prompt: 'x' })).toMatchObject({ ok: false })
+    expect(calls.filter((call) => call.startsWith('/session '))).toEqual([])
   })
 })
 
