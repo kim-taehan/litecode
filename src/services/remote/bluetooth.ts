@@ -12,7 +12,8 @@ import { bluetoothPrologue } from '../../../shared/noiseNK.ts'
 import { secureResponder } from '../../../shared/noiseRecord.ts'
 import type { ByteLink } from '../../../shared/remoteFraming.ts'
 import type { RemoteService } from '../remote.ts'
-import { BLUETOOTH_CARRIER, type RemoteCarrierStatus, type RemoteRadioState } from './carrier.ts'
+import type { FeatureReason } from '../../../shared/features.ts'
+import { BLUETOOTH_CARRIER, type RemoteCarrierStatus, type RemoteRadioState, type RemoteRadioStatus } from './carrier.ts'
 import { serveFramed, type FramedServer } from './framed.ts'
 import type { NoiseIdentity } from './noiseIdentity.ts'
 
@@ -74,6 +75,22 @@ export interface RemoteBluetoothOptions {
   handshakeTimeoutMs?: number
   /** 기본 BLUETOOTH_PACE_BYTES_PER_SECOND */
   paceBytesPerSecond?: number
+}
+
+/** 설정 > 기능의 블루투스 연결 줄에 보일 문제 (이슈 #224, ctx.features.problem) — 설정 > 모바일 상태 줄과 같은 문구. 켜는 중·광고 중은 문제가 아니다 */
+export function bluetoothProblem(radio: RemoteRadioStatus | undefined): FeatureReason | undefined {
+  switch (radio?.state) {
+    case 'poweredOff':
+      return { key: 'remote.bluetooth.poweredOff' }
+    case 'unauthorized':
+      return { key: 'remote.bluetooth.unauthorized' }
+    case 'unsupported':
+      return radio.reason ? { key: 'remote.bluetooth.unsupportedReason', vars: { reason: radio.reason } } : { key: 'remote.bluetooth.unsupported' }
+    case 'failed':
+      return { key: 'remote.bluetooth.failed', vars: { reason: radio.reason ?? '' } }
+    default:
+      return undefined
+  }
 }
 
 export function RemoteBluetooth(ctx: Context, options: RemoteBluetoothOptions): void {

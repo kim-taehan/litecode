@@ -3,6 +3,8 @@
 // (새 기능이 생겨도 기본 켜짐). FEATURE_DEFAULT_OFF 에 든 기능만 기본 꺼짐이고 true 로 적어야 켜진다. 파일에는 기본값과 다른 값만 남긴다.
 // 바탕(대화·엔진·설정·provider·프로젝트·대화 저장)은 여기에 없다 — 끌 수 없다.
 
+import type { MessageKey } from './i18n/ko.ts'
+
 // skills(이슈 #7)는 묶음(ctx.skills — `+` 메뉴의 스킬 팝업 목록(#43)·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
 export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'hooks', 'voice', 'browser'] as const
 export type FeatureId = (typeof FEATURES)[number]
@@ -45,6 +47,14 @@ export function featureDefault(feature: FeatureId): boolean {
 
 /** 그 기능이 쓰려면 같이 켜져 있어야 하는 기능 — `!` 입력은 `!명령` 실행(ctx.shell)이 돌린다 */
 export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'], browser: ['mcp'], lan: ['remote'], bluetooth: ['remote'] }
+
+/** 켜지 못한 사유 (이슈 #224) — 글(묶음이 던진 오류 메시지를 한 줄로 정리한 것) 또는 화면 언어로 번역할 문구 키 */
+export type FeatureReason = string | { key: MessageKey; vars?: Record<string, string | number> }
+
+/** 켜진 기능의 상태 (이슈 #224) — mounting: 묶음을 올리는 중 · on: 떴다 · failed: 묶음이 던졌거나 스스로 문제를 알렸다(ctx.features.problem).
+ *  꺼진 기능은 상태가 없다(목록에서 빠진다). 화면은 failed 만 그린다 — 정상 상태엔 태그를 달지 않는다 */
+export type FeatureStatus = { state: 'mounting' } | { state: 'on' } | { state: 'failed'; reason: FeatureReason }
+export type FeatureStatuses = Partial<Record<FeatureId, FeatureStatus>>
 
 /** 기능별 켜기 값 — 없는 키는 기본값(featureDefault) */
 export type FeatureSwitches = Partial<Record<FeatureId, boolean>>

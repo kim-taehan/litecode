@@ -914,3 +914,37 @@
   background: var(--warn-soft);
   color: var(--text);
 }
+
+/* 기능 상태 (이슈 #224, 시안 _workspace/mock-features/Detail 의 블루투스 줄) — 켜지 못한 기능: 스위치 앞 빨간 알약 + 펼친 아래 맨 위 빨간 상자.
+   켜 두었는데 필요한 기능이 꺼져 못 뜬 기능은 필요 칩만 주황으로 강조한다 */
+.feature-row__status {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.feature-row__status--failed {
+  background: var(--danger-bg);
+  color: color-mix(in srgb, var(--danger) 70%, var(--text));
+}
+
+.feature-row__failure {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: 10px;
+  background: var(--danger-bg);
+  font-size: 13px;
+  line-height: 20px;
+  color: color-mix(in srgb, var(--danger) 45%, var(--text));
+  overflow-wrap: anywhere;
+}
+
+.feature-row__chip--blocked {
+  box-shadow: inset 0 0 0 1px var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--text);
+}

@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { FEATURE_GROUPS, FEATURE_REQUIRES, featureDefault, featureOn, type FeatureId } from '../shared/features.ts'
+import { FEATURE_GROUPS, FEATURE_REQUIRES, featureDefault, featureOn, type FeatureId, type FeatureReason } from '../shared/features.ts'
 import type { MessageKey } from '../shared/i18n/index.ts'
+import { useFeatureStatuses } from './featuresStore.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 
 // 설정 > 기능 (이슈 #8) — 한 줄에 기능 하나 (사용자 2026-10-07 "그냥 한줄에 하나씩 넣고", "상세 볼 수 있게", 시안 _workspace/mock-features
@@ -9,11 +10,15 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 // 칩의 필요·기본값은 shared/features.ts 에서 만든다(문구를 손으로 중복하지 않는다). 펼침은 화면 안 상태 — 저장하지 않고 여러 줄을 함께 펼 수 있다.
 // 바꾸면 곧바로 메인(ctx.settings)에 저장하고, 메인(ctx.features)이 재시작 없이 그 기능 묶음을 올리거나 내린다.
 // 줄은 중분류(FEATURE_GROUPS — 작업 화면 / AI 도구 / 자동화 / 입력·연결·알림)로 나눠 묶음마다 제목 + 한 줄 설명 아래에 둔다 (사용자 결정 2026-10-06).
+// 기능 상태 (이슈 #224, 시안 _workspace/mock-features/Detail 의 블루투스 줄) — 켰는데 못 뜬 기능(ctx.features 의 failed)은 스위치 앞에 빨간 알약
+// "켜지 못함", 펼치면 설명 맨 위에 빨간 상자 "켜지 못한 이유 — 사유". 정상 상태(올리는 중·켜짐)엔 아무것도 달지 않는다(태그 소음 금지).
+// 켜 두었는데 필요한 기능이 꺼져 못 뜬 기능은 그 필요 칩만 강조한다 — 사내망 연결(기본 켜짐)은 모바일 연결을 켜기 전까지 늘 이 상태라 줄 머리 태그는 소음이다.
 // 고정된 기능(shared/features.ts FEATURE_FIXED — 필수인 입력 트리거·!명령 실행·스킬·MCP)은 줄이 없다 (사용자 결정 2026-10-03).
 
 export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: readonly FeatureId[] }) {
   const t = useT()
   const settings = useSettings()
+  const statuses = useFeatureStatuses()
   const [error, setError] = useState<string>()
   const [expanded, setExpanded] = useState<ReadonlySet<FeatureId>>(() => new Set(initialExpanded))
   const stored = settings.features ?? {}
@@ -27,6 +32,10 @@ export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: reado
       () => setError(undefined),
       () => setError(t('settings.saveError')),
     )
+  }
+
+  function reasonText(reason: FeatureReason): string {
+    return typeof reason === 'string' ? reason : t(reason.key, reason.vars)
   }
 
   function toggleExpanded(feature: FeatureId): void {
@@ -58,6 +67,9 @@ export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: reado
               const on = featureOn(stored, feature)
               const open = expanded.has(feature)
               const [paragraph, ...bullets] = t(`feature.${feature}.detail`).split('\n')
+              const status = statuses[feature]
+              const failure = status?.state === 'failed' ? status.reason : undefined
+              const wanted = stored[feature] ?? featureDefault(feature) // 이 기능 스스로의 스위치 값 (필요한 기능과 무관)
               return (
                 <li key={feature} className="feature-row" data-feature={feature} data-expanded={open || undefined}>
                   <div className="feature-row__head">
@@ -76,6 +88,7 @@ export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: reado
                         <span className="feature-row__summary">{t(`feature.${feature}.description`)}</span>
                       </span>
                     </button>
+                    {failure !== undefined && <span className="feature-row__status feature-row__status--failed">{t('features.status.failed')}</span>}
                     <button
                       type="button"
                       role="switch"
@@ -89,6 +102,11 @@ export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: reado
                   </div>
                   {open && (
                     <div className="feature-row__detail" id={`feature-detail-${feature}`}>
+                      {failure !== undefined && (
+                        <div className="feature-row__failure" role="alert">
+                          <b>{t('features.status.failedReason')}</b> — {reasonText(failure)}
+                        </div>
+                      )}
                       <p className="feature-row__paragraph">{paragraph}</p>
                       {bullets.length > 0 && (
                         <ul className="feature-row__bullets">
@@ -98,11 +116,19 @@ export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: reado
                         </ul>
                       )}
                       <div className="feature-row__chips">
-                        {(FEATURE_REQUIRES[feature] ?? []).map((needed) => (
-                          <span key={needed} className="feature-row__chip">
-                            {t(featureOn(stored, needed) ? 'settings.features.requires' : 'settings.features.requires.off', { name: t(`feature.${needed}` as MessageKey) })}
-                          </span>
-                        ))}
+                        {(FEATURE_REQUIRES[feature] ?? []).map((needed) => {
+                          const neededOn = featureOn(stored, needed)
+                          const blocked = wanted && !neededOn
+                          return (
+                            <span
+                              key={needed}
+                              className={blocked ? 'feature-row__chip feature-row__chip--blocked' : 'feature-row__chip'}
+                              title={blocked ? t('features.status.blocked') : undefined}
+                            >
+                              {t(neededOn ? 'settings.features.requires' : 'settings.features.requires.off', { name: t(`feature.${needed}` as MessageKey) })}
+                            </span>
+                          )
+                        })}
                         <span className="feature-row__chip">{t(featureDefault(feature) ? 'settings.features.default.on' : 'settings.features.default.off')}</span>
                         <span className="feature-row__chip">{t(`feature.${feature}.where`)}</span>
                       </div>
