@@ -66,3 +66,35 @@ export function ArrowUp() {
     </Svg>
   )
 }
+
+/** Wi-Fi (시안 mock-ble Main) */
+export function WifiIcon({ size = 24, color = C.sub }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" stroke={color} strokeWidth={1.8} {...line}>
+      <Path d="M2.5 9a14 14 0 0 1 19 0" />
+      <Path d="M5.5 12.5a9.5 9.5 0 0 1 13 0" />
+      <Path d="M8.7 16a5 5 0 0 1 6.6 0" />
+      <Circle cx={12} cy={19.3} r={0.9} />
+    </Svg>
+  )
+}
+
+/** 블루투스 (시안 mock-ble Main·Bt·Fail) */
+export function BluetoothIcon({ size = 24, color = C.sub, strokeWidth = 1.8 }: { size?: number; color?: string; strokeWidth?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" stroke={color} strokeWidth={strokeWidth} {...line}>
+      <Path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9" />
+    </Svg>
+  )
+}
+
+/** 동그라미 느낌표 (시안 mock-ble Fail) */
+export function ErrorCircle({ color }: { color: string }) {
+  return (
+    <Svg width={16} height={16} viewBox="0 0 16 16" stroke={color} strokeWidth={1.5} {...line}>
+      <Circle cx={8} cy={8} r={6.2} />
+      <Path d="M8 4.6v4" />
+      <Path d="M8 11v.1" />
+    </Svg>
+  )
+}

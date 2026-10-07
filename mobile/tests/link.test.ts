@@ -122,6 +122,23 @@ describe('짝짓기', () => {
     expect(store.value).toBeUndefined()
   })
 
+  it('2자리 코드로 짝지으면 짝짓기 응답의 bluetoothKey 와 hello 의 desktopId 를 저장한다 (이슈 #211 — 블루투스 키는 TLS 안에서 받는다)', async () => {
+    const bk = 'C'.repeat(42) + 'A'
+    const inner = createFetchTransport()
+    // 가짜 데스크탑은 블루투스 키를 안 준다 — 짝짓기 응답에 얹는다
+    const withKey: Transport = {
+      stream: (request, handlers) => inner.stream(request, handlers),
+      async request(request) {
+        const response = await inner.request(request)
+        if (!request.url.endsWith('/v1/pair') || response.status !== 200) return response
+        return { ...response, body: JSON.stringify({ ...JSON.parse(response.body), bluetoothKey: bk }) }
+      },
+    }
+    const store = memoryStore()
+    await linked(store, withKey)
+    expect(store.value).toMatchObject({ bluetoothKey: bk, desktopId: 'fake-desktop' })
+  })
+
   it('틀린 코드는 wrong-code — 허용 대기까지 가지 않는다', async () => {
     const link = newLink()
     await link.restore()

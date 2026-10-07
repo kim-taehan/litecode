@@ -6,10 +6,12 @@
 //   30초 동안 아무 바이트도 안 옴(ping 도) → unresponsive ("데스크탑 응답 없음(잠자기?)") — 뒤에서 같은 백오프로 계속 붙어 본다
 //   `device.revoked` 이벤트 또는 401 → revoked — 다시 붙지 않는다 (다시 짝지어야 한다)
 //   지금 주소의 서버 지문이 다르고 다른 후보에도 닿지 못했다 → fingerprint-changed (옛 후보의 다른 지문은 닿지 않음으로 — roaming.ts) — 자동으로 믿지 않는다, 다시 붙지 않는다 (다시 짝지어야 한다)
+//   블루투스 권한 없음·꺼짐·키 없음(BluetoothError.needsUser) → needs-action — 저절로 다시 시도하지 않는다(권한 창을 되풀이하지 않는다). retry() 로 다시
 // 다시 붙을 때: hello(runId 대조) → events?run=&after=<적용한 마지막 seq>. 이을 수 없으면 리듀서가 resync 를 올리고, 여기서 목록과
 // 열린 대화의 스냅샷을 다시 받는다.
 
 import { REMOTE_SILENCE_TIMEOUT_MS, type RemoteEvent } from '../../../shared/remote.ts'
+import { BluetoothError } from './bluetoothLink.ts'
 import { RemoteError, type RemoteClient } from './client.ts'
 import { NetError } from './net.ts'
 import { initialState, reduce, type RemoteAction, type RemoteState } from './state.ts'
@@ -24,6 +26,8 @@ export type ConnectionStatus =
   | { kind: 'revoked' }
   /** 데스크탑 인증서 지문이 짝지을 때와 다르다 (다시 설치했거나 다른 PC) */
   | { kind: 'fingerprint-changed' }
+  /** 사람이 무엇을 해야 붙는다(블루투스 권한·꺼짐·키 없음 — BluetoothError.needsUser). 저절로 다시 시도하지 않는다 — retry() 를 기다린다 */
+  | { kind: 'needs-action' }
 
 const BACKOFF_BASE_MS = 1_000
 const BACKOFF_MAX_MS = 30_000
@@ -49,6 +53,8 @@ export class Connection {
   private syncing = false
   /** 스냅샷을 다 받아 둔 resync 번호 */
   private synced = 0
+  /** 마지막으로 붙지 못한 까닭 — 붙으면 지운다 */
+  private lastFailure: unknown
 
   constructor(client: RemoteClient) {
     this.client = client
@@ -60,6 +66,11 @@ export class Connection {
 
   get status(): ConnectionStatus {
     return this.currentStatus
+  }
+
+  /** 마지막으로 붙지 못했거나 끊긴 까닭(운반이 던진 것 그대로) — 붙어 있으면 undefined. 화면이 사유 문구를 고른다 */
+  get failure(): unknown {
+    return this.lastFailure
   }
 
   /** 상태(state·status)가 바뀔 때마다 부른다. 돌려준 함수로 그만 듣는다 */
@@ -94,6 +105,16 @@ export class Connection {
   /** 앱이 앞으로 돌아왔다 — 기다리던 재시도를 지금 한다 */
   wake(): void {
     if (this.currentStatus.kind !== 'reconnecting' && this.currentStatus.kind !== 'unresponsive') return
+    void this.connect()
+  }
+
+  /** 사용자가 [다시 시도] 를 눌렀다 — 기다리던 재시도든, 사람을 기다리며 멈춘 것(needs-action)이든 지금 처음부터 붙어 본다 */
+  retry(): void {
+    const kind = this.currentStatus.kind
+    if (kind !== 'reconnecting' && kind !== 'unresponsive' && kind !== 'needs-action') return
+    this.attempt = 0
+    this.silent = false
+    this.setStatus({ kind: 'connecting' })
     void this.connect()
   }
 
@@ -141,6 +162,7 @@ export class Connection {
           if (stale()) return
           this.attempt = 0
           this.silent = false
+          this.lastFailure = undefined
           this.setStatus({ kind: 'connected' })
           void this.sync()
         },
@@ -164,8 +186,10 @@ export class Connection {
 
   /** 붙지 못했거나 끊겼다 — 백오프 뒤 다시 */
   private failed(error?: unknown): void {
+    this.lastFailure = error
     if (error instanceof RemoteError && error.status === 401) return this.revoked()
     if (error instanceof NetError && error.kind === 'pin-mismatch') return this.halt({ kind: 'fingerprint-changed' })
+    if (error instanceof BluetoothError && error.needsUser) return this.halt({ kind: 'needs-action' })
     this.teardown()
     this.attempt += 1
     const delay = backoffMs(this.attempt)
@@ -177,8 +201,8 @@ export class Connection {
     this.halt({ kind: 'revoked' })
   }
 
-  /** 다시 붙지 않는다 — 다시 짝지어야 한다 */
-  private halt(status: Extract<ConnectionStatus, { kind: 'revoked' | 'fingerprint-changed' }>): void {
+  /** 저절로는 다시 붙지 않는다 — 다시 짝지어야 한다(revoked·fingerprint-changed) 또는 사람이 고친 뒤 retry() (needs-action) */
+  private halt(status: Extract<ConnectionStatus, { kind: 'revoked' | 'fingerprint-changed' | 'needs-action' }>): void {
     this.teardown()
     this.setStatus(status)
   }

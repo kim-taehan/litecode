@@ -3,7 +3,9 @@
 import type { Attention, ConversationStatus, HistoryMessage, QuestionAttention, TurnItem } from '../../../shared/contract.ts'
 import { stopFeedbackReason } from '../../../shared/hooks.ts'
 import type { RemoteConversation } from '../../../shared/remote.ts'
-import type { ConnectionStatus, ConversationView } from '../core/index.ts'
+import { BluetoothError, diagnosticDetail, type ConnectionStatus, type ConversationView } from '../core/index.ts'
+import { failureDetail } from './link.ts'
+import type { Carrier } from './session.ts'
 import { S } from './strings.ts'
 
 const SECOND = 1_000
@@ -182,7 +184,33 @@ export function statusBanner(status: ConnectionStatus, now: number): string | un
       return S.fingerprintChangedShort
     case 'connecting':
       return S.connecting
+    case 'needs-action':
+      return S.needsAction
     default:
       return undefined
   }
+}
+
+/**
+ * 연결 화면(시안 mock-ble ①·③)에 무엇을 그리나 — 아직 한 번도 못 붙었거나 사람을 기다리며 멈췄을 때 앱이 목록 대신 보인다.
+ * choose: 수단 카드 둘 + [X 로 연결] (connecting 이면 붙는 중) · failed: 사유 + [다시 시도] + [다른 길로 시도] (버튼으로만 권한다)
+ */
+export type GateView = { kind: 'choose'; connecting: boolean } | { kind: 'failed'; title: string; body: string; detail: string }
+
+/** 앱이 목록 대신 연결 화면을 보일 때인가 */
+export function showsGate(status: ConnectionStatus, hasConnected: boolean): boolean {
+  return !hasConnected || status.kind === 'needs-action'
+}
+
+export function gateView(status: ConnectionStatus, failure: unknown, carrier: Carrier, address: string): GateView {
+  const waiting = status.kind === 'reconnecting' || status.kind === 'unresponsive' || status.kind === 'needs-action'
+  if (!waiting || failure === undefined) return { kind: 'choose', connecting: status.kind === 'connecting' || waiting }
+  if (failure instanceof BluetoothError) return { kind: 'failed', title: S.cannotReach.bluetooth, body: S.bluetoothFailure[failure.reason], detail: diagnosticDetail(failure.reason, failure.message) }
+  if (carrier === 'bluetooth') return { kind: 'failed', title: S.cannotReach.bluetooth, body: S.bluetoothLost, detail: failureDetail(failure) }
+  return { kind: 'failed', title: S.cannotReach.wifi, body: S.wifiFailure(address), detail: failureDetail(failure) }
+}
+
+/** 받은 바이트 → "186 KB 받는 중" */
+export function receivingText(bytes: number): string {
+  return S.receivingKb(Math.round(bytes / 1024))
 }

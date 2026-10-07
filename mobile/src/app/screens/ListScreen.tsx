@@ -2,6 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useConnectionStatus, useNow, useRemoteState } from '../hooks.ts'
 import { ChevronDown, Gear } from '../icons.tsx'
+import { BluetoothBadge } from '../BluetoothBits.tsx'
 import type { AppSession } from '../session.ts'
 import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
@@ -39,6 +40,7 @@ export function ListScreen({ session, onOpen, onSettings }: { session: AppSessio
           </View>
           <ChevronDown />
         </Pressable>
+        <BluetoothBadge carrier={session.carrier} />
         <Pressable accessibilityRole="button" accessibilityLabel={S.settings} style={styles.gear} onPress={onSettings}>
           <Gear />
         </Pressable>

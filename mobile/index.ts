@@ -1,3 +1,5 @@
+// 맨 먼저 — Hermes 에 없는 crypto.getRandomValues 를 채운다 (블루투스 Noise 임시 키, src/app/randomValues.ts)
+import './src/app/randomPolyfill.ts'
 import { registerRootComponent } from 'expo'
 import { AppRegistry } from 'react-native'
 import App from './App'

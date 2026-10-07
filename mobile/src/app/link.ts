@@ -7,14 +7,16 @@
 //   직접 입력(https): 처음 본 인증서를 믿는다(TOFU) — 핸드셰이크로 지문을 보고 앞 8자를 크게 띄운다(데스크탑 [허용] 창의 것과 사람이 맞춰 본다)
 //   직접 입력(http):  이 컴퓨터 안(에뮬레이터)만 — 평문. 확인 코드는 요청에서 만든 8자(shared/remotePairing.ts confirmCode)
 // 붙은 뒤에는 저장한 지문으로만 붙는다. 지문이 바뀌었으면 자동으로 믿지 않고 연결 화면으로 돌아가 다시 짝짓게 한다.
+// 길(이슈 #211): 붙을 때는 사용자가 고른 길(Wi-Fi | 블루투스 — prefs 에 기억)로만 붙는다. 안 되면 사유를 보이고 다른 길은 버튼으로만 권한다 —
+// 여기서 다른 길로 넘어가지 않는다. 짝짓기는 사내망(TLS)으로 하고, 블루투스 키는 QR 의 bk(없으면 짝짓기 응답의 bluetoothKey)를 저장해 둔다.
 
 import type { PairRejectReason } from '../../../shared/remote.ts'
 import { confirmCode, isPairCode, normalizePairCode, pairDeviceName } from '../../../shared/remotePairing.ts'
 import type { Transport } from '../core/index.ts'
-import { diagnosticDetail, fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type PinnedNet } from '../core/index.ts'
+import { BluetoothError, connectBluetooth, createBluetoothTransport, diagnosticDetail, fingerprintCode, firstReachable, hostOf, isLoopbackHost as isDesktopLoopback, MAX_ADDRESSES, NetError, netFailure, parseHostPort, readPairQr, RemoteClient, RemoteError, type BleDriver, type PinnedNet } from '../core/index.ts'
 import { allowsPlainHttp, parseAddress } from './address.ts'
 import { createRemoteSession } from './remoteSession.ts'
-import type { AppSession } from './session.ts'
+import type { AppSession, Carrier } from './session.ts'
 
 /** 짝지은 데스크탑 하나 — 이것을 저장해 두고 앱을 다시 켜면 그대로 붙는다 */
 export interface SavedDesktop {
@@ -30,6 +32,10 @@ export interface SavedDesktop {
   fingerprint?: string
   /** 주소 후보 (address 포함) — 데스크탑 IP 가 바뀌면 이것들을 다 시도한다. 옛 저장(평문)에는 없다 */
   addresses?: string[]
+  /** hello.desktopId (QR 의 `d`) — 블루투스 서비스 UUID·Noise 프롤로그가 여기서 나온다. 옛 저장에는 없다 */
+  desktopId?: string
+  /** 블루투스 Noise 채널의 데스크탑 공개키 (QR 의 bk 또는 짝짓기 응답의 bluetoothKey). 없으면 블루투스로 못 붙는다 — QR 로 다시 짝지어야 한다 */
+  bluetoothKey?: string
 }
 
 export interface DesktopStore {
@@ -81,7 +87,8 @@ export type LinkState =
    * confirmKind: fingerprint = 인증서 지문 앞 8자(https), code = 요청에서 만든 확인 코드(평문). confirm 이 없으면 아직 데스크탑을 찾는 중
    */
   | { phase: 'pairing'; confirm?: string; confirmKind?: 'fingerprint' | 'code' }
-  | { phase: 'linked'; session: AppSession; desktop: SavedDesktop }
+  /** carrier: 지금 세션이 쓰는 길 */
+  | { phase: 'linked'; session: AppSession; desktop: SavedDesktop; carrier: Carrier }
 
 export interface PairInput {
   address: string
@@ -135,6 +142,14 @@ export function lanUnsupported(platform: 'android' | 'ios', apiLevel: number | u
 
 /** 핸드셰이크(지문 보기)의 기한 */
 const PROBE_TIMEOUT_MS = 6_000
+/** 블루투스의 보통 요청 기한 — 20KB/s 에서 긴 대화 스냅샷이 10초를 넘길 수 있다 */
+const BLUETOOTH_REQUEST_TIMEOUT_MS = 60_000
+
+/** 마지막으로 고른 길을 읽고 쓰는 곳 (앱은 Preferences) */
+export interface CarrierChoice {
+  get(): Carrier
+  set(carrier: Carrier): void
+}
 
 export class DesktopLink {
   private current: LinkState = { phase: 'loading' }
@@ -143,7 +158,19 @@ export class DesktopLink {
 
   /** transport: 평문(이 컴퓨터 안) 운반 · pinned: 지문 고정 운반 */
   /** apiLevel: Android 의 API 레벨(Platform.Version) — 29 미만이면 사내망 연결을 시도하지 않는다 */
-  constructor(private readonly deps: { store: DesktopStore; transport: Transport; pinned: PinnedNet; platform: 'android' | 'ios'; apiLevel?: number; now?: () => number }) {}
+  /** bluetooth: 라디오 (없으면 블루투스를 고르면 unsupported 로 실패한다) · carrier: 마지막으로 고른 길 (없으면 늘 Wi-Fi) */
+  constructor(
+    private readonly deps: {
+      store: DesktopStore
+      transport: Transport
+      pinned: PinnedNet
+      platform: 'android' | 'ios'
+      apiLevel?: number
+      now?: () => number
+      bluetooth?: BleDriver
+      carrier?: CarrierChoice
+    },
+  ) {}
 
   get state(): LinkState {
     return this.current
@@ -236,7 +263,22 @@ export class DesktopLink {
       code: link.code,
       deviceName,
       fallbackName: link.name || address,
+      desktopId: link.desktopId,
+      bluetoothKey: link.bluetoothKey,
     })
+  }
+
+  /**
+   * 길을 고른다 (연결 화면의 카드·[블루투스로 시도]·[Wi-Fi 로 바꾸기]). 고른 것을 기억하고, 다른 길이면 지금 연결을 끊고 그 길로 새로 붙는다 —
+   * 대화는 hello → events?run=&after= 로 이어받는다. 같은 길이면 지금 다시 시도한다
+   */
+  chooseCarrier(carrier: Carrier): void {
+    if (this.current.phase !== 'linked') return
+    this.deps.carrier?.set(carrier)
+    if (this.current.carrier === carrier) return this.current.session.retry()
+    const { desktop } = this.current
+    this.detach()
+    this.attach(desktop)
   }
 
   /** 설정의 "연결 해제" — 저장을 지우고 연결 화면으로. (데스크탑의 기기 목록에서 빼는 것은 데스크탑에서 한다) */
@@ -262,6 +304,9 @@ export class DesktopLink {
     code: string
     deviceName: string
     fallbackName: string
+    /** QR 의 d·bk */
+    desktopId?: string
+    bluetoothKey?: string
   }): Promise<void> {
     const { platform, store } = this.deps
     const client = new RemoteClient({ transport: request.transport, baseUrl: request.baseUrl })
@@ -275,6 +320,11 @@ export class DesktopLink {
         token: paired.token,
         desktopName: hello?.name ?? request.fallbackName,
       }
+      const desktopId = hello?.desktopId ?? request.desktopId
+      if (desktopId) saved.desktopId = desktopId
+      // 블루투스 키: QR 의 것이 먼저(바깥 경로로 받은 닻), 없으면(2자리 코드) TLS 안에서 받은 짝짓기 응답의 것
+      const bluetoothKey = request.bluetoothKey ?? paired.bluetoothKey
+      if (bluetoothKey) saved.bluetoothKey = bluetoothKey
       if (request.fingerprint) {
         saved.fingerprint = request.fingerprint
         const told = (hello?.addresses ?? []).map(parseHostPort).filter((address): address is string => address !== undefined && !isDesktopLoopback(hostOf(address)))
@@ -293,7 +343,39 @@ export class DesktopLink {
   }
 
   private attach(desktop: SavedDesktop): void {
-    const session = createRemoteSession({
+    const carrier = this.deps.carrier?.get() ?? 'wifi'
+    const session = carrier === 'bluetooth' ? this.bluetoothSession(desktop) : this.wifiSession(desktop)
+    // 데스크탑에서 해제됐다(device.revoked·401) — 토큰은 죽었다. 지문이 바뀌었다 — 믿지 않는다. 둘 다 저장을 지우고 연결 화면으로
+    this.offSession = session.subscribe(() => {
+      const kind = session.getStatus().kind
+      if (kind !== 'revoked' && kind !== 'fingerprint-changed') return
+      this.detach()
+      this.set(kind === 'revoked' ? { phase: 'unpaired', revoked: true } : { phase: 'unpaired', fingerprintChanged: true })
+      void this.deps.store.clear().catch(() => undefined)
+    })
+    this.set({ phase: 'linked', session, desktop, carrier })
+  }
+
+  /** 블루투스 — 요청이 오면 그때 찾아 붙는다(운반이 연다). 키가 없으면 라디오를 건드리지 않고 no-key 로 멈춘다 */
+  private bluetoothSession(desktop: SavedDesktop): AppSession {
+    const { bluetooth, apiLevel } = this.deps
+    const transport = createBluetoothTransport((onReceived) =>
+      connectBluetooth(bluetooth ?? unsupportedDriver, desktop, { onReceived, legacyLocation: apiLevel !== undefined && apiLevel <= 30 }),
+    )
+    return createRemoteSession({
+      carrier: 'bluetooth',
+      transport,
+      baseUrl: `bt://${desktop.desktopId ?? 'desktop'}`,
+      token: desktop.token,
+      requestTimeoutMs: BLUETOOTH_REQUEST_TIMEOUT_MS,
+      desktop: { name: desktop.desktopName, address: desktop.address, fingerprint: desktop.fingerprint && fingerprintCode(desktop.fingerprint) },
+      receivedBytes: () => transport.receivedBytes,
+      release: () => transport.close(),
+    })
+  }
+
+  private wifiSession(desktop: SavedDesktop): AppSession {
+    const session: AppSession = createRemoteSession({
       transport: desktop.fingerprint ? this.deps.pinned.transport(desktop.fingerprint) : this.deps.transport,
       baseUrl: desktop.baseUrl,
       addresses: desktop.addresses ?? [desktop.address],
@@ -303,20 +385,12 @@ export class DesktopLink {
       onAddresses: (address, addresses) => {
         if (this.current.phase !== 'linked' || this.current.session !== session) return
         const moved: SavedDesktop = { ...desktop, address, baseUrl: desktop.baseUrl.replace(/\/\/.*$/, `//${address}`), addresses }
-        this.current = { phase: 'linked', session, desktop: moved }
+        this.current = { ...this.current, desktop: moved }
         void this.deps.store.save(moved).catch(() => undefined)
         this.notify()
       },
     })
-    // 데스크탑에서 해제됐다(device.revoked·401) — 토큰은 죽었다. 지문이 바뀌었다 — 믿지 않는다. 둘 다 저장을 지우고 연결 화면으로
-    this.offSession = session.subscribe(() => {
-      const kind = session.getStatus().kind
-      if (kind !== 'revoked' && kind !== 'fingerprint-changed') return
-      this.detach()
-      this.set(kind === 'revoked' ? { phase: 'unpaired', revoked: true } : { phase: 'unpaired', fingerprintChanged: true })
-      void this.deps.store.clear().catch(() => undefined)
-    })
-    this.set({ phase: 'linked', session, desktop })
+    return session
   }
 
   private detach(): void {
@@ -333,4 +407,17 @@ export class DesktopLink {
   private notify(): void {
     for (const listener of this.listeners) listener()
   }
+}
+
+/** 라디오가 없는 곳(모듈이 없는 빌드·시험) — 키가 있어도 unsupported 로 멈춘다 */
+const unsupportedDriver: BleDriver = {
+  prepare: () => Promise.reject(new BluetoothError('unsupported', 'no bluetooth driver')),
+  scan: () => Promise.resolve(undefined),
+  connect: () => Promise.reject(new Error('unsupported')),
+  requestMtu: () => Promise.reject(new Error('unsupported')),
+  requestHighPriority: () => Promise.resolve(),
+  subscribe: () => Promise.reject(new Error('unsupported')),
+  write: () => Promise.reject(new Error('unsupported')),
+  onDisconnect: () => () => {},
+  disconnect: () => Promise.resolve(),
 }

@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Attention, AttentionAnswer, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
 import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
 import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
-import type { AppSession } from '../session.ts'
+import { BluetoothBadge, BluetoothInfo, CarrierSwitch, HistoryProgress } from '../BluetoothBits.tsx'
+import type { AppSession, Carrier } from '../session.ts'
 import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
@@ -14,7 +15,8 @@ import { attentionTitle, composerBottomMargin, outcomeLabel, questionView, runni
 // 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
 // 답은 글자 그대로 그린다 — 마크다운은 다음 라운드. 모드 칩·"작업 N" 은 모양만.
 // 명령(보내기·중지·되돌리기·답)은 전부 데스크탑으로 간다. 안 된 것은 입력창 위 안내 띠(notice)로 — 누르면 닫힌다.
-export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid: string; onBack(): void }) {
+// 블루투스로 붙어 있으면(시안 mock-ble ②): 머리에 "블루투스 · 느림" 배지, 그 아래 안내 한 줄, 대화를 받는 동안 받은 KB, 입력창 위 [Wi-Fi 로 바꾸기].
+export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSession; cid: string; onBack(): void; onCarrier(carrier: Carrier): void }) {
   const insets = useSafeAreaInsets()
   const keyboardVisible = useKeyboardVisible()
   const state = useRemoteState(session)
@@ -80,6 +82,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
             {[model?.displayName ?? conversation?.model?.modelId, project?.name].filter(Boolean).join(' · ')}
           </Text>
         </View>
+        <BluetoothBadge carrier={session.carrier} />
         {jobs > 0 && (
           <Pressable accessibilityRole="button" accessibilityLabel={S.runningJobs(jobs)} style={styles.jobs}>
             <View style={styles.jobsRing} />
@@ -87,6 +90,8 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
           </Pressable>
         )}
       </View>
+
+      <BluetoothInfo carrier={session.carrier} />
 
       <View style={styles.status}>
         <StatusBanner session={session} />
@@ -100,6 +105,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
         {view?.attention.map((request) => (
           <AttentionCard key={request.id} request={request} onAnswer={(answer) => session.reply(request, answer)} />
         ))}
+        <HistoryProgress session={session} loading={cid in state.loading} />
       </ScrollView>
 
       {view !== undefined && view.queue.length > 0 && (
@@ -118,6 +124,8 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
           <Text style={styles.noticeText}>{S.notice[notice]}</Text>
         </Pressable>
       )}
+
+      <CarrierSwitch carrier={session.carrier} onCarrier={onCarrier} />
 
       <View style={[styles.composer, { marginBottom: composerBottomMargin(insets.bottom, keyboardVisible) }]}>
         <TextInput

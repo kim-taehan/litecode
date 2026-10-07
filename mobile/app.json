@@ -12,6 +12,7 @@
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.USE_BIOMETRIC",
@@ -46,7 +47,8 @@
           "recordAudioAndroid": false
         }
       ],
-      "./plugins/withLoopbackCleartext.js"
+      "./plugins/withLoopbackCleartext.js",
+      "./plugins/withBluetoothCentral.js"
     ]
   }
 }
