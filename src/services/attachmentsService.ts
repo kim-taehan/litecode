@@ -4,7 +4,7 @@ import './chat.ts' // ctx.chat · 'chat/attachments-read' 선언
 import './sessions.ts' // 'sessions/removed' 선언
 import type { AttachmentKind, AttachmentPick } from '../../shared/contract.ts'
 import { tr } from '../i18n.ts'
-import { attachDropped, attachPasted, pickAttachments } from './attachments.ts'
+import { attachDropped, attachPasted, imagePreview, pickAttachments } from './attachments.ts'
 import { PastedImages } from './pastedImages.ts'
 
 // 첨부를 칩으로 만드는 곳 (ctx.attachments, 이슈 #97 — electron/main.ts 의 chatBridge 본문에 있던 것을 옮겼다. 동작은 같다).
@@ -45,6 +45,8 @@ export class AttachmentsService extends Service {
   private pasted: PastedImages
   /** 뜰 때의 폴더 비우기 — 붙여넣기는 이것이 끝난 뒤에 파일을 둔다 */
   private cleared: Promise<void>
+  /** 이 서비스가 이미지 칩으로 내준 경로 → 그 칩 수 (이슈 #214) — preview 는 이 안의 것만 읽는다. 칩을 빼거나 보내면 하나씩 준다 */
+  private images = new Map<string, number>()
 
   constructor(
     ctx: Context,
@@ -54,7 +56,10 @@ export class AttachmentsService extends Service {
     this.pasted = new PastedImages(opts.pastedDir)
     this.cleared = this.pasted.reset().catch((error: unknown) => console.error('[attachments] 붙여넣은 이미지 폴더 비우기 실패', (error as Error).message))
     ctx.effect(() => () => this.pasted.reset().catch(() => {}))
-    ctx.on('chat/attachments-read', (paths) => void this.pasted.discard(paths))
+    ctx.on('chat/attachments-read', (paths) => {
+      this.forget(paths)
+      void this.pasted.discard(paths)
+    })
     ctx.on('sessions/removed', (ids) => void this.pasted.discardOf(ids))
   }
 
@@ -69,6 +74,7 @@ export class AttachmentsService extends Service {
     if (!chosen) return { picked: [], rejected: [] }
     const result = await pickAttachments(image ? 'image' : 'file', chosen, Number(held) || 0)
     this.ctx.chat.allowAttachments(result.picked.map((item) => item.path))
+    this.remember(result.picked)
     return result
   }
 
@@ -93,6 +99,7 @@ export class AttachmentsService extends Service {
     const fromBytes = await attachPasted(this.pasted, String(conversationId), blobs, count, imageInput)
     const picked = [...dropped.picked, ...fromBytes.picked]
     this.ctx.chat.allowAttachments(picked.map((item) => item.path))
+    this.remember(picked)
     return { picked, rejected: [...new Set([...dropped.rejected, ...fromBytes.rejected])] }
   }
 
@@ -100,6 +107,26 @@ export class AttachmentsService extends Service {
   async discard(paths: unknown): Promise<void> {
     const files = Array.isArray(paths) ? paths.filter((file): file is string => typeof file === 'string') : []
     this.ctx.chat.revokeAttachments(files)
+    this.forget(files)
     await this.pasted.discard(files)
+  }
+
+  /** 이미지 칩의 썸네일·크게 보기 (이슈 #214) — 이 서비스가 이미지 칩으로 내준(아직 빼거나 보내지 않은) 경로만, 붙일 때와 같은 검사로 다시 읽어
+   *  data: 주소로. 그 밖은 undefined (화면이 오염돼도 아무 파일이나 읽어 가지 못하게) */
+  async preview(file: unknown): Promise<string | undefined> {
+    if (typeof file !== 'string' || !this.images.has(file)) return undefined
+    return imagePreview(file)
+  }
+
+  private remember(picked: readonly { kind: AttachmentKind; path: string }[]): void {
+    for (const item of picked) if (item.kind === 'image') this.images.set(item.path, (this.images.get(item.path) ?? 0) + 1)
+  }
+
+  private forget(paths: readonly string[]): void {
+    for (const file of paths) {
+      const left = (this.images.get(file) ?? 0) - 1
+      if (left > 0) this.images.set(file, left)
+      else this.images.delete(file)
+    }
   }
 }

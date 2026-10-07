@@ -320,6 +320,7 @@ function attachmentsBridge(ctx: Context): void {
     ctx.attachments.drop(conversationId, input, held, model),
   )
   handle(ctx, Channel.DISCARD_ATTACHMENTS, async (_event, paths: unknown) => ctx.attachments.discard(paths))
+  handle(ctx, Channel.ATTACHMENT_PREVIEW, async (_event, file: unknown) => ctx.attachments.preview(file))
 }
 attachmentsBridge.inject = ['attachments']
 mounted.push(ctx.plugin(AttachmentsService, { host: systemAttachmentsHost, pastedDir: path.join(userData, 'pasted-images') }))
@@ -459,6 +460,7 @@ const openInHost = openInTest ? recordingOpenInHost(openInTest) : systemOpenInHo
 function openInBridge(ctx: Context): void {
   handle(ctx, Channel.OPEN_IN_APPS, async () => ctx.openIn.apps())
   handle(ctx, Channel.OPEN_IN, async (_event, appId: string, directory: string) => ctx.openIn.open(appId, directory))
+  handle(ctx, Channel.OPEN_IN_FILE, async (_event, directory: string, token: string) => ctx.openIn.openFile(directory, token))
 }
 openInBridge.inject = ['openIn']
 

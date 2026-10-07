@@ -16,6 +16,8 @@ import {
 import { Tokens, useHighlight } from './Highlighted.tsx'
 import { languageOfPath } from './highlight.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
+import { useFeatures } from './featuresStore.ts'
+import { reason } from './ipcError.ts'
 import { lineJump } from './lineJump.ts'
 import { useT } from './settingsStore.ts'
 import './filePreview.css'
@@ -25,6 +27,7 @@ import './filePreview.css'
 // 맨 위 탭 줄(대화 머리와 같은 52px, 창 끌기 영역) — 고정 "파일" 탭 + 연 파일 탭(28px 칩, 고른 칩과 hover 에 ×) + "+"(파일 탭으로), 오른쪽 끝에
 // 전체 화면·닫기. 그 아래 38px 경로 줄 — 경로(폴더는 옅게, 파일 이름 굵게, 길면 앞이 잘리며 흐려짐)·종류·보기 전환·다시 읽기·Finder·복사.
 // 파일 탭 본문은 고정폭 줄 번호, .md 는 마크다운, .html 은 격리된 iframe 에서 실제로 렌더링(htmlPreview.ts). 읽기·판정은 메인.
+// 이미지(png·jpg·gif·webp·svg)는 <img>, PDF 는 안내 + 기본 앱에서 열기 (이슈 #214).
 // dsh 와 다른 점: 분할 보기(두 창)는 없다, "파일" 탭은 닫을 수 없다, "+" 는 안내 탭 대신 파일 탭으로.
 
 const WIDTH_KEY = 'litecode.filePreview.width'
@@ -398,6 +401,8 @@ function FileView({ directory, token, jump }: { directory: string; token: string
   const markdown = !!text && /\.(md|markdown)$/i.test(text.path)
   // 잘린 HTML(1MB 넘음)은 렌더링하지 않는다 — 반쪽 문서를 돌리지 않는다
   const html = !!text && /\.html?$/i.test(text.path) && !text.truncated
+  // svg (이슈 #214) — 기본은 이미지(<img>), 원문 보기로 글
+  const svgSource = preview !== 'loading' && preview.status === 'image' ? preview.source : undefined
   const copyLabel = copied ? t('filePreview.copied') : t('filePreview.copyPath')
 
   return (
@@ -406,9 +411,9 @@ function FileView({ directory, token, jump }: { directory: string; token: string
         <PathLabel path={file?.path ?? token} title={file?.absolute ?? token} />
         <span className="file-preview__tools">
           <span className="file-preview__kind">{kindOf(file?.path ?? token, t('filePreview.kindText'))}</span>
-          {(markdown || html) && (
+          {(markdown || html || svgSource !== undefined) && (
             <button type="button" className="file-preview__toggle" aria-pressed={source} onClick={() => setSource((now) => !now)}>
-              {source ? (html ? t('filePreview.showRenderedHtml') : t('filePreview.showRendered')) : t('filePreview.showSource')}
+              {source ? (markdown ? t('filePreview.showRendered') : t('filePreview.showRenderedHtml')) : t('filePreview.showSource')}
             </button>
           )}
           <ReloadButton onClick={() => setRevision((now) => now + 1)} />
@@ -456,6 +461,16 @@ function FileView({ directory, token, jump }: { directory: string; token: string
           </p>
         ) : preview.status === 'binary' ? (
           <p className="file-preview__empty">{t('filePreview.binary', { size: formatBytes(preview.size) })}</p>
+        ) : preview.status === 'tooLarge' ? (
+          <p className="file-preview__empty">{t('filePreview.imageTooLarge', { size: formatBytes(preview.size), max: formatBytes(preview.limit) })}</p>
+        ) : preview.status === 'pdf' ? (
+          <PdfNotice directory={directory} token={token} size={preview.size} />
+        ) : preview.status === 'image' ? (
+          svgSource !== undefined && source ? (
+            <CodeLines text={svgSource} path={preview.path} jump={jump} />
+          ) : (
+            <ImagePreviewBody src={preview.dataUrl} path={preview.path} />
+          )
         ) : html && !source ? (
           <HtmlFrame key={revision} directory={directory} token={token} html={preview.text} />
         ) : markdown && !source ? (
@@ -488,6 +503,42 @@ function HtmlFrame({ directory, token, html }: { directory: string; token: strin
   }, [directory, token, html])
   if (doc === undefined) return <p className="file-preview__empty">{t('filePreview.loading')}</p>
   return <iframe className="file-preview__frame" sandbox="allow-scripts" srcDoc={doc} title={t('filePreview.frame')} referrerPolicy="no-referrer" />
+}
+
+/** 이미지 (이슈 #214, dsh ui-sidebar-documentpreview ImageBody 참조) — 메인이 준 data: 주소를 <img> 하나로, 패널 폭에 맞춰 줄인다(늘리지 않는다).
+ *  svg 도 <img> 로만 — 이미지로 그려진 svg 는 스크립트·외부 리소스가 돌지 않는다 */
+export function ImagePreviewBody({ src, path }: { src: string; path: string }) {
+  return (
+    <div className="file-preview__image">
+      <img src={src} alt={path} draggable={false} referrerPolicy="no-referrer" />
+    </div>
+  )
+}
+
+/** PDF (이슈 #214) — 패널 안에서는 그리지 않는다: 앱 창이 Chromium 내장 PDF 뷰어(plugins)를 켜지 않았고, 미리보기 하위 프레임은 이동·권한이
+ *  막혀 있다(main.ts will-frame-navigate, resilience.ts allowPermission). 대신 "다른 앱에서 열기" 기능(ctx.openIn)이 켜졌으면 OS 기본 앱으로 */
+export function PdfNotice({ directory, token, size }: { directory: string; token: string; size: number }) {
+  const t = useT()
+  const canOpen = useFeatures().has('openIn')
+  const [error, setError] = useState<string>()
+  return (
+    <div className="file-preview__empty file-preview__pdf">
+      <span>{t('filePreview.pdfNotice', { size: formatBytes(size) })}</span>
+      {canOpen && (
+        <button
+          type="button"
+          className="file-preview__toggle"
+          onClick={() => {
+            setError(undefined)
+            window.litecode.openFileIn(directory, token).catch((failure: unknown) => setError(reason(failure)))
+          }}
+        >
+          {t('filePreview.pdfOpen')}
+        </button>
+      )}
+      {error && <span role="alert">{error}</span>}
+    </div>
+  )
 }
 
 /** 경로 — 폴더는 옅게, 마지막 이름은 굵게. 넘치면 앞(왼쪽)이 잘리고 흐려진다 — 파일 이름이 끝까지 보이게 (dsh PathLabel) */

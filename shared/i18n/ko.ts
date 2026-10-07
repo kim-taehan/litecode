@@ -69,6 +69,8 @@ export const ko = {
   'openIn.unknownApp': '열 수 없는 앱입니다',
   'openIn.notProject': '목록에 있는 프로젝트 폴더만 열 수 있습니다',
   'openIn.failed': '{app}에서 열지 못했습니다: {message}',
+  'openIn.notPdf': '프로젝트 안의 PDF 파일만 열 수 있습니다',
+  'openIn.fileFailed': '{name} 을(를) 열지 못했습니다: {message}',
   'main.tabTrajectory': '추론 과정',
   // 대화 — 답 모양·진행 줄·미니맵, 마크다운, `!명령` 카드
   'chat.loading': '불러오는 중…',
@@ -165,6 +167,9 @@ export const ko = {
   'filePreview.loading': '불러오는 중…',
   'filePreview.unavailable': '미리볼 수 없는 파일입니다 — 프로젝트 밖이거나 없는 파일입니다',
   'filePreview.binary': '이진 파일이라 미리볼 수 없습니다 ({size})',
+  'filePreview.imageTooLarge': '이미지가 너무 커서 미리보지 않습니다 ({size}, 상한 {max})',
+  'filePreview.pdfNotice': 'PDF 는 이 패널에서 미리보지 않습니다 ({size})',
+  'filePreview.pdfOpen': '기본 앱에서 열기',
   'filePreview.truncated': '앞 {shown}만 보입니다 (전체 {size})',
   'filePreview.openPanel': '오른쪽 패널 열기',
   'filePreview.hidePanel': '오른쪽 패널 숨기기',
@@ -238,6 +243,8 @@ export const ko = {
   // 첨부 칩 (이슈 #44) — attach.* 의 사유는 메인이 만든다
   'attach.list': '붙인 파일·이미지',
   'attach.remove': '{name} 빼기',
+  'attach.view': '{name} 크게 보기',
+  'attach.viewer': '이미지 {name}',
   'attach.imageFilter': '이미지',
   'attach.notImage': '{name}: PNG·JPEG 이미지만 붙일 수 있습니다',
   'attach.notText': '{name}: 글자 파일만 붙일 수 있습니다',

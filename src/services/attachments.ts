@@ -88,6 +88,12 @@ async function inspect(kind: AttachmentKind, file: string): Promise<{ item: Pick
   }
 }
 
+/** 이미지 칩의 썸네일·크게 보기 (이슈 #214) — 붙일 때와 같은 검사(크기·매직 바이트·픽셀)를 지난 png·jpeg 를 data: 주소로. 못 지나면 undefined */
+export async function imagePreview(file: string): Promise<string | undefined> {
+  const result = await inspect('image', file)
+  return 'error' in result ? undefined : `data:${imageMime(result.data)};base64,${result.data.toString('base64')}`
+}
+
 /** OS 파일 고르기가 준 경로들 → 칩. held 는 그 메시지에 이미 붙은 같은 종류의 수 — 합쳐 상한을 넘는 것은 칩을 만들지 않는다 */
 export async function pickAttachments(kind: AttachmentKind, files: readonly string[], held: number): Promise<AttachmentPick> {
   const max = kind === 'image' ? ATTACHMENT_LIMITS.images : ATTACHMENT_LIMITS.files
