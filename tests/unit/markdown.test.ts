@@ -98,6 +98,67 @@ describe('Markdown', () => {
   it('빈 답은 빈 껍데기', () => {
     expect(html('')).toBe('<div class="md"></div>')
   })
+
+  it('스트리밍 중(streaming)에도 같은 글이면 같은 요소다 (이슈 #175)', () => {
+    const text = '## 요약\n\n- 하나\n- 둘\n\n| a | b |\n|--|--|\n| 1 | 2 |\n\n```ts\nconst a = 1\n'
+    expect(renderToStaticMarkup(createElement(Markdown, { text, streaming: true }))).toBe(html(text))
+  })
+
+  it('IntersectionObserver 가 있으면 코드 블록은 화면에 들어오기 전엔 색 없이 그린다 (이슈 #175)', () => {
+    vi.stubGlobal('IntersectionObserver', class {})
+    try {
+      expect(html('```ts\nconst a = 1\n```')).toContain('<pre><code>const a = 1</code></pre>')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(html('```ts\nconst a = 1\n```')).toContain('<span class="hljs-keyword">const</span>')
+  })
+})
+
+describe('viewport.once — 화면에 처음 들어올 때 한 번 (이슈 #175)', () => {
+  it('들어온 요소만 한 번 알리고, 지켜볼 것이 없으면 관찰자를 끊는다', async () => {
+    const { viewport } = await import('../../renderer/Highlighted.tsx')
+    const made: { callback: (entries: { target: object; isIntersecting: boolean }[]) => void; watched: Set<object>; disconnected: boolean }[] = []
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        state
+        constructor(callback: (entries: { target: object; isIntersecting: boolean }[]) => void) {
+          this.state = { callback, watched: new Set<object>(), disconnected: false }
+          made.push(this.state)
+        }
+        observe(target: object) {
+          this.state.watched.add(target)
+        }
+        unobserve(target: object) {
+          this.state.watched.delete(target)
+        }
+        disconnect() {
+          this.state.disconnected = true
+        }
+      },
+    )
+    try {
+      const a = {} as Element
+      const b = {} as Element
+      const seen: string[] = []
+      viewport.once(a, () => seen.push('a'))
+      const stopB = viewport.once(b, () => seen.push('b'))
+      expect(made).toHaveLength(1) // 요소마다가 아니라 관찰자 하나
+      made[0]!.callback([{ target: a, isIntersecting: false }])
+      expect(seen).toEqual([])
+      made[0]!.callback([{ target: a, isIntersecting: true }])
+      made[0]!.callback([{ target: a, isIntersecting: true }])
+      expect(seen).toEqual(['a'])
+      expect(made[0]!.watched.has(a)).toBe(false)
+      stopB() // 화면에 들어오기 전에 사라진 블록
+      expect(made[0]!.disconnected).toBe(true)
+      made[0]!.callback([{ target: b, isIntersecting: true }])
+      expect(seen).toEqual(['a'])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
 
 describe('isWebUrl', () => {
