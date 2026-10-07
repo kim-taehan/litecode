@@ -4,6 +4,7 @@ import { Markdown } from './Markdown.tsx'
 import { PlusDialog, PlusGroup } from './PlusDialog.tsx'
 import { byScope } from './plusView.ts'
 import { SkillBadge } from './SkillBadge.tsx'
+import { PROJECT_SKILLS_DIR } from '../shared/skills.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 import { reason } from './ipcError.ts'
 
@@ -46,7 +47,7 @@ export function SkillsPopup({ project, onClose }: { project: Project; onClose():
   const group = (scope: SkillScope) => (
     <PlusGroup
       label={t(`plus.scope.${scope}`)}
-      hint={scope === 'project' ? <span className="plus-group__path">{`${project.path.split(/[\\/]/).pop()}/.opencode/skills`}</span> : t('skills.scope.all.hint')}
+      hint={scope === 'project' ? <span className="plus-group__path">{`${project.path.split(/[\\/]/).pop()}/${PROJECT_SKILLS_DIR}`}</span> : t('skills.scope.all.hint')}
       action={
         <button type="button" className="plus-group__action" onClick={() => openFolder(scope)}>
           {t('skills.openFolder')}

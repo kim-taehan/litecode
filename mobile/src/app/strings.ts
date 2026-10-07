@@ -40,6 +40,7 @@ export const S = {
   },
   notice: {
     'desktop-only': '이 대화는 전체 권한 모드라 데스크탑에서만 보낼 수 있습니다.',
+    'answer-desktop-only': '이 대화는 전체 권한 모드라 데스크탑에서만 답할 수 있습니다.',
     'send-failed': '보내지 못했습니다. 연결을 확인하고 다시 보내 주세요.',
     elsewhere: '다른 기기에서 이미 답했습니다.',
     failed: '요청을 처리하지 못했습니다. 연결을 확인해 주세요.',

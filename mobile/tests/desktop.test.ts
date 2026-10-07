@@ -204,8 +204,8 @@ describe('모바일 클라이언트 코어 ↔ ctx.remote', () => {
 })
 
 describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
-  it('폰 화면의 확인 코드가 데스크탑 [허용] 창의 것과 같다 → 허용 → 붙어서 목록을 받고, 전체 권한 대화에는 못 보낸다', async () => {
-    const { ctx, remote, save, base } = await start()
+  it('폰 화면의 확인 코드가 데스크탑 [허용] 창의 것과 같다 → 허용 → 붙어서 목록을 받고, 전체 권한 대화에는 못 보내고 승인도 못 한다', async () => {
+    const { ctx, remote, save, base, turn, llm } = await start()
     await save('c_old', { updatedAt: 1000 })
     await save('c_full', { updatedAt: 2000, mode: 'full' })
     let saved: SavedDesktop | undefined
@@ -238,6 +238,17 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
 
     expect(await session.send('c_full', '폰에서')).toBe(false)
     expect(session.getNotice()).toBe('desktop-only')
+
+    // 전체 권한 대화의 승인 카드는 데스크탑에서만 (#186 B2) — 폰이 답하면 안내가 서고 엔진에 가지 않는다
+    await ctx.chat.send('c_full', { text: '데스크탑에서' })
+    const running = await turn(1)
+    const asked = { kind: 'permission', id: 'per_1', sessionId: running.sessionId, action: 'litecode_create', resources: ['*'] } as Attention
+    running.attention([asked])
+    await until(() => ((ctx.chat.snapshot().c_full as { turn?: { attention: unknown[] } } | undefined)?.turn?.attention.length ?? 0) > 0, '승인 카드')
+    session.reply(asked, 'once')
+    await until(() => session.getNotice() === 'answer-desktop-only', 'answer-desktop-only')
+    expect(llm.replies).toEqual([])
+    running.finish()
 
     // 데스크탑에서 해제 → 저장이 지워지고 연결 화면으로
     await remote.revoke(saved!.deviceId)

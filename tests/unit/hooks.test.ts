@@ -8,7 +8,7 @@ import { HooksService } from '../../src/services/hooks.ts'
 import { entriesFor, gateMatchers, parseHooks, parseProjects, serializeHooks, serializeProjects } from '../../src/services/hooks/config.ts'
 import { decodeHook, hookEnv, hookSpawn, hookStdin, runHook, type HookInput } from '../../src/services/hooks/run.ts'
 import { SessionsService } from '../../src/services/sessions.ts'
-import type { ChatResult, ToolDone } from '../../src/services/llm.ts'
+import type { ChatOptions, ChatResult, ToolDone } from '../../src/services/llm.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { hookKey, hookTimeout, matchesTool, STOP_CHAIN_MAX, stopFeedback, type HookDef } from '../../shared/hooks.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
@@ -257,8 +257,7 @@ class FakeLlm extends Service {
   newMessageId(): string {
     return `msg_${++this.ids}`
   }
-  async chat(...args: unknown[]): Promise<ChatResult> {
-    const [, , , prompt, sessionId, onSession, , onProgress, , , stop, , context] = args as [string, string, string, string, string | undefined, ((id: string) => Promise<void>) | undefined, string, ((item: TurnItem) => void) | undefined, string, unknown, AbortSignal | undefined, unknown, string | undefined]
+  async chat({ prompt, sessionId, onSession, onProgress, stop, context }: ChatOptions): Promise<ChatResult> {
     const id = sessionId ?? `ses_${this.calls.length + 1}`
     if (!sessionId) await onSession?.(id)
     return new Promise<ChatResult>((resolve) => {

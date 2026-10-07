@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import type { EngineMcp } from './engine.ts'
-import { hiddenEnvNames } from './engine.ts'
+import type { EngineMcp } from './engineConfig.ts'
+import { hiddenEnvNames } from './engineConfig.ts'
 import { tr } from '../i18n.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
 import { estimateToolTokens } from '../../shared/mcpTools.ts'
@@ -61,7 +61,18 @@ function listLocal(def: Extract<EngineMcp, { type: 'local' }>, cwd: string, base
   return new Promise<McpTool[]>((resolve, reject) => {
     const [command, ...args] = def.command
     if (!command) return reject(new Error(tr('mcp.error.noCommand')))
-    const child = spawn(command, args, { cwd, env: mcpChildEnv(base, def.environment), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    // 프로세스 그룹으로 띄운다 — `npx` 처럼 감싼 서버는 감싼 쪽만 끄면 진짜 서버(손자)가 남는다 (이슈 #178). Windows 는 그룹이 없어 taskkill /T
+    // (exec.ts 와 같은 규칙. Windows 쪽 실제 실행은 미검증)
+    const child = spawn(command, args, { cwd, env: mcpChildEnv(base, def.environment), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' })
+    const signal = (name: NodeJS.Signals): void => {
+      try {
+        if (child.pid && process.platform !== 'win32') process.kill(-child.pid, name)
+        else if (child.pid && process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => child.kill())
+        else child.kill(name)
+      } catch {
+        // 이미 끝났다 (그룹에 남은 프로세스가 없다)
+      }
+    }
     // 조각 경계에 걸린 여러 바이트 글자가 깨지지 않게 스트림마다 디코더를 둔다. stderr 는 끝을 남긴다 — 사유는 마지막 줄이다
     const stderr = keepTail(4_000)
     const stderrText = streamText()
@@ -75,8 +86,9 @@ function listLocal(def: Extract<EngineMcp, { type: 'local' }>, cwd: string, base
       settled = true
       clearTimeout(timer)
       child.stdin?.end()
-      child.kill('SIGTERM')
-      setTimeout(() => child.exitCode === null && child.signalCode === null && child.kill('SIGKILL'), 2_000).unref()
+      // 감싼 쪽이 이미 끝났어도 그룹에는 손자가 남아 있을 수 있다 — 그래서 끝남 여부와 상관없이 그룹에 보낸다
+      signal('SIGTERM')
+      if (process.platform !== 'win32') setTimeout(() => signal('SIGKILL'), 2_000).unref()
       if (error) reject(error)
       else resolve(tools)
     }

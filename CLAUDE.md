@@ -49,6 +49,8 @@ Electron 렌더러 (React)          Electron 메인 프로세스
   키로 찾아 쓴다. `inject` 로 의존성을 선언하면 그 서비스가 뜰 때까지 자동으로 기다린다 —
   순서를 사람이 직접 안 짜도 된다.
 
+서비스 목록·의존·이벤트·기능 묶음·새 서비스 더하는 순서는 **`docs/cordis-services.md`**.
+
 ### 아키텍처 함정 (실측으로 잡은 것)
 
 1. **`ctx.providers` 를 `ctx.plugin(ProviderRegistry)` 바로 다음 줄에서 쓰면 안 된다.**

@@ -17,10 +17,10 @@ export interface DesktopInfo {
 
 /**
  * 대화 화면에 잠깐 보일 안내.
- * desktop-only: 전체 권한 모드 대화라 폰에서 못 보낸다 · send-failed: 보내지 못했다 · elsewhere: 승인·질문을 다른 기기가 먼저 답했다 ·
+ * desktop-only: 전체 권한 모드 대화라 폰에서 못 보낸다 · answer-desktop-only: 전체 권한 모드 대화의 승인·질문은 폰에서 못 답한다 · send-failed: 보내지 못했다 · elsewhere: 승인·질문을 다른 기기가 먼저 답했다 ·
  * failed: 그 밖의 명령(중지·되돌리기·새 대화)이 실패했다
  */
-export type SessionNotice = 'desktop-only' | 'send-failed' | 'elsewhere' | 'failed'
+export type SessionNotice = 'desktop-only' | 'answer-desktop-only' | 'send-failed' | 'elsewhere' | 'failed'
 
 export interface AppSession {
   getState(): RemoteState

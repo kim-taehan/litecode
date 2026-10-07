@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis'
-import { realDirectory } from './llm.ts'
+import { realDirectory } from './projectPath.ts'
 import { execShell, type ExecHandle } from './exec.ts'
 import { keepEnds } from './outputBuffer.ts'
 import { tr } from '../i18n.ts'

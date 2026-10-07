@@ -1,7 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { readJsonFile } from '../jsonFile.ts'
+import { readJsonFile, unreadableFileError, writeJsonFile } from '../jsonFile.ts'
 
 // 짝지은 기기 (userData/remote-devices.json) — 토큰은 **해시(SHA-256)만** 둔다. 파일이 새도 토큰을 되살릴 수 없다.
 // 데스크탑 id(폰이 "어느 PC 인가" 를 가리는 값 — 비밀이 아니다)도 같은 파일에 있다. 옛 파일의 `enabled`(설정 > 모바일의 스위치, #124 로 없어졌다)는
@@ -37,24 +35,30 @@ export class DeviceStore {
   private stored: Stored = { version: 1, desktopId: randomBytes(8).toString('hex'), devices: [] }
   private queue: Promise<unknown> = Promise.resolve()
   private seenWritten = new Map<string, number>()
+  /** 파일을 못 읽었다(권한 등 — 없는 것·깨진 것과 다르다). 이 실행에서는 그 파일에 쓰지 않는다 — 빈 목록으로 덮으면 짝지은 기기가 전부 사라진다 (이슈 #195) */
+  unreadable?: Error
 
   constructor(
     private file: string,
     private now: () => number = Date.now,
   ) {}
 
-  /** 파일이 없거나 손상됐으면 빈 목록 — 앱 시작을 막지 않는다 (기기는 다시 짝지으면 된다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts) */
+  /** 파일이 없거나 손상됐으면 빈 목록 — 앱 시작을 막지 않는다 (기기는 다시 짝지으면 된다). 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts).
+   *  읽기 자체가 실패하면(권한 등) 빈 목록으로 뜨되 unreadable 을 세우고 쓰지 않는다 — ctx.remote 는 그동안 폰에 503 을 준다(401 이면 폰이 해제된 줄 안다) */
   async load(): Promise<void> {
+    let parsed: Partial<Stored> | undefined
     try {
-      const parsed = (await readJsonFile(this.file, 'object')) as Partial<Stored> | undefined
-      if (!parsed) return // 처음이다 (또는 방금 옮겼다)
-      this.stored = {
-        version: 1,
-        desktopId: typeof parsed?.desktopId === 'string' && parsed.desktopId ? parsed.desktopId : this.stored.desktopId,
-        devices: Array.isArray(parsed?.devices) ? parsed.devices.filter(isDevice) : [],
-      }
-    } catch {
-      // 처음이거나 못 읽는 파일
+      parsed = (await readJsonFile(this.file, 'object')) as Partial<Stored> | undefined
+    } catch (error) {
+      this.unreadable = unreadableFileError(this.file, error)
+      console.warn(`[remote] ${this.unreadable.message}`)
+      return
+    }
+    if (!parsed) return // 처음이다 (또는 방금 옮겼다)
+    this.stored = {
+      version: 1,
+      desktopId: typeof parsed?.desktopId === 'string' && parsed.desktopId ? parsed.desktopId : this.stored.desktopId,
+      devices: Array.isArray(parsed?.devices) ? parsed.devices.filter(isDevice) : [],
     }
   }
 
@@ -68,6 +72,7 @@ export class DeviceStore {
 
   /** 새 기기 — 256bit 토큰을 만들어 해시만 저장하고, 토큰은 이 한 번만 돌려준다 */
   async add(name: string, platform: DevicePlatform): Promise<{ device: StoredDevice; token: string }> {
+    if (this.unreadable) throw this.unreadable
     const token = randomBytes(32).toString('base64url')
     const device: StoredDevice = { id: `dev_${randomBytes(8).toString('hex')}`, name, platform, tokenHash: hashToken(token), pairedAt: this.now() }
     this.stored = { ...this.stored, devices: [...this.stored.devices, device] }
@@ -106,11 +111,9 @@ export class DeviceStore {
   }
 
   private write(): Promise<void> {
+    if (this.unreadable) return Promise.reject(this.unreadable)
     const next = this.queue.then(async () => {
-      await fs.mkdir(path.dirname(this.file), { recursive: true })
-      const temp = `${this.file}.${process.pid}.tmp`
-      await fs.writeFile(temp, JSON.stringify(this.stored), { mode: 0o600 })
-      await fs.rename(temp, this.file) // 쓰다 죽어도 이전 파일이 남게
+      await writeJsonFile(this.file, this.stored, { mode: 0o600 }) // 쓰다 죽어도 이전 파일이 남게
     })
     this.queue = next.catch(() => {}) // 한 번 실패해도 다음 쓰기는 돈다
     return next

@@ -1,16 +1,19 @@
 import { Context, Service } from 'cordis'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import './chat.ts'
 import './sessions.ts'
 import './projects.ts'
 import './providers.ts'
+import type { KeyCipher } from './providers.ts'
 import './settings.ts'
 import './notifications.ts'
 import { tr } from '../i18n.ts'
+import { sameSecret } from './httpUtil.ts'
 import type { RemoteCarrier, RemoteExchange, RemoteOutcome, RemotePeer, RemoteReply, RemoteRequest, RemoteStreamSink } from './remote/carrier.ts'
 import { DeviceStore, FailureLimiter, type DevicePlatform, type StoredDevice } from './remote/devices.ts'
 import { EventLog } from './remote/eventLog.ts'
+import { loadNoiseIdentity, type NoiseIdentity } from './remote/noiseIdentity.ts'
 import { StreamQueue } from './remote/streamQueue.ts'
 import { confirmCode, groupCode, newPairCode, newShortPairCode, normalizePairCode } from './remote/pairing.ts'
 import { fingerprintCode } from '../../shared/remotePairing.ts'
@@ -90,6 +93,10 @@ export interface RemoteServiceOptions {
   /** 데스크탑 [허용] 을 기다리는 시간 */
   pairWaitMs?: number
   now?: () => number
+  /** 블루투스 Noise 정적 키 파일 (앱에서는 userData/remote-noise-key.json, 이슈 #171) — noiseIdentity() 가 처음 불릴 때 만든다 */
+  noiseKeyFile?: string
+  /** noiseKeyFile 의 비밀키를 봉하는 수단 (safeStorage) */
+  cipher?: KeyCipher
 }
 
 /** 데스크탑 [허용] 을 기다리는 짝짓기 요청 */
@@ -186,6 +193,7 @@ export class RemoteService extends Service {
   private disposed = false
   /** 이 실행에서 마지막으로 알린 주소 목록 (쉼표로 이음) — 바뀌면 addresses.changed */
   private announced?: string
+  private noise?: Promise<NoiseIdentity>
 
   constructor(
     ctx: Context,
@@ -218,6 +226,11 @@ export class RemoteService extends Service {
     })
     ctx.on('chat/queue-changed', ({ cid, items }) => this.emitEvent('queue.changed', { cid, items }))
     ctx.on('chat/conversations-changed', ({ project }) => this.emitEvent('conversations.changed', { project }))
+    // 전체 권한은 폰에 열지 않는다 — 보낼 때(POST …/messages) 한 번 본 것으로는 대기열에 쌓인 사이 데스크탑이 full 로 바꾼 것을 못 막는다 (#186 B1).
+    // 엔진에 넘기기 직전에 한 번 더 본다: 막힌 폰 글은 훅이 막은 글과 같이 대기열 맨 앞에 붙잡히고(폰이 되돌리기로 가져간다) 그 턴은 사유와 함께 실패로 끝난다
+    ctx.on('chat/before-send', (send) => {
+      if (send.mode === 'full' && send.origin.startsWith('device:')) send.blocked = tr('remote.fullAccessBlocked')
+    })
     // 알림 기능이 꺼져 있으면 이 이벤트는 오지 않는다 (없어도 동작한다 — 진행 중·답 필요는 위 ctx.chat 이벤트로 나간다)
     ctx.on('notifications/changed', (state) => this.emitNotices(state))
 
@@ -251,7 +264,8 @@ export class RemoteService extends Service {
     const code = this.activeCode()
     const connected = new Set([...this.streams].map((stream) => stream.deviceId))
     const carriers = [...this.carriers].map((carrier) => carrier.status())
-    const error = carriers.find((carrier) => carrier.error)?.error
+    const unreadable = this.store.unreadable as NodeJS.ErrnoException | undefined
+    const error = carriers.find((carrier) => carrier.error)?.error ?? (unreadable && { code: unreadable.code, message: unreadable.message })
     const fingerprint = this.fingerprint()
     const attempts = carriers.flatMap((carrier) => (carrier.lastAttemptAt === undefined ? [] : [carrier.lastAttemptAt]))
     const uri = code && this.pairUri(code)
@@ -286,6 +300,17 @@ export class RemoteService extends Service {
   /** 운반의 상태가 바뀌었다 (다시 바인딩한 주소·수신 시도) — 운반이 부른다. 주소가 바뀌었으면 폰에 `addresses.changed` 를 보낸다 */
   carrierChanged(): void {
     if (!this.disposed) this.changed()
+  }
+
+  /** 블루투스 Noise 채널의 데스크탑 정적 키쌍 (이슈 #171) — 처음 부를 때 읽거나 만든다. 블루투스 운반(③)이 쓰고 QR 의 bk 에 공개키를 싣는다.
+   *  봉한 키를 못 풀면 거절하고(키 파일은 그대로) 다음 호출에 다시 시도한다 */
+  noiseIdentity(): Promise<NoiseIdentity> {
+    if (!this.opts.noiseKeyFile) return Promise.reject(new Error('no bluetooth key file'))
+    this.noise ??= loadNoiseIdentity(this.opts.noiseKeyFile, this.opts.cipher).catch((error: unknown) => {
+      this.noise = undefined
+      throw error
+    })
+    return this.noise
   }
 
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용). 앞 코드는 버린다 */
@@ -432,6 +457,8 @@ export class RemoteService extends Service {
       return { status: 400, body: { error: 'malformed request' } }
     }
 
+    // 기기 목록 파일을 못 읽었다 — 누가 짝지은 기기인지 모른다. 401 이면 폰이 해제된 줄 알고 다시 붙지 않는다 → 503(잠시 못 씀)으로 답하고 짝짓기도 받지 않는다 (이슈 #195)
+    if (this.store.unreadable) return { status: 503, body: { error: 'the device list cannot be read on the desktop' } }
     if (request.method === 'POST' && request.path === remotePath.pair) return this.pair(body, exchange.signal, peer.fingerprint)
 
     const device = this.store.authenticate(request.headers.authorization)
@@ -469,7 +496,7 @@ export class RemoteService extends Service {
     if (!active) return { status: 403, body: { error: 'no pairing in progress', reason: 'no-code' } satisfies PairRejected }
     // 긴 코드(QR)든 짧은 코드(직접 입력)든 — 둘은 한 세션이다
     const given = normalizePairCode(input.code)
-    if (!sameText(given, active.code) && !sameText(given, active.shortCode)) {
+    if (!sameSecret(given, active.code) && !sameSecret(given, active.shortCode)) {
       if (++active.failures >= PAIR_MAX_FAILURES) this.code = undefined // 3회째 — 세션을 버린다(긴 코드·짧은 코드 모두). 새로 [기기 연결] 을 눌러야 한다
       this.changed()
       return { status: 403, body: { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected }
@@ -651,6 +678,11 @@ export class RemoteService extends Service {
         Object.values(this.ctx.chat.snapshot()).some((live) => live.turn?.attention.some((request) => request.sessionId === sessionId && request.id === requestId))
       const elsewhere: Reply = [200, { handled: 'elsewhere' } satisfies AttentionReplyResponse]
       if (!waiting()) return elsewhere
+      // 전체 권한 대화의 승인은 데스크탑에서만 (#186 B2) — full 에서도 묻는 도구(litecode_create 등)를 폰이 허용하지 못하게.
+      // 그 턴이 full 로 시작했거나(내 말의 mode) 대화가 지금 full 이면 막는다
+      const [cid, live] = Object.entries(this.ctx.chat.snapshot()).find(([, entry]) => entry.turn?.attention.some((request) => request.sessionId === sessionId && request.id === requestId))!
+      const conversation = (await this.ctx.sessions.list()).find((entry) => entry.id === cid)
+      if (live.turn?.message.mode === 'full' || conversation?.mode === 'full') return [403, { error: 'conversations in full access mode are desktop-only' }]
       try {
         await this.ctx.chat.reply(sessionId, requestId, answer)
         return [200, { handled: 'ok' } satisfies AttentionReplyResponse]
@@ -682,7 +714,7 @@ export class RemoteService extends Service {
   }
 
   private async registered(project: string): Promise<boolean> {
-    return (await this.ctx.projects.list()).some((entry) => entry.path === project)
+    return this.ctx.projects.has(project)
   }
 
   /** 폰이 닿을 수 있는 대화 — 등록된 프로젝트의 저장된 대화, 또는 폰이 만든 새 대화 */
@@ -731,12 +763,6 @@ function toRemote({ id, project, engineSessionId, title, updatedAt, model, mode 
 
 function isAnswer(value: unknown): value is AttentionAnswer {
   return value === 'once' || value === 'reject' || (Array.isArray(value) && value.every((entry) => Array.isArray(entry) && entry.every((label) => typeof label === 'string')))
-}
-
-function sameText(given: string, expected: string): boolean {
-  const a = Buffer.from(given)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
 }
 
 function frame(event: string, data: unknown, id?: number): string {

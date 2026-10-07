@@ -2,7 +2,7 @@ import { Context, Service } from 'cordis'
 import fs from 'node:fs'
 import { isLanguage, type Language } from '../../shared/i18n/index.ts'
 import { setMainLanguage, tr } from '../i18n.ts'
-import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
+import { readJsonFileSync, unreadableFileError, writeJsonFileSync } from './jsonFile.ts'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../shared/fontSize.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import { isFeatureSwitches, type FeatureSwitches } from '../../shared/features.ts'
@@ -72,6 +72,8 @@ const KEYS = Object.keys(valid) as (keyof Settings)[]
 
 export class SettingsService extends Service {
   private current: Settings
+  /** 파일을 못 읽었다(권한 등 — 없는 것과 다르다). 기본값으로 뜨되 바꾸기를 거절한다 — 덮으면 사용자가 고친 설정이 사라진다 (이슈 #195) */
+  private unreadable?: Error
 
   constructor(
     ctx: Context,
@@ -79,7 +81,14 @@ export class SettingsService extends Service {
   ) {
     super(ctx, 'settings')
     const base = { ...DEFAULTS, ...opts.defaults }
-    const stored = (opts.file && readJson(opts.file)) || {}
+    let stored: Record<string, unknown> = {}
+    try {
+      stored = (opts.file && readJson(opts.file)) || {}
+    } catch (error) {
+      // 생성자에서 던지면 서비스가 영영 안 뜬다 (CLAUDE.md 함정 4) — 기본값으로
+      this.unreadable = unreadableFileError(opts.file!, error)
+      console.warn(`[settings] ${this.unreadable.message}`)
+    }
     this.current = Object.fromEntries(KEYS.map((key) => [key, valid[key](stored[key]) ? stored[key] : base[key]])) as unknown as Settings
     setMainLanguage(this.current.language)
   }
@@ -90,6 +99,7 @@ export class SettingsService extends Service {
 
   /** 바꿀 값만. 하나라도 잘못이면 아무것도 안 바꾸고 던진다 */
   set(patch: Partial<Settings>): Settings {
+    if (this.unreadable) throw this.unreadable
     for (const key of Object.keys(patch) as (keyof Settings)[]) {
       if (!(key in valid) || !valid[key](patch[key])) throw new Error(tr('error.settingInvalid', { name: key }))
     }
@@ -109,7 +119,7 @@ export class SettingsService extends Service {
   }
 }
 
-/** 없으면 undefined. 손상됐으면 옆에 옮겨 두고 undefined (jsonFile.ts) */
+/** 없으면 undefined. 손상됐으면 옆에 옮겨 두고 undefined. 못 읽으면(권한 등) 던진다 (jsonFile.ts) */
 function readJson(file: string): Record<string, unknown> | undefined {
   return readJsonFileSync(file, 'object') as Record<string, unknown> | undefined
 }

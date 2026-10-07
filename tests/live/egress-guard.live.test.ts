@@ -120,7 +120,7 @@ afterAll(async () => {
 
 describe('엔진 기본값 — 사용자 설정이 켜 둔 것이 있어도 밖으로 안 나간다 (#19)', () => {
   it('신규 세대 한 턴이 우리 provider 로 되고, Claude Code 자료가 실리지 않는다', async () => {
-    expect(await services.llm.chat('egress', 'echo', work, '신규 세대 턴')).toMatchObject({ ok: true, text: 'echo: 신규 세대 턴' })
+    expect(await services.llm.chat({ providerId: 'egress', modelId: 'echo', directory: work, prompt: '신규 세대 턴' })).toMatchObject({ ok: true, text: 'echo: 신규 세대 턴' })
     const sent = (await fakeLlm()).lastChatText
     for (const marker of MARKERS) expect(sent, marker).not.toContain(marker)
   })

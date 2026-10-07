@@ -123,11 +123,12 @@ function viewOf(snapshot: ConversationSnapshot): ConversationView {
   }
 }
 
-/** 쥔 seq 가 무효가 됐다 — 새 실행의 seq 로 맞추고 다시 받으라고 적는다. 열린 대화는 다시 받을 때까지 낡은 모습 그대로 보인다 */
+/** 쥔 seq 가 무효가 됐다 — 새 실행의 seq 로 맞추고 다시 받으라고 적는다. 열린 대화는 다시 받을 때까지 낡은 모습 그대로 보인다.
+ *  notices 는 비운다 — 새 실행은 "바뀔 때만" 보내서 도는 턴이 없으면 안 온다. 그동안 목록 화면은 다시 받은 목록의 status 를 쓴다 (#187) */
 function restart(state: RemoteState, runId: string, seq: number): RemoteState {
   const views = Object.fromEntries(Object.entries(state.views).map(([cid, view]) => [cid, { ...view, seq }]))
   const loading = Object.fromEntries(Object.keys(state.loading).map((cid) => [cid, []]))
-  return { ...state, runId, seq, views, loading, resync: state.resync + 1 }
+  return { ...state, runId, seq, views, loading, notices: {}, resync: state.resync + 1 }
 }
 
 function applyEvent(state: RemoteState, event: RemoteEvent): RemoteState {

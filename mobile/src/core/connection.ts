@@ -210,7 +210,7 @@ export class Connection {
           await Promise.all([
             this.loadProjects(),
             ...Object.keys(this.current.conversations).map((project) => this.loadConversations(project)),
-            ...Object.keys(this.current.views).map((cid) => this.openConversation(cid)),
+            ...Object.keys(this.current.views).map((cid) => this.reopenConversation(cid)),
           ])
           this.synced = target
         } else {
@@ -221,6 +221,17 @@ export class Connection {
       // 끊긴 것이다 — 연결이 다시 붙으면(onOpen) 이어서 한다
     } finally {
       this.syncing = false
+    }
+  }
+
+  /** 다시 받기의 열린 대화 하나. 404(데스크탑에서 지웠다)는 다시 해도 404 다 — 닫고 받은 것으로 친다.
+   *  안 그러면 다시 받기가 끝나지 않아 그 뒤 이벤트마다 목록·모든 열린 대화를 또 부른다 (#187) */
+  private async reopenConversation(cid: string): Promise<void> {
+    try {
+      await this.openConversation(cid)
+    } catch (error) {
+      if (!(error instanceof RemoteError && error.status === 404)) throw error
+      this.closeConversation(cid)
     }
   }
 

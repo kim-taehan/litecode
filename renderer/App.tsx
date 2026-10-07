@@ -1,9 +1,8 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
-import type { Attention, AttentionAnswer, AttentionTarget, AttachmentKind, ChatEvent, Conversation, ConversationStatus, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend, TurnItem } from '../shared/ipc.ts'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Attention, AttentionAnswer, AttentionTarget, AttachmentKind, ChatEvent, Conversation, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend, TurnItem } from '../shared/ipc.ts'
 import { titleFrom, TITLE_MAX } from '../shared/chat.ts'
 import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from './chatState.ts'
 import { ago } from './ago.ts'
-import { badgeColor, badgeLetters } from './badge.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap, useFollowBottom } from './Minimap.tsx'
 import { minimapTurns } from './turnView.ts'
@@ -32,6 +31,7 @@ import { pasteIntent, useFileDrop } from './dropPaste.ts'
 import { DropVeil } from './DropVeil.tsx'
 import { countOf } from './attachmentsView.ts'
 import { OpenInButton } from './OpenInButton.tsx'
+import { ConversationMenu } from './Report.tsx'
 import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { QueueDock } from './QueueDock.tsx'
@@ -48,10 +48,15 @@ import { ErrorBoundary } from './ErrorBoundary.tsx'
 import { ChatFind, FindingProvider } from './ChatFind.tsx'
 import { PinButton, PinnedMark, SessionSearch } from './SessionListTools.tsx'
 import { matchesTitle, pinnedFirst } from './sessionListView.ts'
+import { Badge, GearIcon, LogoMark, PencilIcon, SidebarIcon, TrashIcon } from './SidebarIcons.tsx'
+import { HoverCard, startMarquee, stopMarquee, useHoverCard } from './hoverCard.tsx'
+import { Rail } from './Rail.tsx'
+import { MissingConversations } from './MissingConversations.tsx'
+import { ProjectPopover } from './ProjectPopover.tsx'
 
 /** 말풍선·도는 턴(pending·progress·sentAt·attention)·대기열·제목·시각·통계는 메인(ctx.chat)이 정한다 — 이벤트로 받아 입힌다 (chatState.ts).
  *  답이 실패·중단이면 message.error 에 사유 (`⚠️ 사유` 로 그린다) */
-interface Session extends ChatFields {
+export interface Session extends ChatFields {
   id: string
   /** 이 대화가 속한 프로젝트(작업 디렉터리) — 사이드바는 현재 프로젝트의 대화만 보여준다 */
   project: string
@@ -109,97 +114,6 @@ const NO_ITEMS: readonly TurnItem[] = []
 const answerAttention = (request: Attention, answer: AttentionAnswer, target?: AttentionTarget) =>
   window.litecode.replyAttention(request.sessionId, request.id, answer, target)
 
-/** 16px 외곽선 톱니 — dsh 사이드바 설정 줄의 아이콘 자리 */
-function GearIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
-      <path d="M15.64 8.26L17.35 8.51L17.35 11.49L15.64 11.74L15.22 12.75L16.25 14.14L14.14 16.25L12.75 15.22L11.74 15.64L11.49 17.35L8.51 17.35L8.26 15.64L7.25 15.22L5.86 16.25L3.75 14.14L4.78 12.75L4.36 11.74L2.65 11.49L2.65 8.51L4.36 8.26L4.78 7.25L3.75 5.86L5.86 3.75L7.25 4.78L8.26 4.36L8.51 2.65L11.49 2.65L11.74 4.36L12.75 4.78L14.14 3.75L16.25 5.86L15.22 7.25Z" />
-      <circle cx="10" cy="10" r="2.5" />
-    </svg>
-  )
-}
-
-/** 팝오버의 지금 프로젝트 표시 — dsh Menu 선택 항목의 14px ✓ */
-function CheckIcon() {
-  return (
-    <svg className="project-item__check" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2.5 7.5L5.5 10.5L11.5 3.5" />
-    </svg>
-  )
-}
-
-function TrashIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
-      <path d="M2.5 4.5H13.5M6.5 4.5V3H9.5V4.5M4 4.5L4.7 13.2C4.75 13.65 5.1 14 5.55 14H10.45C10.9 14 11.25 13.65 11.3 13.2L12 4.5M6.75 7V11.5M9.25 7V11.5" />
-    </svg>
-  )
-}
-
-function PencilIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M11.2 2.6L13.4 4.8L5.6 12.6L2.8 13.2L3.4 10.4Z" />
-    </svg>
-  )
-}
-
-function Badge({ project }: { project: Project }) {
-  return (
-    <span className="project-switch__badge" style={{ background: badgeColor(project.path) }}>
-      {badgeLetters(project.name)}
-    </span>
-  )
-}
-
-// 잘린 경로를 보여주는 방식은 dsh ui-workspace 의 세션 행을 따른다: 마우스를 올리면 잘린 글자가 일정한 속도로 흘러가
-// 끝부분을 보이고(양 끝은 페이드), 떼면 한 번에 제자리로. 거의 안 잘린 것(8px 이하)은 흔들림으로 보여 움직이지 않는다.
-const MARQUEE_MIN_PX = 8
-const MARQUEE_PX_PER_MS = 0.03
-const marqueeFrames = new WeakMap<HTMLElement, number>()
-
-/** 행 안에서 흘러갈 글자 — `.marquee` 를 붙인 한 줄짜리 요소 */
-function pathOf(row: HTMLElement): HTMLElement | null {
-  return row.querySelector<HTMLElement>('.marquee')
-}
-
-function isClipped(row: HTMLElement): boolean {
-  const path = pathOf(row)
-  return !!path && path.scrollWidth - path.clientWidth > MARQUEE_MIN_PX
-}
-
-function placePath(path: HTMLElement, left: number, range: number): void {
-  path.scrollLeft = left
-  path.toggleAttribute('data-scrolled', left > 0)
-  path.toggleAttribute('data-clipped', left < range)
-}
-
-function startMarquee(row: HTMLElement): void {
-  const path = pathOf(row)
-  if (!path || !isClipped(row)) return
-  const range = path.scrollWidth - path.clientWidth
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return placePath(path, range, range)
-  cancelAnimationFrame(marqueeFrames.get(path) ?? 0)
-  let previous: number | undefined
-  let position = 0
-  const step = (now: number): void => {
-    position += previous === undefined ? 0 : (now - previous) * MARQUEE_PX_PER_MS
-    previous = now
-    placePath(path, Math.min(position, range), range)
-    if (position < range) marqueeFrames.set(path, requestAnimationFrame(step))
-  }
-  marqueeFrames.set(path, requestAnimationFrame(step))
-}
-
-function stopMarquee(row: HTMLElement): void {
-  const path = pathOf(row)
-  if (!path) return
-  cancelAnimationFrame(marqueeFrames.get(path) ?? 0)
-  path.scrollLeft = 0
-  path.removeAttribute('data-scrolled')
-  path.removeAttribute('data-clipped')
-}
-
 // 사이드바 폭·숨김 — dsh ui-layout 의 범위(264~420px)를 따른다. 기본값은 승인 시안의 272px.
 // 창마다의 편의 설정이라 localStorage 에 둔다(못 읽으면 기본값 — 사생활 모드·접근 막힘에도 화면은 뜬다)
 const SIDEBAR_MIN = 264
@@ -228,63 +142,6 @@ function readLayout(): { width: number; hidden: boolean } {
   } catch {
     return { width: SIDEBAR_DEFAULT, hidden: false }
   }
-}
-
-function SidebarIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M7.5 4V16" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  )
-}
-
-/** 로고 아이콘 — 간단한 기하 도형(둥근 사각형 안의 >_). 다른 회사 로고는 쓰지 않는다 */
-function LogoMark() {
-  return (
-    <svg className="sidebar__mark" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-      <rect width="24" height="24" rx="7" fill="currentColor" />
-      <path d="M7.5 8.5L11 12L7.5 15.5M12.5 16H16.5" stroke="var(--bg)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-    </svg>
-  )
-}
-
-type HoverCardContent = { title: string; detail?: string }
-
-/** 잘린 행에 800ms 머물면 행 오른쪽 8px 에 전체 내용 카드 (dsh ui-primitives HoverCard). 흘러가는 글자도 함께 켜고 끈다 */
-function useHoverCard() {
-  const [card, setCard] = useState<HoverCardContent & { top: number; left: number }>()
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => () => clearTimeout(timer.current), [])
-  return {
-    card,
-    /** always: 잘리지 않아도 카드를 띄운다 — 카드에 제목 말고 다른 정보(메시지 수 등)가 있을 때 */
-    enter(row: HTMLElement, content: HoverCardContent, always = false): void {
-      startMarquee(row)
-      clearTimeout(timer.current)
-      if (!always && !isClipped(row)) return
-      timer.current = setTimeout(() => {
-        // 행에 딸린 버튼(☆·✎·× 등)까지 포함한 줄 전체의 오른쪽 바깥에 붙인다 — 버튼을 덮지 않게
-        const rect = (row.closest<HTMLElement>('[data-hover-row]') ?? row).getBoundingClientRect()
-        setCard({ ...content, top: rect.top, left: rect.right + 8 })
-      }, 800) // dsh HoverCard 열림 지연
-    },
-    leave(row: HTMLElement): void {
-      stopMarquee(row)
-      clearTimeout(timer.current)
-      setCard(undefined)
-    },
-  }
-}
-
-function HoverCard({ card }: { card?: HoverCardContent & { top: number; left: number } }) {
-  if (!card) return null
-  return (
-    <div className="hover-card" role="tooltip" style={{ top: card.top, left: card.left }}>
-      <div className="hover-card__name">{card.title}</div>
-      {card.detail && <div className="hover-card__path">{card.detail}</div>}
-    </div>
-  )
 }
 
 export function App() {
@@ -1146,6 +1003,8 @@ export function App() {
               {active.pending && <JobsButton key={active.id} items={active.progress ?? []} startedAt={active.sentAt} />}
               {features.has('openIn') && <OpenInButton directory={active.project} />}
               <RightPanelButton directory={active.project} />
+              {/* 더 보기 ⋯ — 대화 내보내기 (이슈 #177) */}
+              <ConversationMenu key={active.id} conversationId={active.id} />
             </div>
             {/* 설정 > 기능의 추론 과정을 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
             {trajectoryOn && (
@@ -1388,313 +1247,6 @@ export function App() {
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
       <RemotePairPrompt on={features.has('remote')} />
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
-    </div>
-  )
-}
-
-interface RailProps {
-  project?: Project
-  /** 폴더를 고르거나 여는 중 — 배지를 막는다 */
-  picking: boolean
-  /** 다른 프로젝트에 확인할 대화가 있다 — 배지 모서리의 점 (펼친 사이드바 전환 카드의 점과 같은 값) */
-  notice?: ConversationStatus
-  /** 지금 프로젝트에서 도는 대화 수 — 0 이면 그 아이콘은 없다 */
-  running: number
-  switchRef: RefObject<HTMLButtonElement | null>
-  settingsRef: RefObject<HTMLButtonElement | null>
-  onExpand(): void
-  onNewChat(): void
-  onSwitch(): void
-  /** 사이드바를 펼치고 "진행 중" 만 보이게 */
-  onRunning(): void
-  onSettings(): void
-  /** 프로젝트 전환 팝오버 — 배지 옆에 뜬다 */
-  children?: ReactNode
-}
-
-/** 접힌 사이드바 — 56px 아이콘 줄 (이슈 #60 시안, dsh ui-sidebar 의 collapsed rail). 위에서부터 펼치기 · 새 대화 · 프로젝트 배지 ·
- *  진행 중인 대화 수, 맨 아래 설정. 글자가 없으므로 아이콘마다 aria-label 과 옆 카드(HoverCard)로 이름을 보인다.
- *  macOS 는 맨 위 52px 가 창 버튼 자리다 — 빈 끌기 줄(.rail__top)이 차지하고 아이콘은 그 아래부터 */
-function Rail({ project, picking, notice, running, switchRef, settingsRef, onExpand, onNewChat, onSwitch, onRunning, onSettings, children }: RailProps) {
-  const t = useT()
-  const hover = useHoverCard()
-  /** 이름 카드 — 누르면 바로 거둔다 (열린 팝오버·모달 위에 뜨지 않게) */
-  const tip = (title: string) => ({
-    'aria-label': title,
-    onMouseEnter: (event: ReactMouseEvent<HTMLElement>) => hover.enter(event.currentTarget, { title }, true),
-    onMouseLeave: (event: ReactMouseEvent<HTMLElement>) => hover.leave(event.currentTarget),
-    onMouseDown: (event: ReactMouseEvent<HTMLElement>) => hover.leave(event.currentTarget),
-  })
-  return (
-    <aside className="rail" aria-label={t('rail.label')}>
-      <div className="rail__top" />
-      <button type="button" className="rail__button" {...tip(t('sidebar.show'))} onClick={onExpand}>
-        <SidebarIcon size={18} />
-      </button>
-      <button type="button" className="rail__button rail__button--raised" {...tip(t('rail.newChat'))} disabled={!project} onClick={onNewChat}>
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M8 2.5H4A1.5 1.5 0 0 0 2.5 4v8A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V8" />
-          <path d="M12 2.2l1.8 1.8-5 5H7V7.2z" />
-        </svg>
-      </button>
-      <div className="rail__project">
-        <button
-          type="button"
-          className="rail__button"
-          ref={switchRef}
-          disabled={picking}
-          {...tip(project ? t('rail.project', { name: project.name }) : t('rail.openProject'))}
-          onClick={onSwitch}
-        >
-          {project ? <Badge project={project} /> : <span className="project-switch__badge" />}
-          {notice && <StatusDot status={notice} className="rail__notice" />}
-        </button>
-        {children}
-      </div>
-      {running > 0 && (
-        <button type="button" className="rail__button" {...tip(t('rail.running', { count: running }))} onClick={onRunning}>
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M2.5 3.5h11v7.5h-6l-3 2.5v-2.5h-2z" />
-          </svg>
-          <span className="rail__count" aria-hidden="true">
-            {running}
-          </span>
-        </button>
-      )}
-      <span className="rail__spacer" />
-      <button type="button" className="rail__button" ref={settingsRef} {...tip(t('sidebar.settings'))} onClick={onSettings}>
-        <GearIcon size={18} />
-      </button>
-      <HoverCard card={hover.card} />
-    </aside>
-  )
-}
-
-/** 못 연(폴더가 없는) 프로젝트의 저장된 대화 — 열 수 없고 지우기만 된다. 내용을 부르지 않는다(없는 경로를 opencode 에 넘기면
- *  그 경로가 재시작 전까지 500 — 01c Q5). 지우기는 대화 목록 행과 같은 휴지통 → "삭제 확인" */
-function MissingConversations({ sessions, onRemove }: { sessions: Session[]; onRemove(session: Session): Promise<void> }) {
-  const t = useT()
-  const [confirming, setConfirming] = useState<string>()
-  if (sessions.length === 0) return null
-  return (
-    <ul className="missing-list" aria-label={t('missing.list')}>
-      {sessions.map((session) => (
-        <li key={session.id} className="missing-list__item">
-          <span className="missing-list__title">{session.title}</span>
-          <span className="missing-list__note">{t('missing.note')}</span>
-          {confirming === session.id ? (
-            <button
-              type="button"
-              className="session-item__confirm"
-              autoFocus
-              onClick={() => void onRemove(session)}
-              onBlur={() => setConfirming(undefined)}
-              onKeyDown={(event) => event.key === 'Escape' && setConfirming(undefined)}
-            >
-              {t('sidebar.confirmDelete')}
-            </button>
-          ) : (
-            <button type="button" className="session-item__action" aria-label={t('sidebar.deleteChat')} title={t('sidebar.deleteChat')} onClick={() => setConfirming(session.id)}>
-              <TrashIcon />
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-interface ProjectPopoverProps {
-  projects: Project[]
-  current?: string
-  /** 그 프로젝트 대화의 알림 점 (없으면 점 없음) */
-  statusOf(project: string): ConversationStatus | undefined
-  /** 그 프로젝트에서 도는 대화 수 — 실행 중 점 대신 점 + 숫자 */
-  runningOf(project: string): number
-  /** 여는 중 — 행을 막는다 */
-  busy: boolean
-  error?: string
-  onPick(project: Project): void
-  onOpenFolder(): void
-  onToggleFavorite(project: Project): void
-  onRemove(project: Project): Promise<void>
-  /** 보이는 이름만 바꾼다 (폴더는 그대로). 빈 이름이면 폴더 이름으로 */
-  onRename(project: Project, name: string): Promise<void>
-  /** returnFocus: 키보드(Esc)로 닫았으면 true — 포커스를 전환 버튼으로 돌려준다 */
-  onClose(returnFocus: boolean): void
-}
-
-/** 전환 버튼 아래 팝오버 — 검색·즐겨찾기·최근 목록·폴더 열기 (시안 + 00_request B).
- *  시안이 안 정한 상호작용은 dsh ui-primitives Menu 를 따른다: ↑/↓ 로 행을 돌고(끝에서 처음으로) Home/End 로 끝으로,
- *  Esc 는 닫고 포커스를 전환 버튼으로, 바깥 클릭은 그냥 닫는다. (dsh 의 "창 포커스를 잃으면 닫기" 는 뺐다 — 같은 머신의
- *  다른 창이 포커스를 가져가면 실물 테스트 도중 팝오버가 닫혀 실패했다, 2026-09-30.) 목록이 길면 목록만 스크롤하고
- *  "폴더 열기" 는 아래에 고정한다. 행의 ☆·× 는 dsh ui-workspace 의 행 hover 버튼처럼 hover·포커스 때만 보인다
- *  (화살표는 행끼리만 걷고, 행 안의 버튼은 Tab 으로 닿는다). */
-function ProjectPopover({ projects, current, statusOf, runningOf, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose }: ProjectPopoverProps) {
-  const t = useT()
-  const [query, setQuery] = useState('')
-  // 이름 바꾸는 중인 행 — dsh ui-workspace 처럼 그 자리에서 입력칸으로 바뀐다. Enter·바깥으로 나가면 저장, Esc 는 취소
-  const [editing, setEditing] = useState<string>()
-  const ref = useRef<HTMLDivElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
-  const hover = useHoverCard()
-
-  useEffect(() => {
-    function onMouseDown(event: MouseEvent): void {
-      // 전환 버튼(같은 .sidebar__project 안)은 스스로 토글하므로 바깥으로 치지 않는다
-      if (!ref.current?.parentElement?.contains(event.target as Node)) onClose(false)
-    }
-    function onKeyDown(event: KeyboardEvent): void {
-      if (event.key !== 'Escape' || event.isComposing) return // 한글 조합 취소 Esc 에 닫지 않는다
-      event.preventDefault() // 이 Esc 는 여기서 썼다 — 녹음(VoiceInput)까지 취소하지 않게
-      onClose(true)
-    }
-    document.addEventListener('mousedown', onMouseDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [onClose])
-
-  function walk(event: ReactKeyboardEvent): void {
-    const inSearch = event.target instanceof HTMLInputElement
-    if (!['ArrowDown', 'ArrowUp'].includes(event.key) && !(!inSearch && ['Home', 'End'].includes(event.key))) return
-    const rows = [...(ref.current?.querySelectorAll<HTMLButtonElement>('.project-item__main:not(:disabled), .project-popover__open:not(:disabled)') ?? [])]
-    if (rows.length === 0) return
-    event.preventDefault()
-    const from = rows.indexOf(document.activeElement as HTMLButtonElement)
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    const next =
-      event.key === 'Home' ? 0
-      : event.key === 'End' ? rows.length - 1
-      : from === -1 ? (step === 1 ? 0 : rows.length - 1)
-      : (from + step + rows.length) % rows.length
-    rows[next]?.focus()
-  }
-
-  const needle = query.trim().toLowerCase()
-  const filtered = projects.filter((project) => project.name.toLowerCase().includes(needle))
-  // 즐겨찾기한 것은 즐겨찾기 묶음에만 — 최근에 중복으로 안 나온다 (00_request B)
-  const groups = [
-    { name: t('project.favorites'), items: filtered.filter((project) => project.favorite) },
-    { name: t('project.recent'), items: filtered.filter((project) => !project.favorite) },
-  ]
-
-  return (
-    <div className="project-popover" ref={ref} onKeyDown={walk}>
-      <input
-        ref={searchRef}
-        className="project-popover__search"
-        placeholder={t('project.search')}
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        autoFocus
-      />
-      <div className="project-popover__list">
-        {groups.map(
-          (group) =>
-            group.items.length > 0 && (
-              <div key={group.name} role="group" aria-label={group.name}>
-                <div className="project-popover__label">{group.name}</div>
-                {group.items.map((project) => (
-                  <div key={project.path} data-hover-row className={`project-item${project.path === current ? ' project-item--active' : ''}`}>
-                    {editing === project.path ? (
-                      <input
-                        className="project-item__rename"
-                        aria-label={t('project.nameLabel')}
-                        defaultValue={project.name}
-                        autoFocus
-                        onFocus={(event) => event.currentTarget.select()}
-                        onKeyDown={(event) => {
-                          if (event.nativeEvent.isComposing || event.keyCode === 229) return // 한글 조합 확정 Enter
-                          if (event.key === 'Enter') event.currentTarget.blur()
-                          if (event.key === 'Escape') {
-                            event.stopPropagation() // 팝오버까지 닫지 않는다
-                            setEditing(undefined)
-                          }
-                        }}
-                        onBlur={(event) => {
-                          if (editing !== project.path) return
-                          setEditing(undefined)
-                          void onRename(project, event.currentTarget.value).then(() => searchRef.current?.focus())
-                        }}
-                      />
-                    ) : (
-                    <button
-                      type="button"
-                      className="project-item__main"
-                      disabled={busy}
-                      onMouseEnter={(event) => hover.enter(event.currentTarget, { title: project.name, detail: project.path }, true)}
-                      onMouseLeave={(event) => hover.leave(event.currentTarget)}
-                      onClick={() => onPick(project)}
-                    >
-                      <Badge project={project} />
-                      <span className="project-switch__text">
-                        <span className="project-item__name">{project.name}</span>
-                        <span className="project-switch__path marquee">{project.displayPath}</span>
-                      </span>
-                      {/* 실행 중은 점 대신 점 + 숫자, 그 밖의 상태(답 필요·안 본 끝남)는 점 그대로 */}
-                      {statusOf(project.path) && statusOf(project.path) !== 'running' && <StatusDot status={statusOf(project.path)!} />}
-                      <RunningCount count={runningOf(project.path)} label={t('sidebar.running', { count: runningOf(project.path) })} />
-                      {project.path === current && <CheckIcon />}
-                    </button>
-                    )}
-                    {project.favorite && (
-                      <span className="project-item__marker" aria-hidden="true">
-                        ★
-                      </span>
-                    )}
-                    <span className="project-item__actions">
-                      <button
-                        type="button"
-                        className="project-item__action"
-                        aria-label={t('project.rename')}
-                        title={t('project.renameTitle')}
-                        disabled={busy}
-                        onClick={() => setEditing(project.path)}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        type="button"
-                        className="project-item__action"
-                        aria-label={project.favorite ? t('project.unfavorite') : t('project.favorite')}
-                        title={project.favorite ? t('project.unfavorite') : t('project.favorite')}
-                        disabled={busy}
-                        onClick={() => onToggleFavorite(project)}
-                      >
-                        {project.favorite ? '★' : '☆'}
-                      </button>
-                      <button
-                        type="button"
-                        className="project-item__action"
-                        aria-label={t('project.remove')}
-                        title={t('project.removeTitle')}
-                        disabled={busy}
-                        // 뺀 행의 포커스가 사라지므로 검색 입력으로 돌려 키보드를 이어 쓰게 한다
-                        onClick={() => void onRemove(project).then(() => searchRef.current?.focus())}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ),
-        )}
-        {needle && filtered.length === 0 && <div className="project-popover__empty">{t('project.noMatch')}</div>}
-      </div>
-      {error && (
-        <div className="project-popover__error" role="alert">
-          {error}
-        </div>
-      )}
-      <div className="project-popover__divider" />
-      <button type="button" className="project-popover__open" disabled={busy} onClick={onOpenFolder}>
-        {t('project.openFolder')}
-      </button>
-      <HoverCard card={hover.card} />
     </div>
   )
 }

@@ -124,6 +124,13 @@ describe('McpService — 앱 서버 저장', () => {
     expect(() => mcp.save({ ...remote({ name: 'other' }), vars: [{ name: 'Authorization', value: '', secret: true }] })).toThrow(/넣어 주세요/)
   })
 
+  it('varValues — 모든 프로젝트·프로젝트 전용 서버의 env·헤더 값을 비밀 포함 전부 준다 (문제 신고 묶음이 지울 값, #177)', async () => {
+    const { mcp } = await start()
+    mcp.save(remote())
+    mcp.save({ name: 'db', type: 'local', command: ['node', 'db.js'], vars: [{ name: 'DB_PASSWORD', value: 'pw-local-1', secret: true }, { name: 'MODE', value: 'ro', secret: false }], scope: 'project' }, project)
+    expect(mcp.varValues().sort()).toEqual(['Bearer tok-123', 'core', 'pw-local-1', 'ro'])
+  })
+
   it('이름·명령·주소·헤더 값을 검사한다', async () => {
     const { mcp } = await start()
     expect(() => mcp.save(remote({ name: 'has space' }))).toThrow(/32자/)
@@ -593,6 +600,86 @@ describe('listMcpTools — 앱이 직접 붙어 도구 목록만 본다', () => 
     } finally {
       server.close()
     }
+  })
+
+  // 이슈 #178 (02x B 4-5): `npx` 처럼 감싼 서버는 감싼 쪽만 죽고 진짜 서버(손자)가 남았다 — 프로세스 그룹째 끈다.
+  // 정상 끝·기한 초과·감싼 쪽이 먼저 죽은 경우 모두. 손자가 SIGTERM 을 무시하면 유예 뒤 SIGKILL 로
+  describe.skipIf(process.platform === 'win32')('로컬: 끝낼 때 손자 프로세스까지 끈다', () => {
+    const WRAPPER = `
+const { spawn } = require('node:child_process')
+const fs = require('node:fs')
+const code = process.env.IGNORE_TERM ? "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)" : 'setInterval(() => {}, 1000)'
+const grandchild = spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
+fs.writeFileSync(process.env.PID_FILE, String(grandchild.pid))
+if (process.env.MODE === 'exit') process.exit(1)
+let buf = ''
+process.stdin.on('data', (d) => {
+  if (process.env.MODE === 'silent') return
+  buf += d
+  let i
+  while ((i = buf.indexOf('\\n')) !== -1) {
+    const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (m.id === undefined) continue
+    const result = m.method === 'initialize' ? {} : { tools: [{ name: 'only' }] }
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n')
+  }
+})
+`
+    const alive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    async function gone(pid: number, withinMs: number): Promise<boolean> {
+      const until = Date.now() + withinMs
+      while (Date.now() < until) {
+        if (!alive(pid)) return true
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      return !alive(pid)
+    }
+    async function run(env: Record<string, string>, timeoutMs = 5_000): Promise<{ result: PromiseSettledResult<unknown>; grandchild: number }> {
+      const script = path.join(tmp, 'wrapper.cjs')
+      const pidFile = path.join(tmp, 'grandchild.pid')
+      await fs.writeFile(script, WRAPPER)
+      const [result] = await Promise.allSettled([
+        listMcpTools({ type: 'local', command: [process.execPath, script], environment: { PID_FILE: pidFile, ...env } }, { cwd: tmp, env: { PATH: process.env.PATH }, timeoutMs }),
+      ])
+      return { result: result!, grandchild: Number(await fs.readFile(pidFile, 'utf8')) }
+    }
+
+    it('정상 끝', async () => {
+      const { result, grandchild } = await run({ MODE: 'serve' })
+      try {
+        expect(result).toMatchObject({ status: 'fulfilled', value: [{ name: 'only' }] })
+        expect(await gone(grandchild, 1_500)).toBe(true)
+      } finally {
+        if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
+      }
+    })
+
+    it('기한 초과 — SIGTERM 을 무시하는 손자도 유예 뒤 SIGKILL', async () => {
+      const { result, grandchild } = await run({ MODE: 'silent', IGNORE_TERM: '1' }, 500)
+      try {
+        expect(result.status).toBe('rejected')
+        expect(await gone(grandchild, 4_000)).toBe(true)
+      } finally {
+        if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
+      }
+    }, 10_000)
+
+    it('감싼 쪽이 먼저 죽었다', async () => {
+      const { result, grandchild } = await run({ MODE: 'exit' })
+      try {
+        expect(result.status).toBe('rejected')
+        expect(await gone(grandchild, 1_500)).toBe(true)
+      } finally {
+        if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
+      }
+    })
   })
 
   it('mcpChildEnv — OPENCODE_*·LITECODE_*·KEY/PASSWORD/SECRET/TOKEN 을 지운다', () => {

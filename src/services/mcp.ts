@@ -3,11 +3,12 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { EngineMcp } from './engine.ts'
-import { realDirectory, type McpStatus } from './llm.ts'
+import type { EngineMcp } from './engineConfig.ts'
+import type { McpStatus } from './llm.ts'
+import { realDirectory } from './projectPath.ts'
 import { listMcpTools, type McpTool } from './mcpClient.ts'
 import type { KeyCipher } from './providers.ts'
-import { readJsonFileSync } from './jsonFile.ts'
+import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
 import { insideOf } from './projectPath.ts'
 import { tr } from '../i18n.ts'
 import { BROWSER_MCP_NAME } from '../../shared/browser.ts'
@@ -193,15 +194,27 @@ export class McpService extends Service {
   private builtins = new Map<string, BuiltinMcp>()
   /** 숨길 도구를 ctx.llm 에 넘긴 폴더 — 기능을 끄면 비운다 */
   private hiding = new Set<string>()
+  /** 정의·비밀·프로젝트 파일 중 하나를 못 읽었다(권한 등 — 없는 것과 다르다) — 이번 실행에서는 그 파일들에 쓰지 않는다 (이슈 #195) */
+  private unreadable?: Error
 
   constructor(
     ctx: Context,
     private opts: McpServiceOptions = {},
   ) {
     super(ctx, 'mcp')
-    this.servers = ((opts.file && (readJsonFileSync(opts.file, 'array') as McpServerRecord[] | undefined)) || []).filter((server) => typeof server?.name === 'string')
-    this.secrets = (opts.secretsFile && (readJsonFileSync(opts.secretsFile, 'object') as Record<string, Record<string, string>> | undefined)) || {}
-    const projects = (opts.projectsFile && (readJsonFileSync(opts.projectsFile, 'object') as Record<string, Partial<McpProjectRecord>> | undefined)) || {}
+    // 생성자에서 던지면 서비스가 영영 안 뜬다 (CLAUDE.md 함정 4) — 못 읽는 파일(권한 등)은 빈 값으로 뜨고 persist 가 쓰기를 거절한다 (이슈 #195)
+    const read = (file: string, shape: 'array' | 'object'): unknown => {
+      try {
+        return readJsonFileSync(file, shape)
+      } catch (error) {
+        this.unreadable ??= Object.assign(new Error(tr('error.fileUnreadable', { name: path.basename(file), code: (error as NodeJS.ErrnoException).code ?? 'EIO' })), { code: (error as NodeJS.ErrnoException).code })
+        console.warn(`[mcp] ${this.unreadable.message}`)
+        return undefined
+      }
+    }
+    this.servers = ((opts.file && (read(opts.file, 'array') as McpServerRecord[] | undefined)) || []).filter((server) => typeof server?.name === 'string')
+    this.secrets = (opts.secretsFile && (read(opts.secretsFile, 'object') as Record<string, Record<string, string>> | undefined)) || {}
+    const projects = (opts.projectsFile && (read(opts.projectsFile, 'object') as Record<string, Partial<McpProjectRecord>> | undefined)) || {}
     this.projects = Object.fromEntries(Object.entries(projects).map(([dir, entry]) => [dir, { servers: entry?.servers ?? [], enabled: entry?.enabled ?? {}, tools: toolSelections(entry?.tools) }]))
     ctx.on('llm/before-turn', (directory) => this.prepare(directory))
     // 기능을 끄면(묶음이 내려가면) 붙인 앱·프로젝트 서버를 끊는다 — 개인 설정 서버는 opencode 것이라 그대로다
@@ -541,6 +554,19 @@ export class McpService extends Service {
     return cached
   }
 
+  /** 앱이 저장한 서버(모든 프로젝트·프로젝트 전용)의 env·헤더 값 전부 — 비밀 표시와 무관하게. 문제 신고 묶음(ctx.report)이 글에서 지우는 데만
+   *  쓴다 (이슈 #177). 화면·파일·로그로 내보내지 않는다 */
+  varValues(): string[] {
+    const owned: [McpServerRecord, string | undefined][] = [
+      ...this.servers.map((server) => [server, undefined] as [McpServerRecord, undefined]),
+      ...Object.entries(this.projects).flatMap(([workdir, entry]) => entry.servers.map((server) => [server, workdir] as [McpServerRecord, string])),
+    ]
+    return owned.flatMap(([server, owner]) => {
+      const def = this.engineDef(server, owner)
+      return Object.values((def.type === 'remote' ? def.headers : def.environment) ?? {})
+    })
+  }
+
   /** owner 는 프로젝트 전용 서버의 프로젝트(realpath) */
   private engineDef(server: McpServerRecord, owner?: string): EngineMcp {
     const sealed = this.secrets[secretKey(server.name, owner)] ?? {}
@@ -601,9 +627,10 @@ export class McpService extends Service {
   }
 
   private persist(): void {
-    if (this.opts.file) writeJson(this.opts.file, this.servers)
-    if (this.opts.secretsFile) writeJson(this.opts.secretsFile, this.secrets)
-    if (this.opts.projectsFile) writeJson(this.opts.projectsFile, this.projects)
+    if (this.unreadable) throw this.unreadable // 못 읽은 파일을 이번 실행의 값으로 덮지 않는다
+    if (this.opts.file) writeJsonFileSync(this.opts.file, this.servers, { mode: 0o600 })
+    if (this.opts.secretsFile) writeJsonFileSync(this.opts.secretsFile, this.secrets, { mode: 0o600 })
+    if (this.opts.projectsFile) writeJsonFileSync(this.opts.projectsFile, this.projects, { mode: 0o600 })
   }
 }
 
@@ -817,9 +844,3 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function writeJson(file: string, value: unknown): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const temp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(temp, JSON.stringify(value), { mode: 0o600 })
-  fs.renameSync(temp, file)
-}

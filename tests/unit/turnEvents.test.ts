@@ -5,7 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { ascendingId, finishedTool, interruptedError, LlmService, MCP_TOOLS_MARKER, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
+import { ascendingId, finishedTool, LlmService, MCP_TOOLS_MARKER, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
+import { interruptedError } from '../../src/services/history.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
@@ -384,7 +385,7 @@ async function start(url: string, config?: ConstructorParameters<typeof LlmServi
 describe("ctx.llm 턴 수명 이벤트", () => {
   it('끝까지 간 턴: started 한 번 → ended done 한 번. 답은 이 턴 답 메시지(parentID)의 글만 — 다른 클라이언트 답·앞 턴의 늦은 idle·중지 오류는 섞이지 않는다', async () => {
     const { llm, seen } = await start(await fakeOpencode('done'))
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true, text: 'echo: hi', usage: { steps: 1, tokens: { input: 700 } } })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ ok: true, text: 'echo: hi', usage: { steps: 1, tokens: { input: 700 } } })
     expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} done`])
   })
 
@@ -396,7 +397,7 @@ describe("ctx.llm 턴 수명 이벤트", () => {
       { mime: 'image/png' as const, filename: '오류 화면.png', data: png },
       { mime: 'image/jpeg' as const, filename: 'b.jpg', data: Buffer.from([0xff, 0xd8, 0xff]) },
     ]
-    expect(await llm.chat('p', 'm', directory, 'look', undefined, undefined, undefined, undefined, undefined, undefined, undefined, images)).toMatchObject({ ok: true, text: 'echo: hi' })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'look', images })).toMatchObject({ ok: true, text: 'echo: hi' })
     expect(prompts[0]!.parts).toEqual([
       { type: 'text', text: 'look' },
       { type: 'file', mime: 'image/png', filename: '오류 화면.png', url: `data:image/png;base64,${png.toString('base64')}` },
@@ -408,8 +409,8 @@ describe("ctx.llm 턴 수명 이벤트", () => {
   it('글 없이 이미지만 보내면 text 파트를 싣지 않는다 (01y 2절 "글 없이 이미지만"), 첨부가 없으면 text 파트 하나 그대로', async () => {
     const { llm } = await start(await fakeOpencode('done'))
     const images = [{ mime: 'image/png' as const, filename: 'a.png', data: Buffer.from([1, 2, 3]) }]
-    await llm.chat('p', 'm', directory, '', undefined, undefined, undefined, undefined, undefined, undefined, undefined, images)
-    await llm.chat('p', 'm', directory, 'hi', 'ses_1')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: '', images })
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', sessionId: 'ses_1' })
     expect(prompts.map((body) => body.parts)).toEqual([
       [{ type: 'file', mime: 'image/png', filename: 'a.png', url: 'data:image/png;base64,AQID' }],
       [{ type: 'text', text: 'hi' }],
@@ -420,29 +421,29 @@ describe("ctx.llm 턴 수명 이벤트", () => {
   it('file 파트 턴에 session.error 만 오고 idle 이 없어도 실패로 끝난다 (끝 신호 없는 거절)', async () => {
     const { llm } = await start(await fakeOpencode('noidle'))
     const images = [{ mime: 'image/png' as const, filename: 'broken.png', data: Buffer.from('x') }]
-    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, undefined, undefined, undefined, images)).toMatchObject({ ok: false })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', images })).toMatchObject({ ok: false })
   })
 
   it('실패한 턴(assistant error·session.error 뒤 idle): ended failed 와 사유', async () => {
     const { llm, seen } = await start(await fakeOpencode('failed'))
-    expect((await llm.chat('p', 'm', directory, 'hi')).interrupted).toBeUndefined()
+    expect((await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).interrupted).toBeUndefined()
     expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} failed (boom)`])
   })
 
   it('session.error 만 오고 idle 이 없으면(없는 에이전트 — 01w) 상태를 물어 실패로 끝낸다', async () => {
     const { llm } = await start(await fakeOpencode('noidle'))
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, error: 'Agent not found: "x"' })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ ok: false, error: 'Agent not found: "x"' })
   })
 
   it('한 턴에 자동 요약이 끝없이 돌면(한도가 작은 모델 — 01w) 몇 번 뒤 멈추고(abort) 한도 초과 안내로 끝낸다', async () => {
     const { llm } = await start(await fakeOpencode('compactloop'))
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, error: tr('error.contextOverflow') })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ ok: false, error: tr('error.contextOverflow') })
     await expect.poll(() => calls).toContain('/session/ses_1/abort')
   })
 
   it('엔진이 끝나 끊긴 턴: ended interrupted', async () => {
     const { llm, seen } = await start(await fakeOpencode('cut'))
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ error: interruptedError(), interrupted: true })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ error: interruptedError(), interrupted: true })
     expect(seen).toEqual([`started ses_1@${directory}`, `ended ses_1@${directory} interrupted (${interruptedError()})`])
   })
 
@@ -450,7 +451,7 @@ describe("ctx.llm 턴 수명 이벤트", () => {
     setMainLanguage('en')
     try {
       const { llm, seen } = await start(await fakeOpencode('cut'))
-      expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ error: translate('en', 'error.interrupted'), interrupted: true })
+      expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ error: translate('en', 'error.interrupted'), interrupted: true })
       expect(seen.at(-1)).toMatch(/ interrupted \(Interrupted — /)
     } finally {
       setMainLanguage('ko')
@@ -459,8 +460,8 @@ describe("ctx.llm 턴 수명 이벤트", () => {
 
   it('받아들여지기 전에 거절된 턴(프롬프트 500·없는 폴더)은 둘 다 안 나간다', async () => {
     const { llm, seen } = await start(await fakeOpencode('reject'))
-    expect((await llm.chat('p', 'm', directory, 'hi')).ok).toBe(false)
-    expect((await llm.chat('p', 'm', `${directory}/litecode-no-such-dir`, 'hi')).ok).toBe(false)
+    expect((await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).ok).toBe(false)
+    expect((await llm.chat({ providerId: 'p', modelId: 'm', directory: `${directory}/litecode-no-such-dir`, prompt: 'hi' })).ok).toBe(false)
     expect(seen).toEqual([])
   })
 })
@@ -469,7 +470,7 @@ describe('ctx.llm 자동 요약·재시도 (이슈 #20 L2)', () => {
   it('게이트웨이 한도 초과 → opencode 가 요약해 이어 간 턴은 성공이다 — 요약 줄(running → done), 답은 이음(Continue)의 답, 요약 글은 답이 아니다', async () => {
     const { llm, seen } = await start(await fakeOpencode('overflow'))
     const items: TurnItem[] = []
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, (item) => items.push(item))
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', onProgress: (item) => items.push(item) })
     expect(result).toMatchObject({ ok: true, text: 'echo: continued' })
     expect(items.filter((item) => item.kind === 'compaction')).toEqual([
       { kind: 'compaction', id: 'msg_c:compaction', status: 'running' },
@@ -482,14 +483,14 @@ describe('ctx.llm 자동 요약·재시도 (이슈 #20 L2)', () => {
   it('요약도 한도를 넘으면(요약 답 ContextOverflowError) "새 대화로" 안내로 실패 — 요약 줄은 failed', async () => {
     const { llm } = await start(await fakeOpencode('huge'))
     const items: TurnItem[] = []
-    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, (item) => items.push(item))).toMatchObject({ ok: false, error: tr('error.contextOverflow') })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', onProgress: (item) => items.push(item) })).toMatchObject({ ok: false, error: tr('error.contextOverflow') })
     expect(items.filter((item) => item.kind === 'compaction').at(-1)).toMatchObject({ status: 'failed' })
   })
 
   it('재시도(session.status retry) → 진행 줄 "재시도" waiting(몇 번째·사유), 다시 보내면 done. 턴은 그대로 끝난다', async () => {
     const { llm } = await start(await fakeOpencode('retry'))
     const items: TurnItem[] = []
-    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, (item) => items.push(item))).toMatchObject({ ok: true, text: 'echo: hi' })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', onProgress: (item) => items.push(item) })).toMatchObject({ ok: true, text: 'echo: hi' })
     expect(items.filter((item) => item.kind === 'retry')).toEqual([
       { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'waiting' },
       { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'done' },
@@ -548,12 +549,12 @@ describe('ctx.llm.compact (손으로 부르는 요약)', () => {
 describe('레거시 경로 계약 (이슈 #13)', () => {
   it('세션은 POST /session 에 모델·제목(제목 LLM 호출을 막는다)을 싣고, 프롬프트는 prompt_async 에 messageID·모델·모드 에이전트를 매번 싣는다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
-    await llm.chat('p', 'm', directory, '첫 줄\n둘째 줄', undefined, undefined, undefined, undefined, 'plan')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: '첫 줄\n둘째 줄', mode: 'plan' })
     expect(JSON.parse(calls.find((call) => call.startsWith('/session '))!.slice('/session '.length))).toEqual({ model: { providerID: 'p', id: 'm' }, title: '첫 줄' })
     expect(prompts[0]).toMatchObject({ model: { providerID: 'p', modelID: 'm' }, agent: 'plan', parts: [{ type: 'text', text: '첫 줄\n둘째 줄' }] })
     expect(prompts[0]!['messageID']).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/)
 
-    await llm.chat('p', 'm', directory, 'again', 'ses_1') // 이어가는 턴 — 모드를 안 주면 기본(build) 에이전트를 싣는다
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'again', sessionId: 'ses_1' }) // 이어가는 턴 — 모드를 안 주면 기본(build) 에이전트를 싣는다
     expect(prompts[1]).toMatchObject({ agent: 'build', model: { providerID: 'p', modelID: 'm' } })
     expect(prompts[1]!['messageID']).not.toBe(prompts[0]!['messageID'])
   })
@@ -562,21 +563,21 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
   // 매 턴 표지 하나를 넣어 늘 바꾼다. true 는 allow 규칙이 되어 승인을 건너뛰므로 false 만 싣는다
   it('MCP 도구 숨기기 (#164) — 매 턴 tools 맵에 표지 + 그 폴더에서 숨긴 도구를 엔진 이름(비영숫자는 _)으로 false, 다른 폴더 값은 안 섞인다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
-    await llm.chat('p', 'm', directory, 'none hidden')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'none hidden' })
     expect(prompts[0]!['tools']).toEqual({ [MCP_TOOLS_MARKER]: false })
     llm.hideMcpTools(directory, { 'dot.srv': ['do.thing-x', 'plain'], wiki: [] })
     llm.hideMcpTools('/elsewhere', { other: ['x'] })
-    await llm.chat('p', 'm', directory, 'hidden', 'ses_1')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hidden', sessionId: 'ses_1' })
     expect(prompts[1]!['tools']).toEqual({ [MCP_TOOLS_MARKER]: false, 'dot_srv_do_thing-x': false, dot_srv_plain: false })
     llm.hideMcpTools(directory, {})
-    await llm.chat('p', 'm', directory, 'shown again', 'ses_1')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'shown again', sessionId: 'ses_1' })
     expect(prompts[2]!['tools']).toEqual({ [MCP_TOOLS_MARKER]: false }) // 표지만 — 앞 턴의 숨김이 세션에 남지 않게 바꾼다
     expect(Object.values(prompts[2]!['tools'] as object)).not.toContain(true)
   })
 
   it('모든 레거시 호출에 ?directory=<작업 폴더> 를 붙인다 (빠지면 다른 인스턴스로 간다 — 01w)', async () => {
     const { llm } = await start(await fakeOpencode('permission'))
-    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => void (requests[0] && llm.reply('ses_1', requests[0].id, 'once')))
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'ask', onAttention: (requests) => void (requests[0] && llm.reply('ses_1', requests[0].id, 'once')) })
     const legacy = urls.filter((url) => !url.startsWith('/api/'))
     expect(legacy.length).toBeGreaterThan(4)
     for (const url of legacy) expect(url, url).toContain(`directory=${encodeURIComponent(directory)}`)
@@ -584,22 +585,40 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
 
   it('프로젝트 AGENTS.md 를 매 턴 system 으로 싣는다 (opencode 와 같은 "Instructions from:" 모양). 없으면 system 을 안 싣는다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
-    await llm.chat('p', 'm', directory, 'no instructions')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'no instructions' })
     expect(prompts[0]).not.toHaveProperty('system')
     fs.writeFileSync(path.join(directory, 'AGENTS.md'), '# 규칙\n한국어로 답한다\n')
     try {
-      await llm.chat('p', 'm', directory, 'with instructions', 'ses_1')
-      await llm.chat('p', 'm', directory, 'every turn', 'ses_1')
+      await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'with instructions', sessionId: 'ses_1' })
+      await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'every turn', sessionId: 'ses_1' })
       for (const prompt of prompts.slice(1)) expect(prompt['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\n# 규칙\n한국어로 답한다\n`)
     } finally {
       fs.rmSync(path.join(directory, 'AGENTS.md'))
     }
   })
 
+  // 이슈 #176 — 모델이 보는 system 이 바뀌었음(개인 지시문·잘림)을 진행 줄 지시문 항목으로 알린다
+  it('.local.md 가 실린 턴은 진행 줄 맨 앞에 지시문 항목(context)을 둔다. 없으면 두지 않는다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    const items: TurnItem[] = []
+    const turn = () => llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', onProgress: (item) => items.push(item) })
+    await turn()
+    expect(items.some((item) => item.kind === 'context')).toBe(false)
+    fs.writeFileSync(path.join(directory, 'AGENTS.local.md'), 'mine\n')
+    try {
+      items.length = 0
+      await turn()
+      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.local.md')}\nmine\n`)
+      expect(items[0]).toEqual({ kind: 'context', id: `${String(prompts[1]!['messageID'])}:instructions`, text: tr('chat.instructionsLocal', { files: 'AGENTS.local.md' }) })
+    } finally {
+      fs.rmSync(path.join(directory, 'AGENTS.local.md'))
+    }
+  })
+
   // 이슈 #102 — 그 턴에만 실을 맥락(훅의 stdout)은 지시문 뒤에 붙어 system 으로 간다
   it('chat 의 context 는 그 턴의 system 에 실린다 — 지시문이 있으면 그 뒤에, 다음 턴에는 남지 않는다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
-    const turn = (context?: string) => llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', undefined, undefined, [], context)
+    const turn = (context?: string) => llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', images: [], context })
     await turn('branch: main')
     expect(prompts[0]!['system']).toBe('branch: main')
     fs.writeFileSync(path.join(directory, 'AGENTS.md'), 'rules\n')
@@ -640,7 +659,7 @@ describe('ctx.llm.addContext (`!` 카드의 "AI 에게 보내기")', () => {
 
   it('그 세션의 턴이 도는 중이면 거절한다 (돌고 있는 턴이 그 입력에 이어 답한다 — 01w)', async () => {
     const { llm } = await start(await fakeOpencode('hold'))
-    const turn = llm.chat('p', 'm', directory, 'hi')
+    const turn = llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })
     await expect.poll(() => prompts.length).toBe(1)
     expect(await llm.addContext('p', 'm', directory, '$ ls', 'msg_y', 'ses_1')).toMatchObject({ ok: false })
     expect(prompts).toHaveLength(1)
@@ -663,7 +682,7 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
   it('권한 요청 → 이 턴 것만 카드 목록(멈춘 턴의 남은 요청은 빼고)·attention 이벤트, 한 번 허용하면 목록이 비고 resolved, 턴은 끝까지 간다', async () => {
     const { llm, seen } = await start(await fakeOpencode('permission'))
     const { shown, onAttention } = answering(llm, 'once')
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention })
     expect(result).toMatchObject({ ok: true, text: 'done' })
     expect(result.declined).toBeUndefined()
     expect(shown).toEqual([[{ kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'bash', resources: ['ls'] }], []])
@@ -682,7 +701,7 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
     const done: ToolDone[] = []
     ctx.on('llm/tool-done', (info) => void done.push(info))
     const { onAttention } = answering(llm, 'once')
-    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention })
     expect(done).toEqual([{ sessionId: 'ses_1', directory, tool: 'bash', input: {}, output: 'ok', child: false }])
   })
 
@@ -691,13 +710,13 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
     const done: ToolDone[] = []
     ctx.on('llm/tool-done', (info) => void done.push(info))
     const { onAttention } = answering(llm, 'reject')
-    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention })
     expect(done).toEqual([{ sessionId: 'ses_1', directory, tool: 'bash', input: {}, error: 'The user rejected permission to use this specific tool call.', child: false }])
   })
 
   it('권한 거절 → 도구 error 뒤 idle 로 끝나는 턴을 실패가 아닌 "거절함" 으로 끝낸다', async () => {
     const { llm, seen } = await start(await fakeOpencode('permission'))
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', answering(llm, 'reject').onAttention)
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: answering(llm, 'reject').onAttention })
     expect(result).toMatchObject({ ok: true, declined: true })
     expect(seen.at(-1)).toBe(`ended ses_1@${directory} done`)
   })
@@ -705,7 +724,7 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
   it('질문 → 고른 답을 질문 순서대로 보낸다. 거절도 턴이 끝난다', async () => {
     const answered = await start(await fakeOpencode('question'))
     const { shown, onAttention } = answering(answered.llm, [['SQLite']])
-    expect(await answered.llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', onAttention)).toMatchObject({ ok: true })
+    expect(await answered.llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention })).toMatchObject({ ok: true })
     expect(shown[0]).toEqual([{ kind: 'question', id: 'que_1', sessionId: 'ses_1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'SQLite' }] }] }])
     expect(calls).toContain('/question/que_1/reply {"answers":[["SQLite"]]}')
     expect(answered.seen).toContain(`attention ses_1@${directory} question: Which DB?`)
@@ -713,7 +732,7 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
     server?.closeAllConnections()
     server?.close()
     const rejected = await start(await fakeOpencode('question'))
-    const result = await rejected.llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', answering(rejected.llm, 'reject').onAttention)
+    const result = await rejected.llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: answering(rejected.llm, 'reject').onAttention })
     expect(result).toMatchObject({ ok: true, declined: true })
     expect(calls).toContain('/question/que_1/reject {}')
   })
@@ -721,7 +740,7 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
   it('빈 답·모르는 요청·권한에 질문 답은 보내지 않고 던진다 (opencode 는 빈 답도 받는다 — 01i 2-b)', async () => {
     const { llm } = await start(await fakeOpencode('question'))
     const errors: string[] = []
-    const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const turn = llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       if (!requests[0]) return
       void (async () => {
         for (const answer of [[], [[]], [['  ']]] as string[][][]) await llm.reply('ses_1', 'que_1', answer).catch((error: Error) => errors.push(error.message))
@@ -729,7 +748,7 @@ describe('ctx.llm 승인·질문 (레거시 /permission·/question)', () => {
         await llm.reply('ses_1', 'que_1', 'once').catch((error: Error) => errors.push(error.message))
         await llm.reply('ses_1', 'que_1', 'reject')
       })()
-    })
+    } })
     expect(await turn).toMatchObject({ ok: true, declined: true })
     expect(errors).toHaveLength(5)
     expect(calls.filter((call) => call.includes('/question/'))).toEqual(['/question/que_1/reject {}'])
@@ -746,10 +765,10 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { llm, seen } = await start(await fakeOpencode('webask'))
     const shown: Attention[][] = []
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'ask', onAttention: (requests) => {
       shown.push(requests)
       if (requests[0]) void llm.reply('ses_1', requests[0].id, 'once')
-    })
+    } })
     expect(result).toMatchObject({ ok: true, text: 'done' })
     expect(shown).toEqual([[card], []])
     expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_w/reply {"reply":"once"}'])
@@ -763,10 +782,10 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
     const url = await fakeOpencode('webask')
     const { llm, seen } = await start(url)
     const shown: Attention[][] = []
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'ask', onAttention: (requests) => {
       shown.push(requests)
       if (requests[0]) void fetch(`${url}/permission/per_w/reply?directory=${encodeURIComponent(directory)}`, { method: 'POST', body: '{"reply":"once"}' })
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(shown).toEqual([[card], []])
     expect(seen).toContain(`resolved ses_1@${directory}`)
@@ -777,10 +796,10 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { llm } = await start(await fakeOpencode('webchild'))
     const shown: Attention[][] = []
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'ask', onAttention: (requests) => {
       shown.push(requests)
       if (requests[0]) void llm.reply(requests[0].sessionId, requests[0].id, 'once')
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(shown).toEqual([[{ ...card, id: 'per_c', sessionId: 'ses_c' }], []])
     expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_c/reply {"reply":"once"}'])
@@ -793,7 +812,7 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
     const asked: PreTool[] = []
     ctx.on('llm/pre-tool', (info) => (asked.push(info), { deny: true, reason: '사내망만' }))
     const shown: Attention[][] = []
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => void shown.push(requests))
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'ask', onAttention: (requests) => void shown.push(requests) })
     expect(result).toMatchObject({ ok: true, text: 'went on' })
     expect(asked).toEqual([expect.objectContaining({ tool: 'webfetch', input: { url: WEB_URL, format: 'text' }, child: false })])
     expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_w/reply {"reply":"reject","message":"사내망만"}'])
@@ -806,9 +825,9 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
     const { llm, ctx } = await start(await fakeOpencode('webchild'))
     const asked: PreTool[] = []
     ctx.on('llm/pre-tool', (info) => void asked.push(info))
-    await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask', (requests) => {
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'ask', onAttention: (requests) => {
       if (requests[0]) void llm.reply(requests[0].sessionId, requests[0].id, 'once')
-    })
+    } })
     expect(asked).toEqual([expect.objectContaining({ tool: 'webfetch', input: { url: WEB_URL, format: 'text' }, child: true })])
     vi.restoreAllMocks()
   })
@@ -821,7 +840,7 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
       const asked: PreTool[] = []
       ctx.on('llm/pre-tool', (info) => void asked.push(info))
       const shown: Attention[][] = []
-      const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => void shown.push(requests))
+      const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => void shown.push(requests) })
       expect(result.ok, tool).toBe(true)
       expect(asked, tool).toEqual([expect.objectContaining({ tool, input, child: true })])
       expect(calls.filter((call) => call.startsWith('/permission/')), tool).toEqual(['/permission/per_c/reply {"reply":"once"}'])
@@ -834,10 +853,10 @@ describe('ctx.llm 승인 목록을 못 읽을 때 (이슈 #107 — permission.as
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { llm } = await start(await fakeOpencode('permission'))
     const shown: Attention[][] = []
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       shown.push(requests)
       if (requests[0]) setTimeout(() => void llm.reply('ses_1', requests[0]!.id, 'once'), 120) // 그 사이 같은 요청의 이벤트가 한 번 더 온다
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(shown).toEqual([[{ kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'bash', resources: ['ls'] }], []])
     expect(warn).not.toHaveBeenCalled()
@@ -854,14 +873,14 @@ describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)
     const shown: Attention[][] = []
     let caller: Awaited<ReturnType<LlmService['callerOf']>>
     let again: Awaited<ReturnType<LlmService['callerOf']>>
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       shown.push(requests)
       if (!requests[0]) return
       void llm.reply('ses_1', requests[0].id, 'once').then(async () => {
         caller = await llm.callerOf(directory, SEND, MCP_ARGS)
         again = await llm.callerOf(directory, SEND, MCP_ARGS, 30)
       })
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(shown[0]).toEqual([
       { kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: 'litecode_send_to_project', resources: ['*'], mcp: SEND, input: JSON.stringify(MCP_ARGS) },
@@ -876,12 +895,12 @@ describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)
     const { llm } = await start(url)
     const target = { kind: 'conversation' as const, conversationId: 'conv-b' }
     let caller: Awaited<ReturnType<LlmService['callerOf']>>
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       if (!requests[0]) return
       void llm.reply('ses_1', requests[0].id, 'once', target).then(async () => {
         caller = await llm.callerOf(directory, SEND, MCP_ARGS)
       })
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: true, target })
     expect(calls.filter((call) => call.startsWith('/permission/'))).toEqual(['/permission/per_1/reply {"reply":"once"}'])
@@ -892,14 +911,14 @@ describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)
     const { llm } = await start(url)
     let caller: Awaited<ReturnType<LlmService['callerOf']>>
     let other: Awaited<ReturnType<LlmService['callerOf']>>
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       if (!requests[0]) return
       // 폴더 코드가 엔진 비밀번호로 직접 허용한 것처럼
       void fetch(`${url}/permission/per_1/reply?directory=${encodeURIComponent(directory)}`, { method: 'POST', body: '{"reply":"once"}' }).then(async () => {
         other = await llm.callerOf(directory, SEND, { ...MCP_ARGS, message: 'something else' }, 30)
         caller = await llm.callerOf(directory, SEND, MCP_ARGS)
       })
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(other).toBeUndefined()
     expect(caller).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: false })
@@ -914,7 +933,7 @@ describe('ctx.llm 부른 대화 찾기·승인 기록 (이슈 #55, 01z 1-2·1-4)
 describe('ctx.llm 모드 = opencode 에이전트', () => {
   it('보내기 전에 그 모드의 에이전트가 목록에 있는지 본다 — 목록이 비어 있으면(지연 로드) 나올 때까지 기다린다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
-    expect((await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'ask')).ok).toBe(true)
+    expect((await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'ask' })).ok).toBe(true)
     expect(prompts[0]).toMatchObject({ agent: 'litecode-ask' })
   })
 })
@@ -923,7 +942,7 @@ describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
   it('도는 턴을 멈추면 opencode 턴도 멈추고(POST /session/{id}/abort) "중단됨" 으로 끝난다 — turn-ended interrupted', async () => {
     const { llm, seen } = await start(await fakeOpencode('hold'))
     const stop = new AbortController()
-    const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, undefined, undefined, stop.signal)
+    const turn = llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', stop: stop.signal })
     await expect.poll(() => seen.length).toBe(1) // started — 프롬프트가 받아들여졌다
     stop.abort()
     expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped'), sessionId: 'ses_1' })
@@ -935,7 +954,7 @@ describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
     const { llm, seen } = await start(await fakeOpencode('done'))
     const stop = new AbortController()
     stop.abort()
-    expect(await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, undefined, undefined, stop.signal)).toMatchObject({
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', stop: stop.signal })).toMatchObject({
       ok: false,
       interrupted: true,
       error: tr('error.stopped'),
@@ -949,10 +968,10 @@ describe('ctx.llm 사용자 멈춤 (이슈 #3)', () => {
     const { llm } = await start(await fakeOpencode('permission'))
     const stop = new AbortController()
     const shown: Attention[][] = []
-    const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const turn = llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       shown.push(requests)
       if (requests[0]) stop.abort()
-    }, stop.signal)
+    }, stop: stop.signal })
     expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped') })
     expect(shown[0]?.[0]).toMatchObject({ kind: 'permission' })
     expect(calls).toContain('/session/ses_1/abort')
@@ -970,10 +989,10 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     const asked: PreTool[] = []
     if (decide) ctx.on('llm/pre-tool', (info) => (asked.push(info), decide(info)))
     const shown: Attention[][] = []
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, opts.mode ?? 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: opts.mode ?? 'build', onAttention: (requests) => {
       shown.push(requests)
       if (requests[0]) setTimeout(() => void llm.reply('ses_1', requests[0]!.id, 'once'), opts.answerAfterMs ?? 0)
-    })
+    } })
     return { llm, seen, asked, shown, result, replies: calls.filter((call) => call.startsWith('/permission/')) }
   }
 
@@ -1061,13 +1080,13 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     const { llm } = await start(await fakeOpencode('permission'))
     llm.gateTools(['bash'])
     expect(engineGates).toEqual([['bash']])
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       if (!requests[0]) return
       llm.gateTools(['bash', 'edit'])
       llm.gateTools(['edit'])
       expect(engineGates).toEqual([['bash']]) // 턴이 도는 중 — 아직
       void llm.reply('ses_1', requests[0].id, 'once')
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(engineGates).toEqual([['bash'], ['edit']])
   })
@@ -1076,13 +1095,13 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     const { llm } = await start(await fakeOpencode('permission'))
     llm.reloadWhenIdle()
     expect(engineRestarts).toBe(1)
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       if (!requests[0]) return
       llm.reloadWhenIdle()
       llm.reloadWhenIdle()
       expect(engineRestarts).toBe(1) // 턴이 도는 중 — 아직
       void llm.reply('ses_1', requests[0].id, 'once')
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(engineRestarts).toBe(2)
   })
@@ -1096,13 +1115,13 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     })
     const shown: Attention[][] = []
     let caller: Awaited<ReturnType<LlmService['callerOf']>>
-    const result = await llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build', (requests) => {
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
       shown.push(requests)
       if (!requests[0]) return
       void llm.reply('ses_1', requests[0].id, 'once', { kind: 'scope', scope: 'all' }).then(async () => {
         caller = await llm.callerOf(directory, { server: 'litecode', tool: 'send_to_project' }, MCP_ARGS)
       })
-    })
+    } })
     expect(result.ok).toBe(true)
     expect(shown[0]![0]).toMatchObject({ input: JSON.stringify({ ...MCP_ARGS, message: 'MASKED' }) })
     expect(refs[0]).toEqual({ server: 'litecode', tool: 'send_to_project' })
@@ -1113,7 +1132,7 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     const { llm, ctx } = await start(await fakeOpencode('mcpgate'))
     gatedPermissions = ['github_search']
     ctx.on('llm/pre-tool', () => 'allow' as const)
-    const turn = llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, undefined, 'build')
+    const turn = llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build' })
     for (let tries = 0; tries < 200 && !calls.includes('/permission/per_1/reply {"reply":"once"}'); tries++) await new Promise((resolve) => setTimeout(resolve, 5))
     expect(calls).toContain('/permission/per_1/reply {"reply":"once"}')
     expect(await llm.callerOf(directory, { server: 'github', tool: 'search' }, MCP_ARGS)).toEqual({ sessionId: 'ses_1', callId: 'call_1', child: false, approved: false })
@@ -1124,28 +1143,28 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
 describe('ctx.llm /event 무바이트 구간 (01q)', () => {
   it('조용한 구간이 타임아웃보다 길면 끊긴다 — 주입한 타임아웃이 /event fetch 에 닿는다', async () => {
     const { llm } = await start(await fakeOpencode('silent'), { streamTimeoutMs: 300 })
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: false, interrupted: true })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ ok: false, interrupted: true })
   })
 
   it('heartbeat 가 오면 조용한 턴이 타임아웃보다 길어도 끊기지 않는다 — 무바이트 한도는 죽은 연결만 잡는다', async () => {
     const { llm } = await start(await fakeOpencode('heartbeat'), { streamTimeoutMs: 300 })
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true, text: 'late' })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ ok: true, text: 'late' })
   })
 
   it(`기본 한도(${STREAM_IDLE_TIMEOUT_MS}ms — heartbeat 세 번)면 그보다 짧은 조용한 구간을 지나 끝까지 받는다`, async () => {
     const { llm } = await start(await fakeOpencode('silent'))
-    expect(await llm.chat('p', 'm', directory, 'hi')).toMatchObject({ ok: true, text: 'late' })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ ok: true, text: 'late' })
   })
 
   it('엔진이 살아 있는데 끝 이벤트 없이 끊기면 opencode 턴도 멈춘다 (abort) — 재생이 없어 끝을 다시 받을 길이 없다', async () => {
     const { llm } = await start(await fakeOpencode('silent'), { streamTimeoutMs: 300 })
-    await llm.chat('p', 'm', directory, 'hi')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })
     expect(calls).toContain('/session/ses_1/abort')
   })
 
   it('엔진이 끝나 끊긴 턴은 abort 를 보내지 않는다 (보낼 곳이 없다)', async () => {
     const { llm } = await start(await fakeOpencode('cut'))
-    await llm.chat('p', 'm', directory, 'hi')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })
     expect(calls.filter((call) => call.includes('/abort'))).toEqual([])
   })
 })
@@ -1162,7 +1181,7 @@ describe('옛 대화 이어 쓰기 (이슈 #21)', () => {
   it('신규 세대 기록만 있는 세션의 첫 레거시 턴 직전에 옛 글을 합성·noReply 로 한 번 넣고, 다음 턴엔 안 넣는다', async () => {
     previous = v2
     const { llm } = await start(await fakeOpencode('done'))
-    expect(await llm.chat('p', 'm', directory, 'what is my name', 'ses_1')).toMatchObject({ ok: true })
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'what is my name', sessionId: 'ses_1' })).toMatchObject({ ok: true })
     expect(prompts).toHaveLength(2)
     expect(prompts[0]).toMatchObject({ noReply: true, model: { providerID: 'p', modelID: 'm' }, parts: [{ type: 'text', synthetic: true }] })
     const injected = (prompts[0]!['parts'] as { text: string }[])[0]!.text
@@ -1170,7 +1189,7 @@ describe('옛 대화 이어 쓰기 (이슈 #21)', () => {
     expect(String(prompts[0]!['messageID']) < String(prompts[1]!['messageID'])).toBe(true) // 옛 글이 이번 입력보다 먼저 선다
     expect(prompts[1]).toMatchObject({ parts: [{ type: 'text', text: 'what is my name' }] })
 
-    await llm.chat('p', 'm', directory, 'again', 'ses_1')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'again', sessionId: 'ses_1' })
     expect(prompts).toHaveLength(3)
     expect(prompts[2]).not.toHaveProperty('noReply')
   })
@@ -1179,7 +1198,7 @@ describe('옛 대화 이어 쓰기 (이슈 #21)', () => {
   it('옛 글 넣기가 실패해 턴이 시작도 못 하면 그 세션의 거절 기록이 남지 않는다', async () => {
     previous = v2
     const { llm } = await start(await fakeOpencode('reject'))
-    expect((await llm.chat('p', 'm', directory, 'hi', 'ses_1')).ok).toBe(false)
+    expect((await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', sessionId: 'ses_1' })).ok).toBe(false)
     expect((llm as unknown as { declined: Map<string, unknown> }).declined.size).toBe(0)
   })
 
@@ -1189,14 +1208,14 @@ describe('옛 대화 이어 쓰기 (이슈 #21)', () => {
     const id = llm.newMessageId()
     expect(await llm.addContext('p', 'm', directory, '$ ls', id, 'ses_1')).toMatchObject({ ok: true })
     expect(prompts.map((prompt) => (prompt['parts'] as { synthetic?: boolean }[])[0]!.synthetic ?? false)).toEqual([true, false])
-    await llm.chat('p', 'm', directory, 'next', 'ses_1')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'next', sessionId: 'ses_1' })
     expect(prompts).toHaveLength(3)
   })
 
   it('새 세션·신규 기록이 없는 세션엔 아무것도 넣지 않는다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
-    await llm.chat('p', 'm', directory, 'hi')
-    await llm.chat('p', 'm', directory, 'again', 'ses_1')
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })
+    await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'again', sessionId: 'ses_1' })
     expect(prompts.filter((prompt) => prompt['noReply'])).toEqual([])
   })
 

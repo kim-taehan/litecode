@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { tr } from '../i18n.ts'
-import { readJsonFile } from './jsonFile.ts'
+import { readJsonFile, unreadableFileError, writeJsonFile } from './jsonFile.ts'
 import type { Project } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
@@ -55,7 +55,12 @@ export class ProjectsService extends Service {
 
   /** 최근에 연 순서 (맨 앞이 마지막으로 연 프로젝트) */
   async list(): Promise<Project[]> {
-    return toProjects(await this.read())
+    return toProjects(await this.readOrEmpty())
+  }
+
+  /** 등록된 프로젝트인가 — 목록의 path 와 글자 그대로 같을 때만(정규화하지 않는다). 화면이 오염돼도 아무 폴더나 읽거나 만들지 못하게 막는 문이다 */
+  async has(dir: string): Promise<boolean> {
+    return (await this.list()).some((project) => project.path === dir)
   }
 
   /** 폴더를 열어 최근 목록 맨 앞에 올린다. 폴더가 아니면(없는 경로·파일) 목록을 안 바꾸고 throw 한다. */
@@ -100,30 +105,37 @@ export class ProjectsService extends Service {
   private update(mutate: (stored: Stored) => Stored): Promise<Stored> {
     const next = this.queue.then(async () => {
       const stored = mutate(await this.read())
-      await fs.mkdir(path.dirname(this.opts.file), { recursive: true })
-      const temp = `${this.opts.file}.${process.pid}.tmp`
-      await fs.writeFile(temp, JSON.stringify(stored))
-      await fs.rename(temp, this.opts.file) // 쓰다 죽어도 이전 파일이 남게
+      await writeJsonFile(this.opts.file, stored) // 쓰다 죽어도 이전 파일이 남게
       return stored
     })
     this.queue = next.catch(() => {}) // 한 번 실패해도 다음 갱신은 돈다
     return next
   }
 
-  /** 파일이 없거나 손상됐으면 빈 목록 — 최근 목록은 잃어도 되는 편의 데이터라 앱 시작을 막지 않는다. 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts) */
+  /** 파일이 없거나 손상됐으면 빈 목록 — 최근 목록은 잃어도 되는 편의 데이터라 앱 시작을 막지 않는다. 손상된 파일은 옆에 옮겨 둔다 (jsonFile.ts).
+   *  읽기 자체가 실패하면(권한 등) 던진다 — 빈 목록 위에 고쳐 쓰면 원본이 사라진다 (이슈 #195). 그래서 update 는 쓰지 않고 실패한다 */
   private async read(): Promise<Stored> {
+    let parsed: Partial<Record<keyof Stored, unknown>> | undefined
     try {
-      const parsed = (await readJsonFile(this.opts.file, 'object')) as Partial<Record<keyof Stored, unknown>> | undefined
-      const recent = strings(parsed?.recent)
-      const names = Object.fromEntries(
-        Object.entries(typeof parsed?.names === 'object' && parsed.names ? parsed.names : {}).filter(
-          (entry): entry is [string, string] => recent.includes(entry[0]) && typeof entry[1] === 'string',
-        ),
-      )
-      return { recent, favorites: strings(parsed?.favorites).filter((entry) => recent.includes(entry)), names }
-    } catch {
-      return { recent: [], favorites: [], names: {} }
+      parsed = (await readJsonFile(this.opts.file, 'object')) as Partial<Record<keyof Stored, unknown>> | undefined
+    } catch (error) {
+      throw unreadableFileError(this.opts.file, error)
     }
+    const recent = strings(parsed?.recent)
+    const names = Object.fromEntries(
+      Object.entries(typeof parsed?.names === 'object' && parsed.names ? parsed.names : {}).filter(
+        (entry): entry is [string, string] => recent.includes(entry[0]) && typeof entry[1] === 'string',
+      ),
+    )
+    return { recent, favorites: strings(parsed?.favorites).filter((entry) => recent.includes(entry)), names }
+  }
+
+  /** 보여 주기만 하는 읽기 — 못 읽는 파일이면 빈 목록으로 (앱 시작을 막지 않는다). 쓰는 길은 read 로 던진다 */
+  private readOrEmpty(): Promise<Stored> {
+    return this.read().catch((error: unknown) => {
+      console.warn(`[projects] ${(error as Error).message}`)
+      return { recent: [], favorites: [], names: {} }
+    })
   }
 }
 

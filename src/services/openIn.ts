@@ -123,7 +123,7 @@ export class OpenInService extends Service {
     const target = (await this.load()).find((entry) => entry.id === appId)
     if (typeof appId !== 'string' || !target) throw new Error(tr('openIn.unknownApp'))
     // 등록된 realpath 와 정확히 같아야 한다 — 상대 경로·`..`·옵션처럼 보이는 값은 여기서 걸린다
-    const registered = typeof directory === 'string' && (await this.ctx.projects.list()).some((project) => project.path === directory)
+    const registered = typeof directory === 'string' && (await this.ctx.projects.has(directory))
     if (!registered || !path.isAbsolute(directory)) throw new Error(tr('openIn.notProject'))
     if (!fs.statSync(directory, { throwIfNoEntry: false })?.isDirectory()) throw new Error(tr('error.notFolder', { dir: directory }))
     const what: Launch = target.id === 'finder' ? { kind: 'os-open', path: directory } : { kind: 'open-a', args: ['-a', target.bundle, directory] }

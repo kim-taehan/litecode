@@ -87,7 +87,7 @@ export function isLoopbackHost(host: string): boolean {
   return bare === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare)
 }
 
-/** QR 에 싣는 것 — `litecode://pair?v=1&d=…&n=…&a=ip:port,…&fp=…&c=…&x=…` (값은 encodeURIComponent, 순서는 이대로) */
+/** QR 에 싣는 것 — `litecode://pair?v=1&d=…&n=…&a=ip:port,…&fp=…&c=…&x=…[&bk=…]` (값은 encodeURIComponent, 순서는 이대로) */
 export interface PairLink {
   /** v — REMOTE_API_VERSION */
   version: number
@@ -103,6 +103,9 @@ export interface PairLink {
   code: string
   /** x — 코드 만료 (unix 초) */
   expiresAt: number
+  /** bk — 블루투스 Noise NK 채널의 데스크탑 정적 X25519 공개키, base64url 43자 (이슈 #171, shared/noiseNK.ts). 선택: 없으면 블루투스로 못 붙는다.
+   *  v 는 그대로 1 — 모르는 폰은 이 필드를 흘려보낸다 */
+  bluetoothKey?: string
 }
 
 export const PAIR_URI_PREFIX = 'litecode://pair?'
@@ -116,6 +119,7 @@ export function pairUri(link: PairLink): string {
     ['fp', link.fingerprint],
     ['c', link.code],
     ['x', String(link.expiresAt)],
+    ...(link.bluetoothKey !== undefined ? [['bk', link.bluetoothKey] as [string, string]] : []),
   ]
   return PAIR_URI_PREFIX + fields.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&')
 }
@@ -136,9 +140,10 @@ export function parsePairUri(text: string): PairLink | undefined {
   const expiresAt = Number(fields.get('x'))
   const addresses = (fields.get('a') ?? '').split(',').filter(Boolean)
   const fingerprint = fields.get('fp') ?? ''
-  const { d: desktopId = '', n: name = '', c: code = '' } = Object.fromEntries(fields)
+  const { d: desktopId = '', n: name = '', c: code = '', bk: bluetoothKey } = Object.fromEntries(fields)
   if (!Number.isInteger(version) || !Number.isFinite(expiresAt) || !desktopId || !code || addresses.length === 0 || !/^[A-Za-z0-9_-]{43}$/.test(fingerprint)) return undefined
-  return { version, desktopId, name, addresses, fingerprint, code, expiresAt }
+  if (bluetoothKey !== undefined && !/^[A-Za-z0-9_-]{43}$/.test(bluetoothKey)) return undefined
+  return { version, desktopId, name, addresses, fingerprint, code, expiresAt, ...(bluetoothKey !== undefined && { bluetoothKey }) }
 }
 
 /** GET /v1/projects */
@@ -195,7 +200,7 @@ export interface QueueTakeResponse {
   text: string
 }
 
-/** POST /v1/attention/{sessionId}/{requestId} — 본문은 { answer: AttentionAnswer } */
+/** POST /v1/attention/{sessionId}/{requestId} — 본문은 { answer: AttentionAnswer }. 전체 권한 모드 대화의 요청이면 403 (데스크탑에서만 답한다) */
 export interface AttentionReplyResponse {
   /** elsewhere: 다른 기기가 먼저 답했다 (오류가 아니다) */
   handled: 'ok' | 'elsewhere'

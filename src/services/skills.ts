@@ -1,7 +1,7 @@
 import { Context, Service } from 'cordis'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { skillSource, type SkillSource } from '../../shared/skills.ts'
+import { PROJECT_SKILLS_DIR, skillSource, type SkillSource } from '../../shared/skills.ts'
 import { isSkillName } from '../../shared/make.ts'
 import { insideOf } from './projectPath.ts'
 import './llm.ts'
@@ -80,7 +80,7 @@ export class SkillsService extends Service {
 
   /** 스킬 팝업의 "폴더 열기" 가 열 폴더 — 없으면 만든다(빈 폴더). 프로젝트 묶음은 `<프로젝트>/.opencode/skills`, 모든 프로젝트는 앱 스킬 폴더 */
   async folder(scope: SkillScope, directory: string): Promise<string | undefined> {
-    const dir = scope === 'project' ? path.join(directory, '.opencode', 'skills') : this.opts.appDir
+    const dir = scope === 'project' ? path.join(directory, PROJECT_SKILLS_DIR) : this.opts.appDir
     if (dir) await fs.mkdir(dir, { recursive: true })
     return dir
   }
@@ -119,7 +119,7 @@ export class SkillsService extends Service {
     if (existing) throw new Error(`${taken} (${existing.location}). Nothing was written — pick another name.`)
     const root = scope === 'project' ? await fs.realpath(directory) : this.opts.appDir
     if (!root) throw new Error('The app skill folder is not available.')
-    const dir = scope === 'project' ? path.join(root, '.opencode', 'skills', skill.name) : path.join(root, skill.name)
+    const dir = scope === 'project' ? path.join(root, PROJECT_SKILLS_DIR, skill.name) : path.join(root, skill.name)
     const outside = 'The skill folder of this project points outside the project folder. Nothing was written.'
     if (scope === 'project' && !(await within(root, await deepestExisting(dir)))) throw new Error(outside)
     await fs.mkdir(dir, { recursive: true })

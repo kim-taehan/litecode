@@ -132,7 +132,7 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     reply(request, answer) {
       client.reply(request.sessionId, request.id, answer).then((result) => {
         if (result.handled === 'elsewhere') setNotice('elsewhere')
-      }, failed)
+      }, (error: unknown) => setNotice(error instanceof RemoteError && error.status === 403 ? 'answer-desktop-only' : 'failed')) // 403 = 전체 권한 모드 대화 (데스크탑에서만 답한다)
     },
     async createConversation(project) {
       try {

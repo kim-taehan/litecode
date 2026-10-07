@@ -1,9 +1,10 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import http from 'node:http'
 import https from 'node:https'
 import type { AddressInfo } from 'node:net'
 import { normalizeBaseURL } from './providers.ts'
 import { tr } from '../i18n.ts'
+import { sameSecret } from './httpUtil.ts'
 
 // 키 프록시 — 진짜 API 키를 opencode 프로세스에 두지 않으려고 메인 프로세스가 LLM 요청을 중계한다 (QA 1차 차단, 리더 결정 a).
 // opencode 는 자기 env 를 프로젝트 플러그인(.opencode/plugin, opencode.json plugin)과 bash 도구에 그대로 넘기고 --pure 로도
@@ -40,9 +41,7 @@ function forwardable(headers: http.IncomingHttpHeaders, drop: string[] = []): ht
 }
 
 function sameToken(given: string | undefined, expected: string): boolean {
-  const a = Buffer.from(given ?? '')
-  const b = Buffer.from(`Bearer ${expected}`)
-  return a.length === b.length && timingSafeEqual(a, b)
+  return sameSecret(given ?? '', `Bearer ${expected}`)
 }
 
 function fail(res: http.ServerResponse, status: number, message: string): void {

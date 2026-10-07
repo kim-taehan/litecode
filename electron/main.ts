@@ -8,6 +8,8 @@ import { LlmService, type AttentionAnswer } from '../src/services/llm.ts'
 import { ChatService } from '../src/services/chat.ts'
 import { AttachmentsService } from '../src/services/attachmentsService.ts'
 import { systemAttachmentsHost } from './attachmentsHost.ts'
+import { ReportService } from '../src/services/report.ts'
+import { systemReportHost } from './reportHost.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
 import { EngineService, killEngineProcesses } from '../src/services/engine.ts'
@@ -243,16 +245,16 @@ function bootstrap(ctx: Context): void {
   })
   // 파일 미리보기 패널 — 읽기만. 칩 판정에 더해 폴더가 등록된 프로젝트인지 본다(화면이 오염돼도 아무 폴더나 읽게 두지 않는다)
   handle(ctx, Channel.PREVIEW_FILE, async (_event, directory: string, token: string): Promise<FilePreview> => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     return registered ? previewFile(directory, token) : { status: 'unavailable' }
   })
   // 오른쪽 패널(이슈 #29) — HTML 미리보기 리소스와 Files 탭 목록도 등록된 프로젝트 안만
   handle(ctx, Channel.PREVIEW_ASSETS, async (_event, directory: string, token: string, references: string[]): Promise<HtmlAsset[]> => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     return registered ? readHtmlAssets(directory, token, references) : []
   })
   handle(ctx, Channel.LIST_DIRECTORY, async (_event, directory: string, relative: string): Promise<DirectoryListing> => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     return registered ? listDirectory(directory, relative) : { status: 'unavailable' }
   })
   handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
@@ -315,6 +317,17 @@ function attachmentsBridge(ctx: Context): void {
 attachmentsBridge.inject = ['attachments']
 mounted.push(ctx.plugin(AttachmentsService, { host: systemAttachmentsHost, pastedDir: path.join(userData, 'pasted-images') }))
 mounted.push(ctx.plugin(attachmentsBridge))
+
+// 대화 내보내기 · 문제 신고 묶음 (ctx.report, 이슈 #177) — 사용자가 고른 자리에 파일로만 쓴다(밖으로 보내지 않는다). 대화상자·폴더 열기는
+// host 가 요청을 보낸 창에 붙인다 (event.sender). 묶음에는 허용 목록의 파일만, 글은 비밀을 가려서 (report.ts)
+function reportBridge(ctx: Context): void {
+  handle(ctx, Channel.EXPORT_CONVERSATION, async (event, conversationId: string) => ctx.report.exportConversation(String(conversationId), event.sender))
+  handle(ctx, Channel.CREATE_REPORT, async (event) => ctx.report.createBundle(event.sender))
+  handle(ctx, Channel.OPEN_REPORT, async (_event, dir: string) => ctx.report.openBundle(dir))
+}
+reportBridge.inject = ['report']
+mounted.push(ctx.plugin(ReportService, { host: systemReportHost, logFile: mainLog.path, appVersion: app.getVersion() }))
+mounted.push(ctx.plugin(reportBridge))
 
 /** 모든 앱 창에 보낸다 */
 function broadcast(channel: string, ...args: unknown[]): void {
@@ -447,7 +460,7 @@ function skillsBridge(ctx: Context): void {
   handle(ctx, Channel.LIST_SKILLS, async (_event, directory: string) => ctx.skills.list(directory))
   // "폴더 열기" — 등록된 프로젝트일 때만 (화면이 오염돼도 아무 폴더에나 .opencode/skills 를 만들지 않는다). 경로는 메인이 정한다
   handle(ctx, Channel.OPEN_SKILLS_FOLDER, async (_event, scope: SkillScope, directory: string) => {
-    const registered = (await ctx.projects.list()).some((project) => project.path === directory)
+    const registered = await ctx.projects.has(directory)
     const folder = registered ? await ctx.skills.folder(scope === 'project' ? 'project' : 'all', directory) : undefined
     if (!folder || (await shell.openPath(folder))) throw new Error(tr('skills.openFolderError'))
   })
@@ -583,7 +596,13 @@ const features: FeatureDefinition[] = [
     id: 'remote',
     service: 'remote',
     plugin: (ctx) => {
-      ctx.plugin(RemoteService, { file: path.join(userData, 'remote-devices.json'), appVersion: app.getVersion() })
+      ctx.plugin(RemoteService, {
+        file: path.join(userData, 'remote-devices.json'),
+        appVersion: app.getVersion(),
+        // 블루투스 Noise 키 — 블루투스 운반(#171 ③)이 처음 부를 때 만든다. 지금은 아무도 부르지 않는다
+        noiseKeyFile: path.join(userData, 'remote-noise-key.json'),
+        cipher: keyCipher,
+      })
       // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 평문 HTTP(127.0.0.1:47600, 에뮬레이터용)와 사내망 TLS(사설 IPv4 주소마다 :47600,
       // 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다). 블루투스 운반이 이 옆에 올라온다
       ctx.plugin(RemoteHttp)
@@ -661,7 +680,13 @@ function sendFullScreen(win: BrowserWindow): void {
 const windowFile = path.join(userData, 'window.json')
 
 function createWindow(): BrowserWindow {
-  const stored = readJsonFileSync(windowFile, 'object')
+  // 못 읽는 파일(권한 등)은 기본 크기로 — 창 자리는 덮여도 잃을 게 없다. 읽기 실패를 던지게 한 뒤(#195) 창이 안 뜨지 않게
+  let stored: ReturnType<typeof readJsonFileSync> | undefined
+  try {
+    stored = readJsonFileSync(windowFile, 'object')
+  } catch {
+    stored = undefined
+  }
   const saved = restorableBounds(stored, screen.getAllDisplays().map((display) => display.workArea))
   const win = new BrowserWindow({
     ...(saved ?? { width: 1280, height: 800 }),
@@ -756,7 +781,7 @@ function createWindow(): BrowserWindow {
 // 켜진 기능 묶음의 서비스도 같이 본다 — 못 뜨면 화면은 켜진 줄 알고 그 채널을 부른다 ("No handler registered")
 const BOOT_DEADLINE_MS = 15_000
 function checkBoot(): void {
-  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject, ...(ctx.get('features')?.services() ?? [])], (name) => ctx.get(name))
+  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject, ...reportBridge.inject, ...(ctx.get('features')?.services() ?? [])], (name) => ctx.get(name))
   if (!missing.length) return
   console.error(`[boot] ${BOOT_DEADLINE_MS / 1000}초 안에 안 뜬 서비스: ${missing.join(', ')}`)
   if (hiddenForTests) return // 실물 테스트는 대화상자를 띄우지 않는다 — 기록만
