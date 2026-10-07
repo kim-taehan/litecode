@@ -124,6 +124,13 @@ describe('McpService — 앱 서버 저장', () => {
     expect(() => mcp.save({ ...remote({ name: 'other' }), vars: [{ name: 'Authorization', value: '', secret: true }] })).toThrow(/넣어 주세요/)
   })
 
+  it('varValues — 모든 프로젝트·프로젝트 전용 서버의 env·헤더 값을 비밀 포함 전부 준다 (문제 신고 묶음이 지울 값, #177)', async () => {
+    const { mcp } = await start()
+    mcp.save(remote())
+    mcp.save({ name: 'db', type: 'local', command: ['node', 'db.js'], vars: [{ name: 'DB_PASSWORD', value: 'pw-local-1', secret: true }, { name: 'MODE', value: 'ro', secret: false }], scope: 'project' }, project)
+    expect(mcp.varValues().sort()).toEqual(['Bearer tok-123', 'core', 'pw-local-1', 'ro'])
+  })
+
   it('이름·명령·주소·헤더 값을 검사한다', async () => {
     const { mcp } = await start()
     expect(() => mcp.save(remote({ name: 'has space' }))).toThrow(/32자/)

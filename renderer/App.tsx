@@ -32,6 +32,7 @@ import { pasteIntent, useFileDrop } from './dropPaste.ts'
 import { DropVeil } from './DropVeil.tsx'
 import { countOf } from './attachmentsView.ts'
 import { OpenInButton } from './OpenInButton.tsx'
+import { ConversationMenu } from './Report.tsx'
 import { JobsButton } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { QueueDock } from './QueueDock.tsx'
@@ -1146,6 +1147,8 @@ export function App() {
               {active.pending && <JobsButton key={active.id} items={active.progress ?? []} startedAt={active.sentAt} />}
               {features.has('openIn') && <OpenInButton directory={active.project} />}
               <RightPanelButton directory={active.project} />
+              {/* 더 보기 ⋯ — 대화 내보내기 (이슈 #177) */}
+              <ConversationMenu key={active.id} conversationId={active.id} />
             </div>
             {/* 설정 > 기능의 추론 과정을 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
             {trajectoryOn && (

@@ -541,6 +541,19 @@ export class McpService extends Service {
     return cached
   }
 
+  /** 앱이 저장한 서버(모든 프로젝트·프로젝트 전용)의 env·헤더 값 전부 — 비밀 표시와 무관하게. 문제 신고 묶음(ctx.report)이 글에서 지우는 데만
+   *  쓴다 (이슈 #177). 화면·파일·로그로 내보내지 않는다 */
+  varValues(): string[] {
+    const owned: [McpServerRecord, string | undefined][] = [
+      ...this.servers.map((server) => [server, undefined] as [McpServerRecord, undefined]),
+      ...Object.entries(this.projects).flatMap(([workdir, entry]) => entry.servers.map((server) => [server, workdir] as [McpServerRecord, string])),
+    ]
+    return owned.flatMap(([server, owner]) => {
+      const def = this.engineDef(server, owner)
+      return Object.values((def.type === 'remote' ? def.headers : def.environment) ?? {})
+    })
+  }
+
   /** owner 는 프로젝트 전용 서버의 프로젝트(realpath) */
   private engineDef(server: McpServerRecord, owner?: string): EngineMcp {
     const sealed = this.secrets[secretKey(server.name, owner)] ?? {}

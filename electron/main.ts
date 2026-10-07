@@ -8,6 +8,8 @@ import { LlmService, type AttentionAnswer } from '../src/services/llm.ts'
 import { ChatService } from '../src/services/chat.ts'
 import { AttachmentsService } from '../src/services/attachmentsService.ts'
 import { systemAttachmentsHost } from './attachmentsHost.ts'
+import { ReportService } from '../src/services/report.ts'
+import { systemReportHost } from './reportHost.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
 import { EngineService, killEngineProcesses } from '../src/services/engine.ts'
@@ -315,6 +317,17 @@ function attachmentsBridge(ctx: Context): void {
 attachmentsBridge.inject = ['attachments']
 mounted.push(ctx.plugin(AttachmentsService, { host: systemAttachmentsHost, pastedDir: path.join(userData, 'pasted-images') }))
 mounted.push(ctx.plugin(attachmentsBridge))
+
+// 대화 내보내기 · 문제 신고 묶음 (ctx.report, 이슈 #177) — 사용자가 고른 자리에 파일로만 쓴다(밖으로 보내지 않는다). 대화상자·폴더 열기는
+// host 가 요청을 보낸 창에 붙인다 (event.sender). 묶음에는 허용 목록의 파일만, 글은 비밀을 가려서 (report.ts)
+function reportBridge(ctx: Context): void {
+  handle(ctx, Channel.EXPORT_CONVERSATION, async (event, conversationId: string) => ctx.report.exportConversation(String(conversationId), event.sender))
+  handle(ctx, Channel.CREATE_REPORT, async (event) => ctx.report.createBundle(event.sender))
+  handle(ctx, Channel.OPEN_REPORT, async (_event, dir: string) => ctx.report.openBundle(dir))
+}
+reportBridge.inject = ['report']
+mounted.push(ctx.plugin(ReportService, { host: systemReportHost, logFile: mainLog.path, appVersion: app.getVersion() }))
+mounted.push(ctx.plugin(reportBridge))
 
 /** 모든 앱 창에 보낸다 */
 function broadcast(channel: string, ...args: unknown[]): void {
@@ -762,7 +775,7 @@ function createWindow(): BrowserWindow {
 // 켜진 기능 묶음의 서비스도 같이 본다 — 못 뜨면 화면은 켜진 줄 알고 그 채널을 부른다 ("No handler registered")
 const BOOT_DEADLINE_MS = 15_000
 function checkBoot(): void {
-  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject, ...(ctx.get('features')?.services() ?? [])], (name) => ctx.get(name))
+  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject, ...reportBridge.inject, ...(ctx.get('features')?.services() ?? [])], (name) => ctx.get(name))
   if (!missing.length) return
   console.error(`[boot] ${BOOT_DEADLINE_MS / 1000}초 안에 안 뜬 서비스: ${missing.join(', ')}`)
   if (hiddenForTests) return // 실물 테스트는 대화상자를 띄우지 않는다 — 기록만

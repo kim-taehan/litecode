@@ -10,6 +10,7 @@ import type { Project } from '../src/services/projects.ts'
 import type { Conversation, ShellCard } from '../src/services/sessions.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 import type { Trajectory } from '../src/services/trajectory.ts'
+import type { ReportResult } from '../src/services/report.ts'
 import type { TurnItem } from '../src/services/turnProgress.ts'
 import type { Settings } from '../src/services/settings.ts'
 import type { NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
@@ -37,6 +38,7 @@ export type { Project } from '../src/services/projects.ts'
 export type { Conversation, ShellCard } from '../src/services/sessions.ts'
 export type { AppCommand, TriggerCandidate, TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 export type { Trajectory, TrajectoryRecord } from '../src/services/trajectory.ts'
+export type { ReportResult } from '../src/services/report.ts'
 export type { Appearance, Settings } from '../src/services/settings.ts'
 export type { ConversationStatus, NoticeKind, NoticeState, OpenTarget, Toast } from '../src/services/notifications.ts'
 export type { OpenInApp } from '../src/services/openIn.ts'
@@ -124,6 +126,10 @@ export const Channel = {
   SET_SETTINGS: 'settings:set',
   OPEN_SETTINGS_FILE: 'settings:open-file',
   GET_APP_VERSION: 'app:version',
+  /** 대화 내보내기·문제 신고 묶음 (ctx.report, 이슈 #177) */
+  EXPORT_CONVERSATION: 'report:export-conversation',
+  CREATE_REPORT: 'report:create',
+  OPEN_REPORT: 'report:open',
   GET_NOTIFICATIONS: 'notifications:get',
   VIEW_CONVERSATION: 'notifications:view',
   TAKE_PENDING_OPEN: 'notifications:take-open',
@@ -313,6 +319,12 @@ export interface LitecodeBridge {
   openSettingsFile(): Promise<void>
   /** 앱 버전 (package.json version) — 설정 > 일반 맨 아래 "현재 버전" */
   getAppVersion(): Promise<string>
+  /** 대화 머리 ⋯ "대화 내보내기" — 저장 위치를 묻고 그 대화 전체(말·도구 호출·결과·시각)를 JSON 파일 하나로. 못 읽으면 지금 언어의 사유로 거절 */
+  exportConversation(conversationId: string): Promise<ReportResult>
+  /** 설정 > 일반 "문제 신고 묶음" — 폴더를 묻고 그 안에 litecode-report-<시각>/ 을 만든다 (비밀·대화 내용 없음, 로컬 저장만) */
+  createReport(): Promise<ReportResult>
+  /** 이 실행에서 만든 묶음 폴더를 OS 파일 관리자로 연다. 다른 경로·실패면 거절 */
+  openReport(dir: string): Promise<void>
   /** 대화별 알림 상태 (실행 중·답 필요·안 본 끝남) — 대화 행·프로젝트 점 (ctx.notifications) */
   getNotifications(): Promise<NoticeState>
   /** 화면이 지금 보여 주는 대화 — 앱이 앞이면 읽음, 그 대화의 사건은 알리지 않는다 */
