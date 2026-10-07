@@ -58,7 +58,9 @@ async function start(loginDelayMs: number) {
     [
       `#!${process.execPath}`,
       `const fs = require('node:fs'), http = require('node:http')`,
+      `if (process.argv.includes('--version')) { console.log('9.9.9-fake'); process.exit(0) }`,
       `fs.appendFileSync(process.env.FAKE_LOG, process.argv.slice(2).join(' ') + '\\n')`,
+      `console.log('fake opencode listening')`,
       `const port = Number(process.argv[process.argv.indexOf('--port') + 1])`,
       `http.createServer((_q, s) => { s.writeHead(200); s.end('{}') }).listen(port, '127.0.0.1')`,
       `process.on('SIGTERM', () => process.exit(0))`,
@@ -137,6 +139,16 @@ describe('EngineService — 뜨는 중에 온 설정 변경', () => {
     expect(conn.closed.aborted).toBe(true)
     expect(next.gated('bash')).toBe(true)
     expect(serves()).toBe(2)
+  })
+
+  it('version 은 `<bin> --version` 첫 줄, outputTail 은 띄운 서버 출력의 끝 — 띄우기 전엔 빈 글 (문제 신고 묶음, #177)', async () => {
+    const { engine } = await start(0)
+    expect(engine.outputTail()).toBe('')
+    expect(await engine.version()).toBe('9.9.9-fake')
+    expect(serves()).toBe(0) // 버전을 묻는 것은 서버를 띄우지 않는다
+    await engine.connection()
+    for (let tries = 0; tries < 50 && !engine.outputTail(); tries++) await wait(20)
+    expect(engine.outputTail()).toContain('fake opencode listening')
   })
 
   it('뜨는 중에 다시 띄우기로 밀려난 기동이 읽은 값은 새 기동의 값으로 치지 않는다', async () => {

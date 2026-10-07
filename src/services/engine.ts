@@ -190,6 +190,8 @@ function withLast(permission: Record<string, unknown>, name: string, rule: unkno
 const READY_TIMEOUT_MS = 60_000 // 주소를 잡은 뒤에도 /doc 이 수십 초 무응답인 때가 있다 (live-test 스킬 기록)
 const KILL_GRACE_MS = 5_000
 const MAX_OUTPUT = 4_000
+/** `--version` 기한 */
+const VERSION_TIMEOUT_MS = 10_000
 
 /** 이 프로세스가 띄워 아직 살아 있는 opencode 자식 — 앱 종료 기한이 지나면 서비스 상태와 무관하게 죽일 수 있게 쥔다 */
 const liveChildren = new Set<ChildProcess>()
@@ -657,6 +659,10 @@ export class EngineService extends Service {
   private launched?: string
   /** 도구 실행 전 판정을 받을 도구의 매처 (setGate) — 다음 기동이 읽는다 */
   private gateMatchers: readonly string[] = []
+  /** 지금(또는 마지막으로 띄운) 서버 출력의 끝 — 문제 신고 묶음(ctx.report)이 싣는다 */
+  private lastOutput?: { text(): string }
+  /** 엔진 버전 — 한 번만 묻는다 */
+  private versionRead?: Promise<string | undefined>
 
   constructor(
     ctx: Context,
@@ -712,6 +718,26 @@ export class EngineService extends Service {
   /** 떠 있는(띄우는 중인) 서버가 읽은 설정이 지금 설정과 다른가 — 다시 띄워야 한다. 안 떠 있거나 아직 읽기 전이면 아니다 (다음·그 기동이 읽는다) */
   private outdated(): boolean {
     return !!this.current && this.launched !== undefined && JSON.stringify(this.wanted()) !== this.launched
+  }
+
+  /** 엔진 버전 — `<bin> --version` 의 첫 줄 (실측 2026-10-07, 1.18.18: `1.18.18` 한 줄). 서버와 같은 격리 env 로 돌린다. 못 읽으면 undefined.
+   *  문제 신고 묶음(ctx.report)이 싣는다 */
+  version(): Promise<string | undefined> {
+    this.versionRead ??= (async () => {
+      const base = await this.baseEnv()
+      const bin = findOpencodeBinary(base, undefined, this.opts.bundled?.opencode).path
+      if (!bin) return undefined
+      const env = engineEnv(base, { configDir: this.opts.configDir, db: this.opts.db, password: '', rgDir: this.opts.bundled?.rgDir, blockProjectConfig: this.opts.blockProjectConfig })
+      return new Promise<string | undefined>((resolve) =>
+        execFile(bin, ['--version'], { env, timeout: VERSION_TIMEOUT_MS, windowsHide: true }, (error, out) => resolve(error ? undefined : out.trim().split('\n')[0] || undefined)),
+      )
+    })()
+    return this.versionRead
+  }
+
+  /** 지금(또는 마지막으로 띄운) 서버의 stdout·stderr 끝 (MAX_OUTPUT 자) — 띄운 적이 없으면 빈 글. **가리지 않은 원문이다** — 싣는 쪽(ctx.report)이 가린다 */
+  outputTail(): string {
+    return this.lastOutput?.text() ?? ''
   }
 
   /** 떠 있나(띄우는 중 포함) — 묻기만 하고 띄우지 않는다. 엔진과 같이 사라지는 것(붙인 MCP)을 치우려고 죽은 엔진을 다시 띄우지 않게 (#126) */
@@ -829,8 +855,9 @@ export class EngineService extends Service {
     })
     liveChildren.add(child)
     // 끝 MAX_OUTPUT 자를 쥔다 — 기동 실패 사유는 출력의 끝에 있다 (앞만 쥐면 시작 로그에 밀려 잘린다, 참고 레포 검토 02x D).
-    // 읽는 곳은 아래 기동 실패 문구 하나뿐이다. 조각 경계의 한글이 깨지지 않게 스트림마다 디코더
+    // 읽는 곳은 아래 기동 실패 문구와 문제 신고 묶음(outputTail)이다. 조각 경계의 한글이 깨지지 않게 스트림마다 디코더
     const output = keepTail(MAX_OUTPUT)
+    this.lastOutput = output
     for (const stream of [child.stdout, child.stderr]) {
       const decoded = streamText()
       stream?.on('data', (part: Buffer) => output.push(decoded.push(part)))

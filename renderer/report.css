@@ -1,0 +1,203 @@
+/* 대화 내보내기 · 문제 신고 묶음 (이슈 #177, 시안 _workspace/mock-report). 색은 토큰만 — 메뉴 재질은 "다른 앱에서 열기" 메뉴(openIn.css)와 같다 */
+
+/* 대화 머리 오른쪽 끝 ⋯ — 오른쪽 패널 버튼과 같은 28px 아이콘 버튼 */
+.chat-more-wrap {
+  position: relative;
+  flex: none;
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.chat-more {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.chat-more:hover:not(:disabled),
+.chat-more[aria-expanded='true'] {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.chat-more:disabled {
+  cursor: default;
+}
+
+/* 버튼 오른쪽 끝 정렬, 4px 아래. 팝오버 재질 — openIn 메뉴와 같은 치수 */
+.chat-more__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 180px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--menu);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-radius: 16px;
+  box-shadow: var(--shadow-prominent);
+}
+
+.chat-more__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-more__item svg {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.chat-more__item:hover,
+.chat-more__item:focus-visible,
+.chat-more__item:focus {
+  background: var(--fill-hover);
+  outline: none;
+}
+
+/* 잠깐 뜨는 결과 줄 — openIn 오류 말풍선과 같은 모양 */
+.chat-more__notice {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 360px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.chat-more__notice--error {
+  color: var(--danger);
+}
+
+/* 설정 > 일반 "문제 신고 묶음" — 카드 + 저장 뒤 안내 */
+.report-bundle {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
+}
+
+.report-card__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.report-card__head .settings-row__text {
+  padding-right: 0;
+}
+
+.report-card__divider {
+  height: 1px;
+  background: var(--border-light);
+}
+
+.report-card__lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-card__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--module);
+}
+
+.report-card__list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--text-secondary);
+}
+
+.report-card__list-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.report-card__list--in .report-card__list-title {
+  color: var(--ok);
+}
+
+.report-card__list--out {
+  background: var(--danger-bg);
+}
+
+.report-card__list--out .report-card__list-title {
+  color: var(--danger);
+}
+
+.report-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.report-saved__title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.report-saved__path {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.report-saved__open {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface);
+}

@@ -35,6 +35,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `attachments` | `attachmentsService.ts` | 첨부(붙인 이미지·파일 읽기) | `chat` |
 | `features` | `features.ts` | **기능 레지스트리** — 켜진 기능 묶음을 올리고 내린다 (4절) | `settings` |
 | `quit` | `quit.ts` | 종료 확인(도는 턴·붙은 폰이 있으면 한 번 묻는다)·창 닫기 = 숨기기(Windows·Linux 는 트레이). `remote` 는 선택 의존 | `chat`, `settings` |
+| `report` | `report.ts` | 대화 내보내기(엔진 기록 → Trajectory 중립 레코드 → JSON 파일 하나)·문제 신고 묶음(고른 폴더에 `litecode-report-<시각>/`, 허용 목록 파일만, 글은 알려진 비밀 값 + `redactSecrets` 로 가림). 로컬 저장만. 대화상자·폴더 열기는 host. `mcp` 는 선택 의존(`ctx.get`) | `llm`, `sessions`, `settings`, `features`, `providers`, `engine` |
 
 ### 2-2. 기능 묶음 — 설정에서 끄면 통째로 내려간다 (`shared/features.ts`)
 
@@ -136,7 +137,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 
 ## 7. 부팅과 함정
 
-부팅 순서(`electron/main.ts`): `settings` → `providers` → `engine` → `llm` → `projects` → `sessions` → `triggers` → `bootstrap`(providers·llm·projects·engine·sessions·triggers·settings·features 를 inject) → `chat`·`attachments`·`quit` → `features`(기능 묶음 올림). 실제 순서는 inject 가 정하고, 위 줄은 읽기 쉬운 순서일 뿐이다.
+부팅 순서(`electron/main.ts`): `settings` → `providers` → `engine` → `llm` → `projects` → `sessions` → `triggers` → `bootstrap`(providers·llm·projects·engine·sessions·triggers·settings·features 를 inject) → `chat`·`attachments`·`report`·`quit` → `features`(기능 묶음 올림). 실제 순서는 inject 가 정하고, 위 줄은 읽기 쉬운 순서일 뿐이다.
 
 실측으로 잡은 함정 (CLAUDE.md 와 같다):
 1. 서비스는 **비동기로 마운트된다** — `ctx.plugin(X)` 바로 다음 줄에서 `ctx.x` 를 쓰면 안 된다. `inject` 를 선언한 플러그인 안에서만 접근한다.
