@@ -34,6 +34,23 @@ describe('historyMessages (레거시 기록)', () => {
     expect(messages[1]!.items![0]).toMatchObject({ name: 'bash', status: 'done', summary: 'fake', result: '/w\n' })
   })
 
+  // 이슈 #176 — 실시간 턴과 같은 지시문 항목을 다시 연 기록에서도 (user info.system 에서 읽는다)
+  it('user info.system 에 .local.md 가 실렸거나 잘렸으면 그 답의 진행 줄 맨 앞에 지시문 항목. 아니면 없다', () => {
+    const local = `Instructions from: /w/p/AGENTS.md\nrules\n\nInstructions from: /w/p/AGENTS.local.md\nmine\n\n(잘림: 9바이트 중 5)`
+    const messages = historyMessages(
+      [user('a', { id: 'msg_x', system: local }), assistant('ok'), user('b', { system: 'Instructions from: /w/p/AGENTS.md\nrules' }), assistant('ok2')],
+      false,
+      '/w/p',
+    )
+    expect(messages[1]!.items![0]).toEqual({
+      kind: 'context',
+      id: 'msg_x:instructions',
+      text: `${tr('chat.instructionsLocal', { files: 'AGENTS.local.md' })} · ${tr('chat.instructionsTruncated', { total: 9, kept: 5 })}`,
+    })
+    expect(messages[1]!.items!.map((item) => item.kind)).toEqual(['context', 'text'])
+    expect(messages[3]!.items!.some((item) => item.kind === 'context')).toBe(false)
+  })
+
   it('user 말풍선은 엔진 메시지 id 를 싣는다 — 앱이 정한 id 로 보일 글을 찾는다 (ctx.sessions label)', () => {
     expect(historyMessages([user('/hi', { id: 'msg_mine' }), assistant('x')], false)[0]).toMatchObject({ id: 'msg_mine', text: '/hi' })
   })

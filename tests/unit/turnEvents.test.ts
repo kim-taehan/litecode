@@ -596,6 +596,24 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     }
   })
 
+  // 이슈 #176 — 모델이 보는 system 이 바뀌었음(개인 지시문·잘림)을 진행 줄 지시문 항목으로 알린다
+  it('.local.md 가 실린 턴은 진행 줄 맨 앞에 지시문 항목(context)을 둔다. 없으면 두지 않는다', async () => {
+    const { llm } = await start(await fakeOpencode('done'))
+    const items: TurnItem[] = []
+    const turn = () => llm.chat('p', 'm', directory, 'hi', undefined, undefined, undefined, (item) => items.push(item))
+    await turn()
+    expect(items.some((item) => item.kind === 'context')).toBe(false)
+    fs.writeFileSync(path.join(directory, 'AGENTS.local.md'), 'mine\n')
+    try {
+      items.length = 0
+      await turn()
+      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.local.md')}\nmine\n`)
+      expect(items[0]).toEqual({ kind: 'context', id: `${String(prompts[1]!['messageID'])}:instructions`, text: tr('chat.instructionsLocal', { files: 'AGENTS.local.md' }) })
+    } finally {
+      fs.rmSync(path.join(directory, 'AGENTS.local.md'))
+    }
+  })
+
   // 이슈 #102 — 그 턴에만 실을 맥락(훅의 stdout)은 지시문 뒤에 붙어 system 으로 간다
   it('chat 의 context 는 그 턴의 system 에 실린다 — 지시문이 있으면 그 뒤에, 다음 턴에는 남지 않는다', async () => {
     const { llm } = await start(await fakeOpencode('done'))
