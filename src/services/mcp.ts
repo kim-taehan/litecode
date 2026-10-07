@@ -194,15 +194,27 @@ export class McpService extends Service {
   private builtins = new Map<string, BuiltinMcp>()
   /** 숨길 도구를 ctx.llm 에 넘긴 폴더 — 기능을 끄면 비운다 */
   private hiding = new Set<string>()
+  /** 정의·비밀·프로젝트 파일 중 하나를 못 읽었다(권한 등 — 없는 것과 다르다) — 이번 실행에서는 그 파일들에 쓰지 않는다 (이슈 #195) */
+  private unreadable?: Error
 
   constructor(
     ctx: Context,
     private opts: McpServiceOptions = {},
   ) {
     super(ctx, 'mcp')
-    this.servers = ((opts.file && (readJsonFileSync(opts.file, 'array') as McpServerRecord[] | undefined)) || []).filter((server) => typeof server?.name === 'string')
-    this.secrets = (opts.secretsFile && (readJsonFileSync(opts.secretsFile, 'object') as Record<string, Record<string, string>> | undefined)) || {}
-    const projects = (opts.projectsFile && (readJsonFileSync(opts.projectsFile, 'object') as Record<string, Partial<McpProjectRecord>> | undefined)) || {}
+    // 생성자에서 던지면 서비스가 영영 안 뜬다 (CLAUDE.md 함정 4) — 못 읽는 파일(권한 등)은 빈 값으로 뜨고 persist 가 쓰기를 거절한다 (이슈 #195)
+    const read = (file: string, shape: 'array' | 'object'): unknown => {
+      try {
+        return readJsonFileSync(file, shape)
+      } catch (error) {
+        this.unreadable ??= Object.assign(new Error(tr('error.fileUnreadable', { name: path.basename(file), code: (error as NodeJS.ErrnoException).code ?? 'EIO' })), { code: (error as NodeJS.ErrnoException).code })
+        console.warn(`[mcp] ${this.unreadable.message}`)
+        return undefined
+      }
+    }
+    this.servers = ((opts.file && (read(opts.file, 'array') as McpServerRecord[] | undefined)) || []).filter((server) => typeof server?.name === 'string')
+    this.secrets = (opts.secretsFile && (read(opts.secretsFile, 'object') as Record<string, Record<string, string>> | undefined)) || {}
+    const projects = (opts.projectsFile && (read(opts.projectsFile, 'object') as Record<string, Partial<McpProjectRecord>> | undefined)) || {}
     this.projects = Object.fromEntries(Object.entries(projects).map(([dir, entry]) => [dir, { servers: entry?.servers ?? [], enabled: entry?.enabled ?? {}, tools: toolSelections(entry?.tools) }]))
     ctx.on('llm/before-turn', (directory) => this.prepare(directory))
     // 기능을 끄면(묶음이 내려가면) 붙인 앱·프로젝트 서버를 끊는다 — 개인 설정 서버는 opencode 것이라 그대로다
@@ -615,6 +627,7 @@ export class McpService extends Service {
   }
 
   private persist(): void {
+    if (this.unreadable) throw this.unreadable // 못 읽은 파일을 이번 실행의 값으로 덮지 않는다
     if (this.opts.file) writeJsonFileSync(this.opts.file, this.servers, { mode: 0o600 })
     if (this.opts.secretsFile) writeJsonFileSync(this.opts.secretsFile, this.secrets, { mode: 0o600 })
     if (this.opts.projectsFile) writeJsonFileSync(this.opts.projectsFile, this.projects, { mode: 0o600 })

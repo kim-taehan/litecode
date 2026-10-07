@@ -21,7 +21,8 @@ interface StoredKey {
   sealed: boolean
 }
 
-/** 저장한 키를 읽는다(없으면 만들어 저장한다). 봉한 키를 풀지 못하거나 모양이 틀리면 던진다(code ENOISEKEY) — 파일은 그대로 둔다 */
+/** 저장한 키를 읽는다(없으면 만들어 저장한다). 봉한 키를 풀지 못하거나 모양이 틀리면 던진다(code ENOISEKEY) — 파일은 그대로 둔다.
+ *  키 파일을 못 읽어도(권한 등 — 없는 것과 다르다) 만들지 않고 그 오류(code EACCES 등)를 던진다 (이슈 #195) */
 export async function loadNoiseIdentity(file: string, cipher?: KeyCipher): Promise<NoiseIdentity> {
   const stored = (await readJsonFile(file, 'object')) as Partial<StoredKey> | undefined
   let secretKey: Uint8Array

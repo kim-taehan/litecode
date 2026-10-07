@@ -37,7 +37,8 @@ export function spkiFingerprint(key: KeyObject): string {
   return createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('base64url')
 }
 
-/** 저장한 키를 읽고(없으면 만들어 저장하고) 인증서를 새로 만든다. 봉한 키를 풀지 못하면 던진다 — 새 키로 덮으면 짝지은 폰이 전부 지문 불일치가 된다 */
+/** 저장한 키를 읽고(없으면 만들어 저장하고) 인증서를 새로 만든다. 봉한 키를 풀지 못하면 던진다 — 새 키로 덮으면 짝지은 폰이 전부 지문 불일치가 된다.
+ *  키 파일을 못 읽어도(권한 등 — 없는 것과 다르다) 만들지 않고 그 오류(code EACCES 등)를 던진다 (이슈 #195). TLS 운반은 그 사유로 못 뜬 상태가 된다 */
 export async function loadTlsIdentity(file: string, cipher?: KeyCipher, now: Date = new Date()): Promise<TlsIdentity> {
   const stored = (await readJsonFile(file, 'object')) as Partial<StoredKey> | undefined
   let privateKey: KeyObject

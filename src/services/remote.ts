@@ -264,7 +264,8 @@ export class RemoteService extends Service {
     const code = this.activeCode()
     const connected = new Set([...this.streams].map((stream) => stream.deviceId))
     const carriers = [...this.carriers].map((carrier) => carrier.status())
-    const error = carriers.find((carrier) => carrier.error)?.error
+    const unreadable = this.store.unreadable as NodeJS.ErrnoException | undefined
+    const error = carriers.find((carrier) => carrier.error)?.error ?? (unreadable && { code: unreadable.code, message: unreadable.message })
     const fingerprint = this.fingerprint()
     const attempts = carriers.flatMap((carrier) => (carrier.lastAttemptAt === undefined ? [] : [carrier.lastAttemptAt]))
     const uri = code && this.pairUri(code)
@@ -456,6 +457,8 @@ export class RemoteService extends Service {
       return { status: 400, body: { error: 'malformed request' } }
     }
 
+    // 기기 목록 파일을 못 읽었다 — 누가 짝지은 기기인지 모른다. 401 이면 폰이 해제된 줄 알고 다시 붙지 않는다 → 503(잠시 못 씀)으로 답하고 짝짓기도 받지 않는다 (이슈 #195)
+    if (this.store.unreadable) return { status: 503, body: { error: 'the device list cannot be read on the desktop' } }
     if (request.method === 'POST' && request.path === remotePath.pair) return this.pair(body, exchange.signal, peer.fingerprint)
 
     const device = this.store.authenticate(request.headers.authorization)
