@@ -10,7 +10,7 @@ import './settings.ts'
 import './notifications.ts'
 import { tr } from '../i18n.ts'
 import { sameSecret } from './httpUtil.ts'
-import type { RemoteCarrier, RemoteExchange, RemoteOutcome, RemotePeer, RemoteReply, RemoteRequest, RemoteStreamSink } from './remote/carrier.ts'
+import { BLUETOOTH_CARRIER, type RemoteCarrier, type RemoteExchange, type RemoteOutcome, type RemotePeer, type RemoteRadioStatus, type RemoteReply, type RemoteRequest, type RemoteStreamSink } from './remote/carrier.ts'
 import { DeviceStore, FailureLimiter, type DevicePlatform, type StoredDevice } from './remote/devices.ts'
 import { EventLog } from './remote/eventLog.ts'
 import { loadNoiseIdentity, type NoiseIdentity } from './remote/noiseIdentity.ts'
@@ -118,6 +118,8 @@ export interface RemoteDeviceInfo {
   lastSeenAt?: number
   /** 지금 이벤트 스트림이 붙어 있다 */
   connected: boolean
+  /** 지금(붙어 있으면 그 스트림의, 아니면 이 실행에서 마지막 요청의) 운반 id — 'http'·'https'·'bluetooth'. 이 실행에서 요청이 없었으면 없다 (이슈 #210 — 기기 줄의 연결 방법 배지) */
+  via?: string
 }
 
 /** 설정 > 모바일이 그리는 상태 */
@@ -138,6 +140,8 @@ export interface RemoteStatus {
   pairing?: { code: string; shortCode: string; expiresAt: number; uri?: string }
   requests: RemotePairRequest[]
   devices: RemoteDeviceInfo[]
+  /** 블루투스 운반이 올라와 있을 때만(기능 bluetooth, 이슈 #210) — 라디오 상태와 지금 블루투스로 이벤트 스트림이 붙은 기기 이름 */
+  bluetooth?: RemoteRadioStatus & { devices: string[] }
 }
 
 interface ActiveCode {
@@ -155,6 +159,8 @@ interface PendingPair extends RemotePairRequest {
 interface Stream {
   queue: StreamQueue
   deviceId: string
+  /** 이 스트림이 붙은 운반 id */
+  carrier: string
 }
 
 type Reply = [status: number, body: unknown]
@@ -194,6 +200,10 @@ export class RemoteService extends Service {
   /** 이 실행에서 마지막으로 알린 주소 목록 (쉼표로 이음) — 바뀌면 addresses.changed */
   private announced?: string
   private noise?: Promise<NoiseIdentity>
+  /** 읽어 둔 블루투스 키 — 블루투스 운반이 noiseIdentity() 를 부른 뒤에만 있다. 짝짓기 응답·QR 의 bk */
+  private noiseKey?: NoiseIdentity
+  /** 기기 id → 이 실행에서 마지막으로 요청이 온 운반 id */
+  private via = new Map<string, string>()
 
   constructor(
     ctx: Context,
@@ -269,6 +279,8 @@ export class RemoteService extends Service {
     const fingerprint = this.fingerprint()
     const attempts = carriers.flatMap((carrier) => (carrier.lastAttemptAt === undefined ? [] : [carrier.lastAttemptAt]))
     const uri = code && this.pairUri(code)
+    const radio = [...this.carriers].find((carrier) => carrier.id === BLUETOOTH_CARRIER)?.status().radio
+    const streams = [...this.streams]
     return {
       port: carriers.find((carrier) => carrier.port !== undefined)?.port ?? REMOTE_DEFAULT_PORT,
       addresses: this.listening(),
@@ -277,7 +289,18 @@ export class RemoteService extends Service {
       ...(attempts.length > 0 && { lastAttemptAt: Math.max(...attempts) }),
       ...(code && { pairing: { code: groupCode(code.code), shortCode: code.shortCode, expiresAt: code.expiresAt, ...(uri && { uri }) } }),
       requests: [...this.pending.values()].map(({ id, deviceName, platform, confirm, pinned }) => ({ id, deviceName, platform, confirm, ...(pinned && { pinned }) })),
-      devices: this.store.list().map(({ id, name, platform, pairedAt, lastSeenAt }) => ({ id, name, platform, pairedAt, lastSeenAt, connected: connected.has(id) })),
+      devices: this.store.list().map(({ id, name, platform, pairedAt, lastSeenAt }) => {
+        const via = streams.find((stream) => stream.deviceId === id)?.carrier ?? this.via.get(id)
+        return { id, name, platform, pairedAt, lastSeenAt, connected: connected.has(id), ...(via && { via }) }
+      }),
+      ...(radio && {
+        bluetooth: {
+          ...radio,
+          devices: [...new Set(streams.filter((stream) => stream.carrier === BLUETOOTH_CARRIER).map((stream) => stream.deviceId))].flatMap(
+            (id) => this.store.list().find((device) => device.id === id)?.name ?? [],
+          ),
+        },
+      }),
     }
   }
 
@@ -306,11 +329,24 @@ export class RemoteService extends Service {
    *  봉한 키를 못 풀면 거절하고(키 파일은 그대로) 다음 호출에 다시 시도한다 */
   noiseIdentity(): Promise<NoiseIdentity> {
     if (!this.opts.noiseKeyFile) return Promise.reject(new Error('no bluetooth key file'))
-    this.noise ??= loadNoiseIdentity(this.opts.noiseKeyFile, this.opts.cipher).catch((error: unknown) => {
-      this.noise = undefined
-      throw error
-    })
+    this.noise ??= loadNoiseIdentity(this.opts.noiseKeyFile, this.opts.cipher).then(
+      (identity) => (this.noiseKey = identity),
+      (error: unknown) => {
+        this.noise = undefined
+        throw error
+      },
+    )
     return this.noise
+  }
+
+  /** 이 데스크탑의 id (QR 의 `d`) — 블루투스 운반이 서비스 UUID·Noise 프롤로그에 쓴다. 기기 목록 파일을 읽은 뒤(ready) 값이 정해진다 */
+  get desktopId(): string {
+    return this.store.desktopId
+  }
+
+  /** 짝짓기 응답·QR 에 실을 블루투스 키 — 블루투스 운반이 올라와 있고 키를 읽어 둔 때만. 여기서 키를 읽지 않는다(블루투스를 안 쓰는 사용자에게 키 파일을 만들지 않는다) */
+  private bluetoothKey(): string | undefined {
+    return [...this.carriers].some((carrier) => carrier.id === BLUETOOTH_CARRIER) ? this.noiseKey?.publicKeyText : undefined
   }
 
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용). 앞 코드는 버린다 */
@@ -414,7 +450,7 @@ export class RemoteService extends Service {
     for (const stream of this.streams) stream.queue.push(text, coalesceKey(event, data))
   }
 
-  private openEvents(device: StoredDevice, query: URLSearchParams, sink: RemoteStreamSink): void {
+  private openEvents(device: StoredDevice, query: URLSearchParams, sink: RemoteStreamSink, carrier: string): void {
     const queue = new StreamQueue(sink)
     const run = query.get('run')
     const after = Number(query.get('after') ?? Number.NaN)
@@ -427,7 +463,7 @@ export class RemoteService extends Service {
     } else {
       queue.push(frame('reset', here))
     }
-    const stream: Stream = { queue, deviceId: device.id }
+    const stream: Stream = { queue, deviceId: device.id, carrier }
     this.streams.add(stream)
     const ping = setInterval(() => queue.ping(': ping\n\n'), this.opts.pingMs ?? REMOTE_PING_INTERVAL_MS)
     // 폰이 끊었거나(또는 해제·끄기로 우리가 끊었다)
@@ -467,8 +503,9 @@ export class RemoteService extends Service {
       return { status: 401, body: { error: 'not a paired device' } }
     }
     this.store.seen(device.id)
+    this.via.set(device.id, peer.carrier)
     if (request.method === 'GET' && request.path === remotePath.events) {
-      this.openEvents(device, request.query, exchange.openStream())
+      this.openEvents(device, request.query, exchange.openStream(), peer.carrier)
       return { stream: true }
     }
 
@@ -530,7 +567,8 @@ export class RemoteService extends Service {
           }
           void this.store.add(deviceName, platform).then(
             ({ device, token }) => {
-              resolve({ status: 200, body: { deviceId: device.id, token } satisfies PairResponse })
+              const bluetoothKey = this.bluetoothKey()
+              resolve({ status: 200, body: { deviceId: device.id, token, ...(bluetoothKey && { bluetoothKey }) } satisfies PairResponse })
               this.changed()
             },
             (error: unknown) => {
@@ -741,6 +779,7 @@ export class RemoteService extends Service {
       fingerprint,
       code: code.code,
       expiresAt: Math.floor(code.expiresAt / 1000),
+      ...(this.bluetoothKey() && { bluetoothKey: this.bluetoothKey() }),
     })
   }
 }

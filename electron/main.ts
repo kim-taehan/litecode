@@ -51,6 +51,7 @@ import { PresentTool } from '../src/services/appMcp/tools/present.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
 import { RemoteHttps } from '../src/services/remote/https.ts'
+import { RemoteBluetooth, type BlenoLike } from '../src/services/remote/bluetooth.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { attentionTarget } from '../shared/delegation.ts'
@@ -599,16 +600,27 @@ const features: FeatureDefinition[] = [
       ctx.plugin(RemoteService, {
         file: path.join(userData, 'remote-devices.json'),
         appVersion: app.getVersion(),
-        // 블루투스 Noise 키 — 블루투스 운반(#171 ③)이 처음 부를 때 만든다. 지금은 아무도 부르지 않는다
+        // 블루투스 Noise 키 — 블루투스 운반(기능 bluetooth, #210)이 켤 때 처음 부르면 만든다. 블루투스를 안 켜면 파일이 생기지 않는다
         noiseKeyFile: path.join(userData, 'remote-noise-key.json'),
         cipher: keyCipher,
       })
-      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 평문 HTTP(127.0.0.1:47600, 에뮬레이터용)와 사내망 TLS(사설 IPv4 주소마다 :47600,
-      // 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다). 블루투스 운반이 이 옆에 올라온다
+      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 여기는 평문 HTTP(127.0.0.1:47600, 에뮬레이터용). 사내망 TLS 와 블루투스는
+      // 길마다 따로 켜고 끄는 기능 묶음이다(lan·bluetooth — 아래, 이슈 #210)
       ctx.plugin(RemoteHttp)
-      ctx.plugin(RemoteHttps, { keyFile: path.join(userData, 'remote-tls-key.json'), cipher: keyCipher })
       ctx.plugin(remoteBridge)
     },
+  },
+  {
+    // 사내망 연결 (이슈 #210) — 모바일 연결의 TLS 운반(사설 IPv4 주소마다 :47600, 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다).
+    // 기본 켜짐(모바일 연결을 켜면 전처럼 열린다). 설정 > 모바일의 "사내망 연결" 토글이 이것이다 — 끄면 포트를 닫고 블루투스만 남길 수 있다
+    id: 'lan',
+    plugin: (ctx) => void ctx.plugin(RemoteHttps, { keyFile: path.join(userData, 'remote-tls-key.json'), cipher: keyCipher }),
+  },
+  {
+    // 블루투스 연결 (이슈 #210) — 기본 꺼짐. 설정 > 모바일의 "블루투스 연결" 토글. 네이티브 모듈(@stoprocent/bleno)은 켤 때 처음 읽는다 —
+    // 안 켜면 로드도 macOS 블루투스 허용 창도 없다. 못 읽으면(프리빌드 없는 플랫폼) 상태 줄에 사유만 남는다
+    id: 'bluetooth',
+    plugin: (ctx) => void ctx.plugin(RemoteBluetooth, { load: async () => (await import('@stoprocent/bleno')).default as unknown as BlenoLike }),
   },
   {
     // 데스크탑 MCP — 앱 자신의 MCP 서버(127.0.0.1, 실행마다 토큰). ctx.mcp 가 사용자 서버와 같은 길로 매 턴 붙인다.

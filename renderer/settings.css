@@ -759,3 +759,61 @@
   gap: 8px;
   padding-top: 12px;
 }
+
+/* 모바일 연결의 길 (이슈 #210, 시안 mock-ble/Desk.dc.html) — 카드 하나에 사내망·블루투스 줄, 줄마다 상태 한 줄 + 토글 */
+.mobile-paths {
+  margin-top: 16px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.mobile-path {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.mobile-path + .mobile-path {
+  border-top: 0.5px solid var(--border);
+}
+
+.mobile-path .settings-row__text {
+  padding-right: 0;
+}
+
+.mobile-path__status--ok {
+  color: var(--ok);
+}
+
+.mobile-paths__note {
+  margin: 8px 0 0;
+  line-height: 19px;
+}
+
+/* 기기 줄의 지금 연결 방법 — Wi-Fi(파랑)·블루투스(주황)·끊김(회색) 알약 */
+.mobile-device__via {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-ring);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.mobile-device__via--wifi {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.mobile-device__via--bluetooth {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--text);
+}
