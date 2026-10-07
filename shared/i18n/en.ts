@@ -207,6 +207,8 @@ export const en = {
   'changes.edits': '{count} edits',
   'changes.more': '{count} more',
   'changes.note': 'Counts edit-tool changes only. Files changed by shell commands may be missing, and line counts for files edited more than once are totals.',
+  'changes.noteCommands': 'Includes files changed by shell commands (only files git tracks — .gitignored files are left out). Line counts for files edited more than once are totals.',
+  'changes.truncated': 'Too many changes — only some are shown.',
   'present.title': 'Deliverables',
   'present.count': '{count} files',
   'present.cardTitle': 'Deliverables · {count}',

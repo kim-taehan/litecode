@@ -105,8 +105,9 @@ interface AssistantTurnProps {
 const NO_ATTENTION: readonly Attention[] = []
 
 export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
-  // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다
-  const { compactions, rest } = takeCompactions(running ? items : items.filter((item) => item.kind !== 'retry'))
+  // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다.
+  // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
+  const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
   const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(rest)
   const foldable = !running && !failed && work.length > 0
   const [open, setOpen] = useState(false)
@@ -191,6 +192,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   // 성공한 할 일 목록 쓰기 (이슈 #83) — 도구 줄 대신 "할 일 · 완료 2/5" + 체크리스트
   if (item.kind === 'tool' && item.todos) return <TodoRow todos={item.todos} />
   if (item.kind === 'hook') return <HookRow item={item} />
+  if (item.kind === 'changes') return null // 고친 파일 카드에만 (AssistantTurn 이 미리 뺀다)
   if (item.kind === 'text') {
     if (!item.text.trim()) return null
     return (
