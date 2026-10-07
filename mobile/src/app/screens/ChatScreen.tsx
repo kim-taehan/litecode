@@ -36,6 +36,14 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
     }
   }, [session, cid])
 
+  // 목록에 있던 이 대화가 다시 받은 목록에서 빠졌다(데스크탑에서 지웠다·프로젝트를 뺐다) — 빈 화면에 두지 않고 목록으로 (#187).
+  // 막 만든 대화는 목록에 오기 전이라 한 번 보인 뒤에만 본다
+  const listed = useRef(false)
+  useEffect(() => {
+    if (conversation) listed.current = true
+    else if (listed.current) onBack()
+  }, [conversation, onBack])
+
   const project = state.projects.find((candidate) => candidate.path === conversation?.project)
   const model = session.models.find((candidate) => candidate.providerId === conversation?.model?.providerId && candidate.modelId === conversation?.model?.modelId)
   const jobs = runningSubtasks(view?.progress ?? [])

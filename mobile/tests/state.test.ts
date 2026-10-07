@@ -121,6 +121,18 @@ describe('리듀서 — 다시 받기', () => {
     expect(reduce(state, { type: 'conversations.loaded', project: '/p', conversations: [] }).staleProjects).toEqual([])
   })
 
+  // #187 B5 — 새 실행의 데스크탑은 "바뀔 때만" notices.changed 를 낸다. 도는 턴이 없으면 아무것도 안 와서 죽은 턴의 "답 필요" 점이 남았다.
+  // 비우면 목록 화면은 다시 받은 목록의 status(데스크탑이 지금 도는 턴·안 본 끝남으로 채운다)를 쓴다
+  it('reset·runId 가 바뀐 hello·ready 는 옛 실행의 notices 를 비운다', () => {
+    const noticed = run([ev({ event: 'notices.changed', seq: 11, data: { c1: { project: '/p', status: 'attention' } } })], opened())
+    expect(noticed.notices).not.toEqual({})
+    expect(reduce(noticed, ev({ event: 'reset', data: { runId: 'B', seq: 0 } })).notices).toEqual({})
+    expect(reduce(noticed, { type: 'hello', hello: hello('B', 0) }).notices).toEqual({})
+    expect(reduce(noticed, ev({ event: 'ready', data: { runId: 'B', seq: 0 } })).notices).toEqual({})
+    // 같은 실행이면 그대로
+    expect(reduce(noticed, { type: 'hello', hello: hello('A', 40) }).notices).toEqual(noticed.notices)
+  })
+
   it('notices·addresses 는 통째로 바뀐다', () => {
     const state = run([ev({ event: 'notices.changed', seq: 1, data: { c1: { project: '/p', status: 'running' } } }), ev({ event: 'addresses.changed', seq: 2, data: { addresses: ['10.0.0.9:47600'] } })])
     expect(state.notices).toEqual({ c1: { project: '/p', status: 'running' } })
