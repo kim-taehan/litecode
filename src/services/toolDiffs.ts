@@ -70,8 +70,8 @@ function relative(root: string, file: string): string {
   return insideOf(root, file) ?? file
 }
 
-/** patch 의 hunk 본문에서 추가·삭제 줄 수 (머리의 `---`·`+++` 는 hunk 밖이라 세지 않는다) */
-function countLines(patch: string): { added: number; removed: number } {
+/** patch 의 hunk 본문에서 추가·삭제 줄 수 (머리의 `---`·`+++` 는 hunk 밖이라 세지 않는다). 명령으로 바뀐 파일(commandChanges.ts)도 쓴다 */
+export function countLines(patch: string): { added: number; removed: number } {
   let added = 0
   let removed = 0
   let oldLeft = 0

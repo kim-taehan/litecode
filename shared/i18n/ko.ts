@@ -216,6 +216,9 @@ export const ko = {
   'changes.edits': '{count}번',
   'changes.more': '{count}개 더',
   'changes.note': '편집 도구로 고친 파일만 셉니다. 명령으로 바꾼 파일은 빠져 있을 수 있고, 여러 번 고친 파일의 줄 수는 합계입니다.',
+  // 명령으로 바뀐 파일까지 — 턴 앞뒤 git 스냅숏 (이슈 #213)
+  'changes.noteCommands': '명령으로 바뀐 파일도 셉니다(git 이 보는 파일만 — .gitignore 된 파일은 빠집니다). 여러 번 고친 파일의 줄 수는 합계입니다.',
+  'changes.truncated': '변경이 너무 많아 일부만 보입니다.',
   // 턴 끝 결과물 카드 — AI 가 결과물로 선언한 파일 (이슈 #91)
   'present.title': '결과물',
   'present.count': '파일 {count}',

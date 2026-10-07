@@ -8,7 +8,7 @@ import './changedFiles.css'
 // 턴 끝 "AI 가 고친 파일" 카드 (이슈 #82, dsh ui-deliverables ChangedFiles 참조 — 답과 행동 줄 사이의 카드 한 장이라는 자리·줄 모양만):
 // 머리 "AI 가 고친 파일 N · +a −d", 줄마다 이름(폴더는 흐리게)·상태·+a −d·횟수. 줄을 누르면 그 파일의 diff 가 카드 안에서 펼쳐지고
 // (DiffCard — 여러 번 고쳤으면 순서대로), 이름 옆 버튼은 오른쪽 패널에서 그 파일을 연다(답의 파일 칩과 같은 길).
-// 모은 규칙과 한계는 changedFiles.ts — 명령으로 바꾼 파일은 빠지므로 카드 아래 줄이 그렇다고 말한다.
+// 모은 규칙과 한계는 changedFiles.ts — 명령으로 바꾼 파일은 턴 앞뒤 git 스냅숏이 있을 때만 들어 있어(이슈 #213) 카드 아래 줄이 어느 쪽인지 말한다.
 // 대화 안 찾기(ChatFind)의 대상이 아니다: 같은 diff 가 작업 줄(.turn__work)에 이미 있어 여기까지 찾으면 일치가 두 번 센다
 
 const stat = (added: number, removed: number, unknownBefore: boolean) => `+${added} −${unknownBefore ? '?' : removed}`
@@ -34,7 +34,8 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({ changes, direct
           {t('changes.more', { count: more })}
         </button>
       )}
-      <p className="changed-files__note">{t('changes.note')}</p>
+      {changes.truncated && <p className="changed-files__note">{t('changes.truncated')}</p>}
+      <p className="changed-files__note">{t(changes.commands ? 'changes.noteCommands' : 'changes.note')}</p>
     </section>
   )
 })

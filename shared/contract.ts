@@ -41,6 +41,10 @@ export type TurnItem =
   /** 사용자 훅 하나가 돌았다 (이슈 #102) — 끝난 뒤에만 온다. command 는 명령 앞부분, seconds 는 걸린 시간(0.1초 단위),
    *  reason 은 막은 사유(stderr)나 실패 사유(종료 코드·시간 초과). 엔진 기록에는 없다 — 도는 턴과 방금 끝난 턴에만 보인다 */
   | { kind: 'hook'; id: string; event: HookEvent; command: string; outcome: HookOutcome; seconds: number; reason?: string }
+  /** 턴 앞뒤 git 스냅숏의 차이 — 명령(sed·포매터·코드 생성기)으로 바뀐 파일까지 (이슈 #213). 턴 끝에 하나, 화면은 작업 줄로 그리지 않고
+   *  "고친 파일" 카드에만 합친다(도구 diff 가 있는 파일은 도구 쪽). diffs 가 비어도 온다 — 스냅숏을 떴다는 뜻.
+   *  truncated: 상한(바뀐 파일 수·턴 전부터 더러운 파일 수)에 걸려 일부만 실었다. 엔진 기록에는 없다 — 도는 턴과 방금 끝난 턴에만 보인다 */
+  | { kind: 'changes'; id: string; diffs: FileDiff[]; truncated?: true }
 
 export interface Subtask {
   kind: 'subtask'
