@@ -5,6 +5,9 @@
 
 export type SkillSource = 'app' | 'project' | 'claude'
 
+/** 프로젝트 스킬 폴더 — 프로젝트 루트 기준 상대 경로 (opencode 가 읽는 곳, '/' 구분) */
+export const PROJECT_SKILLS_DIR = '.opencode/skills'
+
 /** 스킬 파일(SKILL.md)이나 그 폴더의 경로 → 출처 */
 export function skillSource(location: string): SkillSource {
   const normalized = `${location.replace(/\\/g, '/')}/`

@@ -1,7 +1,7 @@
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FAKE_PAIR_CODE, startFakeDesktop, type FakeDesktop } from '../dev/fake-desktop.mts'
-import { DEFAULT_ADDRESS, isLoopbackHost, parseAddress } from '../src/app/address.ts'
+import { allowsPlainHttp, DEFAULT_ADDRESS, parseAddress } from '../src/app/address.ts'
 import { DesktopLink, failureDetail, pairFailure, type DesktopStore, type LinkState, type SavedDesktop } from '../src/app/link.ts'
 import type { AppSession } from '../src/app/session.ts'
 import { createFetchTransport, createNativePinnedNet, NetError, RemoteError, type Transport } from '../src/core/index.ts'
@@ -78,8 +78,8 @@ describe('주소', () => {
   })
 
   it('이 컴퓨터 안 주소만 루프백이다 — 비슷하게 생긴 것은 아니다', () => {
-    expect(['10.0.2.2', '127.0.0.1', 'localhost', 'LocalHost'].map(isLoopbackHost)).toEqual([true, true, true, true])
-    expect(['10.0.2.3', '192.168.0.12', '127.0.0.1.evil.example', 'localhost.example', '10.0.2.22'].map(isLoopbackHost)).toEqual([false, false, false, false, false])
+    expect(['10.0.2.2', '127.0.0.1', 'localhost', 'LocalHost'].map(allowsPlainHttp)).toEqual([true, true, true, true])
+    expect(['10.0.2.3', '192.168.0.12', '127.0.0.1.evil.example', 'localhost.example', '10.0.2.22'].map(allowsPlainHttp)).toEqual([false, false, false, false, false])
   })
 })
 

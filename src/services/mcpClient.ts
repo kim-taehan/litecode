@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import type { EngineMcp } from './engine.ts'
-import { hiddenEnvNames } from './engine.ts'
+import type { EngineMcp } from './engineConfig.ts'
+import { hiddenEnvNames } from './engineConfig.ts'
 import { tr } from '../i18n.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
 import { estimateToolTokens } from '../../shared/mcpTools.ts'
