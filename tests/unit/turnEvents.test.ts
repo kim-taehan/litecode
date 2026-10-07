@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { ascendingId, finishedTool, LlmService, MCP_TOOLS_MARKER, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
+import { ascendingId, connectionRefused, finishedTool, LlmService, MCP_TOOLS_MARKER, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
 import { interruptedError } from '../../src/services/history.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
@@ -16,7 +16,7 @@ import { translate } from '../../shared/i18n/index.ts'
 // {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
 // (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'mcpask' | 'mcpgate' | 'twoasks' | 'webask' | 'webchild' | 'globchild' | 'grepchild'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'refused' | 'retryloop' | 'retryback' | 'retrystop' | 'mcpask' | 'mcpgate' | 'twoasks' | 'webask' | 'webchild' | 'globchild' | 'grepchild'
 
 /** 'mcpask' 턴이 묻는 앱 MCP 도구 호출의 인자 (이슈 #55) */
 const MCP_ARGS = { session: 'c-1a2b3c4d', message: 'fix the tests' }
@@ -35,6 +35,8 @@ const BROKEN_LIST = { name: 'BadRequest', data: { message: 'Expected JSON value,
 const SILENT_MS = 1_500
 
 const PROXY = 'http://proxy.invalid/v1'
+/** 게이트웨이가 꺼져 있을 때 opencode 가 retry status 의 message 에 싣는 글 — 키 프록시 502 본문의 error.message 그대로 (이슈 #207 스크린샷) */
+const REFUSED = 'litecode 키 프록시: 게이트웨이에 연결하지 못했습니다 (ECONNREFUSED)'
 /** 작업 폴더 — AGENTS.md 시험용으로 이 파일이 만든다. 끝나면 이 경로만 지운다 */
 const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'litecode-turnevents-')))
 const A = 'msg_a1'
@@ -271,6 +273,30 @@ async function fakeOpencode(ending: Ending): Promise<string> {
               idle()
             }, 100)
           }
+          // 게이트웨이가 꺼져 있다 (이슈 #207): 키 프록시가 502 로 답하고 opencode 는 그 사유로 재시도한다 — 엔진은 5번까지 기다린다(여기선 멈출 때까지 조용)
+          if (ending === 'refused') emit('session.status', { status: { type: 'retry', attempt: 1, message: REFUSED, next: Date.now() + 2000 } })
+          // 일반 재시도가 계속된다: 다시 보낼 때마다 busy 뒤 다음 attempt (opencode 1.18.18 은 한 스텝의 재시도마다 busy 를 다시 세운다)
+          if (ending === 'retryloop') {
+            for (let attempt = 1; attempt <= 5; attempt++) {
+              setTimeout(() => {
+                if (attempt > 1) emit('session.status', { status: { type: 'busy' } })
+                emit('session.status', { status: { type: 'retry', attempt, message: 'Internal Server Error', next: Date.now() + 2000 } })
+              }, attempt * 30)
+            }
+          }
+          // 재시도 3번 뒤 살아난다 → 다음 스텝은 attempt 가 1 부터 다시다 (재시도 묶음은 스텝마다)
+          if (ending === 'retryback') {
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              emit('session.status', { status: { type: 'retry', attempt, message: 'Internal Server Error', next: Date.now() + 2000 } })
+              emit('session.status', { status: { type: 'busy' } })
+            }
+            part({ type: 'tool', id: 'prt_b', tool: 'bash', callID: 'call_1', state: { status: 'completed', input: {}, output: 'ok' } })
+            emit('session.status', { status: { type: 'retry', attempt: 1, message: 'Internal Server Error', next: Date.now() + 2000 } })
+            emit('session.status', { status: { type: 'busy' } })
+            answer('echo: hi')
+            idle()
+          }
+          if (ending === 'retrystop') emit('session.status', { status: { type: 'retry', attempt: 1, message: 'Internal Server Error', next: Date.now() + 2000 } })
           if (ending === 'compactloop') for (let i = 0; i < 10; i++) emit('session.compacted', {}) // 한도가 작아 요약 → Continue → 다시 넘침 (idle 없음)
           if (ending === 'permission' || ending === 'question') {
             part({ type: 'tool', id: 'prt_b', tool: ending === 'question' ? 'question' : 'bash', callID: 'call_1', state: { status: 'running', input: {} } })
@@ -495,6 +521,52 @@ describe('ctx.llm 자동 요약·재시도 (이슈 #20 L2)', () => {
       { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'waiting' },
       { kind: 'retry', id: 'retry:0', attempt: 1, message: 'Internal Server Error', status: 'done' },
     ])
+  })
+})
+
+// 재시도 상한 (이슈 #207): opencode 는 일시 오류를 5번까지(~1분 반) 재시도한다. 연결 자체가 안 되는 오류는 첫 알림에서, 그 밖은 3번 넘으면 앱이 멈춘다
+describe('ctx.llm 재시도 상한', () => {
+  it('게이트웨이에 연결 못 하는 재시도(ECONNREFUSED)는 1번째 알림에서 멈추고(abort) 실패로 끝낸다 — 사유는 HTTP 502 문구 + 원문', async () => {
+    const { llm, seen } = await start(await fakeOpencode('refused'))
+    const error = `${tr('httpError.502')} (HTTP 502: ${REFUSED})`
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })
+    expect(result).toMatchObject({ ok: false, error })
+    expect(result.interrupted).toBeUndefined()
+    await expect.poll(() => calls).toContain('/session/ses_1/abort')
+    expect(seen.at(-1)).toBe(`ended ses_1@${directory} failed (${error})`)
+  })
+
+  it('ENOTFOUND·EHOSTUNREACH 도 연결 실패로 본다, 그 밖의 글은 아니다', async () => {
+    expect(connectionRefused('litecode 키 프록시: 게이트웨이에 연결하지 못했습니다 (ENOTFOUND)')).toBe(true)
+    expect(connectionRefused('litecode key proxy: Could not connect to the gateway (EHOSTUNREACH)')).toBe(true)
+    expect(connectionRefused('connect econnrefused 127.0.0.1:11434')).toBe(true)
+    expect(connectionRefused('Internal Server Error')).toBe(false)
+    expect(connectionRefused('Rate limit exceeded')).toBe(false)
+  })
+
+  it('일반 재시도는 3번까지 기다리고 4번째 알림에서 멈추고(abort) 실패로 끝낸다', async () => {
+    const { llm } = await start(await fakeOpencode('retryloop'))
+    const items: TurnItem[] = []
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', onProgress: (item) => items.push(item) })).toMatchObject({ ok: false, error: 'Internal Server Error' })
+    await expect.poll(() => calls).toContain('/session/ses_1/abort')
+    expect(Math.max(...items.flatMap((item) => (item.kind === 'retry' ? [item.attempt] : [])))).toBe(4)
+  })
+
+  it('재시도 3번 뒤 살아나고 다음 스텝에서 다시 1번째 재시도가 와도 상한에 걸리지 않고 끝까지 간다', async () => {
+    const { llm } = await start(await fakeOpencode('retryback'))
+    expect(await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })).toMatchObject({ ok: true, text: 'echo: hi' })
+    expect(calls.filter((call) => call.includes('/abort'))).toEqual([])
+  })
+
+  it('재시도를 기다리는 중 사용자가 멈추면 실패가 아니라 "중단됨"', async () => {
+    const { llm, seen } = await start(await fakeOpencode('retrystop'))
+    const stop = new AbortController()
+    const items: TurnItem[] = []
+    const turn = llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', stop: stop.signal, onProgress: (item) => items.push(item) })
+    await expect.poll(() => items.some((item) => item.kind === 'retry')).toBe(true)
+    stop.abort()
+    expect(await turn).toMatchObject({ ok: false, interrupted: true, error: tr('error.stopped') })
+    expect(seen.at(-1)).toBe(`ended ses_1@${directory} interrupted (${tr('error.stopped')})`)
   })
 })
 
