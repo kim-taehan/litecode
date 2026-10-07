@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { tr } from '../i18n.ts'
-import { readJsonFile } from './jsonFile.ts'
+import { readJsonFile, writeJsonFile } from './jsonFile.ts'
 import type { Project } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
@@ -58,6 +58,11 @@ export class ProjectsService extends Service {
     return toProjects(await this.read())
   }
 
+  /** 등록된 프로젝트인가 — 목록의 path 와 글자 그대로 같을 때만(정규화하지 않는다). 화면이 오염돼도 아무 폴더나 읽거나 만들지 못하게 막는 문이다 */
+  async has(dir: string): Promise<boolean> {
+    return (await this.list()).some((project) => project.path === dir)
+  }
+
   /** 폴더를 열어 최근 목록 맨 앞에 올린다. 폴더가 아니면(없는 경로·파일) 목록을 안 바꾸고 throw 한다. */
   async open(dir: string): Promise<Project> {
     const real = await fs.realpath(dir)
@@ -100,10 +105,7 @@ export class ProjectsService extends Service {
   private update(mutate: (stored: Stored) => Stored): Promise<Stored> {
     const next = this.queue.then(async () => {
       const stored = mutate(await this.read())
-      await fs.mkdir(path.dirname(this.opts.file), { recursive: true })
-      const temp = `${this.opts.file}.${process.pid}.tmp`
-      await fs.writeFile(temp, JSON.stringify(stored))
-      await fs.rename(temp, this.opts.file) // 쓰다 죽어도 이전 파일이 남게
+      await writeJsonFile(this.opts.file, stored) // 쓰다 죽어도 이전 파일이 남게
       return stored
     })
     this.queue = next.catch(() => {}) // 한 번 실패해도 다음 갱신은 돈다

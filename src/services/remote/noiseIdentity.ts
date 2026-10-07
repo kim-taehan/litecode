@@ -1,7 +1,5 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import { decodeNoiseKey, encodeNoiseKey, generateNoiseKeyPair, noiseKeyCode, noisePublicKey, type NoiseKeyPair } from '../../../shared/noiseNK.ts'
-import { readJsonFile } from '../jsonFile.ts'
+import { readJsonFile, writeJsonFile } from '../jsonFile.ts'
 import type { KeyCipher } from '../providers.ts'
 
 // 블루투스 채널의 신원 (이슈 #171, 설계 01ab 5절 "페어링·보안") — Noise NK 응답자의 정적 X25519 키쌍 하나.
@@ -43,10 +41,7 @@ export async function loadNoiseIdentity(file: string, cipher?: KeyCipher): Promi
     const text = encodeNoiseKey(secretKey)
     const sealed = cipher?.available() === true
     const next: StoredKey = { version: 1, key: sealed ? cipher!.encrypt(text).toString('base64') : text, sealed }
-    await fs.mkdir(path.dirname(file), { recursive: true })
-    const temp = `${file}.${process.pid}.tmp`
-    await fs.writeFile(temp, JSON.stringify(next), { mode: 0o600 })
-    await fs.rename(temp, file)
+    await writeJsonFile(file, next, { mode: 0o600 })
   }
   const publicKey = noisePublicKey(secretKey)
   return { secretKey, publicKey, publicKeyText: encodeNoiseKey(publicKey), code: noiseKeyCode(publicKey) }

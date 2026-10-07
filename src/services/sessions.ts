@@ -1,9 +1,7 @@
 import { Context, Service } from 'cordis'
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import type { History } from './llm.ts'
 import { shellContext } from './shell.ts'
-import { readJsonFile } from './jsonFile.ts'
+import { readJsonFile, writeJsonFile } from './jsonFile.ts'
 import { isMode } from '../../shared/modes.ts'
 import { TITLE_MAX } from '../../shared/chat.ts'
 import './llm.ts'
@@ -280,10 +278,7 @@ export class SessionsService extends Service {
   private update(mutate: (stored: Stored) => Stored): Promise<Stored> {
     const next = this.queue.then(async () => {
       const stored = mutate(await this.read())
-      await fs.mkdir(path.dirname(this.opts.file), { recursive: true })
-      const temp = `${this.opts.file}.${process.pid}.tmp`
-      await fs.writeFile(temp, JSON.stringify(stored))
-      await fs.rename(temp, this.opts.file) // 쓰다 죽어도 이전 파일이 남게
+      await writeJsonFile(this.opts.file, stored) // 쓰다 죽어도 이전 파일이 남게
       return stored
     })
     this.queue = next.catch(() => {}) // 한 번 실패해도 다음 갱신은 돈다

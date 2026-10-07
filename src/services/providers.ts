@@ -1,9 +1,7 @@
 import { Context, Service } from 'cordis'
-import fs from 'node:fs'
-import path from 'node:path'
 import { providerIdFor } from '../../shared/providerId.ts'
 import { tr } from '../i18n.ts'
-import { readJsonFileSync } from './jsonFile.ts'
+import { readJsonFileSync, writeJsonFileSync } from './jsonFile.ts'
 import { describeHttpError, errorDetail } from '../../shared/httpError.ts'
 
 // 모델 provider 설정 — dsh 의 Settings > Models 화면과 같은 모양을 따른다.
@@ -198,8 +196,9 @@ export class ProviderRegistry extends Service {
   }
 
   private persist(): void {
-    if (this.opts.file) writeJson(this.opts.file, this.all())
-    if (this.opts.keysFile) writeJson(this.opts.keysFile, this.keys)
+    if (this.opts.file) writeJsonFileSync(this.opts.file, this.all())
+    // 키는 봉해 두지만 그래도 비밀이다 — 다른 비밀 파일(mcp·기기 토큰·TLS/Noise 키)과 같이 0600
+    if (this.opts.keysFile) writeJsonFileSync(this.opts.keysFile, this.keys, { mode: 0o600 })
   }
 }
 
@@ -216,9 +215,3 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function writeJson(file: string, value: unknown): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const temp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(temp, JSON.stringify(value))
-  fs.renameSync(temp, file) // 쓰다 죽어도 이전 파일이 남게
-}

@@ -71,6 +71,13 @@ describe('ProviderRegistry', () => {
     expect(await fs.readFile(files.keysFile!, 'utf8')).not.toContain('sk-secret-123')
   })
 
+  it('봉한 키 파일(provider-keys.json)은 권한 0600 — 목록 파일(providers.json)은 키가 없어 보통 권한 그대로다', async () => {
+    const providers = await registry(files)
+    providers.save({ ...config, apiKey: 'sk-secret-123' })
+    expect((await fs.stat(files.keysFile!)).mode & 0o777).toBe(0o600)
+    expect((await fs.stat(files.file!)).mode & 0o777).not.toBe(0o600)
+  })
+
   it('OS 암호화를 못 쓰면 키 저장을 거부하고 아무것도 안 바꾼다 (평문 저장 금지)', async () => {
     const providers = await registry({ ...files, cipher: { ...reversing, available: () => false } })
 

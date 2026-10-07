@@ -67,6 +67,24 @@ describe('ProjectsService', () => {
     expect((await service.list()).map((project) => project.path)).toEqual([real])
   })
 
+  it('has 는 목록의 path 와 글자 그대로 같을 때만 참이다 — 끝 슬래시·심볼릭 링크·대소문자가 다르면 거짓 (IPC 의 폴더 문)', async () => {
+    const service = await projects()
+    const real = await folder('real')
+    const link = path.join(root, 'link')
+    await fs.symlink(real, link)
+    expect(await service.has(real)).toBe(false)
+    await service.open(real)
+
+    expect(await service.has(real)).toBe(true)
+    expect(await service.has(`${real}/`)).toBe(false)
+    expect(await service.has(link)).toBe(false)
+    expect(await service.has(real.toUpperCase())).toBe(false)
+    expect(await service.has(path.join(real, 'sub'))).toBe(false)
+    expect(await service.has(undefined as unknown as string)).toBe(false) // 화면이 문자열이 아닌 값을 보내도
+    await service.remove(real)
+    expect(await service.has(real)).toBe(false)
+  })
+
   it('없는 경로·파일은 거절하고 목록을 안 바꾼다', async () => {
     const service = await projects()
     const a = await folder('alpha')
