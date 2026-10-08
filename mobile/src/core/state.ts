@@ -5,11 +5,13 @@
 // - 대화 스냅샷에는 그 시점 seq 가 있다. 그 대화의 이벤트는 스냅샷 seq 초과분만 적용한다
 // - 스냅샷을 받는 동안(loading) 온 그 대화의 이벤트는 모아 두었다가 스냅샷 위에 다시 적용한다 — 요청과 응답 사이의 틈을 메운다
 // - `reset`, 또는 runId 가 바뀐 `ready`·hello → 쥔 seq 는 무효다. resync 번호를 올리고, 연결(connection.ts)이 목록과 열린 대화를 다시 받는다
-// - `turn.progress` 는 같은 item.id 를 통째로 바꾼다
+// - `turn.progress` 는 같은 item.id 를 통째로 바꾼다 (끼워 넣은 말 앞에 얼린 답 안의 줄이면 그 자리에서 — 이슈 #250)
+// - `turn.interjected` 는 도는 턴의 진행 줄을 그 앞의 답으로 얼리고 말풍선을 끼운다 (규칙은 데스크탑과 같은 shared/chatReducer.ts)
 // - `conversations.changed` → 그 프로젝트 목록이 낡았다고 적는다(staleProjects) — 다시 받는 것은 연결의 몫
 
 import type { Attention, HistoryMessage, NoticeState, TurnItem } from '../../../shared/contract.ts'
 import type { ConversationSnapshot, Hello, RemoteConversation, RemoteEvent, RemoteProject } from '../../../shared/remote.ts'
+import { endedMessages, interjectInView, placeInView } from '../../../shared/chatReducer.ts'
 
 /** 열어 둔 대화 하나 */
 export interface ConversationView {
@@ -145,6 +147,7 @@ function applyEvent(state: RemoteState, event: RemoteEvent): RemoteState {
   switch (event.event) {
     case 'turn.started':
     case 'turn.progress':
+    case 'turn.interjected':
     case 'turn.attention':
     case 'turn.ended':
     case 'queue.changed': {
@@ -179,16 +182,14 @@ function applyToView(view: ConversationView, event: RemoteEvent): ConversationVi
       const messages = at === -1 ? [...view.messages, message] : view.messages.map((existing, index) => (index === at ? message : existing))
       return { ...view, messages, running: true, progress: [], attention: [], seq }
     }
-    case 'turn.progress': {
-      const { item } = event.data
-      const known = view.progress.some((existing) => existing.id === item.id)
-      const progress = known ? view.progress.map((existing) => (existing.id === item.id ? item : existing)) : [...view.progress, item]
-      return { ...view, progress, running: true, seq }
-    }
+    case 'turn.progress':
+      return { ...placeInView(view, event.data.item), running: true, seq }
+    case 'turn.interjected':
+      return view.running ? { ...interjectInView(view, event.data.message), seq } : { ...view, seq }
     case 'turn.attention':
       return { ...view, attention: event.data.requests, seq }
     case 'turn.ended':
-      return { ...view, messages: [...view.messages, event.data.message], running: false, progress: [], attention: [], seq }
+      return { ...view, messages: endedMessages(view.messages, event.data.message, event.data.unanswered), running: false, progress: [], attention: [], seq }
     case 'queue.changed':
       return { ...view, queue: event.data.items, seq }
     default:

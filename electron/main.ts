@@ -303,6 +303,7 @@ function chatBridge(ctx: Context): void {
   ctx.on('chat/turn-progress', ({ cid, item }) => broadcast(Channel.TURN_PROGRESS, cid, item))
   ctx.on('chat/turn-attention', ({ cid, requests }) => broadcast(Channel.TURN_ATTENTION, cid, requests))
   ctx.on('chat/turn-ended', (data) => broadcast(Channel.TURN_ENDED, data))
+  ctx.on('chat/turn-interjected', (data) => broadcast(Channel.TURN_INTERJECTED, data))
   ctx.on('chat/queue-changed', (data) => broadcast(Channel.QUEUE_CHANGED, data))
   ctx.on('chat/conversations-changed', (data) => broadcast(Channel.CONVERSATIONS_CHANGED, data))
 }

@@ -74,6 +74,11 @@ describe('view — 상태를 화면 글로', () => {
     expect(userMessageView({ role: 'user', text: '  안녕\n' })).toEqual({ kind: 'bubble', text: '안녕', attachments: [] })
   })
 
+  it('userMessageView: 끼워 넣었지만 답을 못 받은 말은 "답 없음" 을 단다 (이슈 #250)', () => {
+    expect(userMessageView({ role: 'user', text: '끼운 말', interjected: true, unanswered: true })).toEqual({ kind: 'bubble', text: '끼운 말', attachments: [], unanswered: true })
+    expect(userMessageView({ role: 'user', text: '끼운 말', interjected: true })).toEqual({ kind: 'bubble', text: '끼운 말', attachments: [] })
+  })
+
   it('userMessageView: 다른 대화가 보낸 지시는 딱지를 단다 — 내가 친 글과 가른다', () => {
     expect(userMessageView({ role: 'user', text: '빌드해', origin: { conversationId: 'x', title: '기획' } })).toEqual({ kind: 'bubble', text: '빌드해', attachments: [], origin: '기획' })
     expect(userMessageView({ role: 'user', text: '빌드해', origin: { conversationId: 'x', title: '' } })).toEqual({ kind: 'bubble', text: '빌드해', attachments: [], origin: '새 대화' })

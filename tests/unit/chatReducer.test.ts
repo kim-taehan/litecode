@@ -76,6 +76,58 @@ describe('reduceChat', () => {
   })
 })
 
+describe('reduceChat — 도는 턴에 끼워 넣은 말 (이슈 #250)', () => {
+  const said = (id: string, text: string, patch: Partial<HistoryMessage> = {}) => asked(id, text, { interjected: true, ...patch })
+  const interjected = (message: HistoryMessage): ChatEvent => ({ event: 'turn.interjected', data: { cid: 'c1', message } })
+  const text = (id: string, body: string): TurnItem => ({ kind: 'text', id, text: body, done: true })
+
+  it('말풍선을 도는 턴 사이에 끼운다 — 그때까지의 진행 줄은 그 앞의 답으로 얼리고, 뒤 진행 줄은 그 아래로', () => {
+    const view = run(emptyChatView, started(asked('m1', 'A')), progress(tool), progress(text('a', 'A 중간 글')), interjected(said('m2', 'B')), progress(think))
+    expect(view.messages).toEqual([asked('m1', 'A'), { role: 'assistant', text: 'A 중간 글', items: [tool, text('a', 'A 중간 글')] }, said('m2', 'B')])
+    expect(view).toMatchObject({ running: true, startedAt: 1_000, progress: [think] })
+  })
+
+  it('끼우기 전에 생긴 줄이 늦게 바뀌면(도는 도구가 끝남) 얼린 답 안의 그 자리를 바꾼다 — 아래에 또 생기지 않는다', () => {
+    const finished: TurnItem = { ...tool, status: 'done' } as TurnItem
+    const view = run(emptyChatView, started(asked('m1', 'A')), progress(tool), interjected(said('m2', 'B')), progress(think), progress(finished))
+    expect(view.messages[1]).toMatchObject({ role: 'assistant', items: [finished] })
+    expect(view.progress).toEqual([think])
+  })
+
+  it('진행 줄이 없을 때 끼우면 빈 답을 만들지 않는다. 연달아 끼워도 순서대로', () => {
+    const view = run(emptyChatView, started(asked('m1', 'A')), interjected(said('m2', 'B')), progress(think), interjected(said('m3', 'C')))
+    expect(view.messages.map((message) => message.role === 'user' ? message.text : `[${message.items?.map((item) => item.id).join(',')}]`)).toEqual(['A', 'B', '[t1]', 'C'])
+  })
+
+  it('턴 끝: 마지막 답을 붙이고, 답을 못 받은 끼워 넣은 말(unanswered)에 표시', () => {
+    const view = run(
+      emptyChatView,
+      started(asked('m1', 'A')),
+      progress(tool),
+      interjected(said('m2', 'B')),
+      { event: 'turn.ended', data: { cid: 'c1', message: answered('', { declined: true }), outcome: 'done', unanswered: ['m2'] } },
+    )
+    expect(view.messages.at(-2)).toEqual(said('m2', 'B', { unanswered: true }))
+    expect(view.messages.at(-1)).toMatchObject({ role: 'assistant', declined: true })
+    expect(view.running).toBe(false)
+  })
+
+  it('턴이 안 도는 대화에 늦게 온 끼워 넣기는 버린다', () => {
+    expect(run(emptyChatView, interjected(said('m2', 'B')))).toEqual(emptyChatView)
+  })
+
+  it('스냅샷(withLive): 얼린 답·끼워 넣은 말을 그 턴의 내 말 뒤에 — 다시 불러와도 두 번 붙지 않는다', () => {
+    const frozen: HistoryMessage = { role: 'assistant', text: '', items: [tool] }
+    const live = { turn: { message: asked('m1', 'A'), startedAt: 5_000, progress: [think], attention: [], interjections: [frozen, said('m2', 'B')] }, queue: { cid: 'c1', items: [], held: false, attachments: [] } }
+    const once = withLive(emptyChatView, live)
+    expect(once.messages).toEqual([asked('m1', 'A'), frozen, said('m2', 'B')])
+    expect(withLive(once, live).messages).toEqual(once.messages)
+    // 기록을 다시 읽으면(withHistory) 끼워 넣은 말까지 기록의 것, 그 말풍선은 화면 것 그대로
+    const loaded = [asked('m1', 'A'), answered('A 쓰다 만'), asked('m2', 'B'), answered('B 쓰다 만')]
+    expect(withHistory(once, loaded).messages).toEqual([asked('m1', 'A'), answered('A 쓰다 만'), said('m2', 'B')])
+  })
+})
+
 describe('withLive — 화면을 다시 불러왔을 때의 스냅샷', () => {
   const turn = { message: asked('m2', '도는 중'), startedAt: 5_000, progress: [think], attention: [permission] }
   const live = { turn, queue: { cid: 'c1', items: ['다음'], held: false, attachments: [] } }

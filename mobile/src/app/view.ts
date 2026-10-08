@@ -57,7 +57,7 @@ export function questionView(request: QuestionAttention): QuestionView {
  * bubble: 첨부 이름(있으면) + 다른 대화가 보낸 지시면 그 대화 제목(origin)과 보낸 프로젝트 이름(originProject — 다른 프로젝트에서 왔다, 이슈 #137.
  * 그 전에 같은 프로젝트의 대화가 보낸 기록에는 없다) + 글. 글이 비면(첨부만 보냄) 말풍선은 그리지 않는다
  */
-export type UserMessageView = { kind: 'hook'; reason: string } | { kind: 'bubble'; text: string; attachments: string[]; origin?: string; originProject?: string }
+export type UserMessageView = { kind: 'hook'; reason: string } | { kind: 'bubble'; text: string; attachments: string[]; origin?: string; originProject?: string; unanswered?: true }
 
 export function userMessageView(message: HistoryMessage): UserMessageView {
   const reason = stopFeedbackReason(message.text)
@@ -68,6 +68,7 @@ export function userMessageView(message: HistoryMessage): UserMessageView {
     attachments: (message.attachments ?? []).map((attachment) => attachment.name),
     ...(message.origin && { origin: message.origin.title || S.untitled }),
     ...(message.origin?.project && { originProject: message.origin.project }),
+    ...(message.unanswered && { unanswered: true as const }), // 끼워 넣었지만 답을 못 받은 말 (이슈 #250)
   }
 }
 

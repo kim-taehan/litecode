@@ -8,7 +8,7 @@ import { SPEECH_MAX_SAMPLES, SPEECH_MAX_SECONDS, type SpeechErrorCode, type Spee
 // 3단계(실시간 받아쓰기): 말하는 동안 받아쓴 글(확정 + 임시)을 상태에 쥐고 띠 아래에 보인다 — 입력창에는 정지 뒤에 한 번에 넣는다 (말하는 중에 커서가 튀지 않게).
 // 음성 대화 모드 1단계(#238, 실측 _workspace/01aq_voice_chat_feasibility.md): 같은 상태 기계에 chat 표시를 단다 — 듣는 중(recording) → 말을 멈추면 카운트다운
 // (countdown) → 보내는 중(transcribing) → 다시 듣기(listen). 보낼 수 없으면 입력창에 넣고 사유를 남기고 끈다(대기 + notice).
-// 계속 듣기(#240): 답이 오는 동안에도 마이크를 닫지 않는다 — 보내는 중에도 마이크는 열려 있고, 도는 턴이 있으면 보낸 말은 메인의 대기열에 쌓인다.
+// 계속 듣기(#240): 답이 오는 동안에도 마이크를 닫지 않는다 — 보내는 중에도 마이크는 열려 있고, 도는 턴이 있으면 보낸 말은 메인이 그 턴에 끼워 넣는다(#250).
 // 버튼 하나(#244): 받아쓰기(정지를 눌러야 입력창에 넣는 녹음)를 없앴다 — 녹음은 늘 음성 대화로 시작한다(start 가 chat 을 단다).
 
 // ── 상태 기계 ────────────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ export interface VoiceChatTarget {
 /**
  * 자동 보내기 금지 표 (01aq §3.2) — 보낼 수 없으면 사유. 시작할 때는 transcript 없이 부른다.
  * 사용자가 친 글·첨부가 말과 섞여 나가지 않게, `/`·`!` 로 시작하는 말이 명령·셸로 실행되지 않게, 보내기가 말없이 돌아가지 않게.
- * 그 대화에 도는 턴은 막지 않는다 (#240) — 보내면 메인이 대기열에 쌓고 턴이 끝나면 차례로 보낸다
+ * 그 대화에 도는 턴은 막지 않는다 (#240) — 보내면 메인이 그 턴에 끼워 넣는다 (#250)
  */
 export function voiceChatBlock(target: VoiceChatTarget, transcript?: string): MessageKey | undefined {
   if (target.attention) return 'voice.chat.stop.attention'
@@ -281,7 +281,7 @@ export interface VoiceChatActivity {
 
 /**
  * 대화 모드에서 대화의 턴 상태가 바뀌었을 때 멈출 사유 — 승인·질문 카드가 뜨면 어느 단계든 멈춘다 (카드 중에 한 말이 답으로 쓰이면 안 된다).
- * 도는 턴은 멈출 사유가 아니다 (#240 — 듣는 중 보낸 말은 대기열로)
+ * 도는 턴은 멈출 사유가 아니다 (#240 — 듣는 중 보낸 말은 그 턴에 끼워 넣는다, #250)
  */
 export function voiceChatWatch(state: VoiceState, activity: VoiceChatActivity): MessageKey | undefined {
   return state.chat && activity.attention ? 'voice.chat.stop.attention' : undefined

@@ -564,6 +564,31 @@ describe('REST', () => {
     llm.calls[1]!.finish()
   })
 
+  it('끼워 넣기 (이슈 #250) — 폰 글은 202 interjected, turn.interjected 가 스트림에 가고, 스냅샷 기록에 얼린 답·끼워 넣은 말이 실린다. 턴 끝에 unanswered', async () => {
+    const { api, pair, save, turn, llm, events } = await start()
+    const { token } = await pair()
+    await save('c1')
+    llm.steerable = true
+    const stream = await events(token)
+    await api('POST', '/v1/conversations/c1/messages', { token, body: { text: '하나', clientMessageId: 'a' } })
+    const running = await turn(1)
+    const tool: TurnItem = { kind: 'tool', id: 't1', name: 'bash', status: 'running' }
+    running.progress(tool)
+    expect(await api('POST', '/v1/conversations/c1/messages', { token, body: { text: '둘', clientMessageId: 'b' } })).toMatchObject({ status: 202, body: { state: 'interjected' } })
+    await until(() => llm.interjected.length === 1, '끼워 넣은 말이 엔진에')
+    expect(llm.interjected).toEqual(['둘'])
+    await until(() => parseFrames(stream.raw()).some((frame) => frame.event === 'turn.interjected'), 'turn.interjected')
+    const said = parseFrames(stream.raw()).find((frame) => frame.event === 'turn.interjected')!
+    expect(said.data).toMatchObject({ cid: 'c1', message: { role: 'user', text: '둘', interjected: true } })
+    const snapshot = (await api<ConversationSnapshot>('GET', '/v1/conversations/c1', { token })).body
+    expect(snapshot.history.messages).toMatchObject([{ role: 'user', text: '하나' }, { role: 'assistant', items: [tool] }, { role: 'user', text: '둘', interjected: true }])
+    expect(snapshot.live).toMatchObject({ progress: [], queue: [] })
+    const id = (said.data as { message: { id: string } }).message.id
+    running.finish({ declined: true, unanswered: [id] })
+    await until(() => parseFrames(stream.raw()).some((frame) => frame.event === 'turn.ended'), 'turn.ended')
+    expect(parseFrames(stream.raw()).find((frame) => frame.event === 'turn.ended')!.data).toMatchObject({ unanswered: [id] })
+  })
+
   it('중지 — 도는 턴을 멈추고(interrupted), 대기열 되돌리기는 이 기기가 쌓은 것을 합쳐 준다', async () => {
     const { ctx, api, pair, save, turn, chatEvents } = await start()
     const { token } = await pair()

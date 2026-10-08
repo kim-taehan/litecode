@@ -212,6 +212,10 @@ export interface HistoryMessage {
   attachments?: Attachment[]
   /** user: 사람이 친 글이 아니라 다른 대화가 보낸 지시다 (이슈 #55) — 화면이 "다른 대화에서 온 지시" 딱지를 단다 */
   origin?: MessageOrigin
+  /** user: 도는 턴에 끼워 넣은 말 (이슈 #250) — 그 턴의 진행 사이에 놓인다. 도는 턴과 방금 끝난 턴에만 있다 (엔진 기록엔 보통 말풍선이다) */
+  interjected?: boolean
+  /** user: 끼워 넣었지만 답을 못 받았다 (승인 거절·중지로 턴이 끝났다) — 화면이 그 말풍선에 "답 없음" 을 단다. 맥락에는 남아 있다 */
+  unanswered?: boolean
   /** assistant: 그 턴의 진행 줄 (생각·도구·글·지시문) — 실시간 턴의 chat onProgress 와 같은 모양 */
   items?: TurnItem[]
   /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
