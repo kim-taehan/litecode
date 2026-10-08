@@ -360,7 +360,7 @@ export class SpeechService extends Service {
         if (!stream) return
         stream.awaiting = false
         stream.inferMs += reply.inferMs
-        stream.partial({ final: reply.final, tentative: reply.tentative })
+        stream.partial({ final: reply.final, tentative: reply.tentative, speaking: reply.speaking, silentMs: reply.silentMs })
         return this.flush(job)
       }
       job.resolve({ text: reply.text, audioSeconds: (stream?.total ?? job.pcm.length) / SPEECH_SAMPLE_RATE, inferSeconds: ((stream?.inferMs ?? 0) + reply.inferMs) / 1000 })

@@ -153,6 +153,105 @@
   opacity: 0.85;
 }
 
+/* 대화 버튼 (#238) — 마이크 옆. 마이크와 같은 28px 높이의 알약, 음성 대화 중엔 눌린 모양 */
+.composer__talk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: none;
+  border-radius: 999px;
+  outline: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.composer__talk:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.composer__talk:focus-visible,
+.voice-strip__hold:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.composer__talk[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.composer__talk:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* 음성 대화 띠 — 받아쓰기 띠와 같은 줄. 듣는 중엔 글이 제 너비만(음량 막대가 남은 자리), 카운트다운에선 차오르는 띠가 남은 자리 */
+.voice-strip[data-voice-chat] {
+  padding-left: 4px;
+}
+
+.voice-strip[data-voice-chat='listening'] .voice-strip__text,
+.voice-strip[data-voice-chat='countdown'] .voice-strip__text {
+  flex: none;
+  white-space: nowrap;
+}
+
+.voice-strip[data-voice-chat='listening'] .voice-strip__dot {
+  background: var(--danger);
+}
+
+.voice-strip[data-voice-chat='waiting'] .voice-strip__dot {
+  background: var(--text-tertiary);
+}
+
+.voice-strip__countdown {
+  flex: 1;
+  min-width: 24px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--fill-active);
+  overflow: hidden;
+}
+
+.voice-strip__countdown-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: voice-fill linear forwards;
+}
+
+.voice-strip__hold {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  outline: none;
+  background: var(--fill-active);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.voice-strip__hold:hover {
+  opacity: 0.85;
+}
+
+@keyframes voice-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* 말하는 동안 받아쓴 글 — 띠 바로 아래. 확정 글은 본문 색, 말하고 있는 구간(임시)은 흐리게. 네 줄을 넘으면 끝이 보이게 흘린다 */
 .voice-live {
   max-height: 80px;
@@ -181,6 +280,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .voice-strip__dot {
+    animation: none;
+  }
+  /* 카운트다운은 움직임 대신 꽉 찬 띠로 — 보내기 전이라는 것만 보인다 */
+  .voice-strip__countdown-fill {
     animation: none;
   }
 }

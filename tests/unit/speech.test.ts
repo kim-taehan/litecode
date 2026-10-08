@@ -37,8 +37,8 @@ class FakeWorker implements SpeechWorkerHandle {
     this.on.message({ type: 'result', id: this.posts.at(-1)!.id, text, inferMs })
   }
   /** 마지막으로 받은 조각(stream-feed)에 답한다 */
-  partial(final: string, tentative: string, inferMs = 10): void {
-    this.on.message({ type: 'partial', id: this.posts.at(-1)!.id, final, tentative, inferMs })
+  partial(final: string, tentative: string, inferMs = 10, speaking = tentative !== '', silentMs = 0): void {
+    this.on.message({ type: 'partial', id: this.posts.at(-1)!.id, final, tentative, speaking, silentMs, inferMs })
   }
   exit(): void {
     this.on.exit()
@@ -394,11 +394,11 @@ describe('실시간 받아쓰기 (openStream)', () => {
     stream.write(chunk(4))
     expect(worker.posts).toHaveLength(base + 1) // 답이 오기 전엔 더 안 보낸다
     worker.partial('', '안녕')
-    expect(seen).toEqual([{ final: '', tentative: '안녕' }])
+    expect(seen).toEqual([{ final: '', tentative: '안녕', speaking: true, silentMs: 0 }])
     expect(worker.posts).toHaveLength(base + 2)
     expect(worker.posts.at(-1)!.pcm).toHaveLength(4800)
-    worker.partial('안녕하세요.', '')
-    expect(seen.at(-1)).toEqual({ final: '안녕하세요.', tentative: '' })
+    worker.partial('안녕하세요.', '', 10, false, 640)
+    expect(seen.at(-1)).toEqual({ final: '안녕하세요.', tentative: '', speaking: false, silentMs: 640 }) // 말 끝 신호(#238)를 그대로 넘긴다
     expect(worker.posts).toHaveLength(base + 2) // 밀린 것이 없으면 안 보낸다
     stream.cancel()
   })

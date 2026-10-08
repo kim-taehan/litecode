@@ -97,20 +97,36 @@ describe('조각을 받아 확정·임시 글로 (StreamDecoder)', () => {
     const { decode, calls } = recognizer()
     const time = clock()
     const decoder = new StreamDecoder(vad, decode, time.now)
-    expect(decoder.feed(silence(10))).toEqual({ final: '', tentative: '' })
+    expect(decoder.feed(silence(10))).toMatchObject({ final: '', tentative: '' }) // 말 끝 신호(speaking·silentMs)는 아래 따로
     expect(calls).toHaveLength(0) // 말이 없으면 인식하지 않는다
     time.at += 1000
     // 앞 무음이 9창 + 192 표본이라 창이 192 만큼 어긋나 있다 — 창을 못 채운 끝 192 표본은 다음 조각을 기다린다
-    expect(decoder.feed(speech(8192, 20))).toEqual({ final: '', tentative: '가×10048' })
+    expect(decoder.feed(speech(8192, 20))).toMatchObject({ final: '', tentative: '가×10048' })
     time.at += 1000
-    expect(decoder.feed(speech(8192, 10))).toEqual({ final: '', tentative: '가×15168' }) // 처음부터 다시
+    expect(decoder.feed(speech(8192, 10))).toMatchObject({ final: '', tentative: '가×15168' }) // 처음부터 다시
     time.at += 1000
-    expect(decoder.feed(silence(3))).toEqual({ final: '가×15360', tentative: '' })
+    expect(decoder.feed(silence(3))).toMatchObject({ final: '가×15360', tentative: '' })
     expect(calls.at(-1)).toBe(31 * 512) // 확정은 VAD 가 자른 구간 그대로 (소리가 걸친 창 31개 — 임시 인식의 꼬리가 아니다)
     time.at += 1000
-    expect(decoder.feed(speech(16384, 20))).toEqual({ final: '가×15360', tentative: '나×10048' }) // 앞 구간의 소리는 임시 인식에 안 들어간다
+    expect(decoder.feed(speech(16384, 20))).toMatchObject({ final: '가×15360', tentative: '나×10048' }) // 앞 구간의 소리는 임시 인식에 안 들어간다
     time.at += 1000
-    expect(decoder.feed(silence(2))).toEqual({ final: '가×15360 나×10240', tentative: '' })
+    expect(decoder.feed(silence(2))).toMatchObject({ final: '가×15360 나×10240', tentative: '' })
+  })
+
+  it('말 끝 신호 (#238) — VAD 가 켜져 있으면 speaking·silentMs 0, 꺼지면 마지막으로 켜졌던 창 뒤에 넣은 소리만큼 silentMs 가 는다', () => {
+    const vad = new FakeVad()
+    const decoder = new StreamDecoder(vad, recognizer().decode, clock().now)
+    // 연 뒤 말이 없으면 연 때부터 센다 — 앞에 넣은 무음 300ms 는 세지 않는다 (앞 무음의 끝 192 표본 + 1408 = 3창 넣음)
+    expect(decoder.feed(new Int16Array(1408))).toMatchObject({ speaking: false, silentMs: 96 })
+    expect(decoder.feed(speech(8192, 10))).toMatchObject({ speaking: true, silentMs: 0 })
+    // 말소리가 걸친 창까지는 켜져 있고(창이 64 표본 어긋나 있어 다음 조각의 첫 창에 말소리 끝이 걸친다), 그 뒤 조용한 창 수만큼 (창 하나 32ms)
+    expect(decoder.feed(silence(1))).toMatchObject({ speaking: true, silentMs: 0 })
+    expect(decoder.feed(silence(10))).toMatchObject({ speaking: false, silentMs: 320 })
+    expect(decoder.feed(silence(25))).toMatchObject({ speaking: false, silentMs: 1120, final: '가×5120' })
+    // 다시 말하면 0 으로 — 확정 글은 그대로 이어진다 (카운트다운 중에 다시 말하면 이어서 받아쓴다)
+    const resumed = decoder.feed(speech(16384, 3))
+    expect(resumed).toMatchObject({ speaking: true, silentMs: 0, final: '가×5120' })
+    expect(decoder.feed(silence(2)).silentMs).toBe(32)
   })
 
   it('임시 인식에는 말이 시작되기 전 1초까지만 넣는다 (오래 조용했어도)', () => {
@@ -231,8 +247,8 @@ describe('워커가 메시지 하나에 하는 일 (speechEngine)', () => {
     expect(ask({ type: 'stream-start', id: 5, language: 'ko' })).toBeUndefined()
     expect(prepared).toEqual(['ko']) // 인식기는 열 때 만들어 둔다 — 첫 임시 인식의 걸린 시간에 섞이지 않게
     time.at = 1000
-    expect(ask({ type: 'stream-feed', id: 5, pcm: speech(8192, 20) })).toEqual({ type: 'partial', id: 5, final: '', tentative: '가×10048', inferMs: 7 })
-    expect(ask({ type: 'stream-feed', id: 5, pcm: silence(2) })).toEqual({ type: 'partial', id: 5, final: '가×10240', tentative: '', inferMs: 7 })
+    expect(ask({ type: 'stream-feed', id: 5, pcm: speech(8192, 20) })).toEqual({ type: 'partial', id: 5, final: '', tentative: '가×10048', speaking: true, silentMs: 0, inferMs: 7 })
+    expect(ask({ type: 'stream-feed', id: 5, pcm: silence(2) })).toEqual({ type: 'partial', id: 5, final: '가×10240', tentative: '', speaking: false, silentMs: 32, inferMs: 7 })
     expect(ask({ type: 'stream-feed', id: 5, pcm: silence(2) })).toMatchObject({ type: 'partial', inferMs: 0 }) // 인식할 것이 없어도 답한다 (메인이 답을 기다린다)
     expect(ask({ type: 'stream-stop', id: 5, pcm: speech(16384, 4) })).toEqual({ type: 'result', id: 5, text: '가×10240 나×2048', inferMs: 7 })
     expect(languages).toEqual(['ko', 'ko', 'ko'])
@@ -330,8 +346,8 @@ describe('IPC 쪽 장부 (speechBridgeStreams)', () => {
     const events: SpeechStreamEvent[] = []
     const streams = speechBridgeStreams(speech.service, (event) => void events.push(event))
     streams.start(undefined)
-    speech.opened[0]!.partial({ final: '하나.', tentative: '둘' })
-    expect(events).toEqual([{ stream: 1, final: '하나.', tentative: '둘' }])
+    speech.opened[0]!.partial({ final: '하나.', tentative: '', speaking: false, silentMs: 300 })
+    expect(events).toEqual([{ stream: 1, final: '하나.', tentative: '', speaking: false, silentMs: 300 }]) // 말 끝 신호(#238)도 그대로 싣는다
   })
 
   it('정지 — 최종 글을 돌려주고 장부를 비운다. 정지 뒤의 조각·모르는 번호의 정지는 버린다', async () => {
@@ -372,7 +388,7 @@ describe('IPC 쪽 장부 (speechBridgeStreams)', () => {
     expect(streams.start(undefined)).toEqual({ ok: true, stream: 2 })
     expect(speech.opened[0]!.cancelled).toBe(1)
     streams.chunk(1, new Int16Array(1600))
-    speech.opened[0]!.partial({ final: '옛', tentative: '' })
+    speech.opened[0]!.partial({ final: '옛', tentative: '', speaking: false, silentMs: 0 })
     await flush()
     expect(speech.opened[0]!.written).toHaveLength(0)
     expect(events).toEqual([])
@@ -385,7 +401,7 @@ describe('IPC 쪽 장부 (speechBridgeStreams)', () => {
     streams.start(undefined)
     speech.opened[0]!.reject(new SpeechError('failed', 'engine exited'))
     await flush()
-    expect(events).toEqual([{ stream: 1, final: '', tentative: '', error: 'failed' }])
+    expect(events).toEqual([{ stream: 1, final: '', tentative: '', speaking: false, silentMs: 0, error: 'failed' }])
     streams.chunk(1, new Int16Array(1600)) // 죽은 스트림
     expect(speech.opened[0]!.written).toHaveLength(0)
 

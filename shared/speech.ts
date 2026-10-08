@@ -58,6 +58,10 @@ export interface SpeechPartial {
   final: string
   /** 말하고 있는 구간의 임시 글 — 다음에 통째로 바뀔 수 있다 */
   tentative: string
+  /** 엔진의 VAD 가 지금 말소리로 보고 있다 */
+  speaking: boolean
+  /** VAD 가 꺼진 뒤 지난 소리의 길이(ms) — 말하는 중이면 0. 실제 무음은 이 값 + VAD 꺼짐 지연(약 0.5초). 음성 대화(#238)의 말 끝 판정 */
+  silentMs: number
 }
 
 /** `speech:partial` 한 번. error 가 있으면 그 스트림은 끝났다 (엔진이 죽음·기한) — 화면은 녹음을 멈춘다 */
