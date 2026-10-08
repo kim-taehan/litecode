@@ -625,6 +625,18 @@
   color: var(--danger);
 }
 
+/* 노란 안내 한 줄 — 키체인이 저장된 키를 안 풀어 줄 때 모델 페이지 위쪽 (이슈 #231). 경고 토큰은 승인 카드·블루투스 배지와 같다 */
+.settings-notice {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text);
+}
+
 /* 기능 페이지 (이슈 #8) — 처음엔 dsh ui-settings-plugin-inventory 의 두 칸 카드였고, 2026-10-07 에 한 줄 목록 + 펼침으로 바꿨다 (아래 .feature-rows) */
 .features-page {
   display: flex;

@@ -9,6 +9,8 @@ import { parsePairUri } from '../../shared/remote.ts'
 import { FRAME, FrameChannel, utf8, type ByteLink, type FrameMessage } from '../../shared/remoteFraming.ts'
 import { BLUETOOTH_PACE_BYTES_PER_SECOND, RemoteBluetooth, type BlenoCharacteristicOptions, type BlenoLike, type RemoteBluetoothOptions } from '../../src/services/remote/bluetooth.ts'
 import { zlibCodec } from '../../src/services/remote/framed.ts'
+import { loadNoiseIdentity } from '../../src/services/remote/noiseIdentity.ts'
+import type { KeyCipher } from '../../src/services/providers.ts'
 import { box, parseFrames, setUp, start, tearDown, until } from './support/remoteHarness.ts'
 
 // 블루투스 운반 (이슈 #210) — 가짜 bleno 로만. 라디오·광고·스캔은 쓰지 않는다.
@@ -268,6 +270,17 @@ describe('블루투스 운반 — 광고 수명', () => {
     expect(desktop.remote.status().error).toBeUndefined()
     expect((await desktop.api('GET', '/v1/hello')).status).toBe(401) // HTTP 운반은 산다
     await expect(fs.stat(noiseKeyFile())).rejects.toThrow() // 모듈을 못 읽었으면 키도 만들지 않는다
+  })
+
+  it('봉한 키를 키 저장소가 안 풀어 주면 failed + keyStore 표시 — 화면이 영어 원문 대신 키체인 안내를 보인다 (이슈 #231)', async () => {
+    let available = true
+    const cipher: KeyCipher = { available: () => available, encrypt: (plain) => Buffer.from(plain).reverse(), decrypt: (sealed) => Buffer.from(sealed).reverse().toString() }
+    await loadNoiseIdentity(noiseKeyFile(), cipher)
+    available = false
+    const desktop = await start({ http: false, noiseKeyFile: noiseKeyFile(), cipher })
+    await bluetooth(desktop, new FakeBleno())
+    await until(() => desktop.remote.status().bluetooth?.state === 'failed', '실패')
+    expect(desktop.remote.status().bluetooth).toMatchObject({ state: 'failed', keyStore: true })
   })
 })
 

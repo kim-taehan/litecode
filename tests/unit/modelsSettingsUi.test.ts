@@ -64,3 +64,21 @@ describe('ProviderEditor — 편집 안 버튼', () => {
     expect(footer.indexOf(ko('models.cancel'))).toBeLessThan(footer.indexOf(ko('models.apply')))
   })
 })
+
+// 이슈 #231: 키체인이 키를 안 풀어 주면 채팅만 실패하고 설정에는 아무 표시가 없었다 — 모델 페이지 위쪽에 노란 안내 한 줄
+describe('ModelsPage — 키 저장소 안내', () => {
+  const escaped = (text: string) => text.replace(/'/g, '&#x27;').replace(/"/g, '&quot;')
+
+  it('저장된 키를 읽을 수 없는 provider 가 있으면 설명 아래에 안내 한 줄(role=status)', () => {
+    const html = renderToStaticMarkup(createElement(ModelsPage, { providers: [{ ...provider, keyLocked: true }], onProvidersChange: () => {} }))
+    const notice = `<p class="settings-notice" role="status">${escaped(ko('models.keyStoreLocked'))}</p>`
+    expect(html).toContain(notice)
+    expect(html.indexOf(notice)).toBeGreaterThan(html.indexOf('models-page__hint'))
+    expect(html.indexOf(notice)).toBeLessThan(html.indexOf('provider-card'))
+  })
+
+  it('없으면 안내도 없다', () => {
+    const html = renderToStaticMarkup(createElement(ModelsPage, { providers: [provider], onProvidersChange: () => {} }))
+    expect(html).not.toContain('settings-notice')
+  })
+})

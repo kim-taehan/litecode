@@ -470,6 +470,7 @@ export const ko = {
   // 설정 > 모델
   'models.title': '모델',
   'models.hint': '모델을 제공하는 게이트웨이(OpenAI 호환)를 설정합니다.',
+  'models.keyStoreLocked': "키체인 접근이 허용되지 않아 저장된 키를 읽을 수 없습니다 — 앱을 다시 열고 키체인 창에서 '항상 허용'을 눌러 주세요 (EKEYSTORE)",
   'models.keySet': 'API 키 설정됨',
   'models.keyNone': 'API 키 없음',
   'models.confirmDelete': '삭제 확인',
@@ -562,6 +563,9 @@ export const ko = {
   'error.keyChars': '키에 쓸 수 없는 문자가 섞였습니다 (붙여넣기 확인)',
   'error.keyStorage': '이 환경에서는 API 키를 안전하게 저장할 수 없습니다 (OS 암호화 저장소 사용 불가)',
   'error.keyReenter': '주소가 바뀌었습니다 — 키를 다시 입력하세요',
+  // 키체인이 봉한 키를 안 풀어 준다 (이슈 #231) — 다시 빌드한 앱을 열면 macOS 가 접근을 다시 묻는다
+  'error.modelKeyStore': "모델 키를 읽지 못했습니다 — macOS 키체인에서 litecode 접근이 허용되지 않았습니다. 앱을 다시 열고 키체인 창에서 '항상 허용'을 눌러 주세요 (EKEYSTORE)",
+  'error.keyStore': "macOS 키체인에서 litecode 접근이 허용되지 않아 저장된 키를 읽을 수 없습니다. 앱을 다시 열고 키체인 창에서 '항상 허용'을 눌러 주세요 (EKEYSTORE)",
   'error.fetchModels': '모델 목록을 가져오지 못했습니다 — {reason}',
   // HTTP 실패 문구 (shared/httpError.ts) — 뒤에 원문 사유가 괄호로 붙는다
   'httpError.401': 'API 키가 맞지 않습니다 — 설정 > 모델에서 키를 확인하세요',

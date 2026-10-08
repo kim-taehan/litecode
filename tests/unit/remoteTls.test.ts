@@ -125,8 +125,25 @@ describe('신원 — 키 하나, 인증서는 띄울 때마다', () => {
     expect(JSON.parse(text)).toMatchObject({ version: 1, sealed: true })
     expect((await loadTlsIdentity(file, cipher)).fingerprint).toBe(first.fingerprint)
     available = false
-    await expect(loadTlsIdentity(file, cipher)).rejects.toMatchObject({ code: 'ETLSKEY' })
+    await expect(loadTlsIdentity(file, cipher)).rejects.toMatchObject({ code: 'ETLSKEY', keyStore: true })
+    // 키체인이 풀기를 거절해도(복호화가 던짐) 같은 표시 — 화면이 키체인 안내를 보인다 (이슈 #231)
+    available = true
+    const denied: KeyCipher = { ...cipher, decrypt: () => { throw new Error('Error while decrypting the ciphertext') } }
+    await expect(loadTlsIdentity(file, denied)).rejects.toMatchObject({ code: 'ETLSKEY', keyStore: true })
     expect(await fs.readFile(file, 'utf8')).toBe(text)
+  })
+
+  it('봉한 키를 못 풀어 TLS 운반이 못 뜨면 상태 오류에 keyStore 표시가 실린다 (코드는 ETLSKEY 그대로, 이슈 #231)', async () => {
+    let available = true
+    const cipher: KeyCipher = {
+      available: () => available,
+      encrypt: (plain) => Buffer.from(plain, 'utf8').reverse(),
+      decrypt: (sealed) => Buffer.from(sealed).reverse().toString('utf8'),
+    }
+    await loadTlsIdentity(path.join(box.root, 'remote-tls-key.json'), cipher)
+    available = false
+    const desktop = await start({ tls: { addresses: () => ['127.0.0.1'], allowPeer: () => true, cipher } })
+    expect(desktop.remote.status().error).toMatchObject({ code: 'ETLSKEY', keyStore: true })
   })
 })
 

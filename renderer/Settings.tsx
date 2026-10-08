@@ -190,6 +190,10 @@ export function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalP
   const [editing, setEditing] = useState<string | typeof NEW>()
   const [confirmingDelete, setConfirmingDelete] = useState<string>()
   const [error, setError] = useState<string>()
+  // 키를 못 푼 기록(keyLocked, 이슈 #231)은 대화 도중에 생긴다 — 페이지를 열 때 목록을 다시 읽는다
+  useEffect(() => {
+    void window.litecode.listProviders().then(onProvidersChange, () => {})
+  }, [])
 
   async function remove(id: string): Promise<void> {
     setConfirmingDelete(undefined)
@@ -204,6 +208,11 @@ export function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalP
     <div className="models-page">
       <h2 className="models-page__title">{t('models.title')}</h2>
       <p className="models-page__hint">{t('models.hint')}</p>
+      {providers.some((provider) => provider.keyLocked) && (
+        <p className="settings-notice" role="status">
+          {t('models.keyStoreLocked')}
+        </p>
+      )}
       {error && (
         <p className="settings-error" role="alert">
           {error}

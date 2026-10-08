@@ -110,8 +110,8 @@ export function RemoteHttps(ctx: Context, options: RemoteHttpsOptions): void {
           try {
             identity ??= await loadTlsIdentity(options.keyFile, options.cipher)
           } catch (failure) {
-            const { code, message } = failure as NodeJS.ErrnoException
-            error = { code: code ?? 'ETLSKEY', message }
+            const { code, message, keyStore } = failure as NodeJS.ErrnoException & { keyStore?: true }
+            error = { code: code ?? 'ETLSKEY', message, ...(keyStore && { keyStore }) }
             return
           }
           await rebind()

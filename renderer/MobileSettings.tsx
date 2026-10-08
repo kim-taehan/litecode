@@ -98,7 +98,7 @@ export function MobilePage() {
             ? t('remote.bluetooth.unsupportedReason', { reason: bluetooth.reason })
             : t('remote.bluetooth.unsupported')
           : bluetooth.state === 'failed'
-            ? t('remote.bluetooth.failed', { reason: bluetooth.reason ?? '' })
+            ? t('remote.bluetooth.failed', { reason: bluetooth.keyStore ? t('error.keyStore') : (bluetooth.reason ?? '') })
             : t(`remote.bluetooth.${bluetooth.state}`)
   const toggle = (feature: FeatureId, on: boolean) => run(() => setFeature(features, feature, on))
   const via = (device: RemoteDeviceInfo) => (!device.connected ? 'none' : device.via === 'bluetooth' ? 'bluetooth' : 'wifi')
@@ -146,7 +146,9 @@ export function MobilePage() {
             )}
             {status.error && status.error.code !== 'ENOLAN' && (
               <div className="settings-error" role="alert">
-                {status.error.code === 'EADDRINUSE' ? t('remote.error.portInUse', { port: status.port }) : t('remote.error.listen', { message: status.error.message })}
+                {status.error.code === 'EADDRINUSE'
+                  ? t('remote.error.portInUse', { port: status.port })
+                  : t('remote.error.listen', { message: status.error.keyStore ? t('error.keyStore') : status.error.message })}
               </div>
             )}
           </div>

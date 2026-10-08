@@ -16,7 +16,7 @@ import { translate } from '../../shared/i18n/index.ts'
 // {type, properties}(server.connected 가 바로 온다), 답 메시지의 parentID = 보낸 messageID, 끝은 session.idle, 중지는 abort → session.error
 // (MessageAbortedError) → idle 두 번. 승인·질문은 permission.asked·question.asked + GET /permission·/question?directory=(폴더 전부)
 
-type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'refused' | 'retryloop' | 'retryback' | 'retrystop' | 'mcpask' | 'mcpgate' | 'twoasks' | 'webask' | 'webchild' | 'globchild' | 'grepchild'
+type Ending = 'done' | 'failed' | 'cut' | 'reject' | 'hold' | 'permission' | 'question' | 'silent' | 'heartbeat' | 'noidle' | 'compactloop' | 'overflow' | 'huge' | 'retry' | 'refused' | 'keystore' | 'retryloop' | 'retryback' | 'retrystop' | 'mcpask' | 'mcpgate' | 'twoasks' | 'webask' | 'webchild' | 'globchild' | 'grepchild'
 
 /** 'mcpask' 턴이 묻는 앱 MCP 도구 호출의 인자 (이슈 #55) */
 const MCP_ARGS = { session: 'c-1a2b3c4d', message: 'fix the tests' }
@@ -37,6 +37,8 @@ const SILENT_MS = 1_500
 const PROXY = 'http://proxy.invalid/v1'
 /** 게이트웨이가 꺼져 있을 때 opencode 가 retry status 의 message 에 싣는 글 — 키 프록시 502 본문의 error.message 그대로 (이슈 #207 스크린샷) */
 const REFUSED = 'litecode 키 프록시: 게이트웨이에 연결하지 못했습니다 (ECONNREFUSED)'
+/** 키체인이 저장된 모델 키를 안 풀어 줄 때(이슈 #231) 키 프록시 502 본문의 error.message — 몇 번을 다시 보내도 풀리지 않는다 */
+const KEYSTORE = tr('error.proxy', { message: tr('error.modelKeyStore') })
 /** 작업 폴더 — AGENTS.md 시험용으로 이 파일이 만든다. 끝나면 이 경로만 지운다 */
 const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'litecode-turnevents-')))
 const A = 'msg_a1'
@@ -283,6 +285,7 @@ async function fakeOpencode(ending: Ending): Promise<string> {
           }
           // 게이트웨이가 꺼져 있다 (이슈 #207): 키 프록시가 502 로 답하고 opencode 는 그 사유로 재시도한다 — 엔진은 5번까지 기다린다(여기선 멈출 때까지 조용)
           if (ending === 'refused') emit('session.status', { status: { type: 'retry', attempt: 1, message: REFUSED, next: Date.now() + 2000 } })
+          if (ending === 'keystore') emit('session.status', { status: { type: 'retry', attempt: 1, message: KEYSTORE, next: Date.now() + 2000 } })
           // 일반 재시도가 계속된다: 다시 보낼 때마다 busy 뒤 다음 attempt (opencode 1.18.18 은 한 스텝의 재시도마다 busy 를 다시 세운다)
           if (ending === 'retryloop') {
             for (let attempt = 1; attempt <= 5; attempt++) {
@@ -542,6 +545,14 @@ describe('ctx.llm 재시도 상한', () => {
     expect(result.interrupted).toBeUndefined()
     await expect.poll(() => calls).toContain('/session/ses_1/abort')
     expect(seen.at(-1)).toBe(`ended ses_1@${directory} failed (${error})`)
+  })
+
+  it('저장된 모델 키를 못 읽는 재시도(EKEYSTORE, #231)도 1번째 알림에서 멈추고(abort) 실패로 끝낸다 — 사유는 안내 문구 그대로', async () => {
+    const { llm, seen } = await start(await fakeOpencode('keystore'))
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi' })
+    expect(result).toMatchObject({ ok: false, error: KEYSTORE })
+    await expect.poll(() => calls).toContain('/session/ses_1/abort')
+    expect(seen.at(-1)).toBe(`ended ses_1@${directory} failed (${KEYSTORE})`)
   })
 
   it('ENOTFOUND·EHOSTUNREACH 도 연결 실패로 본다, 그 밖의 글은 아니다', async () => {
