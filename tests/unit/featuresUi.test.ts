@@ -20,7 +20,7 @@ vi.mock('../../renderer/featuresStore.ts', () => ({
   useFeatureStatuses: () => store.statuses,
 }))
 
-function render(features: FeatureSwitches = {}, initialExpanded: readonly FeatureId[] = [], statuses: FeatureStatuses = {}): string {
+function render(features: FeatureSwitches = {}, initialExpanded: FeatureId | undefined = undefined, statuses: FeatureStatuses = {}): string {
   store.features = features
   store.statuses = statuses
   return renderToStaticMarkup(createElement(FeaturesPage, { initialExpanded }))
@@ -60,7 +60,7 @@ describe('FeaturesPage — 접힌 첫 그림', () => {
 
 describe('FeaturesPage — 펼친 그림', () => {
   it('펼친 줄은 aria-expanded=true 이고 자세한 설명·불릿·칩(필요·기본값·쓰는 곳)을 보인다', () => {
-    const html = render({ remote: true }, ['bluetooth'])
+    const html = render({ remote: true }, 'bluetooth')
     expect(count(html, 'aria-expanded="true"')).toBe(1)
     expect(count(html, 'aria-expanded="false"')).toBe(CHOOSABLE_FEATURES.length - 1)
     const [paragraph, ...bullets] = translate('ko', 'feature.bluetooth.detail').split('\n')
@@ -73,17 +73,21 @@ describe('FeaturesPage — 펼친 그림', () => {
   })
 
   it('필요한 기능이 꺼져 있으면 칩에 (꺼짐) 을 붙인다', () => {
-    const html = render({}, ['lan'])
+    const html = render({}, 'lan')
     expect(html).toContain('>필요: 모바일 연결 (꺼짐)<')
     expect(html).toContain('>기본값: 켜짐<')
   })
 
-  it('필요한 기능이 없는 기능엔 필요 칩이 없다, 여러 줄을 함께 펼칠 수 있다', () => {
-    const html = render({}, ['terminal', 'browser'])
-    expect(count(html, 'aria-expanded="true"')).toBe(2)
+  it('필요한 기능이 없는 기능엔 필요 칩이 없다', () => {
+    const html = render({}, 'terminal')
+    expect(count(html, 'aria-expanded="true"')).toBe(1) // 한 번에 펼칠 수 있는 줄은 하나 (#251)
     const terminal = html.slice(html.indexOf('data-feature="terminal"'), html.indexOf('data-feature="trajectory"'))
     expect(terminal).not.toContain('필요:')
     expect(terminal).toContain('>기본값: 켜짐<')
+  })
+
+  it('필요한 기능이 있는 기능엔 필요 칩이 있다', () => {
+    const html = render({}, 'browser')
     const browser = html.slice(html.indexOf('data-feature="browser"'))
     expect(browser).toContain('>필요: MCP<') // MCP 는 고정(늘 켜짐)
   })
@@ -99,14 +103,14 @@ describe('FeaturesPage — 기능 상태', () => {
   }
 
   it('정상 상태(on·mounting·없음)는 태그도 상자도 그리지 않는다', () => {
-    const html = render({ remote: true, bluetooth: true }, ['bluetooth', 'terminal'], { terminal: { state: 'on' }, bluetooth: { state: 'mounting' } })
+    const html = render({ remote: true, bluetooth: true }, 'bluetooth', { terminal: { state: 'on' }, bluetooth: { state: 'mounting' } })
     expect(html).not.toContain('feature-row__status')
     expect(html).not.toContain('feature-row__failure')
     expect(html).not.toContain('켜지 못함')
   })
 
   it('failed 면 줄 머리(스위치 앞)에 빨간 알약 "켜지 못함" — 접혀 있으면 사유 상자는 없다', () => {
-    const html = render({ remote: true, bluetooth: true }, [], { bluetooth: { state: 'failed', reason: 'radio gone' } })
+    const html = render({ remote: true, bluetooth: true }, undefined, { bluetooth: { state: 'failed', reason: 'radio gone' } }) // 접힌 첫 그림
     const row = rowOf(html, 'bluetooth')
     const head = row.slice(0, row.indexOf('role="switch"'))
     expect(head).toContain('class="feature-row__status feature-row__status--failed"')
@@ -116,7 +120,7 @@ describe('FeaturesPage — 기능 상태', () => {
   })
 
   it('펼치면 설명 맨 위에 빨간 상자 "켜지 못한 이유 — 사유" (글 사유)', () => {
-    const html = render({ remote: true, bluetooth: true }, ['bluetooth'], { bluetooth: { state: 'failed', reason: 'radio gone' } })
+    const html = render({ remote: true, bluetooth: true }, 'bluetooth', { bluetooth: { state: 'failed', reason: 'radio gone' } })
     const row = rowOf(html, 'bluetooth')
     const detail = row.slice(row.indexOf('feature-row__detail'))
     expect(detail.indexOf('feature-row__failure')).toBeGreaterThan(-1)
@@ -126,13 +130,13 @@ describe('FeaturesPage — 기능 상태', () => {
   })
 
   it('사유가 문구 키면 번역해 보인다 (블루투스 권한 없음)', () => {
-    const html = render({ remote: true, bluetooth: true }, ['bluetooth'], { bluetooth: { state: 'failed', reason: { key: 'remote.bluetooth.unauthorized' } } })
+    const html = render({ remote: true, bluetooth: true }, 'bluetooth', { bluetooth: { state: 'failed', reason: { key: 'remote.bluetooth.unauthorized' } } })
     expect(html).toContain(`<b>켜지 못한 이유</b> — ${translate('ko', 'remote.bluetooth.unauthorized').replaceAll('>', '&gt;')}`)
   })
 
   // 줄 머리에는 태그를 달지 않는다 — 사내망 연결(기본 켜짐)은 모바일 연결을 켜기 전까지 늘 이 상태라 태그가 소음이 된다
   it('켜 두었는데 필요한 기능이 꺼져 있으면 그 칩을 강조하고 "필요한 기능이 꺼져 있음" 을 단다 — 줄 머리 태그는 없다', () => {
-    const html = render({ remote: false, bluetooth: true }, ['bluetooth'])
+    const html = render({ remote: false, bluetooth: true }, 'bluetooth')
     const row = rowOf(html, 'bluetooth')
     expect(row).toContain(`class="feature-row__chip feature-row__chip--blocked" title="${translate('ko', 'features.status.blocked')}"`)
     expect(row).toContain('>필요: 모바일 연결 (꺼짐)<')
@@ -140,8 +144,9 @@ describe('FeaturesPage — 기능 상태', () => {
   })
 
   it('필요한 기능이 꺼져 있어도 이 기능 스스로 꺼져 있으면(기본 꺼짐) 강조하지 않는다', () => {
-    const html = render({}, ['bluetooth', 'lan'])
-    expect(rowOf(html, 'bluetooth')).not.toContain('feature-row__chip--blocked')
+    const html = render({}, 'lan')
+    // 블루투스 줄은 접혀 있어 칩 자체도 없다 — 강조의 대상이 아니다
+    expect(rowOf(html, 'bluetooth')).not.toContain('feature-row__chip')
     expect(rowOf(html, 'bluetooth')).not.toContain('feature-row__status')
     // 사내망 연결은 기본 켜짐 — 모바일 연결이 꺼져 있어 못 뜬다
     expect(rowOf(html, 'lan')).toContain('feature-row__chip--blocked')

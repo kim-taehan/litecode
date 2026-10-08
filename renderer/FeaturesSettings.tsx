@@ -7,7 +7,8 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 // 설정 > 기능 (이슈 #8) — 한 줄에 기능 하나 (사용자 2026-10-07 "그냥 한줄에 하나씩 넣고", "상세 볼 수 있게", 시안 _workspace/mock-features
 // Main·Detail). 묶음마다 둥근 테두리 목록 한 장, 줄 = 펼침 버튼(▸ + 이름 + 한 줄 요약, 말줄임) · 스위치(따로 눌리는 요소, 일반 페이지와 같은 36×20).
 // 줄을 누르면 아래로 늘어나 자세한 설명(`feature.<id>.detail` — 첫 줄은 문단, 나머지 줄은 불릿)과 칩(필요한 기능 · 기본값 · 쓰는 곳)을 보인다.
-// 칩의 필요·기본값은 shared/features.ts 에서 만든다(문구를 손으로 중복하지 않는다). 펼침은 화면 안 상태 — 저장하지 않고 여러 줄을 함께 펼 수 있다.
+// 칩의 필요·기본값은 shared/features.ts 에서 만든다(문구를 손으로 중복하지 않는다). 펼침은 화면 안 상태 — 저장하지 않고 한 번에 하나만(#251 — 줄 하나를 펼치면
+// 열려 있던 줄은 접히고, 열려 있는 줄을 다시 누르면 접힌다).
 // 바꾸면 곧바로 메인(ctx.settings)에 저장하고, 메인(ctx.features)이 재시작 없이 그 기능 묶음을 올리거나 내린다.
 // 줄은 중분류(FEATURE_GROUPS — 작업 화면 / AI 도구 / 자동화 / 입력·연결·알림)로 나눠 묶음마다 제목 + 한 줄 설명 아래에 둔다 (사용자 결정 2026-10-06).
 // 기능 상태 (이슈 #224, 시안 _workspace/mock-features/Detail 의 블루투스 줄) — 켰는데 못 뜬 기능(ctx.features 의 failed)은 스위치 앞에 빨간 알약
@@ -15,12 +16,12 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 // 켜 두었는데 필요한 기능이 꺼져 못 뜬 기능은 그 필요 칩만 강조한다 — 사내망 연결(기본 켜짐)은 모바일 연결을 켜기 전까지 늘 이 상태라 줄 머리 태그는 소음이다.
 // 고정된 기능(shared/features.ts FEATURE_FIXED — 필수인 입력 트리거·!명령 실행·스킬·MCP)은 줄이 없다 (사용자 결정 2026-10-03).
 
-export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: readonly FeatureId[] }) {
+export function FeaturesPage({ initialExpanded = undefined }: { initialExpanded?: FeatureId }) {
   const t = useT()
   const settings = useSettings()
   const statuses = useFeatureStatuses()
   const [error, setError] = useState<string>()
-  const [expanded, setExpanded] = useState<ReadonlySet<FeatureId>>(() => new Set(initialExpanded))
+  const [expanded, setExpanded] = useState<FeatureId | undefined>(initialExpanded)
   const stored = settings.features ?? {}
 
   function toggle(feature: FeatureId): void {
@@ -39,11 +40,8 @@ export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: reado
   }
 
   function toggleExpanded(feature: FeatureId): void {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (!next.delete(feature)) next.add(feature)
-      return next
-    })
+    // 한 번에 하나 — 열려 있던 줄은 자동으로 접히고, 이미 열린 줄을 누르면 접힌다 (#251)
+    setExpanded((current) => (current === feature ? undefined : feature))
   }
 
   return (
@@ -65,7 +63,7 @@ export function FeaturesPage({ initialExpanded = [] }: { initialExpanded?: reado
           <ul className="feature-rows">
             {group.features.map((feature) => {
               const on = featureOn(stored, feature)
-              const open = expanded.has(feature)
+              const open = expanded === feature
               const [paragraph, ...bullets] = t(`feature.${feature}.detail`).split('\n')
               const status = statuses[feature]
               const failure = status?.state === 'failed' ? status.reason : undefined
