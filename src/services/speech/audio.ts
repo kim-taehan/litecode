@@ -7,6 +7,13 @@ import type { SpeechLanguage } from '../../../shared/speech.ts'
 
 /** 앞에 붙이는 무음 — 녹음이 0초부터 말로 시작하면 VAD 가 첫 음절을 자른다 ("데이터베이스" → "터베스", 실측) */
 export const LEAD_SILENCE_MS = 300
+
+/** 확정 인식이 구간 말고도 구간 **앞** 소리를 함께 보는 폭(0.5초) — VAD 는 발음 경계에 구간을 팍 자른다(감지는
+ *  말 시작된 0.25~0.3초 뒤에), SenseVoice 는 말 시작 전 소리가 없는 인식에선 첫 음절을 못 쓴다. 그래서 첫 구간이
+ *  아닌 구원의 앞 음절이 빠졌다 (실측 2026-10-08, _workspace/probe-voicechat — "두번째 문장": 구간만 "번 개문." /
+ *  구간 앞 0.5초 진본 포함 "두 …문장."; 한 문장 "중간에 잘리는데" → "잘리는데"). 같은 길이여도 진본(마이크 무음)이
+ *  0.0 제로보다 낫다 — 모델 반응이 달랐다 */
+export const SEGMENT_LEAD = SPEECH_SAMPLE_RATE / 2
 /** Silero VAD 가 한 번에 받는 창 (표본 수) */
 export const VAD_WINDOW = 512
 
@@ -39,22 +46,32 @@ export interface VadLike {
   flush(): void
 }
 
-/** VAD 로 말 구간을 잘라 구간마다 decode 하고 잇는다. 말이 없으면 빈 문자열 */
+/** VAD 로 말 구간을 잘라 구간마다 decode 하고 잇는다. 말이 없으면 빈 문자열.
+ *  구간은 **구간 앞의 SEGMENT_LEAD (진본)** 까지 인식에 넣는다 — 앞 음절 유실을 막기 위해 (위 상수 참고) */
 export function transcribeSamples(vad: VadLike, decode: (samples: Float32Array) => string, samples: Float32Array): string {
   const texts: string[] = []
-  const drain = (): void => {
+  let fedSoFar = 0
+  let solidUntil = 0
+  const drain = (fedEnd: number): void => {
     while (!vad.isEmpty()) {
-      texts.push(decode(vad.front(false).samples))
+      const segment = vad.front(false)
+      const start = segment.start ?? fedEnd - segment.samples.length
+      const end = start + segment.samples.length
+      const from = Math.max(start - SEGMENT_LEAD, solidUntil, 0)
+      solidUntil = Math.max(solidUntil, end)
+      texts.push(decode(samples.slice(from, end)))
       vad.pop()
     }
   }
   vad.reset()
   for (let at = 0; at < samples.length; at += VAD_WINDOW) {
-    vad.acceptWaveform(samples.subarray(at, at + VAD_WINDOW))
-    drain()
+    const take = Math.min(VAD_WINDOW, samples.length - at)
+    vad.acceptWaveform(samples.subarray(at, at + take))
+    fedSoFar += take
+    drain(fedSoFar)
   }
   vad.flush()
-  drain()
+  drain(samples.length)
   return joinPieces(texts)
 }
 

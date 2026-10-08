@@ -1,5 +1,5 @@
 import { SPEECH_SAMPLE_RATE, type SpeechLanguage } from '../../../shared/speech.ts'
-import { joinPieces, LEAD_SILENCE_MS, toSamples, transcribeSamples, VAD_WINDOW, type VadLike, type WorkerReply, type WorkerRequest } from './audio.ts'
+import { joinPieces, LEAD_SILENCE_MS, SEGMENT_LEAD, toSamples, transcribeSamples, VAD_WINDOW, type VadLike, type WorkerReply, type WorkerRequest } from './audio.ts'
 
 // 실시간 받아쓰기의 워커 쪽 순수한 부분 — sherpa·Electron 을 모른다 (단위 테스트가 닿는 자리).
 // SenseVoice 는 스트리밍 모델이 아니다. 그래서 **말소리 구간 단위로 흉내 낸다**: 녹음 조각을 받는 대로 VAD 에 넣고
@@ -47,6 +47,8 @@ export class StreamDecoder {
   private tentativeCost = 0
   /** VAD 가 마지막으로 말소리로 본 때의 fed — 앞에 넣은 무음은 세지 않는다 (연 때부터) */
   private voicedAt: number
+  /** 확정 인식이 이미 본 소리의 끝(fed) — 구간 앞 진본이 이 앞의 소리(이미 확정된 앞 구간)를 다시 넣지 않게 한다 */
+  private solidUntil = 0
 
   constructor(
     private readonly vad: VadLike,
@@ -117,11 +119,22 @@ export class StreamDecoder {
   private drain(): void {
     while (!this.vad.isEmpty()) {
       const segment = this.vad.front(false)
-      this.texts.push(this.decode(segment.samples))
+      this.texts.push(this.decode(this.segmentAudio(segment)))
       this.vad.pop()
       this.tentative = ''
       this.keep(segment.start === undefined ? 0 : this.fed - (segment.start + segment.samples.length))
     }
+  }
+
+  /** 확정 인식에 넣는 소리 — 구간 + 구간 앞의 SEGMENT_LEAD 만큼, tail 로 쥐고 있는 범위 안에서.
+   *  스트림 연 때의 300ms 합성 무음도 tail 에 있으니 첫 구간 앞 진본이 되고 (한 번에 받아쓰기와 같은 위치),
+   *  그 뒤 구간 앞 진본은 그 직전까지의 진본(마이크 무음·앞 말꼬리)이 된다 */
+  private segmentAudio(segment: { samples: Float32Array; start?: number }): Float32Array {
+    const start = segment.start ?? this.fed - segment.samples.length
+    const end = start + segment.samples.length
+    const from = Math.max(start - SEGMENT_LEAD, this.solidUntil, this.fed - this.tailLength)
+    this.solidUntil = Math.max(this.solidUntil, end)
+    return this.tail.slice(this.tailLength - (this.fed - from), this.tailLength - (this.fed - end))
   }
 
   /** tail 의 끝 count 표본만 남긴다 */

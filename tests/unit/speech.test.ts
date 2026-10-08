@@ -701,27 +701,32 @@ describe('워커의 순수한 부분', () => {
     expect(joinPieces([])).toBe('')
   })
 
-  it('512 표본씩 VAD 에 넣고, 나온 말 구간마다 인식해 잇는다 — 끝에 남은 구간(flush)까지, 구간은 복사본으로 받는다', () => {
+  it('512 표본씩 VAD 에 넣고, 나온 말 구간마다 인식해 잇는다 — 끝에 남은 구간(flush)까지. 구간은 복사본으로, 구간 앞 0.5초(SEGMENT_LEAD) 까지도 인식에 넣는다', () => {
     const fed: number[] = []
     const fronts: boolean[] = []
-    let queue: Float32Array[] = []
+    let queue: { samples: Float32Array; start: number }[] = []
     let resets = 0
     const vad: VadLike = {
       reset: () => void resets++,
       acceptWaveform(samples) {
         fed.push(samples.length)
-        if (fed.length === 2) queue.push(new Float32Array([1])) // 둘째 창 뒤에 구간 하나
+        if (fed.length === 2) queue.push({ samples: new Float32Array([1]), start: 1000 }) // 둘째 창 뒤에 구간 하나
       },
       isEmpty: () => queue.length === 0,
       isDetected: () => false,
       front(external) {
         fronts.push(external)
-        return { samples: queue[0]! }
+        return queue[0]!
       },
       pop: () => void queue.shift(),
-      flush: () => void (queue = [...queue, new Float32Array([2]), new Float32Array([3])]),
+      flush: () => void (queue = [...queue, { samples: new Float32Array([2]), start: 1100 }, { samples: new Float32Array([3]), start: 1150 }]),
     }
-    const text = transcribeSamples(vad, (samples) => ['', '첫 구간 ', '', '끝 구간'][samples[0]!]!, new Float32Array(1200))
+    // 구간의 끝 표본을 입력에 박아 둔다 — 인식이 받은 소리의 끝이 그 표본인지로 확인
+    const input = new Float32Array(1200)
+    input[1000] = 1
+    input[1100] = 2
+    input[1150] = 3
+    const text = transcribeSamples(vad, (samples) => ['', '첫 구간 ', '', '끝 구간'][samples.at(-1) ?? -1]!, input)
     expect(fed).toEqual([512, 512, 176])
     expect(resets).toBe(1)
     expect(fronts).toEqual([false, false, false])

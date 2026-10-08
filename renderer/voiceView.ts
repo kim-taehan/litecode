@@ -225,6 +225,15 @@ export const VOICE_CHAT_COUNTDOWN_MS = VOICE_CHAT_SILENCE_MS - VAD_OFF_MS
 /** 받아쓰기 한 번의 상한(120초) 전에 스트림을 닫고 다시 연다 — 그때까지 들은 글이 있으면 보내지 않고 입력창에 넣고 끈다 */
 export const VOICE_CHAT_REOPEN_MS = (SPEECH_MAX_SECONDS - 10) * 1000
 
+/** 재개 열 때의 말소리 감지 — 지금 순간 소리가 이보다 크면 재개를 2초만 미룬다. 엔진의 "소리 없음"(live)은
+ *  0.3~0.9초 이전의 것이라서, 타이머가 한 발화 도중에 터면 그 앞 소리가 옛 스트림에 묻힌다 (실측 2026-10-08).
+ *  RMS 기준 — 보통 말소리는 0.1 안팎(바가 절반), 밑은 배경이다 */
+export const RESTREAM_MIN_LEVEL = 0.03
+export const RESTREAM_DEFER_MS = 2000
+export function restreamDelay(live: number): boolean {
+  return live >= RESTREAM_MIN_LEVEL
+}
+
 /** 말 끝 카운트다운의 남은 시간 — VAD 가 꺼졌고 받아쓴 글이 있을 때만. 이미 지난 무음(silentMs)만큼 짧다. 아직 말하는 중이거나 들은 글이 없으면 undefined */
 export function countdownLeft(partial: SpeechPartial): number | undefined {
   if (partial.speaking || partial.tentative !== '' || partial.final.trim() === '') return undefined
