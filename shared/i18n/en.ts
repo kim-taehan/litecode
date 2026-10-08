@@ -390,7 +390,7 @@ export const en = {
   'feature.openIn.where': 'Chat header button',
   'feature.web': 'Web fetch',
   'feature.web.description': 'Lets the AI read the web page at an address — only addresses this PC can reach',
-  'feature.web.detail': 'The AI reads the web page at an address with the web fetch tool.\nOn a closed network outside addresses are out of reach — it only works for addresses this PC can reach, such as internal docs.\nThere is no web search. You have to give it the address.\nIt is not used in Plan mode.\nChanging it restarts the engine — an answer in progress stops.',
+  'feature.web.detail': 'The AI reads the web page at an address with the web fetch tool.\nOn a closed network outside addresses are out of reach — it only works for addresses this PC can reach, such as internal docs.\nThere is no web search. You have to give it the address.\nIt is not used in Plan mode.\nThis switch only controls the web fetch tool. If this PC can reach the internet, the AI can also reach it with commands (curl and the like), and in Default mode commands run without asking — to stop that, set the mode to \"Ask every time\".\nChanging it restarts the engine — an answer in progress stops.',
   'feature.web.where': 'A tool the AI calls during a chat',
   'settings.openFile': 'Open configuration file',
   'settings.openFileError': 'Could not open configuration file',
