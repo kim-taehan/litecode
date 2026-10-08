@@ -2,14 +2,14 @@ import { Context, Service } from 'cordis'
 import './llm.ts'
 import './sessions.ts'
 import './providers.ts'
-import type { ChatImage, ChatResult } from './llm.ts'
+import type { ChatImage, ChatResult, Interjection } from './llm.ts'
 import { outgoing } from './attachments.ts'
 import { SendQueues } from './sendQueue.ts'
 import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
 import { addTurn, type ChatUsage } from '../../shared/usage.ts'
-import { upsertItem } from '../../shared/chatReducer.ts'
-import { COMPACT_COMMAND, chipsOf, queueLabel, titleFrom, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
+import { frozenAnswer, placeItem, segmentText, upsertItem } from '../../shared/chatReducer.ts'
+import { COMPACT_COMMAND, chipsOf, fromPerson, queueLabel, titleFrom, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
 import type { Mode } from '../../shared/modes.ts'
 import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
@@ -20,6 +20,9 @@ import type { Attention, AttentionAnswer, AttentionTarget, Conversation, History
 // - 엔진을 모른다: 턴은 ctx.llm.chat 으로만 돌리고, 목록 정보는 ctx.sessions 에 적는다
 // - 대화마다 한 턴씩: 도는 중에 온 보내기는 대기열에 쌓이고, 턴이 끝나면(실패·중단이어도) 출처가 같은 것끼리 합쳐 다음 턴으로 간다.
 //   사용자가 멈춘 턴(stop)은 대기열을 붙잡는다 — 보내지 않고 화면이 입력창으로 되돌린다(takeQueue)
+// - 끼워 넣기 (이슈 #250): 사람이 친 글(데스크탑·폰)은 도는 턴이 있으면 대기열 대신 그 턴에 끼워 넣는다(ctx.llm.reserve) — 엔진의 다음 스텝이
+//   읽는다. 말풍선은 'chat/turn-interjected', 그때까지의 진행 줄은 그 앞의 답으로 얼린다. 엔진이 그 턴을 아직 안 받았거나 멈추는 중이면 대기열.
+//   다른 대화의 지시·앱이 이어 보낸 것('hook')·요약 턴은 지금처럼 대기열이다
 // - 이벤트는 shared/chat.ts 의 ChatEventMap (shared/remote.ts 와 같은 모양) — Cordis 이름은 `chat/<이름>`
 // - 알림(ctx.notifications)은 그대로 ctx.llm 의 'llm/turn-*' 를 듣는다
 // - 다른 대화가 보낸 지시 (이슈 #55, 세션 도구 appMcp/tools/sessions.ts 가 send 로 넣는다): origin 이 `session:<보낸 대화>` 이고 from 에 보낸 대화의
@@ -38,6 +41,7 @@ declare module 'cordis' {
     'chat/turn-progress'(data: ChatEventMap['turn.progress']): void
     'chat/turn-attention'(data: ChatEventMap['turn.attention']): void
     'chat/turn-ended'(data: ChatEventMap['turn.ended']): void
+    'chat/turn-interjected'(data: ChatEventMap['turn.interjected']): void
     'chat/queue-changed'(data: ChatEventMap['queue.changed']): void
     'chat/conversations-changed'(data: ChatEventMap['conversations.changed']): void
     /** 보낼 첨부를 메인이 다 읽었다 (못 읽어 실패한 턴도) — 그 경로들. 화면에는 안 간다 */
@@ -89,6 +93,10 @@ interface LiveTurn {
   startedAt: number
   /** 그 턴의 내 말 — 대화를 저장하고 turn.started 를 낸 뒤부터 있다 */
   message?: HistoryMessage
+  /** 그 턴을 돌리는 대화 (프로젝트·모델·모드) — begin 이 저장한 뒤부터 있다. 끼워 넣는 말이 같은 것으로 간다 */
+  conversation?: Conversation
+  /** 끼워 넣은 말과 그 앞에 얼린 답 (이 순서로 내 말 뒤에 — 이슈 #250). progress 는 마지막 끼워 넣은 말 뒤의 진행 줄이다 */
+  interjections: HistoryMessage[]
   progress: TurnItem[]
   attention: Attention[]
   /** 이 턴을 시작한 쪽 — 사람 또는 다른 대화 */
@@ -138,11 +146,13 @@ export class ChatService extends Service {
     return !!model && !!this.ctx.providers.get(model.providerId)?.models.find((entry) => entry.id === model.modelId)?.imageInput
   }
 
-  /** 보낸다. 그 대화의 턴이 도는 중이면(또는 붙잡힌 대기열이 있으면) 대기열에 쌓는다 — 턴이 끝나면 합쳐 간다.
+  /** 보낸다. 그 대화의 턴이 도는 중이면 사람이 친 글은 그 턴에 끼워 넣고('interjected', 이슈 #250), 그 밖(다른 대화의 지시·끼워 넣을 수 없을 때·
+   *  붙잡힌 대기열이 있을 때)은 대기열에 쌓는다 — 턴이 끝나면 합쳐 간다.
    *  아니면 대화를 저장하고(새 대화면 첫 메시지로 제목) 'chat/turn-started' 를 낸 뒤 돌아온다 — 답은 이벤트로 온다 ('chat/turn-ended').
    *  저장 안 된 대화인데 project 가 없거나 모델을 모르면 던진다 */
   async send(cid: string, input: QueuedSend): Promise<SendResult> {
     const item = clean(input)
+    if (this.interject(cid, item)) return { state: 'interjected' }
     if (this.queues.submit(cid, item, this.turns.has(cid))) return { state: 'queued' }
     const turn = this.open(cid, item.origin ?? 'user')
     const ready = await this.begin(cid, item, turn, false)
@@ -287,7 +297,7 @@ export class ChatService extends Service {
   note(cid: string, item: TurnItem): boolean {
     const turn = this.turns.get(cid)
     if (!turn?.message) return false
-    turn.progress = upsertItem(turn.progress, item)
+    this.place(turn, item)
     this.ctx.emit('chat/turn-progress', { cid, item })
     return true
   }
@@ -298,7 +308,9 @@ export class ChatService extends Service {
     for (const cid of new Set([...this.turns.keys(), ...this.queues.ids()])) {
       const turn = this.turns.get(cid)
       state[cid] = {
-        ...(turn?.message && { turn: { message: turn.message, startedAt: turn.startedAt, progress: turn.progress, attention: turn.attention } }),
+        ...(turn?.message && {
+          turn: { message: turn.message, startedAt: turn.startedAt, progress: turn.progress, attention: turn.attention, ...(turn.interjections.length > 0 && { interjections: turn.interjections }) },
+        }),
         queue: this.queueOf(cid),
       }
     }
@@ -317,7 +329,7 @@ export class ChatService extends Service {
   }
 
   private open(cid: string, origin: ChatOrigin): LiveTurn {
-    const turn: LiveTurn = { stop: new AbortController(), startedAt: Date.now(), progress: [], attention: [], origin, sends: 0 }
+    const turn: LiveTurn = { stop: new AbortController(), startedAt: Date.now(), interjections: [], progress: [], attention: [], origin, sends: 0 }
     this.turns.set(cid, turn)
     return turn
   }
@@ -367,6 +379,7 @@ export class ChatService extends Service {
         ...(files.length > 0 && { attachments: chipsOf(files) }),
         ...(item.from && { origin: item.from }),
       }
+      turn.conversation = conversation
       this.ctx.emit('chat/conversations-changed', { project, removed })
       this.ctx.emit('chat/turn-started', { cid, message: turn.message, origin: item.origin ?? 'user', conversation })
       return conversation
@@ -387,6 +400,8 @@ export class ChatService extends Service {
   private async run(cid: string, item: QueuedSend, turn: LiveTurn, conversation: Conversation): Promise<void> {
     const result = await this.ask(cid, item, turn, conversation).catch((error: unknown): ChatResult => ({ ok: false, error: (error as Error).message }))
     const outcome: TurnOutcome = result.ok ? 'done' : result.interrupted ? 'interrupted' : 'failed'
+    // 끼워 넣은 말이 있었으면 답 글은 마지막 말 뒤의 글이다 — 앞의 글은 얼린 답에 있다 (다시 열면 엔진 기록도 말마다 답이 갈린다)
+    const answer = !result.ok ? '' : turn.interjections.length > 0 ? segmentText(turn.progress) : (result.text ?? '')
     const after: AfterTurn = {
       cid,
       project: conversation.project,
@@ -394,7 +409,7 @@ export class ChatService extends Service {
       origin: turn.origin,
       outcome,
       declined: !!result.declined,
-      text: result.ok ? (result.text ?? '') : '',
+      text: answer,
       signal: turn.stop.signal,
     }
     await this.ctx.serial('chat/after-turn', after).catch((error: unknown) => console.error('[chat] after-turn 실패', (error as Error).message))
@@ -407,7 +422,7 @@ export class ChatService extends Service {
       .catch(() => undefined)
     const message: HistoryMessage = {
       role: 'assistant',
-      text: result.ok ? (result.text ?? '') : '',
+      text: answer,
       ...(!result.ok && { error: String(result.error) }),
       items: turn.progress,
       duration: Date.now() - turn.startedAt,
@@ -421,6 +436,7 @@ export class ChatService extends Service {
       ...(result.usage && { usage: result.usage }),
       outcome,
       ...(stored && { conversation: stored }),
+      ...(result.unanswered?.length && { unanswered: result.unanswered }),
     })
     // 이어 보낼 글 — 사용자가 그사이 멈췄으면 보내지 않는다
     if (after.followUp && !turn.stop.signal.aborted) this.queues.prepend(cid, { text: after.followUp, origin: 'hook' })
@@ -431,13 +447,53 @@ export class ChatService extends Service {
   private async ask(cid: string, item: QueuedSend, turn: LiveTurn, conversation: Conversation): Promise<ChatResult> {
     const { project, model, mode } = conversation
     const sessionId = conversation.engineSessionId
+    const messageId = turn.message!.id!
+    const ready = await this.prepareSend(cid, item, turn.origin, conversation, messageId, !sessionId, turn.stop.signal)
+    if ('error' in ready) return { ok: false, sessionId, error: ready.error }
+    return this.ctx.llm.chat({
+      providerId: model!.providerId,
+      modelId: model!.modelId,
+      directory: project,
+      prompt: ready.prompt,
+      sessionId,
+      onSession: (created) => this.ctx.sessions.attach(cid, created),
+      messageId,
+      onProgress: (progress) => {
+        if (this.turns.get(cid) !== turn) return // 끝난 뒤 늦게 온 것은 버린다
+        this.place(turn, progress)
+        this.ctx.emit('chat/turn-progress', { cid, item: progress })
+      },
+      mode: isMode(mode) ? mode : undefined,
+      onAttention: (requests) => {
+        if (this.turns.get(cid) !== turn) return
+        turn.attention = requests
+        this.ctx.emit('chat/turn-attention', { cid, requests })
+      },
+      stop: turn.stop.signal, // 답변 중지 — 첫 턴은 아직 엔진 세션이 없어 대화 id 로 쥔다
+      images: ready.images,
+      context: ready.context,
+    })
+  }
+
+  /** 엔진에 보낼 것을 만든다 — 턴 하나(ask)와 끼워 넣는 말(deliver)이 같은 길을 간다: 보내기 직전 확장점, 첨부 읽기, 보일 글·칩·출처 적기.
+   *  막혔거나(사람 글은 입력창으로 되돌린다) 첨부를 못 붙이면 그 사유 */
+  private async prepareSend(
+    cid: string,
+    item: QueuedSend,
+    origin: ChatOrigin,
+    conversation: Conversation,
+    messageId: string,
+    first: boolean,
+    signal: AbortSignal,
+  ): Promise<{ prompt: string; images: ChatImage[]; context?: string } | { error: string }> {
+    const { project, model, mode } = conversation
     const typed = item.text
     // 보내기 직전 확장점 (이슈 #102) — 첨부를 읽기 전에 묻는다 (막히면 그 첨부째 입력창으로 되돌린다)
-    const before: BeforeSend = { cid, project, text: typed, ...(mode && { mode }), origin: turn.origin, first: !sessionId, signal: turn.stop.signal, context: [] }
+    const before: BeforeSend = { cid, project, text: typed, ...(mode && { mode }), origin, first, signal, context: [] }
     await this.ctx.serial('chat/before-send', before).catch((error: unknown) => console.error('[chat] before-send 실패', (error as Error).message))
     if (before.blocked !== undefined) {
       this.queues.restore(cid, item)
-      return { ok: false, sessionId, error: before.blocked }
+      return { error: before.blocked }
     }
     // 첨부 (이슈 #44) — 메인이 읽는다. 글 파일은 본문에 `@경로`·코드 블록으로 풀고, 이미지는 ctx.llm 이 file 파트로 싣는다.
     // 못 붙이는 것이 있으면 보내지 않고 그 사유로 끝낸다 (화면은 실패한 턴으로 보인다)
@@ -451,7 +507,7 @@ export class ChatService extends Service {
         if (!this.acceptsImages(model) && attached.some((file) => file.kind === 'image')) throw new Error(tr('plus.menu.image.blocked'))
         ;({ text: prompt, images } = await outgoing(project, typed, attached))
       } catch (error) {
-        return { ok: false, sessionId, error: (error as Error).message }
+        return { error: (error as Error).message }
       } finally {
         // 읽기가 끝났다(못 읽었어도 이 첨부는 다시 안 쓰인다) — 허용 목록에서 빼고, 붙여넣은 이미지의 임시 파일을 이때 지운다 (이슈 #80)
         const read = attached.map((file) => file.path)
@@ -464,33 +520,61 @@ export class ChatService extends Service {
     // 글 파일 칩도 그 id 로 적는다 (엔진 기록엔 첨부로 안 남는다 — 이미지 칩은 엔진 기록의 file 파트에서 온다)
     const display = item.display !== undefined && item.display !== typed ? item.display : undefined
     const shown = display || (files.length > 0 ? typed : undefined)
-    const messageId = turn.message!.id!
     if (shown !== undefined) await this.ctx.sessions.label(cid, messageId, shown)
     if (files.length > 0) await this.ctx.sessions.noteAttachments(cid, messageId, files)
     if (item.from) await this.ctx.sessions.noteOrigin(cid, messageId, item.from) // 다시 열어도 "다른 대화에서 온 지시" 로 보이게
-    return this.ctx.llm.chat({
-      providerId: model!.providerId,
-      modelId: model!.modelId,
-      directory: project,
-      prompt,
-      sessionId,
-      onSession: (created) => this.ctx.sessions.attach(cid, created),
-      messageId,
-      onProgress: (progress) => {
-        if (this.turns.get(cid) !== turn) return // 끝난 뒤 늦게 온 것은 버린다
-        turn.progress = upsertItem(turn.progress, progress)
-        this.ctx.emit('chat/turn-progress', { cid, item: progress })
-      },
-      mode: isMode(mode) ? mode : undefined,
-      onAttention: (requests) => {
-        if (this.turns.get(cid) !== turn) return
-        turn.attention = requests
-        this.ctx.emit('chat/turn-attention', { cid, requests })
-      },
-      stop: turn.stop.signal, // 답변 중지 — 첫 턴은 아직 엔진 세션이 없어 대화 id 로 쥔다
-      images,
-      context: before.context.join('\n\n') || undefined,
-    })
+    return { prompt, images, ...(before.context.length > 0 && { context: before.context.join('\n\n') }) }
+  }
+
+  /** 사람이 친 글을 도는 턴에 끼워 넣는다 (이슈 #250) — 끼웠으면 true. 사람 글이 아니거나(다른 대화의 지시·'hook'), 턴이 아직 시작 전이거나
+   *  멈추는 중이거나 붙잡힌 대기열이 있거나, 엔진이 그 턴에 자리를 안 주면(아직 안 받음·요약 턴·이미 끝남) false — 부른 쪽이 대기열로.
+   *  자리를 잡으면 곧바로 말풍선을 낸다(그때까지의 진행 줄은 그 앞의 답으로 얼린다). 보내기는 뒤에서 (deliver) */
+  private interject(cid: string, item: QueuedSend): boolean {
+    const turn = this.turns.get(cid)
+    const asked = turn?.message?.id
+    if (!turn || !asked || !turn.conversation || !fromPerson(item.origin) || turn.stop.signal.aborted || this.queues.held(cid)) return false
+    const messageId = this.ctx.llm.newMessageId()
+    const slot = this.ctx.llm.reserve(asked, messageId)
+    if (!slot) return false
+    const { mode } = turn.conversation
+    const files = item.attachments ?? []
+    const message: HistoryMessage = {
+      id: messageId,
+      role: 'user',
+      text: item.display ?? item.text,
+      at: Date.now(),
+      ...(mode && { mode }), // 끼워 넣은 말은 도는 턴의 모델·모드로 간다 (ctx.llm.reserve)
+      ...(files.length > 0 && { attachments: chipsOf(files) }),
+      interjected: true,
+    }
+    turn.interjections = [...turn.interjections, ...frozenAnswer(turn.progress), message]
+    turn.progress = []
+    this.ctx.emit('chat/turn-interjected', { cid, message })
+    void this.deliver(cid, item, turn, slot, messageId)
+    return true
+  }
+
+  /** 끼워 넣는 말을 보낸다 — 턴과 같은 길(prepareSend)을 거쳐 잡아 둔 자리로. 막히거나 못 붙이면 보내지 않는다(그 말은 답 없음으로 남는다) */
+  private async deliver(cid: string, item: QueuedSend, turn: LiveTurn, slot: Interjection, messageId: string): Promise<void> {
+    try {
+      const ready = await this.prepareSend(cid, item, item.origin ?? 'user', turn.conversation!, messageId, false, turn.stop.signal)
+      if ('error' in ready) return slot.cancel()
+      await slot.send(ready)
+    } catch (error) {
+      console.error('[chat] 끼워 넣기 실패', (error as Error).message)
+      slot.cancel()
+    }
+  }
+
+  /** 도는 턴의 진행 줄 하나를 놓는다 — 끼워 넣은 말 앞에 얼린 답에 같은 줄이 있으면 그 자리에서 (placeItem) */
+  private place(turn: LiveTurn, item: TurnItem): void {
+    if (turn.interjections.length === 0) {
+      turn.progress = upsertItem(turn.progress, item)
+      return
+    }
+    const placed = placeItem(turn.interjections, turn.progress, item)
+    turn.interjections = placed.segments
+    turn.progress = placed.progress
   }
 }
 

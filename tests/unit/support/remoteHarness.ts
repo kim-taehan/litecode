@@ -43,6 +43,21 @@ export class FakeLlm extends Service {
   newMessageId(): string {
     return `msg_${++this.ids}`
   }
+  /** 끼워 넣기 자리 (이슈 #250) — steerable 일 때만 도는 턴에 자리를 준다(보낸 글은 interjected 에 쌓인다). 아니면 엔진이 아직 턴을 안 받은
+   *  것처럼 없다 — 도는 턴에 보낸 글은 지금처럼 대기열로 간다 */
+  steerable = false
+  interjected: string[] = []
+  private live = new Set<string>()
+  reserve(turn: string) {
+    if (!this.steerable || !this.live.has(turn)) return undefined
+    return {
+      send: async ({ prompt }: { prompt: string }) => {
+        this.interjected.push(prompt)
+        return true
+      },
+      cancel: () => {},
+    }
+  }
   /** 엔진 세션 하나의 기록을 심는다 (큰 스냅샷 시험) */
   seed(sessionId: string, messages: HistoryMessage[]): void {
     this.transcript.set(sessionId, messages)
@@ -53,6 +68,7 @@ export class FakeLlm extends Service {
     const messages = this.transcript.get(id) ?? []
     this.transcript.set(id, messages)
     messages.push({ id: messageId, role: 'user', text: prompt })
+    if (messageId) this.live.add(messageId)
     return new Promise<ChatResult>((resolve) => {
       this.calls.push({
         prompt,
@@ -61,6 +77,7 @@ export class FakeLlm extends Service {
         progress: (item) => onProgress?.(item),
         attention: (requests) => onAttention?.(requests),
         finish: (result = {}) => {
+          if (messageId) this.live.delete(messageId)
           messages.push({ role: 'assistant', text: `echo: ${prompt}` })
           resolve({ ok: true, sessionId: id, text: `echo: ${prompt}`, ...result })
         },

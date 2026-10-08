@@ -278,6 +278,7 @@ export function App() {
       window.litecode.onTurnProgress((cid, item) => apply({ event: 'turn.progress', data: { cid, item } })),
       window.litecode.onTurnAttention((cid, requests) => apply({ event: 'turn.attention', data: { cid, requests } })),
       window.litecode.onTurnEnded((data) => apply({ event: 'turn.ended', data })),
+      window.litecode.onTurnInterjected((data) => apply({ event: 'turn.interjected', data })),
       window.litecode.onQueueChanged((data) => apply({ event: 'queue.changed', data })),
       window.litecode.onConversationsChanged((data) => {
         forgetPruned(data.removed)
@@ -444,7 +445,7 @@ export function App() {
     hasSession: (id) => sessions.some((session) => session.id === id),
     edit: (id, change) => changeDraftOf(id, (now) => ({ ...now, text: change(now.text) })),
     // 음성 대화 모드 (#238) — 받아쓴 글만 보낸다(첨부·트리거 없이). 보낼 수 없는 경우는 send 가 말없이 돌아가기 전에 금지 표가 사유로 막는다.
-    // 답이 오는 중이면 메인이 대기열에 쌓는다 (#240)
+    // 답이 오는 중이면 메인이 그 턴에 끼워 넣는다 (#240·#250)
     chat: {
       activity: voiceActivity,
       block: (transcript) =>
@@ -643,7 +644,7 @@ export function App() {
   }
 
   /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display. mode: 이 턴부터 그 모드로 ("이 계획대로 실행").
-   *  보내기는 메인(ctx.chat)에 부탁한다 — 그 대화의 턴이 도는 중이면 메인이 대기열에 쌓고 턴 끝에 합쳐 보낸다. 내 말·답은 이벤트로 온다.
+   *  보내기는 메인(ctx.chat)에 부탁한다 — 그 대화의 턴이 도는 중이면 메인이 그 턴에 끼워 넣는다(#250, 엔진이 아직 안 받았으면 대기열). 내 말·답은 이벤트로 온다.
    *  첨부는 command.attachments(없음을 뜻하는 빈 목록), 안 주면 입력 카드의 칩 — 보내면 칩을 비운다 */
   function send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts: { mode?: Mode } = {}): void {
     const target = active
@@ -1065,7 +1066,7 @@ export function App() {
                     </div>
                   )}
                   {message.role === 'user' ? (
-                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} origin={message.origin} />
+                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} origin={message.origin} unanswered={message.unanswered} />
                   ) : (
                     <AssistantTurn
                       items={message.items ?? NO_ITEMS}

@@ -42,7 +42,7 @@ import './voice.css'
 // 음성 대화 모드 1단계 (#238, 시안 CkySBn4p42AwG7w1jxL8ZZ ②~④, 실측 _workspace/01aq_voice_chat_feasibility.md) — 마이크 옆 '대화' 버튼. 같은 녹음·스트림 길을 쓰고:
 // 말을 멈추면(엔진의 VAD 가 꺼지고 silentMs 가 차면) 카운트다운 띠가 차오른 뒤 받아쓴 글**만** 보낸다(첨부·트리거 없이). 카운트다운 중에 다시 말하면 이어서 받아쓴다.
 // 계속 듣기(#240): 보낼 때 마이크는 그대로 두고 받아쓰기 스트림만 닫아 글을 받고 새 스트림을 연다(그사이 조각은 쥐었다가 새 스트림에). 답이 오는 동안에도
-// 듣고, 그때 말을 멈추면 같은 보내기를 부른다 — 그 대화에 도는 턴이 있으면 메인(ctx.chat)이 대기열에 쌓고 턴이 끝나면 차례로 보낸다.
+// 듣고, 그때 말을 멈추면 같은 보내기를 부른다 — 그 대화에 도는 턴이 있으면 메인(ctx.chat)이 그 턴에 끼워 넣는다 (#250, 엔진이 아직 턴을 안 받았으면 대기열).
 // 보낼 수 없으면(초안·첨부·`/`·`!`·모델 없음·쓸 수 없는 대화·대화 전환) 받아쓴 글을 입력창에 넣고 사유를 띠에 남기고 끈다 — 조용히 돌아가지 않는다.
 // 승인·질문 카드·실패·중지에서도 멈춘다. 받아쓰기 120초 상한 전에 스트림만 닫고 다시 연다(마이크는 그대로). 읽어 주기·말로 끼어들기는 없다(2·3단계).
 // 버튼 하나 (#244, 시안 MgE8jmZ4f1XM578AUgQxp6 안 2) — 위의 받아쓰기(정지를 눌러야 입력창에 넣는 녹음)와 '대화' 버튼을 없앴다. 마이크 아이콘 버튼 하나가
@@ -73,7 +73,7 @@ export interface VoiceInput {
   dismiss(): void
   /** 지금 음량 (RMS) */
   level(): number
-  /** 그 대화에 답이 오는 중(도는 턴·대기열) — 대화 모드 띠의 "답변 중" 표시. 이때 보낸 말은 대기열에 쌓인다 */
+  /** 그 대화에 답이 오는 중(도는 턴·대기열) — 대화 모드 띠의 "답변 중" 표시. 이때 보낸 말은 도는 턴에 끼워 넣는다 (#250) */
   answering: boolean
   /** 음성 버튼 — 꺼져 있으면 음성 대화를 시작하고, 켜져 있으면 끈다 (들은 글은 입력창에) */
   toggleChat(): void
@@ -253,7 +253,7 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
   }
 
   /**
-   * 대화 모드 — 말 끝(카운트다운이 끝났다). 마이크는 그대로 두고 지금 스트림만 닫아 받아쓴 글을 받아 보낸다 — 도는 턴이 있으면 메인이 대기열에 쌓는다 (#240).
+   * 대화 모드 — 말 끝(카운트다운이 끝났다). 마이크는 그대로 두고 지금 스트림만 닫아 받아쓴 글을 받아 보낸다 — 도는 턴이 있으면 메인이 그 턴에 끼워 넣는다 (#240·#250).
    * 그사이 조각은 쥐었다가 새 스트림에. 보낼 수 없으면(금지 표·대화 전환) 또는 그사이 껐으면 입력창에 넣고 끈다
    */
   async function utter(active: Flight): Promise<void> {
@@ -398,7 +398,7 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     })
   }, [on])
 
-  // 대화 모드 — 승인·질문 카드가 뜨면 멈춘다 (도는 턴은 멈추지 않는다 — 보낸 말은 대기열로, #240)
+  // 대화 모드 — 승인·질문 카드가 뜨면 멈춘다 (도는 턴은 멈추지 않는다 — 보낸 말은 그 턴에 끼워 넣는다, #240·#250)
   const { busy: answering, attention } = options.chat.activity
   useEffect(() => {
     const key = voiceChatWatch(state, { busy: answering, attention })
@@ -499,7 +499,7 @@ const CHAT_TEXT: Record<ChatStage, MessageKey> = {
   sending: 'voice.chat.sending',
 }
 
-/** 답이 오는 중의 상태 글 — 말을 멈추면 바로 가지 않고 대기열에 들어간다 */
+/** 답이 오는 중의 상태 글 — 말을 멈추면 새 턴이 아니라 지금 답에 끼워 넣는다 (#250) */
 const CHAT_TEXT_QUEUED: Partial<Record<ChatStage, MessageKey>> = {
   listening: 'voice.chat.listeningQueued',
   countdown: 'voice.chat.countdownQueued',

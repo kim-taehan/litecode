@@ -229,9 +229,10 @@ export class RemoteService extends Service {
       this.emitEvent('turn.attention', { cid, requests })
       this.emitNotices()
     })
-    ctx.on('chat/turn-ended', ({ cid, message, usage, outcome }) => {
+    ctx.on('chat/turn-interjected', ({ cid, message }) => this.emitEvent('turn.interjected', { cid, message }))
+    ctx.on('chat/turn-ended', ({ cid, message, usage, outcome, unanswered }) => {
       this.turnProjects.delete(cid)
-      this.emitEvent('turn.ended', { cid, message, ...(usage && { usage }), outcome })
+      this.emitEvent('turn.ended', { cid, message, ...(usage && { usage }), outcome, ...(unanswered && { unanswered }) })
       this.emitNotices()
     })
     ctx.on('chat/queue-changed', ({ cid, items }) => this.emitEvent('queue.changed', { cid, items }))
@@ -649,8 +650,12 @@ export class RemoteService extends Service {
       const turn = live?.turn
       const snapshot: ConversationSnapshot = turn
         ? {
-            // 턴이 도는 중이면 기록은 그 턴의 내 말까지만 — 쓰다 만 답은 live.progress 가 그리고, 끝나면 turn.ended 가 붙인다
-            history: { ...history, messages: withHistory({ ...emptyChatView, running: true, messages: [turn.message] }, history.messages).messages },
+            // 턴이 도는 중이면 기록은 그 턴의 내 말까지만 — 쓰다 만 답은 live.progress 가 그리고, 끝나면 turn.ended 가 붙인다.
+            // 끼워 넣은 말이 있으면(이슈 #250) 그 뒤에 메인이 쥔 얼린 답·끼워 넣은 말 — live.progress 는 마지막 끼워 넣은 말 뒤의 줄이다
+            history: {
+              ...history,
+              messages: [...withHistory({ ...emptyChatView, running: true, messages: [turn.message] }, history.messages).messages, ...(turn.interjections ?? [])],
+            },
             live: { progress: turn.progress, attention: turn.attention, queue: live.queue.items },
             seq: this.log.seq,
           }

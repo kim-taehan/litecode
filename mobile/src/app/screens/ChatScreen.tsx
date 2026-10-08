@@ -65,7 +65,7 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
     const text = await session.takeQueue(cid)
     if (text) setDraft((current) => (current ? `${current}\n${text}` : text))
   }
-  // 턴이 도는 중이고 입력이 비었으면 중지, 아니면 보내기(턴 중이면 데스크탑이 대기열에 넣는다)
+  // 턴이 도는 중이고 입력이 비었으면 중지, 아니면 보내기(턴 중이면 데스크탑이 그 턴에 끼워 넣는다 — 이슈 #250)
   const stopping = (view?.running ?? false) && !draft.trim()
 
   return (
@@ -179,6 +179,7 @@ function UserMessage({ message }: { message: HistoryMessage }) {
           <Text style={styles.bubbleText}>{shape.text}</Text>
         </View>
       )}
+      {shape.unanswered && <Text style={styles.userMeta}>{S.unanswered}</Text>}
     </View>
   )
 }

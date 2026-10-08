@@ -187,7 +187,7 @@ export interface LiveTurn {
 
 /** GET /v1/conversations/{cid} — 스냅샷 + 그 시점 seq. 이 대화의 이벤트는 seq 초과분만 적용한다 (스냅샷과 스트림 사이에 틈이 없다) */
 export interface ConversationSnapshot {
-  /** 끝난 말풍선들 + (턴이 도는 중이면) 그 턴의 user 말까지. 도는 턴의 진행 줄은 live.progress 에 있다 */
+  /** 끝난 말풍선들 + (턴이 도는 중이면) 그 턴의 user 말까지, 끼워 넣은 말이 있으면 그 앞에 얼린 답과 그 말까지 (이슈 #250). 도는 턴의 진행 줄은 live.progress 에 있다 */
   history: History
   /** 턴이 도는 중일 때만 */
   live?: LiveTurn
@@ -202,8 +202,8 @@ export interface SendMessageRequest {
   model?: ModelChoice
 }
 export interface SendMessageResponse {
-  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중이라 그 대화 대기열에 들어갔다 */
-  state: 'sent' | 'queued'
+  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중이라 그 대화 대기열에 들어갔다. interjected: 도는 턴에 끼워 넣었다 (이슈 #250 — 'turn.interjected') */
+  state: 'sent' | 'queued' | 'interjected'
 }
 
 /** POST /v1/conversations/{cid}/stop */
@@ -249,7 +249,9 @@ export interface RemoteEventMap {
   'turn.progress': { cid: string; item: TurnItem }
   /** 그 대화가 지금 기다리는 승인·질문 전부 (빈 배열 = 더 없다) */
   'turn.attention': { cid: string; requests: Attention[] }
-  'turn.ended': { cid: string; message: HistoryMessage; usage?: TurnUsage; outcome: TurnOutcome }
+  /** 도는 턴에 사람이 친 말을 끼워 넣었다 (이슈 #250) — ChatEventMap 과 같다 */
+  'turn.interjected': { cid: string; message: HistoryMessage }
+  'turn.ended': { cid: string; message: HistoryMessage; usage?: TurnUsage; outcome: TurnOutcome; unanswered?: string[] }
   'queue.changed': { cid: string; items: string[] }
   /** 그 프로젝트의 대화 목록을 다시 받아라 */
   'conversations.changed': { project: string }

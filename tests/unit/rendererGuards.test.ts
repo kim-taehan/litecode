@@ -71,6 +71,16 @@ describe('답 전체 복사', () => {
   })
 })
 
+describe('끼워 넣은 말의 "답 없음" (이슈 #250)', () => {
+  it('답을 못 받은 끼워 넣은 말에는 말풍선 아래에 작게 "답 없음" — 그 밖의 말에는 없다', () => {
+    const html = renderToStaticMarkup(createElement(UserMessage, { text: 'B 말', at: 1, unanswered: true }))
+    expect(html).toContain('class="user-turn__unanswered"')
+    expect(html).toContain(translate('ko', 'chat.unanswered'))
+    expect(translate('en', 'chat.unanswered')).not.toBe(translate('ko', 'chat.unanswered'))
+    expect(renderToStaticMarkup(createElement(UserMessage, { text: 'A 말', at: 1 }))).not.toContain('user-turn__unanswered')
+  })
+})
+
 describe('타자가 본문을 다시 그리지 않게 — 답·내 말은 memo', () => {
   it('AssistantTurn·UserMessage 가 memo 컴포넌트다', () => {
     const memo = Symbol.for('react.memo')

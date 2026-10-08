@@ -28,9 +28,22 @@ interface Call {
   finish(result?: Partial<ChatResult>): void
 }
 
+/** 도는 턴에 잡은 끼워 넣기 자리 하나 (ctx.llm.reserve, 이슈 #250) */
+interface Reserved {
+  turn: string
+  messageId: string
+  sent?: { prompt: string; images?: readonly ChatImage[]; context?: string }
+  cancelled?: boolean
+}
+
 class FakeLlm extends Service {
   calls: Call[] = []
   replies: unknown[][] = []
+  /** 끼워 넣기 자리를 내준다 — 끄면 엔진이 아직 턴을 안 받은 것처럼 늘 없다(대기열로 간다). 대기열 시험들은 그 길을 본다 */
+  steerable = false
+  reserved: Reserved[] = []
+  /** 아직 끝나지 않은 턴의 messageId */
+  private live = new Set<string>()
   /** 동시에 돌던 턴의 최대 수 — 대화 하나에 한 턴씩인지 본다 */
   peak = 0
   private open = 0
@@ -45,10 +58,14 @@ class FakeLlm extends Service {
     const id = sessionId ?? `ses_${this.calls.length + 1}`
     if (!sessionId) await onSession?.(id)
     this.peak = Math.max(this.peak, ++this.open)
+    if (messageId) this.live.add(messageId)
     return new Promise<ChatResult>((resolve) => {
       const end = (result: ChatResult) => {
         this.open--
-        resolve(result)
+        if (messageId) this.live.delete(messageId)
+        // 보내지 않은(cancel) 끼워 넣은 말은 답 없음 — 보낸 말의 답 여부는 시험이 finish 의 unanswered 로 정한다
+        const cancelled = this.reserved.filter((entry) => entry.turn === messageId && entry.cancelled).map((entry) => entry.messageId)
+        resolve(result.unanswered || cancelled.length === 0 ? result : { ...result, unanswered: cancelled })
       }
       this.calls.push({
         providerId, modelId, directory, prompt, sessionId, messageId, mode, images,
@@ -58,6 +75,18 @@ class FakeLlm extends Service {
       })
       stop?.addEventListener('abort', () => end({ ok: false, sessionId: id, error: tr('error.stopped'), interrupted: true }))
     })
+  }
+  reserve(turn: string, messageId: string) {
+    if (!this.steerable || !this.live.has(turn)) return undefined
+    const entry: Reserved = { turn, messageId }
+    this.reserved.push(entry)
+    return {
+      send: async (input: NonNullable<Reserved['sent']>) => {
+        entry.sent = input
+        return true
+      },
+      cancel: () => void (entry.cancelled = true),
+    }
   }
   /** 손으로 부른 요약 (/compact, 이슈 #144) — 받아 쥐고 있다가 시험이 끝낸다 */
   compacts: { providerId: string; modelId: string; directory: string; sessionId: string; progress(item: TurnItem): void; finish(result?: Partial<ChatResult> & { messageId?: string }): void }[] = []
@@ -122,6 +151,7 @@ async function start(limit?: number) {
   ctx.on('chat/turn-progress', (data) => void events.push(['turn.progress', data]))
   ctx.on('chat/turn-attention', (data) => void events.push(['turn.attention', data]))
   ctx.on('chat/turn-ended', (data) => void events.push(['turn.ended', data]))
+  ctx.on('chat/turn-interjected', (data) => void events.push(['turn.interjected', data]))
   ctx.on('chat/queue-changed', (data) => void events.push(['queue.changed', data]))
   ctx.on('chat/conversations-changed', (data) => void events.push(['conversations.changed', data]))
   const llm = ready.llm as unknown as FakeLlm
@@ -819,5 +849,148 @@ describe('ChatService — 요약 (/compact)', () => {
     expect(chat.stop('c1')).toBe(true)
     expect(await ended(2)).toMatchObject({ cid: 'c1', outcome: 'interrupted', message: { interrupted: true, error: tr('error.stopped') } })
     expect(chat.turnOf('c1')).toBeUndefined()
+  })
+})
+
+// 도는 턴에 끼워 넣기 (이슈 #250) — 사람이 친 글(데스크탑·폰)은 대기열 대신 그 턴에 끼워 넣는다 (ctx.llm.reserve → send). 다른 대화의 지시·
+// 앱이 이어 보낸 것·요약 턴은 지금처럼 대기열. 말풍선은 'chat/turn-interjected', 그때까지의 진행 줄은 그 앞의 답으로 얼린다
+describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
+  async function steering() {
+    const started = await start()
+    started.llm.steerable = true
+    await started.chat.send('c1', input('A 일', { mode: 'plan' }))
+    const first = await started.turn(1)
+    return { ...started, first }
+  }
+  const text = (id: string, body: string): TurnItem => ({ kind: 'text', id, text: body, done: true })
+  const tool: TurnItem = { kind: 'tool', id: 'x1', name: 'bash', status: 'running' }
+
+  it('사람이 친 글은 대기열이 아니라 도는 턴에 간다 — 그 턴의 모드로 말풍선(interjected)을 내고, 엔진엔 그 턴 자리로 보낸다', async () => {
+    const { chat, llm, first, of, names } = await steering()
+    first.progress(tool)
+    expect(await chat.send('c1', input('B 말', { mode: 'build', model: { providerId: 'gw', modelId: 'm2' } }))).toEqual({ state: 'interjected' })
+    expect(names()).not.toContain('queue.changed')
+    expect(chat.queued('c1')).toBe(0)
+    const said = of('turn.interjected')[0]!
+    expect(said).toMatchObject({ cid: 'c1', message: { role: 'user', text: 'B 말', mode: 'plan', interjected: true } })
+    expect(llm.reserved).toHaveLength(1)
+    expect(llm.reserved[0]).toMatchObject({ turn: first.messageId, messageId: said.message.id })
+    await until(() => llm.reserved[0]!.sent !== undefined)
+    expect(llm.reserved[0]!.sent).toMatchObject({ prompt: 'B 말', images: [] })
+    expect(llm.calls).toHaveLength(1)
+  })
+
+  it('끼운 뒤 진행 줄은 말풍선 아래로, 끼우기 전 줄이 바뀌면 얼린 답 안에서 — 스냅샷·턴 끝 답도 그 모양, 답 글은 마지막 말 뒤의 글', async () => {
+    const { chat, first, ended } = await steering()
+    first.progress(tool)
+    first.progress(text('a', 'A 중간 '))
+    await chat.send('c1', input('B 말'))
+    const finished: TurnItem = { ...tool, status: 'done' } as TurnItem
+    first.progress(finished)
+    first.progress(text('b', 'B 에 답함'))
+    const live = chat.snapshot().c1!.turn!
+    expect(live.progress).toEqual([text('b', 'B 에 답함')])
+    expect(live.interjections).toMatchObject([{ role: 'assistant', text: 'A 중간 ', items: [finished, text('a', 'A 중간 ')] }, { role: 'user', text: 'B 말', interjected: true }])
+    first.finish({ text: 'A 중간 B 에 답함' })
+    const end = await ended(1)
+    expect(end.message).toMatchObject({ role: 'assistant', text: 'B 에 답함', items: [text('b', 'B 에 답함')] })
+    expect(end.unanswered).toBeUndefined()
+  })
+
+  it('턴 끝 확장점(after-turn)이 받는 답 글도 마지막 말 뒤의 글이다', async () => {
+    const { ctx, chat, first, ended } = await steering()
+    const texts: string[] = []
+    ctx.on('chat/after-turn', (turn) => void texts.push(turn.text))
+    first.progress(text('a', 'A 글'))
+    await chat.send('c1', input('B 말'))
+    first.progress(text('b', 'B 답'))
+    first.finish({ text: 'A 글B 답' })
+    await ended(1)
+    expect(texts).toEqual(['B 답'])
+  })
+
+  it('폰(device:)이 친 글도 끼워 넣는다', async () => {
+    const { chat } = await steering()
+    expect(await chat.send('c1', input('폰에서', { origin: 'device:d1' }))).toEqual({ state: 'interjected' })
+  })
+
+  it('다른 대화의 지시·앱이 이어 보낸 것(hook)은 끼워 넣지 않고 대기열에 — 자리를 잡지도 않는다', async () => {
+    const { chat, llm } = await steering()
+    expect(await chat.send('c1', input('지시', { origin: 'session:c9', from: { conversationId: 'c9', title: '다른 대화' } }))).toEqual({ state: 'queued' })
+    expect(await chat.send('c1', input('이어서', { origin: 'hook' }))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(2)
+    expect(llm.reserved).toEqual([])
+  })
+
+  it('요약(/compact) 턴 중에 친 글은 대기열에 — 엔진이 그 턴에 자리를 주지 않는다', async () => {
+    const { chat, llm, first, ended } = await steering()
+    first.finish()
+    await ended(1)
+    expect(await chat.compact('c1')).toEqual({ ok: true })
+    expect(await chat.send('c1', input('요약 뒤 질문'))).toEqual({ state: 'queued' })
+    await until(() => llm.compacts.length === 1)
+    llm.compacts[0]!.finish()
+  })
+
+  it('엔진이 아직 턴을 안 받았거나 멈추는 중이면 대기열로 (지금까지와 같다)', async () => {
+    const { chat, llm } = await steering()
+    llm.steerable = false
+    expect(await chat.send('c1', input('아직'))).toEqual({ state: 'queued' })
+    llm.steerable = true
+    chat.stop('c1')
+    expect(await chat.send('c1', input('멈춘 뒤'))).toEqual({ state: 'queued' })
+  })
+
+  it('답을 못 받은 끼워 넣은 말(거절·중지)은 입력창으로 되돌리지 않고 턴 끝에 unanswered 로 알린다', async () => {
+    const { chat, first, of, ended } = await steering()
+    await chat.send('c1', input('B 말'))
+    const said = of('turn.interjected')[0]!.message
+    first.finish({ declined: true, unanswered: [said.id!] })
+    expect(await ended(1)).toMatchObject({ outcome: 'done', unanswered: [said.id], message: { declined: true } })
+    expect(chat.queued('c1')).toBe(0)
+  })
+
+  it('보내기 직전 확장점(before-send)을 똑같이 거친다 — 맥락은 끼워 넣는 말에 실리고, 막히면 보내지 않고 입력창으로(붙잡힌 대기열) 답 없음', async () => {
+    const { ctx, chat, llm, first, of, ended } = await steering()
+    const seen: { text: string; first: boolean; origin: string }[] = []
+    ctx.on('chat/before-send', (send) => {
+      seen.push({ text: send.text, first: send.first, origin: send.origin })
+      if (send.text === '막을 말') send.blocked = '막힘'
+      else send.context.push('B 맥락')
+    })
+    await chat.send('c1', input('B 말'))
+    await until(() => llm.reserved[0]?.sent !== undefined)
+    expect(llm.reserved[0]!.sent).toMatchObject({ prompt: 'B 말', context: 'B 맥락' })
+    await chat.send('c1', input('막을 말'))
+    await until(() => llm.reserved[1]?.cancelled === true)
+    expect(llm.reserved[1]!.sent).toBeUndefined()
+    expect(of('queue.changed').at(-1)).toMatchObject({ items: ['막을 말'], held: true })
+    expect(seen).toEqual([{ text: 'B 말', first: false, origin: 'user' }, { text: '막을 말', first: false, origin: 'user' }])
+    first.finish()
+    expect((await ended(1)).unanswered).toEqual([of('turn.interjected')[1]!.message.id])
+  })
+
+  it('첨부도 같은 길로 읽어 실린다 — 글 파일은 본문에, 칩은 말풍선에, 그 메시지 id 로 적어 둔다', async () => {
+    const { ctx, chat, llm, stored, of } = await steering()
+    const read: string[][] = []
+    ctx.on('chat/attachments-read', (paths) => void read.push(paths))
+    const file = path.join(root, 'notes.md')
+    await fs.writeFile(file, '# 메모')
+    chat.allowAttachments([file])
+    await chat.send('c1', input('이것도 봐', { project: root, attachments: [{ kind: 'file', path: file, name: 'notes.md', size: 6 }] }))
+    const said = of('turn.interjected')[0]!.message
+    expect(said).toMatchObject({ text: '이것도 봐', attachments: [{ kind: 'file', name: 'notes.md', size: 6 }] })
+    await until(() => llm.reserved[0]?.sent !== undefined)
+    expect(llm.reserved[0]!.sent!.prompt).toContain('notes.md')
+    expect(read).toEqual([[file]])
+    expect((await stored('c1'))?.attachments).toEqual({ [said.id!]: [{ kind: 'file', name: 'notes.md', size: 6 }] })
+  })
+
+  it('고르지 않은 첨부면 보내지 않는다 — 그 말은 답 없음', async () => {
+    const { chat, llm, first, ended } = await steering()
+    await chat.send('c1', input('몰래', { project: root, attachments: [{ kind: 'file', path: '/etc/passwd', name: 'passwd', size: 1 }] }))
+    await until(() => llm.reserved[0]?.cancelled === true)
+    first.finish()
+    expect((await ended(1)).unanswered).toEqual([llm.reserved[0]!.messageId])
   })
 })

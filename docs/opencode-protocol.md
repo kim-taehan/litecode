@@ -129,6 +129,13 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
   - **차이**: 도구 인자 이름이 다르다(read·write 는 `filePath`). 계획 모드 턴의 user 글 뒤에 `<system-reminder>` 가 붙는다. build 의 시스템 프롬프트는 opencode 기본.
     `websearch` 는 레거시에 없다. 500 은 5번 재시도(~71초, `session.status {type:"retry", attempt, message, next}` → 진행 줄). `/event` heartbeat 10초 — 무바이트 30초면 끊긴 것.
     `noReply` 를 돌고 있는 턴에 넣으면 그 턴이 이어서 답한다(턴 중 막기 유지). prompt 의 `system` 은 user 메시지 `info.system` 에 남는다
+  - **도는 턴에 끼워 넣기** (#250, 실측 2026-10-08, 근거 `_workspace/01ar_interject_probe.md`, 가짜 LLM): 도는 세션에 `prompt_async` 를 또 보내면 204 즉시,
+    user 메시지는 바로 저장되고 **도는 스텝이 끝난 직후의 다음 모델 호출에 실린다**(6/6 — 도는 도구·글 스텝 하나는 끝까지 간다). 그 뒤 assistant 의 parentID 는
+    새 user, idle 은 합쳐 맨 끝 한 번. 그 뒤 스텝은 **마지막 user 의 agent·system·tools** 를 쓴다(1/1) → 끼워 넣는 말에도 도는 턴과 같은 값을 싣는다.
+    도는 턴엔 `noReply` 가 무시된다(5/5). 승인 거절·abort 로 루프가 끝나면 끼워 넣은 user 는 답 없이 남는다(6/6). 이전 idle 과 엇갈려 늦게 닿으면 새 루프·
+    자기 idle 을 받는다(8/8) → 끝 판정은 "끼워 넣은 user 를 모두 본 뒤의 idle". 동기 `/message` 는 루프 끝까지 블록(1/1). 승인 대기 중에 넣어도 승인은
+    그대로 남고 승인하면 이어서 반영(1/1). 앱: `ctx.llm.reserve`(보내기 전에 `TurnScope.adopt`) → `Interjection.send`/`cancel`, 답 못 받은 말은 `ChatResult.unanswered`.
+    미측정: 진짜 모델이 끼워 넣은 말 뒤 앞 일을 이어 가는지, task·자동 요약 중 끼워 넣기, 연달아 두 번, 이미지 첨부
   - **설정** (#12·#19): 레거시는 앱 CONFIG_DIR 외에 `~/.config/opencode`·`~/.opencode`·프로젝트 opencode.json·`.opencode/` 를 읽고 그 MCP 를 띄운다 →
     `OPENCODE_DISABLE_PROJECT_CONFIG=1`(**레거시가** 프로젝트 설정을 안 읽게 — 신규 세대 런타임은 이 플래그를 안 본다, "opencode 에 설정 넘기기" 의 ⚠️ #101. AGENTS.md(없으면 CLAUDE.md)는 `ctx.llm` 이 매 턴 `system` 으로 — `instructions.ts`). 개인 설정은 읽되(사용자 결정)
     앱 CONFIG_DIR 값이 이긴다 — `model`·`enabled_providers`(개인 설정이 앱 provider 를 꺼 **모든 턴이 Model not found** 였다)·`share:"disabled"`·`autoupdate`·`lsp`·`formatter` false.

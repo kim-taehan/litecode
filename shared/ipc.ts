@@ -57,6 +57,8 @@ export const Channel = {
   TURN_STARTED: 'chat:turn-started',
   /** 메인 → 화면 (ChatEventMap['turn.ended']) — 턴이 끝났다: 답과 합산한 목록 정보 */
   TURN_ENDED: 'chat:turn-ended',
+  /** 메인 → 화면 (ChatEventMap['turn.interjected']) — 도는 턴에 사람이 친 말을 끼워 넣었다 (이슈 #250) */
+  TURN_INTERJECTED: 'chat:turn-interjected',
   /** 메인 → 화면 (ChatEventMap['queue.changed']) — 그 대화의 대기열 */
   QUEUE_CHANGED: 'chat:queue',
   /** 메인 → 화면 (ChatEventMap['conversations.changed']) */
@@ -197,8 +199,8 @@ export interface LitecodeBridge {
   removeProvider(id: string): Promise<ProviderSummary[]>
   /** 메인 프로세스가 `GET {baseURL}/models` 로 묻는다. 키는 입력한 것, 없으면 id 의 저장된 키 */
   fetchProviderModels(draft: { id?: string; baseURL: string; apiKey?: string }): Promise<ModelCatalogEntry[]>
-  /** 그 대화에 보낸다 (ctx.chat, 이슈 #52) — 바로 돌아온다: 'sent'(턴이 시작됐다) 또는 'queued'(그 대화의 턴이 도는 중이라 대기열에 쌓였다 —
-   *  턴이 끝나면 메인이 합쳐 보낸다). 내 말·진행 줄·답은 onTurnStarted·onTurnProgress·onTurnEnded 로 온다. 제목·저장·통계 합산은 메인이 한다.
+  /** 그 대화에 보낸다 (ctx.chat, 이슈 #52) — 바로 돌아온다: 'sent'(턴이 시작됐다), 'interjected'(도는 턴에 끼워 넣었다 — 말풍선은
+   *  onTurnInterjected, 이슈 #250) 또는 'queued'(엔진이 그 턴을 아직 안 받았거나 멈추는 중이라 대기열에 쌓였다 — 턴이 끝나면 메인이 합쳐 보낸다). 내 말·진행 줄·답은 onTurnStarted·onTurnProgress·onTurnEnded 로 온다. 제목·저장·통계 합산은 메인이 한다.
    *  input.project 는 아직 저장 안 된 새 대화가 만들어질 폴더. display 를 주면 다시 열었을 때 text 대신 그 글이 말풍선에 보인다 (`/` 명령: text 는
    *  풀어 쓴 template). mode·model 은 이 턴부터 그 대화의 것이 된다.
    *  attachments 는 붙인 파일·이미지 (pickAttachments 가 준 것만 — 그 밖의 경로는 거절). 메인이 읽는다: 이미지는 엔진에 이미지로, 글 파일은
@@ -213,6 +215,7 @@ export interface LitecodeBridge {
   chatSnapshot(): Promise<ChatSnapshot>
   onTurnStarted(listener: (event: ChatEventMap['turn.started']) => void): () => void
   onTurnEnded(listener: (event: ChatEventMap['turn.ended']) => void): () => void
+  onTurnInterjected(listener: (event: ChatEventMap['turn.interjected']) => void): () => void
   onQueueChanged(listener: (event: ChatEventMap['queue.changed']) => void): () => void
   onConversationsChanged(listener: (event: ChatEventMap['conversations.changed']) => void): () => void
   /** `+` 메뉴의 파일 추가·이미지 추가 (이슈 #44) — OS 파일 고르기(여러 개)를 띄워 고른 것을 칩 정보로 준다. 화면은 경로만 들고 내용은 안 읽는다.
