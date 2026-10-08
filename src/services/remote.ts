@@ -127,8 +127,8 @@ export interface RemoteStatus {
   port: number
   /** 듣고 있는 주소 (`ip:port`) — 못 떴으면 빈 목록 */
   addresses: string[]
-  /** 운반이 못 뜬 사유 (code: EADDRINUSE 등) */
-  error?: { code?: string; message: string }
+  /** 운반이 못 뜬 사유 (code: EADDRINUSE 등). keyStore: 키 저장소가 봉한 키를 안 풀어 줬다 (이슈 #231) */
+  error?: { code?: string; message: string; keyStore?: true }
   /** 사내망(TLS) 리스너의 인증서 지문 (SPKI SHA-256 base64url) — TLS 운반이 없거나 못 떴으면 없다 */
   fingerprint?: string
   /** 지문 앞 8자 (`ABCD-EFGH`, shared/remotePairing.ts fingerprintCode) — 직접 입력 화면과 [허용] 확인에 보인다 */

@@ -87,7 +87,8 @@ export function bluetoothProblem(radio: RemoteRadioStatus | undefined): FeatureR
     case 'unsupported':
       return radio.reason ? { key: 'remote.bluetooth.unsupportedReason', vars: { reason: radio.reason } } : { key: 'remote.bluetooth.unsupported' }
     case 'failed':
-      return { key: 'remote.bluetooth.failed', vars: { reason: radio.reason ?? '' } }
+      // 키체인이 블루투스 키를 안 풀어 줬다 — 영어 원문 대신 키 저장소 안내 (이슈 #231)
+      return radio.keyStore ? { key: 'error.keyStore' } : { key: 'remote.bluetooth.failed', vars: { reason: radio.reason ?? '' } }
     default:
       return undefined
   }
@@ -120,6 +121,8 @@ class BluetoothCarrier {
   private identity?: NoiseIdentity
   private state: RemoteRadioState = 'starting'
   private reason?: string
+  /** 마지막 fail() 의 원인이 키 저장소다 (이슈 #231) — failed 일 때만 내보낸다 (fail 이 매번 다시 정한다) */
+  private keyStore = false
   private running = false
   /** 켜고 끌 때마다 바뀐다 — 끈 뒤에 도착한 콜백을 버린다 */
   private generation = 0
@@ -138,7 +141,11 @@ class BluetoothCarrier {
 
   status(): RemoteCarrierStatus {
     const links = [...this.connections.values()].filter((connection) => connection.server).length
-    return { up: this.running && this.state === 'advertising', addresses: [], radio: { state: this.state, ...(this.reason && { reason: this.reason }), links } }
+    return {
+      up: this.running && this.state === 'advertising',
+      addresses: [],
+      radio: { state: this.state, ...(this.reason && { reason: this.reason }), ...(this.state === 'failed' && this.keyStore && { keyStore: true as const }), links },
+    }
   }
 
   /** ctx.remote 가 운반을 띄울 때 — 띄우지 못했어도 다시 부를 수 있다(이미 돌고 있으면 그대로) */
@@ -252,6 +259,7 @@ class BluetoothCarrier {
   private fail(state: RemoteRadioState, error: unknown): void {
     this.state = state
     this.reason = error instanceof Error ? error.message : String(error)
+    this.keyStore = (error as { keyStore?: unknown } | undefined)?.keyStore === true
     this.remote.carrierChanged()
   }
 

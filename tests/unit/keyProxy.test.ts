@@ -1,6 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { tr } from '../../src/i18n.ts'
 import { startKeyProxy, type KeyProxy, type ProxyTarget } from '../../src/services/keyProxy.ts'
 
 // 키 프록시 단위 테스트 — 외부 프로세스 없이 이 프로세스 안의 127.0.0.1 서버끼리만 돈다.
@@ -43,5 +44,34 @@ describe('startKeyProxy', () => {
 
     target = { baseURL, apiKey: 'sk-good' }
     expect((await call()).status).toBe(200)
+  })
+
+  // 이슈 #231: 키체인이 키를 안 풀어 주면 ctx.providers.apiKey 가 EKEYSTORE 로 던진다 — ERR_PROXY 로 뭉개지 않고 안내 문구·코드를 싣고, 앱 로그에 한 줄
+  it('targetOf 가 EKEYSTORE 오류를 던지면 502 에 그 안내 문구·코드를 싣고(ERR_PROXY 아님) console.error 로 코드·경로 앞부분만 한 줄 남긴다', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      proxy = await startKeyProxy(() => {
+        throw Object.assign(new Error(tr('error.modelKeyStore')), { code: 'EKEYSTORE' })
+      })
+      const res = await fetch(`${proxy.baseURLFor('gw')}/chat/completions?x=SECRETQUERY`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${proxy.token}`, 'content-type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(5_000),
+      })
+      expect(res.status).toBe(502)
+      const body = (await res.json()) as { error: { message: string } }
+      expect(body.error.message).toBe(tr('error.proxy', { message: tr('error.modelKeyStore') }))
+      expect(body.error.message).toContain('EKEYSTORE')
+      expect(body.error.message).not.toContain('ERR_PROXY')
+      expect(logged).toHaveBeenCalledTimes(1)
+      const line = String(logged.mock.calls[0]![0])
+      expect(line).toContain('EKEYSTORE')
+      expect(line).toContain('/gw')
+      expect(line).not.toContain('SECRETQUERY')
+      expect(line).not.toContain(proxy.token)
+    } finally {
+      logged.mockRestore()
+    }
   })
 })

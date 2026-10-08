@@ -45,8 +45,9 @@ describe('데스크탑 정적 키 — 봉해서 userData 에', () => {
     expect(JSON.parse(text)).toMatchObject({ version: 1, sealed: true })
     expect((await loadNoiseIdentity(file, cipher)).publicKeyText).toBe(first.publicKeyText)
     available = false
-    await expect(loadNoiseIdentity(file, cipher)).rejects.toMatchObject({ code: 'ENOISEKEY' })
-    await expect(loadNoiseIdentity(file)).rejects.toMatchObject({ code: 'ENOISEKEY' })
+    // 키 저장소 탓이면 keyStore 표시 — 화면이 영어 원문 대신 키체인 안내를 보인다 (이슈 #231)
+    await expect(loadNoiseIdentity(file, cipher)).rejects.toMatchObject({ code: 'ENOISEKEY', keyStore: true })
+    await expect(loadNoiseIdentity(file)).rejects.toMatchObject({ code: 'ENOISEKEY', keyStore: true })
     expect(await fs.readFile(file, 'utf8')).toBe(text)
   })
 
@@ -54,9 +55,11 @@ describe('데스크탑 정적 키 — 봉해서 userData 에', () => {
     const file = path.join(box.root, 'remote-noise-key.json')
     const broken: KeyCipher = { available: () => true, encrypt: () => Buffer.from('x'), decrypt: () => { throw new Error('bad') } }
     await fs.writeFile(file, JSON.stringify({ version: 1, key: 'AAAA', sealed: true }))
-    await expect(loadNoiseIdentity(file, broken)).rejects.toMatchObject({ code: 'ENOISEKEY' })
+    await expect(loadNoiseIdentity(file, broken)).rejects.toMatchObject({ code: 'ENOISEKEY', keyStore: true }) // 풀기 실패 = 키체인이 거절 (#231)
     await fs.writeFile(file, JSON.stringify({ version: 1, key: 'too-short', sealed: false }))
-    await expect(loadNoiseIdentity(file)).rejects.toMatchObject({ code: 'ENOISEKEY' })
+    const malformed = await loadNoiseIdentity(file).catch((error: unknown) => error)
+    expect(malformed).toMatchObject({ code: 'ENOISEKEY' })
+    expect((malformed as { keyStore?: boolean }).keyStore).toBeUndefined() // 모양이 틀린 것은 키 저장소 탓이 아니다
     expect(JSON.parse(await fs.readFile(file, 'utf8'))).toMatchObject({ key: 'too-short' })
   })
 

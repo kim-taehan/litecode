@@ -66,8 +66,8 @@ export interface RemoteCarrierStatus {
   addresses: string[]
   /** 듣는(또는 들을) 포트 — 포트가 없는 운반은 없다 */
   port?: number
-  /** 켰는데 못 뜬 사유 */
-  error?: { code?: string; message: string }
+  /** 켰는데 못 뜬 사유 — keyStore: 키 저장소(키체인)가 봉한 키를 안 풀어 줬다 (화면은 원문 대신 키체인 안내, 이슈 #231) */
+  error?: { code?: string; message: string; keyStore?: true }
   /** 폰이 공개키 지문으로 고정하는 운반(TLS)의 지문 — SPKI SHA-256 base64url */
   fingerprint?: string
   /** 마지막으로 접속이 들어온 시각 (막은 것도) — 진단용. 세지 않는 운반은 없다 */
@@ -83,6 +83,8 @@ export type RemoteRadioState = 'starting' | 'advertising' | 'poweredOff' | 'unau
 export interface RemoteRadioStatus {
   state: RemoteRadioState
   reason?: string
+  /** failed 의 원인이 키 저장소(키체인)다 — 화면은 reason(영어 원문) 대신 키체인 안내를 보인다 (이슈 #231) */
+  keyStore?: true
   /** 핸드셰이크를 마친 연결 수 */
   links: number
 }

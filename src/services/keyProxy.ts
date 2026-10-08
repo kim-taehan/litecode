@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import http from 'node:http'
 import https from 'node:https'
 import type { AddressInfo } from 'node:net'
-import { normalizeBaseURL } from './providers.ts'
+import { KEY_STORE_CODE, normalizeBaseURL } from './providers.ts'
 import { tr } from '../i18n.ts'
 import { sameSecret } from './httpUtil.ts'
 
@@ -53,12 +53,14 @@ export async function startKeyProxy(targetOf: (providerId: string) => ProxyTarge
   const token = randomBytes(24).toString('base64url')
   const server = http.createServer((req, res) => {
     // 처리기의 동기 예외(예: 예전에 저장된 키에 헤더로 못 쓰는 문자 — http.request 가 ERR_INVALID_CHAR 를 던진다)는 메인 프로세스의
-    // uncaughtException 이 되고 요청은 응답 없이 매달린다 (03_qa 2차) — 오류 코드만 실어 502 로 끝낸다
+    // uncaughtException 이 되고 요청은 응답 없이 매달린다 (03_qa 2차) — 오류 코드만 실어 502 로 끝낸다.
+    // 키 저장소가 키를 안 풀어 주면(이슈 #231) ctx.providers 의 안내 문구(키 값 없음)를 그대로 싣는다. 앱 로그에는 코드·provider 경로만
     try {
       forward(req, res)
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? 'ERR_PROXY'
-      if (!res.headersSent) fail(res, 502, tr('error.proxyRequest', { code }))
+      console.error(`[keyProxy] ${req.method} /${(req.url ?? '').split(/[/?]/)[1] ?? ''} failed (${code})`)
+      if (!res.headersSent) fail(res, 502, code === KEY_STORE_CODE ? (error as Error).message : tr('error.proxyRequest', { code }))
       else res.destroy()
     }
   })

@@ -235,6 +235,9 @@ const UNREACHABLE_STATUS = 502
 export function connectionRefused(message: string): boolean {
   return UNREACHABLE.test(message)
 }
+/** 저장된 모델 키를 못 푼다 (이슈 #231, providers.ts KEY_STORE_CODE) — 키 프록시가 502 에 안내 문구째 싣는다. 키체인 허용은 앱을 다시 열어야 바뀌어
+ *  몇 번을 다시 보내도 풀리지 않는다 → 1번째 알림에서 멈추고, 안내 문구가 그대로 보이게 turnError(HTTP 문구 덧씌우기)를 거치지 않는다 */
+const KEY_STORE = /\bEKEYSTORE\b/
 /** MCP 호출 요청을 받고 그 running 도구 파트를 기다리는 한도 — 이벤트는 요청 1~3ms 뒤에 온다 (01z 1-2, 10/10) */
 export const CALLER_WAIT_MS = 2_000
 /** 승인 요청을 받고 그 running 도구 파트(도구 이름·인자)를 기다리는 한도 — 묻는 순간 이미 running 이다 (01z 1-3, 3/3). 넘기면 요청에 실린 것으로 */
@@ -1119,9 +1122,10 @@ export class LlmService extends Service {
         if (status?.type === 'retry') {
           const message = status.message ?? ''
           const unreachable = connectionRefused(message)
-          if (unreachable || (status.attempt ?? 1) > MAX_RETRIES_PER_TURN) {
+          const keyStore = KEY_STORE.test(message)
+          if (unreachable || keyStore || (status.attempt ?? 1) > MAX_RETRIES_PER_TURN) {
             void this.abort(conn, sessionId, workdir)
-            finish(outcome({ ok: false, error: turnError(message, unreachable ? (httpStatusOf(message) ?? UNREACHABLE_STATUS) : undefined) }))
+            finish(outcome({ ok: false, error: keyStore ? message : turnError(message, unreachable ? (httpStatusOf(message) ?? UNREACHABLE_STATUS) : undefined) }))
           }
         }
         return

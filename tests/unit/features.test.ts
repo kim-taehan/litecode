@@ -383,6 +383,8 @@ describe('featureProblem 매핑 — 묶음이 알리는 문제', () => {
     expect(bluetoothProblem({ state: 'unsupported', links: 0 })).toEqual({ key: 'remote.bluetooth.unsupported' })
     expect(bluetoothProblem({ state: 'unsupported', reason: 'no prebuild', links: 0 })).toEqual({ key: 'remote.bluetooth.unsupportedReason', vars: { reason: 'no prebuild' } })
     expect(bluetoothProblem({ state: 'failed', reason: 'key', links: 0 })).toEqual({ key: 'remote.bluetooth.failed', vars: { reason: 'key' } })
+    // 이슈 #231: 키체인이 블루투스 키를 안 풀어 줬다 — 영어 원문 대신 키 저장소 안내 문구(번역)
+    expect(bluetoothProblem({ state: 'failed', reason: 'the bluetooth key is sealed and the key store is unavailable', keyStore: true, links: 0 })).toEqual({ key: 'error.keyStore' })
   })
 
   it('음성: 확인 중·준비됨·뜨는 중은 문제가 아니고, 엔진·모델 파일이 없거나 손상되면 문제다', () => {
