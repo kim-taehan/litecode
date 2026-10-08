@@ -267,7 +267,9 @@ export class LlmService extends Service {
   /** 턴이 도는 세션 — addContext 가 막는다 */
   private busy = new Set<string>()
   /** 기다리는 요청 id → 요청한 세션(하위 작업이면 자식)·그 요청을 기다리는 턴의 세션·폴더·종류·도구 호출 (reply 가 쓴다). 턴이 끝나면 지운다 */
-  private requests = new Map<string, { sessionId: string; turn: string; directory: string; kind: Attention['kind']; callID?: string }>()
+  private requests = new Map<string, { sessionId: string; turn: string; directory: string; kind: Attention['kind']; callID?: string; action?: string; resources?: string[] }>()
+  /** 대화(턴의 엔진 세션) → [항상 허용]한 폴더 밖 접근 패턴 (allowKey). 그 대화의 같은 요청은 카드 없이 once 로 답한다 (이슈 #242). 저장하지 않는다 */
+  private allowed = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 앱이 거절한 도구 호출 id. 그 도구가 error 로 끝나고 idle 이 오면 거절로 끝난 턴이다 */
   private declined = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
@@ -1288,7 +1290,10 @@ export class LlmService extends Service {
         const answer =
           typeof decision === 'object'
             ? { reply: 'reject', message: decision.reason.trim() || 'Blocked before running.' }
-            : decision !== 'ask' && conn.gated(entry.permission) && modePermission(mode, entry.permission, { resources: entry.patterns, child }) === 'allow'
+            : decision !== 'ask' &&
+                ((conn.gated(entry.permission) && modePermission(mode, entry.permission, { resources: entry.patterns, child }) === 'allow') ||
+                  // 이 대화에서 [항상 허용]한 폴더 밖 패턴 (이슈 #242) — 사용자가 미리 정한 허용이지만 이 호출을 본 것은 아니라 장부에는 적지 않는다
+                  this.allowedAlready(sessionId, entry.permission, entry.patterns))
               ? { reply: 'once' }
               : undefined
         if (answer) {
@@ -1339,7 +1344,9 @@ export class LlmService extends Service {
         }),
         ...(questions?.map((entry): Attention => ({ kind: 'question', id: entry.id, ...origin(entry), questions: entry.questions })) ?? pending.filter((entry) => entry.kind === 'question')),
       ]
-      for (const entry of permissions) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID })
+      for (const entry of permissions) {
+        this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID, action: entry.permission, resources: entry.patterns ?? [] })
+      }
       for (const entry of questions ?? []) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'question', callID: entry.tool?.callID })
       publish(next)
     }
@@ -1374,28 +1381,31 @@ export class LlmService extends Service {
    *  그 도구가 error 로 끝나고 오는 idle 이 거절로 끝난 턴이다. 이미 풀렸거나 모르는 요청이면 던진다.
    *  **`always` 는 보내지 않는다** — 그 폴더의 모든 세션에서 더는 묻지 않게 된다 (01z 1-3).
    *  허용(once)한 도구 호출은 그 턴의 장부에 적는다 — 앱 MCP 서버가 "사용자가 앱에서 누른 허용" 만 받게 (callerOf 의 approved, 01z 1-4).
-   *  target 은 허용하며 사용자가 고른 받을 대화 (이슈 #67) — 장부에만 적는다. **엔진에는 보내지 않는다**(엔진에 가는 답은 once 그대로) */
+   *  target 은 허용하며 사용자가 고른 받을 대화 (이슈 #67) — 장부에만 적는다. **엔진에는 보내지 않는다**(엔진에 가는 답은 once 그대로).
+   *  always(항상 허용, 이슈 #242)는 폴더 밖 접근(external_directory)에만 — 엔진에는 once 로 보내고, 성공하면 그 대화(request.turn) + 그 패턴을
+   *  기억해 다음 요청은 카드 없이 once 로 답하고(watchAttention 의 judge), 이미 떠 있는 같은 패턴의 카드도 once 로 함께 푼다 */
   async reply(sessionId: string, requestId: string, answer: AttentionAnswer, target?: AttentionTarget): Promise<void> {
     const request = this.requests.get(requestId)
     if (!request || request.sessionId !== sessionId) throw new Error(tr('error.attentionGone'))
+    const always = answer === 'always'
     const valid =
       answer === 'reject' ||
       (request.kind === 'permission'
-        ? answer === 'once'
+        ? answer === 'once' || (always && request.action === ALLOW_ALWAYS_ACTION)
         : Array.isArray(answer) && answer.length > 0 && answer.every((entry) => Array.isArray(entry) && entry.length > 0 && entry.every((label) => typeof label === 'string' && label.trim() !== '')))
     if (!valid) throw new Error(tr('error.attentionAnswer'))
     const conn = await this.ctx.engine.connection()
     // 하위 작업의 요청을 거절하면 그 자식만 그 도구 오류로 이어 가고 부모 턴은 계속 돈다 — 부모 턴의 "거절로 끝남" 이 아니다
     const declined = answer === 'reject' && request.callID && request.sessionId === request.turn ? this.declined.get(sessionId) : undefined
     declined?.add(request.callID!) // 보내기 전에 — 도구 error 가 응답보다 먼저 올 수 있다
-    const approving = answer === 'once' && request.kind === 'permission' && request.callID ? [...this.running].find((live) => live.sessionId === request.turn)?.calls : undefined
+    const approving = (answer === 'once' || always) && request.kind === 'permission' && request.callID ? [...this.running].find((live) => live.sessionId === request.turn)?.calls : undefined
     approving?.approve(request.callID!, target) // 보내기 전에 — 허용된 도구의 MCP 호출이 응답보다 먼저 올 수 있다
     const base = `${conn.url}/${request.kind}/${requestId}`
     const query = at(request.directory)
     const json = { ...conn.headers, 'content-type': 'application/json' }
     const res =
       request.kind === 'permission'
-        ? await fetch(`${base}/reply?${query}`, { method: 'POST', headers: json, body: JSON.stringify({ reply: answer }) })
+        ? await fetch(`${base}/reply?${query}`, { method: 'POST', headers: json, body: JSON.stringify({ reply: always ? 'once' : answer }) })
         : answer === 'reject'
           ? await fetch(`${base}/reject?${query}`, { method: 'POST', headers: json, body: '{}' })
           : await fetch(`${base}/reply?${query}`, { method: 'POST', headers: json, body: JSON.stringify({ answers: answer }) })
@@ -1406,7 +1416,28 @@ export class LlmService extends Service {
     }
     this.requests.delete(requestId)
     this.watchers.get(request.turn)?.answered(requestId)
+    if (!always) return
+    const key = allowKey(request.resources ?? [])
+    const remembered = this.allowed.get(request.turn) ?? new Set<string>()
+    remembered.add(key)
+    this.allowed.set(request.turn, remembered)
+    // 이미 떠 있는 같은 대화·같은 패턴의 카드 — 하나가 실패해도 그 카드만 남는다(다시 누를 수 있다)
+    const same = [...this.requests].filter(([, other]) => other.turn === request.turn && other.kind === 'permission' && other.action === ALLOW_ALWAYS_ACTION && allowKey(other.resources ?? []) === key)
+    await Promise.all(same.map(([id, other]) => this.reply(other.sessionId, id, 'once').catch(() => {})))
   }
+
+  /** 이 대화(턴의 엔진 세션)에서 [항상 허용]한 폴더 밖 접근 패턴의 요청이다 (이슈 #242) */
+  private allowedAlready(turn: string, permission: string, patterns: readonly string[] | undefined): boolean {
+    return permission === ALLOW_ALWAYS_ACTION && !!this.allowed.get(turn)?.has(allowKey(patterns ?? []))
+  }
+}
+
+/** [항상 허용]을 받는 권한 — 폴더 밖 접근만 (이슈 #242). 다른 권한·보내기·만들기·질문은 늘 묻는다 */
+const ALLOW_ALWAYS_ACTION = 'external_directory'
+
+/** 요청 패턴의 비교 열쇠 — 패턴 목록이 같아야 같은 요청이다 */
+function allowKey(patterns: readonly string[]): string {
+  return JSON.stringify([...patterns].sort())
 }
 
 /** 끝난(completed·error) 도구 파트 → 'llm/tool-done' 의 중립 모양. 아직 도는 파트·도구가 아닌 파트면 undefined.
