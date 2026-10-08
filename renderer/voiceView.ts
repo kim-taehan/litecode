@@ -9,6 +9,7 @@ import { SPEECH_MAX_SAMPLES, SPEECH_MAX_SECONDS, type SpeechErrorCode, type Spee
 // 음성 대화 모드 1단계(#238, 실측 _workspace/01aq_voice_chat_feasibility.md): 같은 상태 기계에 chat 표시를 단다 — 듣는 중(recording) → 말을 멈추면 카운트다운
 // (countdown) → 보내는 중(transcribing) → 다시 듣기(listen). 보낼 수 없으면 입력창에 넣고 사유를 남기고 끈다(대기 + notice).
 // 계속 듣기(#240): 답이 오는 동안에도 마이크를 닫지 않는다 — 보내는 중에도 마이크는 열려 있고, 도는 턴이 있으면 보낸 말은 메인의 대기열에 쌓인다.
+// 버튼 하나(#244): 받아쓰기(정지를 눌러야 입력창에 넣는 녹음)를 없앴다 — 녹음은 늘 음성 대화로 시작한다(start 가 chat 을 단다).
 
 // ── 상태 기계 ────────────────────────────────────────────────────────────────
 
@@ -40,8 +41,8 @@ export interface VoiceState {
 export type VoiceLiveText = Pick<SpeechPartial, 'final' | 'tentative'>
 
 export type VoiceEvent =
-  /** 마이크·대화 버튼 — 대기일 때만. run 은 앞 번호보다 커야 한다 */
-  | { type: 'start'; run: number; sessionId: string; chat?: boolean }
+  /** 음성 버튼 — 대기일 때만, 늘 대화 모드로 (#244). run 은 앞 번호보다 커야 한다 */
+  | { type: 'start'; run: number; sessionId: string }
   /** 마이크가 열렸다 */
   | { type: 'granted'; run: number }
   /** 말하는 동안의 글이 바뀌었다 — 녹음 중·받아쓰는 중(정지 직전에 보낸 조각의 답)일 때만 */
@@ -54,16 +55,14 @@ export type VoiceEvent =
   | { type: 'listen'; run: number }
   /** 대화 모드를 끈다 — 어느 단계든 대기로, 사유를 남긴다 (대기면 사유만) */
   | { type: 'end'; notice?: VoiceNotice }
-  /** 정지(버튼·상한) — 녹음 중일 때만 */
+  /** 정지(말 끝·끄기) — 녹음 중일 때만 */
   | { type: 'stop'; run: number }
-  /** 인식이 끝났다 — notice 는 "말소리 없음"·"다른 대화에 넣음" */
+  /** 인식이 끝났다 (입력창에 넣고 껐다) — notice 는 멈춘 사유·"다른 대화에 넣음" */
   | { type: 'done'; run: number; notice?: VoiceNotice }
   /** 마이크·녹음·인식 실패 */
   | { type: 'failed'; run: number; notice: VoiceNotice }
   /** 취소(✕·Esc·대화 삭제·기능 끔) — 어느 단계든 대기로, 띠의 글도 지운다 */
   | { type: 'cancel' }
-  /** 준비 안 된 엔진처럼 녹음을 시작하지 않고 알리는 것 — 대기일 때만 */
-  | { type: 'notify'; notice: VoiceNotice }
   | { type: 'dismiss' }
 
 export const VOICE_IDLE: VoiceState = { phase: 'idle', run: 0 }
@@ -72,7 +71,7 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
   switch (event.type) {
     case 'start':
       if (state.phase !== 'idle' || event.run <= state.run) return state
-      return { phase: 'requesting', run: event.run, sessionId: event.sessionId, ...(event.chat && { chat: true }) }
+      return { phase: 'requesting', run: event.run, sessionId: event.sessionId, chat: true }
     case 'granted':
       return state.phase === 'requesting' && event.run === state.run ? { ...state, phase: 'recording' } : state
     case 'partial':
@@ -99,8 +98,6 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       return { phase: 'idle', run: state.run, notice: event.notice }
     case 'cancel':
       return state.phase === 'idle' && !state.notice ? state : { phase: 'idle', run: state.run }
-    case 'notify':
-      return state.phase === 'idle' ? { phase: 'idle', run: state.run, notice: event.notice } : state
     case 'dismiss': {
       if (!state.notice) return state
       const { notice: _, ...rest } = state
@@ -155,14 +152,6 @@ export function barLevel(value: number): number {
 /** 새 값을 오른쪽 끝에 넣고 왼쪽으로 민다 — 길이는 그대로 */
 export function pushLevel(levels: readonly number[], level: number): number[] {
   return [...levels.slice(1), level]
-}
-
-// ── 경과 ─────────────────────────────────────────────────────────────────────
-
-/** 녹음 경과 "0:07" — 상한을 넘겨 그리지 않는다 */
-export function elapsedLabel(ms: number): string {
-  const seconds = Math.max(0, Math.min(SPEECH_MAX_SECONDS, Math.floor(ms / 1000)))
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 // ── 넣기 ─────────────────────────────────────────────────────────────────────

@@ -1,23 +1,24 @@
 /* 음성 입력 (이슈 #109 2단계) — 마이크 버튼과 녹음 띠. 치수는 dsh client-ui-voice-input(28px 버튼, 32px 둥근 버튼, 24px 파형)을 따르고
    색은 styles.css 의 토큰만 쓴다 (라이트·다크 공통) */
 
-/* 마이크 버튼 — 모델 선택과 보내기 사이. 바탕 없는 28px 원, 도는 동안은 눌린 모양 */
+/* 음성 버튼 (#244, 시안 MgE8jmZ4f1XM578AUgQxp6 안 2) — 모델 선택과 보내기 사이. 마이크 아이콘만, 회색 32px 원. 음성 대화 중엔 파란 채움 + 흰 아이콘 */
 .composer__voice {
   display: grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: none;
   border-radius: 999px;
   outline: none;
-  background: transparent;
+  background: var(--fill-hover);
   color: var(--text-secondary);
+  transition: background-color 100ms ease;
 }
 
-.composer__voice:hover:not(:disabled) {
-  background: var(--fill-hover);
+.composer__voice:hover {
+  background: var(--fill-active);
 }
 
 .composer__voice:focus-visible,
@@ -26,17 +27,12 @@
 }
 
 .composer__voice[aria-pressed='true'] {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--accent);
+  color: #fff;
 }
 
-.composer__voice[data-voice='recording'] {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.composer__voice:disabled {
-  cursor: default;
+.composer__voice[aria-pressed='true']:hover {
+  background: var(--accent-hover);
 }
 
 /* 녹음 띠 — 입력칸과 아래 줄 사이의 한 줄 */
@@ -117,14 +113,6 @@
   background: var(--text-tertiary);
 }
 
-.voice-strip__time {
-  flex: none;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .voice-strip__button {
   display: grid;
   place-items: center;
@@ -143,50 +131,8 @@
   background: var(--fill-active);
 }
 
-.voice-strip__stop {
-  background: var(--danger);
-  color: #fff;
-}
-
-.voice-strip__stop:hover {
-  background: var(--danger);
-  opacity: 0.85;
-}
-
-/* 대화 버튼 (#238) — 마이크 옆. 마이크와 같은 28px 높이의 알약, 음성 대화 중엔 눌린 모양 */
-.composer__talk {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: none;
-  height: 28px;
-  padding: 0 10px 0 8px;
-  border: none;
-  border-radius: 999px;
-  outline: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.composer__talk:hover:not(:disabled) {
-  background: var(--fill-hover);
-}
-
-.composer__talk:focus-visible,
 .voice-strip__hold:focus-visible {
   box-shadow: 0 0 0 2px var(--accent);
-}
-
-.composer__talk[aria-pressed='true'] {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.composer__talk:disabled {
-  cursor: default;
-  opacity: 0.5;
 }
 
 /* 음성 대화 띠 — 받아쓰기 띠와 같은 줄. 듣는 중엔 글이 제 너비만(음량 막대가 남은 자리), 카운트다운에선 차오르는 띠가 남은 자리 */
