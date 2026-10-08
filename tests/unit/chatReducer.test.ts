@@ -160,10 +160,13 @@ describe('대화 화면의 판정 (App.tsx 에서 옮김)', () => {
     expect(titleFrom('')).toBe('')
   })
 
-  it('queueLabel: 보일 글 > 본문 > (글 없이 첨부만) 파일 이름들', () => {
+  it('queueLabel: 보일 글 > 본문, 첨부가 있으면 뒤에 파일 이름들 (글 없이 첨부만이면 이름만 — 이슈 #246)', () => {
+    const files = [{ kind: 'file' as const, path: '/w/a.md', name: 'a.md', size: 1 }, { kind: 'image' as const, path: '/w/b.png', name: 'b.png', size: 2 }]
     expect(queueLabel({ text: 'expanded', display: '/hi' })).toBe('/hi')
     expect(queueLabel({ text: 'plain' })).toBe('plain')
-    expect(queueLabel({ text: '', attachments: [{ kind: 'file', path: '/w/a.md', name: 'a.md', size: 1 }, { kind: 'image', path: '/w/b.png', name: 'b.png', size: 2 }] })).toBe('a.md, b.png')
+    expect(queueLabel({ text: '', attachments: files })).toBe('a.md, b.png')
+    expect(queueLabel({ text: '봐 줘', attachments: files })).toBe('봐 줘 · a.md, b.png')
+    expect(queueLabel({ text: 'expanded', display: '/hi', attachments: [files[1]!] })).toBe('/hi · b.png')
   })
 
   it('switchedMode: 앞 내 말과 모드가 다른 내 말 자리에 구분선 — 첫 내 말·모드 없는 말은 아니다', () => {

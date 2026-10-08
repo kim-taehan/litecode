@@ -95,7 +95,10 @@ export function chipsOf(picked: readonly PickedAttachment[]): Attachment[] {
   return [...picked.filter((item) => item.kind !== 'image').map(chip), ...picked.filter((item) => item.kind === 'image').map(chip)]
 }
 
-/** 대기열 한 줄에 보일 글 — 보일 글(없으면 본문), 글 없이 첨부만 쌓았으면 파일 이름 (이슈 #44) */
+/** 대기열 한 줄에 보일 글 — 보일 글(없으면 본문), 첨부가 있으면 뒤에 ` · ` 로 파일 이름들. 글 없이 첨부만이면 이름만 (이슈 #44·#246).
+ *  글이 앞이라 한 줄 말줄임에서 잘리는 쪽은 이름이다 — 전체는 줄의 title 로 본다 */
 export function queueLabel(item: QueuedSend): string {
-  return (item.display ?? item.text) || (item.attachments ?? []).map((file) => file.name).join(', ')
+  const shown = item.display ?? item.text
+  const names = (item.attachments ?? []).map((file) => file.name).join(', ')
+  return shown && names ? `${shown} · ${names}` : shown || names
 }

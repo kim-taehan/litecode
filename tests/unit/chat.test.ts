@@ -574,7 +574,7 @@ describe('ChatService — 첨부 (이슈 #44)', () => {
     const first = await turn(1)
     await chat.send('c1', input('', { project: root, attachments: [{ kind: 'file', path: a, name: 'a.md', size: 1 }] }))
     await chat.send('c1', input('둘 다 봐', { project: root, attachments: [{ kind: 'file', path: b, name: 'b.md', size: 1 }] }))
-    expect(of('queue.changed').at(-1)).toMatchObject({ items: ['a.md', '둘 다 봐'], attachments: [{ kind: 'file', name: 'a.md', size: 1 }, { kind: 'file', name: 'b.md', size: 1 }] })
+    expect(of('queue.changed').at(-1)).toMatchObject({ items: ['a.md', '둘 다 봐 · b.md'], attachments: [{ kind: 'file', name: 'a.md', size: 1 }, { kind: 'file', name: 'b.md', size: 1 }] })
     first.finish()
     const second = await turn(2)
     expect(second.prompt.indexOf('a.md')).toBeGreaterThan(-1)
