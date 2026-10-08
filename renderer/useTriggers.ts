@@ -57,6 +57,12 @@ export function triggerOpen(query: Pick<TriggerQuery, 'span' | 'candidates'> | n
   return !!query && focused && query.candidates.length > 0 && spanKey(query) !== dismissed
 }
 
+/** 닫은 표시를 계속 쥘지 — 메뉴가 가리키는 자리·질의가 바뀌었거나(다른 글자, 트리거가 사라짐) 후보가 없어졌으면 잊는다.
+ *  잊지 않으면 Esc 로 닫은 뒤 같은 자리에 `@` 를 다시 쳐도(질의가 같다) 대화를 바꿀 때까지 메뉴가 다시 열리지 않는다 (이슈 #236) */
+export function nextDismissed(dismissed: string | undefined, key: string | null): string | undefined {
+  return dismissed !== undefined && key === dismissed ? dismissed : undefined
+}
+
 /** 후보와 그 후보를 물은 입력 — 구간(span)은 asked 의 글 기준이다 */
 export type AskedQuery = TriggerQuery & { asked: { draft: string; caret: number } }
 
@@ -118,6 +124,10 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
 
   const key = query && spanKey(query)
   const open = triggerOpen(query, dismissed, focused)
+  // 메뉴가 다른 자리·질의를 가리키거나 사라지면 닫은 표시를 잊는다 — 다시 같은 글자를 치면 다시 열린다
+  useEffect(() => {
+    setDismissed((current) => nextDismissed(current, key))
+  }, [key])
 
   function replaceQuerySpan(text: string): void {
     const next = query && replaceSpan(query, latestDraft.current, text)
