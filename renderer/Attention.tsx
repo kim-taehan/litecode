@@ -12,7 +12,8 @@ import './attention.css'
 
 // 턴이 사람을 기다릴 때 대화 안에 뜨는 카드 (라운드 A). 승인 카드는 dsh ui-approval(주황 띠 "승인 대기" + 제목 + 명령 + [거절][한 번 허용],
 // 카드에 포커스가 있으면 Enter 허용·Esc 거절), 질문 카드는 dsh ui-user-questions(보기 버튼 + 직접 입력)의 모양·동작을 litecode 로 새로 썼다.
-// "항상 허용" 은 두지 않는다(사용자 결정 — 되돌릴 화면이 없다). 답은 메인(ctx.llm.reply)으로 가고, 답한 카드는 메인이 목록에서 뺀다.
+// "항상 허용" 은 폴더 밖 접근 카드에만 둔다(이슈 #242 — 그 대화 + 그 폴더만, 앱을 다시 켜면 잊는다. 엔진에는 once 만 간다). 그 밖의 카드에는
+// 두지 않는다(사용자 결정 — 되돌릴 화면이 없다). 답은 메인(ctx.llm.reply)으로 가고, 답한 카드는 메인이 목록에서 뺀다.
 
 interface CardProps<T extends Attention> {
   request: T
@@ -71,6 +72,8 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   const [scope, setScope] = useState(make?.scope)
   // 브라우저 도구 (이슈 #147) — 서버·도구 이름만으로는 무엇을 승인하는지 모른다. 열 주소·넣을 글·실행할 스크립트를 줄이지 않고 보인다
   const browser = request.mcp?.server === BROWSER_MCP_NAME ? browserApprovalDetail(request.mcp.tool, request.input) : undefined
+  /** [항상 허용] — 폴더 밖 접근만 (이슈 #242) */
+  const always = request.action === 'external_directory' && !request.mcp
   const allow = (): void => {
     if (make) return answer('once', { kind: 'scope', scope: scope ?? make.scope })
     if (!delegation) return answer('once')
@@ -138,9 +141,15 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
       <div className="attention-card__actions">
         {delegation && <span className="attention-card__actions-note">{t('delegate.card.note')}</span>}
         {make && make.kind !== 'mcp' && <span className="attention-card__actions-note">{t(`make.${make.kind}.note`)}</span>}
+        {always && <span className="attention-card__actions-note">{t('approval.allowAlwaysNote')}</span>}
         <button type="button" className="attention-card__button attention-card__button--reject" disabled={busy} onClick={() => answer('reject')}>
           {t('approval.reject')}
         </button>
+        {always && (
+          <button type="button" className="attention-card__button" data-answer="always" disabled={busy} onClick={() => answer('always')}>
+            {t('approval.allowAlways')}
+          </button>
+        )}
         <button type="button" className="attention-card__button attention-card__button--primary" disabled={busy || (!!delegation && !chosen)} onClick={allow}>
           {make ? t(`make.${make.kind}.allow`) : !delegation ? t('approval.allowOnce') : chosen ? t('delegate.pick.send', { project: chosen.project.name }) : t('delegate.pick.sendNone')}
         </button>

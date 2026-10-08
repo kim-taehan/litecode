@@ -152,8 +152,10 @@ export interface AttentionQuestion {
   multiple?: boolean
 }
 
-/** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'. "항상 허용" 은 없다(사용자 결정) */
-export type AttentionAnswer = 'once' | 'reject' | string[][]
+/** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'.
+ *  'always'(항상 허용, 이슈 #242)는 폴더 밖 접근(external_directory) 카드에만 — 엔진에는 once 로 가고, 앱이 그 대화 + 그 패턴을 기억해
+ *  다음 요청을 카드 없이 once 로 답한다(앱을 다시 켜면 잊는다). 폰은 보내지 못한다 */
+export type AttentionAnswer = 'once' | 'always' | 'reject' | string[][]
 
 /** 승인 카드에서 사용자가 고른 "받을 대화" (이슈 #67·#137) — 다른 프로젝트에 지시를 보내는 도구의 허용(once)에 함께 싣는다. 고른 프로젝트의
  *  마지막에 보던 대화 하나다. 엔진은 모른다(엔진에 가는 답은 once 뿐) — 앱이 허용 기록에 적어 두고 앱 MCP 서버의 도구가 실행할 때 쓴다 */

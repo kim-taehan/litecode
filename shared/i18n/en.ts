@@ -278,6 +278,8 @@ export const en = {
   'approval.webfetch': 'Wants to fetch a web page',
   'approval.other': 'Requests the {action} permission',
   'approval.allowOnce': 'Allow once',
+  'approval.allowAlways': 'Always allow',
+  'approval.allowAlwaysNote': "Won't ask again for this folder in this conversation",
   'approval.reject': 'Reject',
   'approval.sendError': 'Could not send the answer: {reason}',
   'question.waiting': 'Answer needed',

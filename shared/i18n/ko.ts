@@ -293,6 +293,8 @@ export const ko = {
   'approval.webfetch': '웹 페이지를 가져오려고 합니다',
   'approval.other': '{action} 권한을 요청합니다',
   'approval.allowOnce': '한 번 허용',
+  'approval.allowAlways': '항상 허용',
+  'approval.allowAlwaysNote': '이 대화에서 이 폴더는 다시 묻지 않습니다',
   'approval.reject': '거절',
   'approval.sendError': '답을 보내지 못했습니다: {reason}',
   'question.waiting': '질문에 답해 주세요',
