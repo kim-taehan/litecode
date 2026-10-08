@@ -398,7 +398,7 @@ describe('실패 문구', () => {
 })
 
 describe('마이크 버튼·녹음 띠의 그림 (정적 렌더)', () => {
-  const voice = (state: VoiceState, on = true): VoiceInput => ({ on, state, since: undefined, toggle() {}, cancel() {}, dismiss() {}, level: () => 0, toggleChat() {}, hold() {} })
+  const voice = (state: VoiceState, on = true): VoiceInput => ({ on, state, since: undefined, toggle() {}, cancel() {}, dismiss() {}, level: () => 0, answering: false, toggleChat() {}, hold() {} })
   const button = (state: VoiceState, on = true) => renderToStaticMarkup(createElement(VoiceButton, { voice: voice(state, on) }))
   const strip = (state: VoiceState, on = true) => renderToStaticMarkup(createElement(VoiceStrip, { voice: voice(state, on) }))
   const recording: VoiceState = { phase: 'recording', run: 1, sessionId: 'a' }

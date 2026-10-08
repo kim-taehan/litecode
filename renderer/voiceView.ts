@@ -7,12 +7,13 @@ import { SPEECH_MAX_SAMPLES, SPEECH_MAX_SECONDS, type SpeechErrorCode, type Spee
 // 결과는 입력창에 넣기만). dsh 와 다른 점: 초안이 바뀌었으면 "넣기" 버튼 대신 지금 커서 자리에, 대화를 바꿨으면 버리지 않고 시작한 대화의 초안에.
 // 3단계(실시간 받아쓰기): 말하는 동안 받아쓴 글(확정 + 임시)을 상태에 쥐고 띠 아래에 보인다 — 입력창에는 정지 뒤에 한 번에 넣는다 (말하는 중에 커서가 튀지 않게).
 // 음성 대화 모드 1단계(#238, 실측 _workspace/01aq_voice_chat_feasibility.md): 같은 상태 기계에 chat 표시를 단다 — 듣는 중(recording) → 말을 멈추면 카운트다운
-// (countdown) → 보내는 중(transcribing) → 답 대기(waiting, 마이크는 닫혀 있다) → 다시 듣기. 보낼 수 없으면 입력창에 넣고 사유를 남기고 끈다(대기 + notice).
+// (countdown) → 보내는 중(transcribing) → 다시 듣기(listen). 보낼 수 없으면 입력창에 넣고 사유를 남기고 끈다(대기 + notice).
+// 계속 듣기(#240): 답이 오는 동안에도 마이크를 닫지 않는다 — 보내는 중에도 마이크는 열려 있고, 도는 턴이 있으면 보낸 말은 메인의 대기열에 쌓인다.
 
 // ── 상태 기계 ────────────────────────────────────────────────────────────────
 
-/** idle: 대기 · requesting: 마이크를 여는 중(권한 창 포함) · recording: 녹음 중 · transcribing: 받아쓰는 중 · waiting: 대화 모드에서 보낸 턴의 답을 기다린다 */
-export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'transcribing' | 'waiting'
+/** idle: 대기 · requesting: 마이크를 여는 중(권한 창 포함) · recording: 녹음 중 · transcribing: 받아쓰는 중 (대화 모드는 보내는 중 — 마이크는 열려 있다) */
+export type VoicePhase = 'idle' | 'requesting' | 'recording' | 'transcribing'
 
 /** 녹음 띠에 남는 한 줄 — info 는 잠깐 보이고 사라지고, error 는 닫거나 다시 녹음할 때까지 남는다 */
 export interface VoiceNotice {
@@ -39,7 +40,7 @@ export interface VoiceState {
 export type VoiceLiveText = Pick<SpeechPartial, 'final' | 'tentative'>
 
 export type VoiceEvent =
-  /** 마이크 버튼 — 대기일 때만(대화 모드는 답 대기에서도). run 은 앞 번호보다 커야 한다 */
+  /** 마이크·대화 버튼 — 대기일 때만. run 은 앞 번호보다 커야 한다 */
   | { type: 'start'; run: number; sessionId: string; chat?: boolean }
   /** 마이크가 열렸다 */
   | { type: 'granted'; run: number }
@@ -49,8 +50,8 @@ export type VoiceEvent =
   | { type: 'countdown'; run: number; until: number }
   /** 대화 모드 — 카운트다운 중에 다시 말했다. 그대로 이어서 듣는다 */
   | { type: 'resume'; run: number }
-  /** 대화 모드 — 보냈다(또는 들은 글이 비었다). 마이크를 닫고 답을 기다린다 */
-  | { type: 'wait'; run: number }
+  /** 대화 모드 — 보냈다(또는 들은 글이 비었다·대기열에 넣었다). 열린 마이크로 다시 듣는다 */
+  | { type: 'listen'; run: number }
   /** 대화 모드를 끈다 — 어느 단계든 대기로, 사유를 남긴다 (대기면 사유만) */
   | { type: 'end'; notice?: VoiceNotice }
   /** 정지(버튼·상한) — 녹음 중일 때만 */
@@ -70,7 +71,7 @@ export const VOICE_IDLE: VoiceState = { phase: 'idle', run: 0 }
 export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
   switch (event.type) {
     case 'start':
-      if ((state.phase !== 'idle' && !(state.phase === 'waiting' && event.chat)) || event.run <= state.run) return state
+      if (state.phase !== 'idle' || event.run <= state.run) return state
       return { phase: 'requesting', run: event.run, sessionId: event.sessionId, ...(event.chat && { chat: true }) }
     case 'granted':
       return state.phase === 'requesting' && event.run === state.run ? { ...state, phase: 'recording' } : state
@@ -82,9 +83,9 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
       return state.phase === 'recording' && state.chat && event.run === state.run ? { ...state, countdown: event.until } : state
     case 'resume':
       return state.countdown !== undefined && event.run === state.run ? withoutCountdown(state) : state
-    case 'wait':
+    case 'listen':
       if (state.phase !== 'transcribing' || !state.chat || event.run !== state.run) return state
-      return { phase: 'waiting', run: state.run, ...(state.sessionId !== undefined && { sessionId: state.sessionId }), chat: true }
+      return { phase: 'recording', run: state.run, ...(state.sessionId !== undefined && { sessionId: state.sessionId }), chat: true }
     case 'end':
       if (state.phase === 'idle') return event.notice ? { phase: 'idle', run: state.run, notice: event.notice } : state
       return { phase: 'idle', run: state.run, ...(event.notice && { notice: event.notice }) }
@@ -113,9 +114,9 @@ function withoutCountdown(state: VoiceState): VoiceState {
   return rest
 }
 
-/** 마이크를 쥐고 있거나 받아쓰기의 답을 기다리는 중 — Esc 가 취소다. 대화 모드의 답 대기는 아니다 (마이크가 닫혀 있고, Esc 는 답변 중지의 것) */
+/** 마이크를 쥐고 있거나 받아쓰기의 답을 기다리는 중 — Esc 가 취소다. 대화 모드는 답이 오는 동안에도 듣는다 — 그때의 Esc 도 음성 대화의 것이다 (#240) */
 export function voiceBusy(state: VoiceState): boolean {
-  return state.phase !== 'idle' && state.phase !== 'waiting'
+  return state.phase !== 'idle'
 }
 
 /** info 줄이 떠 있는 시간 */
@@ -232,8 +233,6 @@ export const VOICE_CHAT_SILENCE_MS = 1200
 export const VAD_OFF_MS = 500
 /** VAD 가 꺼진 뒤의 카운트다운 — 띠가 이만큼 차오른 뒤 보낸다. 다시 말하면 VAD 가 약 0.3초 뒤에 켜지므로 실제 여유는 약 0.9초 (01aq §2.5) */
 export const VOICE_CHAT_COUNTDOWN_MS = VOICE_CHAT_SILENCE_MS - VAD_OFF_MS
-/** 답이 끝난 뒤 "도는 턴 없음 + 대기열 빔" 이 이만큼 이어지면 다시 듣는다 — after-turn 훅의 다음 턴은 turn-ended 뒤에 시작된다 (01aq §3.3) */
-export const VOICE_CHAT_SETTLE_MS = 300
 /** 받아쓰기 한 번의 상한(120초) 전에 스트림을 닫고 다시 연다 — 그때까지 들은 글이 있으면 보내지 않고 입력창에 넣고 끈다 */
 export const VOICE_CHAT_REOPEN_MS = (SPEECH_MAX_SECONDS - 10) * 1000
 
@@ -253,19 +252,17 @@ export interface VoiceChatTarget {
   model: boolean
   /** 쓸 수 있는 대화 (기록을 읽었고 폴더가 있다) */
   writable: boolean
-  /** 그 대화에 도는 턴·대기열·붙잡힌 대기열이 있다 */
-  busy: boolean
   /** 승인·질문 카드가 떠 있다 */
   attention: boolean
 }
 
 /**
  * 자동 보내기 금지 표 (01aq §3.2) — 보낼 수 없으면 사유. 시작할 때는 transcript 없이 부른다.
- * 사용자가 친 글·첨부가 말과 섞여 나가지 않게, `/`·`!` 로 시작하는 말이 명령·셸로 실행되지 않게, 보내기가 말없이 돌아가지 않게
+ * 사용자가 친 글·첨부가 말과 섞여 나가지 않게, `/`·`!` 로 시작하는 말이 명령·셸로 실행되지 않게, 보내기가 말없이 돌아가지 않게.
+ * 그 대화에 도는 턴은 막지 않는다 (#240) — 보내면 메인이 대기열에 쌓고 턴이 끝나면 차례로 보낸다
  */
 export function voiceChatBlock(target: VoiceChatTarget, transcript?: string): MessageKey | undefined {
   if (target.attention) return 'voice.chat.stop.attention'
-  if (target.busy) return 'voice.chat.stop.busy'
   if (target.draft.trim() !== '' || target.attachments > 0) return 'voice.chat.stop.draft'
   if (!target.model) return 'voice.chat.stop.noModel'
   if (!target.writable) return 'voice.chat.stop.cannotWrite'
@@ -273,28 +270,21 @@ export function voiceChatBlock(target: VoiceChatTarget, transcript?: string): Me
   return undefined
 }
 
-/** 답 대기 중 턴이 끝났다 — 실패·중지면 멈춘다 (다시 들으면 같은 글이 또 막히거나, 사용자가 멈춘 것을 되돌린다) */
+/** 대화 모드 중 그 대화의 턴이 끝났다 — 실패·중지면 멈춘다 (계속 들으면 같은 글이 또 막히거나, 사용자가 멈춘 것을 되돌린다) */
 export function turnStopReason(outcome: TurnOutcome): MessageKey | undefined {
   return outcome === 'failed' ? 'voice.chat.stop.failed' : outcome === 'interrupted' ? 'voice.chat.stop.interrupted' : undefined
 }
 
-/** 보고 있는 대화의 턴 상태 — busy: 도는 턴·대기열·붙잡힌 대기열, attention: 승인·질문 카드 */
+/** 보고 있는 대화의 턴 상태 — busy: 도는 턴·대기열·붙잡힌 대기열(띠의 "답변 중" 표시), attention: 승인·질문 카드 */
 export interface VoiceChatActivity {
   busy: boolean
   attention: boolean
 }
 
 /**
- * 대화 모드에서 대화의 턴 상태가 바뀌었을 때 할 일.
- * - 답 대기: 카드가 뜨면 멈춤. 보낸 턴이 시작된 걸 본 뒤(started) 도는 턴·대기열이 없으면 다시 듣기 (VOICE_CHAT_SETTLE_MS 유지는 훅이 잰다)
- * - 마이크를 여는 중·듣는 중: 그 대화에 턴이 시작되면(폰·다른 대화가 보냄) 멈춤 — 받아쓴 글은 입력창으로
+ * 대화 모드에서 대화의 턴 상태가 바뀌었을 때 멈출 사유 — 승인·질문 카드가 뜨면 어느 단계든 멈춘다 (카드 중에 한 말이 답으로 쓰이면 안 된다).
+ * 도는 턴은 멈출 사유가 아니다 (#240 — 듣는 중 보낸 말은 대기열로)
  */
-export function voiceChatWatch(state: VoiceState, activity: VoiceChatActivity, started: boolean): { type: 'relisten' } | { type: 'end'; key: MessageKey } | undefined {
-  if (!state.chat) return undefined
-  if (state.phase === 'waiting') {
-    if (activity.attention) return { type: 'end', key: 'voice.chat.stop.attention' }
-    return started && !activity.busy ? { type: 'relisten' } : undefined
-  }
-  if ((state.phase === 'requesting' || state.phase === 'recording') && activity.busy) return { type: 'end', key: 'voice.chat.stop.busy' }
-  return undefined
+export function voiceChatWatch(state: VoiceState, activity: VoiceChatActivity): MessageKey | undefined {
+  return state.chat && activity.attention ? 'voice.chat.stop.attention' : undefined
 }
