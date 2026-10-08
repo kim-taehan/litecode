@@ -68,10 +68,10 @@ export type WorkerRequest =
   | { type: 'stream-cancel'; id: number }
 
 /** 워커 → 메인. ready: 엔진·모델을 읽었다 · fatal: 못 읽었다(워커는 곧 끝난다) · result/error: 그 id 의 답 ·
- *  partial: stream-feed 의 답 — 지금까지 확정된 글 전부와 말하고 있는 구간의 임시 글 */
+ *  partial: stream-feed 의 답 — 지금까지 확정된 글 전부와 말하고 있는 구간의 임시 글, VAD 가 말소리로 보는지와 꺼진 뒤 지난 시간 */
 export type WorkerReply =
   | { type: 'ready'; loadMs: number }
   | { type: 'fatal'; message: string }
   | { type: 'result'; id: number; text: string; inferMs: number }
-  | { type: 'partial'; id: number; final: string; tentative: string; inferMs: number }
+  | { type: 'partial'; id: number; final: string; tentative: string; speaking: boolean; silentMs: number; inferMs: number }
   | { type: 'error'; id: number; message: string }

@@ -40,7 +40,7 @@ export function speechBridgeStreams(speech: Pick<SpeechService, 'openStream'>, e
             if (open !== mine) return
             open = undefined
             // 정지를 기다리는 중이면 그 답이 사유를 준다
-            if (!mine.stopping) emit({ stream: id, final: '', tentative: '', error: error instanceof SpeechError ? error.code : 'failed' })
+            if (!mine.stopping) emit({ stream: id, final: '', tentative: '', speaking: false, silentMs: 0, error: error instanceof SpeechError ? error.code : 'failed' })
           },
         )
         return { ok: true, stream: id }
