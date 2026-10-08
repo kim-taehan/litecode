@@ -18,7 +18,6 @@ import {
   turnStopReason,
   VOICE_BARS,
   VOICE_CHAT_REOPEN_MS,
-  VOICE_CHAT_SETTLE_MS,
   VOICE_IDLE,
   VOICE_NOTICE_MS,
   voiceBusy,
@@ -42,8 +41,9 @@ import './voice.css'
 // 상태는 App 에 훅 하나(useVoiceInput)로 두고 버튼과 띠가 나눠 그린다 — 둘이 입력 카드의 다른 줄에 있다.
 // 음성 대화 모드 1단계 (#238, 시안 CkySBn4p42AwG7w1jxL8ZZ ②~④, 실측 _workspace/01aq_voice_chat_feasibility.md) — 마이크 옆 '대화' 버튼. 같은 녹음·스트림 길을 쓰고:
 // 말을 멈추면(엔진의 VAD 가 꺼지고 silentMs 가 차면) 카운트다운 띠가 차오른 뒤 받아쓴 글**만** 보낸다(첨부·트리거 없이). 카운트다운 중에 다시 말하면 이어서 받아쓴다.
-// 보내면 마이크를 닫고 답을 기다리다가, 그 대화에 도는 턴·대기열이 없는 상태가 300ms 이어지면 다시 듣는다(새 이벤트 없이 — after-turn 훅의 다음 턴과 겹치지 않게).
-// 보낼 수 없으면(초안·첨부·`/`·`!`·모델 없음·쓸 수 없는 대화·도는 턴·대화 전환) 받아쓴 글을 입력창에 넣고 사유를 띠에 남기고 끈다 — 조용히 돌아가지 않는다.
+// 계속 듣기(#240): 보낼 때 마이크는 그대로 두고 받아쓰기 스트림만 닫아 글을 받고 새 스트림을 연다(그사이 조각은 쥐었다가 새 스트림에). 답이 오는 동안에도
+// 듣고, 그때 말을 멈추면 같은 보내기를 부른다 — 그 대화에 도는 턴이 있으면 메인(ctx.chat)이 대기열에 쌓고 턴이 끝나면 차례로 보낸다.
+// 보낼 수 없으면(초안·첨부·`/`·`!`·모델 없음·쓸 수 없는 대화·대화 전환) 받아쓴 글을 입력창에 넣고 사유를 띠에 남기고 끈다 — 조용히 돌아가지 않는다.
 // 승인·질문 카드·실패·중지에서도 멈춘다. 받아쓰기 120초 상한 전에 스트림만 닫고 다시 연다(마이크는 그대로). 읽어 주기·말로 끼어들기는 없다(2·3단계).
 
 export interface VoiceInputOptions {
@@ -76,6 +76,8 @@ export interface VoiceInput {
   dismiss(): void
   /** 지금 음량 (RMS) */
   level(): number
+  /** 그 대화에 답이 오는 중(도는 턴·대기열) — 대화 모드 띠의 "답변 중" 표시. 이때 보낸 말은 대기열에 쌓인다 */
+  answering: boolean
   /** 대화 버튼 — 꺼져 있으면 음성 대화를 시작하고, 켜져 있으면 끈다 (들은 글은 입력창에) */
   toggleChat(): void
   /** 카운트다운의 [취소] — 보내지 않고 입력창에 남기고 음성 대화를 끈다 */
@@ -102,6 +104,8 @@ interface Flight {
   countdown?: ReturnType<typeof setTimeout>
   /** 대화 모드인데 보내지 않고 입력창에 넣고 끈다 — 그때 남길 사유 */
   keep?: { notice?: VoiceNotice }
+  /** 대화 모드 — 말 끝의 스트림을 닫고 글을 받는 중 (마이크는 열려 있다). 그사이 끄면 받은 글을 입력창에 넣는다 */
+  sending?: boolean
 }
 
 const EMPTY: VoiceNotice = { tone: 'info', key: 'voice.empty' }
@@ -120,8 +124,6 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
   latest.current = options
   const current = useRef(state)
   current.current = state
-  /** 대화 모드의 답 대기 — 보낸 턴이 시작된 걸 봤다 (그 전엔 다시 듣지 않는다) */
-  const [started, setStarted] = useState(false)
 
   /** 마이크와 메인의 스트림을 놓는다 (끝난 스트림을 버려도 된다) */
   function release(active: Flight): void {
@@ -158,7 +160,7 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     dispatch({ type: 'done', run: active.run, ...(notice && { notice }) })
   }
 
-  /** chat: 음성 대화 모드의 듣기 — 대기나 답 대기에서. 보낼 수 없는 대화면 시작하지 않고 사유를 남긴다 */
+  /** chat: 음성 대화 모드의 듣기 — 대기에서. 보낼 수 없는 대화면 시작하지 않고 사유를 남긴다 (답이 오는 중이어도 시작한다 — #240) */
   async function start(chat = false): Promise<void> {
     const { sessionId, inputRef } = latest.current
     if (!sessionId || flight.current) return
@@ -215,6 +217,11 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     active.stream = undefined
     active.live = undefined
     void window.litecode.cancelSpeechStream(old).catch(() => {})
+    await restream(active)
+  }
+
+  /** 대화 모드 — 스트림을 닫은 뒤 새로 연다 (마이크는 그대로). 그사이 쥔 조각을 새 스트림에 흘리고 다시 열기 타이머를 건다 */
+  async function restream(active: Flight): Promise<void> {
     let opened: SpeechStreamOpened
     try {
       opened = await window.litecode.startSpeechStream()
@@ -242,24 +249,59 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
       active.countdown = undefined
       dispatch({ type: 'resume', run: active.run })
     } else if (active.countdown === undefined) {
-      active.countdown = setTimeout(() => void finish(active), left)
+      active.countdown = setTimeout(() => void utter(active), left)
       dispatch({ type: 'countdown', run: active.run, until: performance.now() + left })
     }
   }
 
-  /** 대화 모드 — 보냈다(또는 들은 글이 없다). 마이크를 놓고 답을 기다린다. relisten: 턴을 기다리지 않고 곧 다시 듣는다 */
-  function wait(active: Flight, relisten: boolean): void {
-    flight.current = undefined
-    setStarted(relisten)
-    dispatch({ type: 'wait', run: active.run })
+  /**
+   * 대화 모드 — 말 끝(카운트다운이 끝났다). 마이크는 그대로 두고 지금 스트림만 닫아 받아쓴 글을 받아 보낸다 — 도는 턴이 있으면 메인이 대기열에 쌓는다 (#240).
+   * 그사이 조각은 쥐었다가 새 스트림에. 보낼 수 없으면(금지 표·대화 전환) 또는 그사이 껐으면 입력창에 넣고 끈다
+   */
+  async function utter(active: Flight): Promise<void> {
+    if (flight.current !== active || active.stopping || active.sending || active.stream === undefined) return
+    active.sending = true
+    clearTimeout(active.timer)
+    clearTimeout(active.countdown)
+    active.countdown = undefined
+    const old = active.stream
+    active.stream = undefined
+    active.live = undefined
+    dispatch({ type: 'stop', run: active.run })
+    let reply: SpeechReply
+    try {
+      reply = await window.litecode.stopSpeechStream(old) // 남은 말소리 구간까지 확정한 글
+    } catch {
+      return fail(active, 'voice.error.failed')
+    }
+    if (flight.current !== active) return
+    if (!reply.ok) return failWith(active, reply.code)
+    active.sending = false
+    const said = reply.text
+    if (!active.keep && said.trim() !== '') {
+      // 자동 보내기 금지 표 — 막히면 입력창에 넣고 사유를 남기고 끈다
+      const blocked = latest.current.sessionId !== active.sessionId ? 'voice.chat.stop.switched' : latest.current.chat.block(said)
+      if (blocked) active.keep = { notice: { tone: 'error', key: blocked } }
+      else latest.current.chat.send(said.trim())
+    }
+    if (active.keep) {
+      release(active)
+      return said.trim() === '' ? done(active, active.keep.notice) : place(active, said)
+    }
+    dispatch({ type: 'listen', run: active.run })
+    await restream(active)
   }
 
   /** 음성 대화를 끈다 — 듣는 중·보내는 중이면 들은 글을 입력창에 넣고, 아니면 마이크만 놓는다. notice: 띠에 남길 사유 */
   function endChat(notice?: VoiceNotice): void {
     const active = flight.current
+    if (active?.sending) {
+      active.keep = notice ? { notice } : {} // 받는 중인 글은 보내지 않고 입력창에 (utter)
+      return
+    }
     if (active?.since !== undefined) {
       active.keep = notice ? { notice } : {}
-      void finish(active) // 이미 정지 중이면(보내는 중) 그 답이 keep 을 보고 보내지 않는다
+      void finish(active) // 이미 정지 중이면 그 답이 keep 의 사유를 남긴다
       return
     }
     if (active) {
@@ -287,17 +329,12 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     if (flight.current !== active) return
     if (!reply.ok) return failWith(active, reply.code)
     const said = reply.text
-    const sending = active.chat && !active.keep
-    if (said.trim() === '') return sending ? wait(active, true) : done(active, active.keep ? active.keep.notice : EMPTY)
-    if (sending) {
-      // 자동 보내기 금지 표 — 막히면 입력창에 넣고 사유를 남기고 끈다
-      const blocked = latest.current.sessionId !== active.sessionId ? 'voice.chat.stop.switched' : latest.current.chat.block(said)
-      if (!blocked) {
-        latest.current.chat.send(said.trim())
-        return wait(active, false)
-      }
-      active.keep = { notice: { tone: 'error', key: blocked } }
-    }
+    if (said.trim() === '') return done(active, active.keep ? active.keep.notice : EMPTY)
+    place(active, said)
+  }
+
+  /** 받아쓴 글을 녹음을 시작한 대화의 초안에 넣고 끝낸다 (대화 모드면 끈다 — keep 의 사유를 남긴다) */
+  function place(active: Flight, said: string): void {
     const { sessionId: showing, inputRef, edit } = latest.current
     const input = showing === active.sessionId ? inputRef.current : null
     const cursor = input?.selectionEnd
@@ -352,28 +389,23 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     })
   }, [on])
 
-  // 대화 모드의 답 대기 — 그 대화의 턴이 끝났다. 실패·중지면 멈추고, 아니면 "턴이 시작된 걸 봤다" (아주 짧은 턴은 도는 표시가 안 그려질 수 있다)
+  // 대화 모드 중 그 대화의 턴이 끝났다 — 실패·중지면 멈춘다 (들은 글은 입력창에). 잘 끝나면 그대로 듣는다
   useEffect(() => {
     if (!on) return
     return window.litecode.onTurnEnded((event) => {
       const now = current.current
-      if (!now.chat || now.phase !== 'waiting' || event.cid !== now.sessionId) return
+      if (!now.chat || event.cid !== now.sessionId) return
       const reason = turnStopReason(event.outcome)
       if (reason) endChat({ tone: event.outcome === 'interrupted' ? 'info' : 'error', key: reason })
-      else setStarted(true)
     })
   }, [on])
 
-  // 대화 모드 — 그 대화의 턴 상태를 본다: 답 대기면 카드에서 멈추거나 "도는 턴·대기열 없음" 이 300ms 이어질 때 다시 듣고, 듣는 중에 턴이 시작되면 멈춘다
-  const { busy: turnBusy, attention } = options.chat.activity
+  // 대화 모드 — 승인·질문 카드가 뜨면 멈춘다 (도는 턴은 멈추지 않는다 — 보낸 말은 대기열로, #240)
+  const { busy: answering, attention } = options.chat.activity
   useEffect(() => {
-    if (state.phase === 'waiting' && turnBusy && !started) return setStarted(true)
-    const next = voiceChatWatch(state, { busy: turnBusy, attention }, started)
-    if (next?.type === 'end') return endChat({ tone: 'error', key: next.key })
-    if (next?.type !== 'relisten') return
-    const timer = setTimeout(() => void start(true), VOICE_CHAT_SETTLE_MS)
-    return () => clearTimeout(timer)
-  }, [state.phase, state.chat, turnBusy, attention, started])
+    const key = voiceChatWatch(state, { busy: answering, attention })
+    if (key) endChat({ tone: 'error', key })
+  }, [state.chat, attention])
 
   // 대화 모드 중에 다른 대화로 옮겨 가면 끈다 — 들은 글은 시작한 대화의 입력창에
   const showing = options.sessionId
@@ -431,6 +463,7 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
     cancel,
     dismiss: () => dispatch({ type: 'dismiss' }),
     level: () => flight.current?.recording.level() ?? 0,
+    answering,
     toggleChat() {
       if (current.current.chat) endChat()
       else if (current.current.phase === 'idle') void start(true)
@@ -493,11 +526,10 @@ export function VoiceChatButton({ voice }: { voice: VoiceInput }) {
   )
 }
 
-/** 음성 대화 띠의 단계 — 시안 ② 듣는 중 · ③ 보내는 중(카운트다운 → 보냄) · ④ 답변 중 대기 */
-type ChatStage = 'requesting' | 'listening' | 'countdown' | 'sending' | 'waiting'
+/** 음성 대화 띠의 단계 — 시안 ② 듣는 중 · ③ 보내는 중(카운트다운 → 보냄). 답이 오는 동안에도 듣는다 (#240 — 시안 ④ 답변 중 대기는 없앴다) */
+type ChatStage = 'requesting' | 'listening' | 'countdown' | 'sending'
 
 function chatStage(state: VoiceState): ChatStage {
-  if (state.phase === 'waiting') return 'waiting'
   if (state.phase === 'transcribing') return 'sending'
   if (state.phase === 'requesting') return 'requesting'
   return state.countdown !== undefined ? 'countdown' : 'listening'
@@ -508,24 +540,31 @@ const CHAT_TEXT: Record<ChatStage, MessageKey> = {
   listening: 'voice.chat.listening',
   countdown: 'voice.chat.countdown',
   sending: 'voice.chat.sending',
-  waiting: 'voice.chat.waiting',
 }
 
-/** 음성 대화 띠 — 끝내기 · 상태 글 · (듣는 중) 음량 · (카운트다운) 차오르는 띠와 [취소]. 들은 글은 받아쓰기처럼 띠 아래에 */
+/** 답이 오는 중의 상태 글 — 말을 멈추면 바로 가지 않고 대기열에 들어간다 */
+const CHAT_TEXT_QUEUED: Partial<Record<ChatStage, MessageKey>> = {
+  listening: 'voice.chat.listeningQueued',
+  countdown: 'voice.chat.countdownQueued',
+}
+
+/** 음성 대화 띠 — 끝내기 · 상태 글 · (답이 오는 중) "답변 중" 표시 · (듣는 중) 음량 · (카운트다운) 차오르는 띠와 [취소]. 들은 글은 받아쓰기처럼 띠 아래에 */
 function VoiceChatStrip({ voice }: { voice: VoiceInput }) {
   const t = useT()
   const { phase, live, countdown } = voice.state
   const stage = chatStage(voice.state)
+  const text = (voice.answering && CHAT_TEXT_QUEUED[stage]) || CHAT_TEXT[stage]
   return (
     <>
-      <div className="voice-strip" data-voice={phase} data-voice-chat={stage}>
+      <div className="voice-strip" data-voice={phase} data-voice-chat={stage} data-voice-answering={voice.answering || undefined}>
         <button type="button" className="voice-strip__button" data-voice-action="end-chat" aria-label={t('voice.chat.end')} title={t('voice.chat.end')} onClick={voice.toggleChat}>
           <CloseIcon />
         </button>
         <span className="voice-strip__text" role="status">
           <span className="voice-strip__dot" aria-hidden="true" />
-          {t(CHAT_TEXT[stage])}
+          {t(text)}
         </span>
+        {voice.answering && <span className="voice-strip__answering">{t('voice.chat.answering')}</span>}
         {stage === 'listening' && <VoiceMeter level={voice.level} />}
         {stage === 'countdown' && countdown !== undefined && (
           <>

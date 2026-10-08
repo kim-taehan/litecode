@@ -204,8 +204,15 @@
   background: var(--danger);
 }
 
-.voice-strip[data-voice-chat='waiting'] .voice-strip__dot {
-  background: var(--text-tertiary);
+/* 답이 오는 중 (#240) — 계속 듣고 있다는 것이 주인공이라 작게 */
+.voice-strip__answering {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--fill-active);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .voice-strip__countdown {

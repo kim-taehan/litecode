@@ -307,6 +307,31 @@ describe('ChatService — 대기열', () => {
     expect((await turn(2)).prompt).toBe('다음')
   })
 
+  it('음성 대화 (#240): 답이 오는 동안 여러 번 말해도 순서대로 — 한 답 중에 한 말은 합쳐 다음 턴, 그다음 답 중에 한 말은 그다음 턴', async () => {
+    const { chat, llm, turn, ended } = await start()
+    expect(await chat.send('c1', input('하나'))).toEqual({ state: 'sent' })
+    const first = await turn(1)
+    // 첫 답이 오는 동안 두 번 말했다 (화면은 매번 같은 보내기를 부른다 — 대기열은 메인의 것)
+    expect(await chat.send('c1', input('둘'))).toEqual({ state: 'queued' })
+    expect(await chat.send('c1', input('셋'))).toEqual({ state: 'queued' })
+    first.finish()
+    const second = await turn(2)
+    expect(second.prompt).toBe('둘\n셋')
+    // 둘째 답이 오는 동안 또 말했다 — 앞 것을 앞지르지 않고 그 뒤 턴으로
+    expect(await chat.send('c1', input('넷'))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(1)
+    second.finish()
+    const third = await turn(3)
+    third.finish()
+    await ended(3)
+    expect(llm.calls.map((call) => call.prompt)).toEqual(['하나', '둘\n셋', '넷'])
+    expect(llm.peak).toBe(1)
+    // 답이 다 끝난 뒤에 한 말은 바로 간다
+    expect(await chat.send('c1', input('다섯'))).toEqual({ state: 'sent' })
+    ;(await turn(4)).finish()
+    await ended(4)
+  })
+
   it('두 손님이 같은 대화에 동시에 보내도 한 턴씩 — 하나는 바로, 하나는 대기열', async () => {
     const { chat, llm, turn, ended } = await start()
     const results = await Promise.all([chat.send('c1', input('A')), chat.send('c1', input('B'))])

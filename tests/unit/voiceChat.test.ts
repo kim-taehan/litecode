@@ -12,7 +12,6 @@ import {
   VAD_OFF_MS,
   VOICE_CHAT_COUNTDOWN_MS,
   VOICE_CHAT_REOPEN_MS,
-  VOICE_CHAT_SETTLE_MS,
   VOICE_CHAT_SILENCE_MS,
   VOICE_IDLE,
   voiceBusy,
@@ -24,9 +23,10 @@ import {
   type VoiceState,
 } from '../../renderer/voiceView.ts'
 
-// 음성 대화 모드 1단계 (이슈 #238) — 말을 멈추면 카운트다운 뒤 저절로 보내고, 답이 끝나면 다시 듣는다. 읽어 주기·끼어들기는 없다.
-// 여기서 고정하는 것: 상태 기계(듣기 → 카운트다운 → 보내는 중 → 답 대기 → 다시 듣기) / 말 끝 판정(엔진의 speaking·silentMs) /
-// 자동 보내기 금지 표 / 턴 결과에 따른 멈춤 / 답 대기 중 무엇을 할지 / 버튼·띠의 그림.
+// 음성 대화 모드 1단계 (이슈 #238) — 말을 멈추면 카운트다운 뒤 저절로 보낸다. 읽어 주기·끼어들기는 없다.
+// 계속 듣기 (#240) — 답이 오는 동안에도 마이크를 닫지 않고, 그때 한 말은 메인의 대기열에 쌓인다 (순서는 chat.test.ts 의 "음성 대화" 시험).
+// 여기서 고정하는 것: 상태 기계(듣기 → 카운트다운 → 보내는 중 → 다시 듣기) / 말 끝 판정(엔진의 speaking·silentMs) /
+// 자동 보내기 금지 표 / 턴 결과에 따른 멈춤 / 턴 상태에 따른 멈춤 / 버튼·띠의 그림.
 // 마이크·타이머·IPC 를 쥔 훅(useVoiceInput)은 단위로 못 잡는다 — 마이크를 열지 않는다.
 
 vi.mock('../../renderer/settingsStore.ts', () => ({ useT: () => (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('ko', key, vars) }))
@@ -35,7 +35,7 @@ const run = (events: VoiceEvent[], from: VoiceState = VOICE_IDLE): VoiceState =>
 const listening: VoiceState = { phase: 'recording', run: 1, sessionId: 'a', chat: true }
 
 describe('대화 모드 상태 기계', () => {
-  it('듣기 → 카운트다운 → 보내는 중 → 답 대기 → 다시 듣기 — 대화 모드 표시(chat)를 끝까지 쥔다', () => {
+  it('듣기 → 카운트다운 → 보내는 중 → 다시 듣기 — 대화 모드 표시(chat)를 끝까지 쥔다. 마이크를 닫는 답 대기 단계는 없다 (#240)', () => {
     let state = voiceReducer(VOICE_IDLE, { type: 'start', run: 1, sessionId: 'a', chat: true })
     expect(state).toEqual({ phase: 'requesting', run: 1, sessionId: 'a', chat: true })
     state = voiceReducer(state, { type: 'granted', run: 1 })
@@ -44,10 +44,13 @@ describe('대화 모드 상태 기계', () => {
     expect(state.countdown).toBe(5000)
     state = voiceReducer(state, { type: 'stop', run: 1 })
     expect(state).toEqual({ phase: 'transcribing', run: 1, sessionId: 'a', chat: true }) // 카운트다운은 지운다
-    state = voiceReducer(state, { type: 'wait', run: 1 })
-    expect(state).toEqual({ phase: 'waiting', run: 1, sessionId: 'a', chat: true })
-    state = voiceReducer(state, { type: 'start', run: 2, sessionId: 'a', chat: true })
-    expect(state).toEqual({ phase: 'requesting', run: 2, sessionId: 'a', chat: true })
+    state = voiceReducer(state, { type: 'listen', run: 1 })
+    expect(state).toEqual(listening) // 같은 녹음(번호)으로 곧장 다시 듣는다 — 마이크를 다시 열지 않는다
+  })
+
+  it('다시 듣기는 보낸 글을 띠에서 지운다 (다음 말은 새 글로)', () => {
+    const sending: VoiceState = { phase: 'transcribing', run: 1, sessionId: 'a', chat: true, live: { final: '보낸 말', tentative: '' } }
+    expect(voiceReducer(sending, { type: 'listen', run: 1 })).toEqual(listening)
   })
 
   it('카운트다운 중에 다시 말하면(resume) 카운트다운만 지우고 그대로 듣는다 — 받아쓴 글은 남는다', () => {
@@ -65,26 +68,27 @@ describe('대화 모드 상태 기계', () => {
     expect(voiceReducer(sending, { type: 'countdown', run: 1, until: 1 })).toBe(sending)
   })
 
-  it('답 대기(wait)는 대화 모드로 보내는 중일 때만 — 받아쓰기의 정지는 대기로 가지 않는다', () => {
+  it('다시 듣기(listen)는 대화 모드로 보내는 중일 때만, 같은 번호일 때만 — 받아쓰기의 정지는 듣기로 돌아가지 않는다', () => {
     const transcribing: VoiceState = { phase: 'transcribing', run: 1, sessionId: 'a' }
-    expect(voiceReducer(transcribing, { type: 'wait', run: 1 })).toBe(transcribing)
-    expect(voiceReducer({ ...transcribing, chat: true }, { type: 'wait', run: 2 })).toEqual({ ...transcribing, chat: true })
+    expect(voiceReducer(transcribing, { type: 'listen', run: 1 })).toBe(transcribing)
+    expect(voiceReducer({ ...transcribing, chat: true }, { type: 'listen', run: 2 })).toEqual({ ...transcribing, chat: true })
+    expect(voiceReducer(listening, { type: 'listen', run: 1 })).toBe(listening)
   })
 
-  it('답 대기에서 다시 듣기는 대화 모드 시작으로만 — 받아쓰기(마이크 버튼)로는 시작하지 않는다', () => {
-    const waiting: VoiceState = { phase: 'waiting', run: 1, sessionId: 'a', chat: true }
-    expect(voiceReducer(waiting, { type: 'start', run: 2, sessionId: 'a' })).toBe(waiting)
-    expect(voiceReducer(listening, { type: 'start', run: 2, sessionId: 'a', chat: true })).toBe(listening) // 듣는 중엔 다시 시작하지 않는다
+  it('듣는 중·보내는 중엔 다시 시작하지 않는다', () => {
+    expect(voiceReducer(listening, { type: 'start', run: 2, sessionId: 'a', chat: true })).toBe(listening)
+    const sending: VoiceState = { ...listening, phase: 'transcribing' }
+    expect(voiceReducer(sending, { type: 'start', run: 2, sessionId: 'a', chat: true })).toBe(sending)
   })
 
   it('멈춤(end) — 어느 단계에서든 대화 모드를 끄고 사유를 남긴다. 대기면 사유만', () => {
     const notice = { tone: 'error', key: 'voice.chat.stop.attention' } as const
-    for (const phase of ['requesting', 'recording', 'transcribing', 'waiting'] as const) {
+    for (const phase of ['requesting', 'recording', 'transcribing'] as const) {
       expect(voiceReducer({ ...listening, phase }, { type: 'end', notice })).toEqual({ phase: 'idle', run: 1, notice })
     }
     expect(voiceReducer(VOICE_IDLE, { type: 'end', notice })).toEqual({ phase: 'idle', run: 0, notice })
     expect(voiceReducer(VOICE_IDLE, { type: 'end' })).toBe(VOICE_IDLE)
-    expect(voiceReducer({ ...listening, phase: 'waiting' }, { type: 'end' })).toEqual({ phase: 'idle', run: 1 })
+    expect(voiceReducer({ ...listening, phase: 'transcribing' }, { type: 'end' })).toEqual({ phase: 'idle', run: 1 })
   })
 
   it('보내지 않고 입력창에 넣고 끝나면(done·failed·cancel) 대화 모드도 꺼진다', () => {
@@ -98,9 +102,9 @@ describe('대화 모드 상태 기계', () => {
     expect(voiceReducer(state, { type: 'dismiss' })).toEqual({ ...listening, countdown: 10 })
   })
 
-  it('답 대기는 마이크를 쥐지 않는다 — Esc 는 답변 중지("Esc 두 번")의 것이다', () => {
-    expect(voiceBusy({ phase: 'waiting', run: 1, sessionId: 'a', chat: true })).toBe(false)
-    expect(voiceBusy(listening)).toBe(true)
+  it('대화 모드는 어느 단계든 마이크를 쥔다 — Esc 는 음성 대화 끄기다 (답이 오는 중에도, #240)', () => {
+    for (const phase of ['requesting', 'recording', 'transcribing'] as const) expect(voiceBusy({ ...listening, phase })).toBe(true)
+    expect(voiceBusy(VOICE_IDLE)).toBe(false)
   })
 })
 
@@ -130,7 +134,7 @@ describe('말 끝 판정 (엔진의 speaking·silentMs)', () => {
 })
 
 describe('자동 보내기 금지 표 (voiceChatBlock)', () => {
-  const ready: VoiceChatTarget = { draft: '', attachments: 0, model: true, writable: true, busy: false, attention: false }
+  const ready: VoiceChatTarget = { draft: '', attachments: 0, model: true, writable: true, attention: false }
 
   it('보낼 수 있으면 사유가 없다', () => {
     expect(voiceChatBlock(ready)).toBeUndefined()
@@ -138,13 +142,17 @@ describe('자동 보내기 금지 표 (voiceChatBlock)', () => {
   })
 
   it('사유마다 문구 — 조용히 돌아가지 않는다', () => {
-    expect(voiceChatBlock({ ...ready, attention: true, busy: true })).toBe('voice.chat.stop.attention')
-    expect(voiceChatBlock({ ...ready, busy: true })).toBe('voice.chat.stop.busy')
+    expect(voiceChatBlock({ ...ready, attention: true, draft: '쓰던 글' })).toBe('voice.chat.stop.attention')
     expect(voiceChatBlock({ ...ready, draft: '쓰던 글' })).toBe('voice.chat.stop.draft')
     expect(voiceChatBlock({ ...ready, draft: '@src/' })).toBe('voice.chat.stop.draft') // 트리거(@ / !)를 치는 중
     expect(voiceChatBlock({ ...ready, attachments: 1 })).toBe('voice.chat.stop.draft')
     expect(voiceChatBlock({ ...ready, model: false })).toBe('voice.chat.stop.noModel')
     expect(voiceChatBlock({ ...ready, writable: false })).toBe('voice.chat.stop.cannotWrite')
+  })
+
+  it('그 대화에 도는 턴은 막는 사유가 아니다 — 보내면 메인이 대기열에 쌓는다 (#240)', () => {
+    expect(voiceChatBlock({ ...ready, busy: true } as VoiceChatTarget, '이어서 이것도 해 줘')).toBeUndefined()
+    expect(ko).not.toHaveProperty('voice.chat.stop.busy')
   })
 
   it('공백뿐인 초안은 빈 것으로 본다', () => {
@@ -158,42 +166,36 @@ describe('자동 보내기 금지 표 (voiceChatBlock)', () => {
   })
 })
 
-describe('턴 결과와 답 대기', () => {
-  it('실패·중지면 멈춘다 — 다시 들으면 같은 글이 또 막히거나 사용자가 멈춘 것을 되돌린다', () => {
+describe('턴 결과와 턴 상태', () => {
+  it('실패·중지면 멈춘다 — 계속 들으면 같은 글이 또 막히거나 사용자가 멈춘 것을 되돌린다', () => {
     expect(turnStopReason('failed')).toBe('voice.chat.stop.failed')
     expect(turnStopReason('interrupted')).toBe('voice.chat.stop.interrupted')
     expect(turnStopReason('done')).toBeUndefined()
   })
 
-  const waiting: VoiceState = { phase: 'waiting', run: 1, sessionId: 'a', chat: true }
   const quiet = { busy: false, attention: false }
 
-  it('답 대기 — 턴이 시작된 걸 본 뒤, 도는 턴·대기열이 없으면 다시 듣는다 (유지 시간은 훅이 잰다)', () => {
-    expect(VOICE_CHAT_SETTLE_MS).toBe(300)
-    expect(voiceChatWatch(waiting, quiet, true)).toEqual({ type: 'relisten' })
-    expect(voiceChatWatch(waiting, quiet, false)).toBeUndefined() // 보낸 턴이 아직 시작 전 — 곧바로 다시 듣지 않는다
-    expect(voiceChatWatch(waiting, { busy: true, attention: false }, true)).toBeUndefined() // 훅의 다음 턴·대기열
+  it('도는 턴·대기열이 있어도 멈추지 않는다 — 듣는 중·마이크를 여는 중·보내는 중 모두 (#240)', () => {
+    for (const phase of ['requesting', 'recording', 'transcribing'] as const) {
+      expect(voiceChatWatch({ ...listening, phase }, { busy: true, attention: false })).toBeUndefined()
+    }
+    expect(voiceChatWatch(listening, quiet)).toBeUndefined()
   })
 
-  it('승인·질문 카드가 뜨면 멈춘다 — 손으로 고르게', () => {
-    expect(voiceChatWatch(waiting, { busy: true, attention: true }, true)).toEqual({ type: 'end', key: 'voice.chat.stop.attention' })
+  it('승인·질문 카드가 뜨면 어느 단계든 멈춘다 — 카드 중에 한 말이 답으로 쓰이지 않게', () => {
+    for (const phase of ['requesting', 'recording', 'transcribing'] as const) {
+      expect(voiceChatWatch({ ...listening, phase }, { busy: true, attention: true })).toBe('voice.chat.stop.attention')
+    }
   })
 
-  it('듣는 중에 그 대화에 턴이 시작되면(다른 곳에서 보냄) 멈춘다 — 받아쓴 글은 훅이 입력창에 넣는다', () => {
-    expect(voiceChatWatch(listening, { busy: true, attention: false }, false)).toEqual({ type: 'end', key: 'voice.chat.stop.busy' })
-    expect(voiceChatWatch({ ...listening, phase: 'requesting' }, { busy: true, attention: false }, false)).toEqual({ type: 'end', key: 'voice.chat.stop.busy' })
-    expect(voiceChatWatch(listening, quiet, false)).toBeUndefined()
-  })
-
-  it('보내는 중·대화 모드가 아니면 아무 일도 없다', () => {
-    expect(voiceChatWatch({ ...listening, phase: 'transcribing' }, { busy: true, attention: true }, true)).toBeUndefined()
-    expect(voiceChatWatch({ phase: 'recording', run: 1, sessionId: 'a' }, { busy: true, attention: true }, true)).toBeUndefined()
-    expect(voiceChatWatch(VOICE_IDLE, quiet, true)).toBeUndefined()
+  it('대화 모드가 아니면 아무 일도 없다', () => {
+    expect(voiceChatWatch({ phase: 'recording', run: 1, sessionId: 'a' }, { busy: true, attention: true })).toBeUndefined()
+    expect(voiceChatWatch(VOICE_IDLE, { busy: true, attention: true })).toBeUndefined()
   })
 })
 
 describe('대화 버튼·대화 모드 띠의 그림 (정적 렌더)', () => {
-  const voice = (state: VoiceState, on = true): VoiceInput => ({
+  const voice = (state: VoiceState, on = true, answering = false): VoiceInput => ({
     on,
     state,
     since: undefined,
@@ -201,12 +203,13 @@ describe('대화 버튼·대화 모드 띠의 그림 (정적 렌더)', () => {
     cancel() {},
     dismiss() {},
     level: () => 0,
+    answering,
     toggleChat() {},
     hold() {},
   })
   const button = (state: VoiceState, on = true) => renderToStaticMarkup(createElement(VoiceChatButton, { voice: voice(state, on) }))
   const mic = (state: VoiceState) => renderToStaticMarkup(createElement(VoiceButton, { voice: voice(state) }))
-  const strip = (state: VoiceState) => renderToStaticMarkup(createElement(VoiceStrip, { voice: voice(state) }))
+  const strip = (state: VoiceState, answering = false) => renderToStaticMarkup(createElement(VoiceStrip, { voice: voice(state, true, answering) }))
 
   it('대화 버튼은 기능이 켜져 있을 때만 — 대기면 눌리지 않은 모양', () => {
     expect(button(VOICE_IDLE, false)).toBe('')
@@ -218,7 +221,7 @@ describe('대화 버튼·대화 모드 띠의 그림 (정적 렌더)', () => {
   })
 
   it('대화 모드 중 — 대화 버튼은 눌린 모양(끝내기), 받아쓰기 마이크는 못 누른다', () => {
-    for (const phase of ['requesting', 'recording', 'transcribing', 'waiting'] as const) {
+    for (const phase of ['requesting', 'recording', 'transcribing'] as const) {
       const state = { ...listening, phase }
       expect(button(state)).toContain('aria-pressed="true"')
       expect(button(state)).toContain(`aria-label="${ko['voice.chat.end']}"`)
@@ -250,15 +253,30 @@ describe('대화 버튼·대화 모드 띠의 그림 (정적 렌더)', () => {
     expect(band).toContain(`>${ko['voice.chat.hold']}<`)
   })
 
-  it('보내는 중 · 답 대기 — 상태 글과 끝내기', () => {
+  it('보내는 중 — 상태 글과 끝내기', () => {
     const sending = strip({ ...listening, phase: 'transcribing' })
     expect(sending).toContain('data-voice-chat="sending"')
     expect(sending).toContain(ko['voice.chat.sending'])
-    const waiting = strip({ ...listening, phase: 'waiting' })
-    expect(waiting).toContain('data-voice-chat="waiting"')
-    expect(waiting).toContain(ko['voice.chat.waiting'])
-    expect(waiting).toContain('data-voice-action="end-chat"')
-    expect(waiting).not.toContain('voice-strip__meter') // 답을 기다리는 동안 마이크는 닫혀 있다
+    expect(sending).toContain('data-voice-action="end-chat"')
+  })
+
+  it('답이 오는 중에도 듣는 중 띠 — 음량이 살아 있고, 작은 "답변 중" 표시와 "대기열에 넣음" 안내 (#240)', () => {
+    const band = strip(listening, true)
+    expect(band).toContain('data-voice-chat="listening"')
+    expect(band).toContain('data-voice-answering="true"')
+    expect(band).toContain('voice-strip__meter')
+    expect(band).toContain(`class="voice-strip__answering">${ko['voice.chat.answering']}<`)
+    expect(band).toContain(ko['voice.chat.listeningQueued'])
+    expect(band).not.toContain(ko['voice.chat.listening'] + '<')
+    const counting = strip({ ...listening, countdown: 1234 }, true)
+    expect(counting).toContain(ko['voice.chat.countdownQueued'])
+    expect(counting).toContain('data-voice-action="hold"') // [취소] 는 그대로 — 대기열에도 넣지 않고 입력창에
+  })
+
+  it('답이 없으면 "답변 중" 표시가 없다', () => {
+    const band = strip(listening)
+    expect(band).not.toContain('voice-strip__answering')
+    expect(band).not.toContain('data-voice-answering')
   })
 
   it('멈춘 사유는 대화 모드가 꺼진 뒤 한 줄로 남는다', () => {

@@ -443,11 +443,12 @@ export function App() {
     inputRef: trigger.inputRef,
     hasSession: (id) => sessions.some((session) => session.id === id),
     edit: (id, change) => changeDraftOf(id, (now) => ({ ...now, text: change(now.text) })),
-    // 음성 대화 모드 (#238) — 받아쓴 글만 보낸다(첨부·트리거 없이). 보낼 수 없는 경우는 send 가 말없이 돌아가기 전에 금지 표가 사유로 막는다
+    // 음성 대화 모드 (#238) — 받아쓴 글만 보낸다(첨부·트리거 없이). 보낼 수 없는 경우는 send 가 말없이 돌아가기 전에 금지 표가 사유로 막는다.
+    // 답이 오는 중이면 메인이 대기열에 쌓는다 (#240)
     chat: {
       activity: voiceActivity,
       block: (transcript) =>
-        voiceChatBlock({ draft, attachments: attached.length, model: !!findModel(providers, selected), writable: !!active && canWrite(active), ...voiceActivity }, transcript),
+        voiceChatBlock({ draft, attachments: attached.length, model: !!findModel(providers, selected), writable: !!active && canWrite(active), attention: voiceActivity.attention }, transcript),
       send: (text) => send({ text, attachments: [] }),
     },
   })
