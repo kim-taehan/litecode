@@ -8,7 +8,10 @@ import { SPEECH_MAX_SECONDS } from '../../shared/speech.ts'
 import { VoiceButton, VoiceStrip, type VoiceInput } from '../../renderer/VoiceInput.tsx'
 import {
   countdownLeft,
+  restreamDelay,
   turnStopReason,
+  RESTREAM_DEFER_MS,
+  RESTREAM_MIN_LEVEL,
   VAD_OFF_MS,
   VOICE_CHAT_COUNTDOWN_MS,
   VOICE_CHAT_REOPEN_MS,
@@ -128,6 +131,14 @@ describe('말 끝 판정 (엔진의 speaking·silentMs)', () => {
   it('120초 상한 전에 받아쓰기를 닫고 다시 연다 — 상한보다 앞, 카운트다운이 끝날 여유를 둔다', () => {
     expect(VOICE_CHAT_REOPEN_MS).toBeLessThan(SPEECH_MAX_SECONDS * 1000 - VOICE_CHAT_COUNTDOWN_MS)
     expect(VOICE_CHAT_REOPEN_MS).toBeGreaterThan(60_000)
+    // 재개 열 때 말소리가 들리면 미루는 2초를 써도 상한을 넘지 않는다
+    expect(VOICE_CHAT_REOPEN_MS + RESTREAM_DEFER_MS).toBeLessThan(SPEECH_MAX_SECONDS * 1000)
+  })
+
+  it('재개 열 때 지금 소리가 있으면 2초 미룬다 — 엔진의 "소리 없음"은 0.9초 전의 것이라 (실측 2026-10-08)', () => {
+    expect(restreamDelay(0.1)).toBe(true) // 보통 말소리 (바 절반)
+    expect(restreamDelay(RESTREAM_MIN_LEVEL)).toBe(true) // 경계는 미루는 쪽
+    expect(restreamDelay(RESTREAM_MIN_LEVEL / 2)).toBe(false) // 배경은 안 미룬다
   })
 })
 

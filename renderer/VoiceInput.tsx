@@ -13,7 +13,9 @@ import {
   notReady,
   pushLevel,
   replyFailure,
+  restreamDelay,
   turnStopReason,
+  RESTREAM_DEFER_MS,
   VOICE_BARS,
   VOICE_CHAT_REOPEN_MS,
   VOICE_IDLE,
@@ -203,6 +205,11 @@ export function useVoiceInput(options: VoiceInputOptions): VoiceInput {
   /** 대화 모드 — 받아쓰기 상한(120초) 전에 스트림만 닫고 새로 연다 (마이크는 그대로, 그사이 조각은 쥐었다가 새 스트림에). 들은 글이 있으면 입력창에 넣고 끈다 */
   async function reopen(active: Flight): Promise<void> {
     if (flight.current !== active || active.stopping || active.stream === undefined || active.countdown !== undefined) return // 카운트다운이면 곧 보낸다
+    if (restreamDelay(active.recording.level())) {
+      // 한 발화 도중에 타이머가 터면 — 이 앞 소리가 옛 스트림에 묻힌다. 2초만 미뤄 재확인 (엔진의 live 는 0.9초 전 것이라 믿지 않는다)
+      active.timer = setTimeout(() => void reopen(active), RESTREAM_DEFER_MS)
+      return
+    }
     if (active.live && (active.live.speaking || active.live.final.trim() !== '' || active.live.tentative !== '')) return endChat({ tone: 'error', key: 'voice.chat.stop.tooLong' })
     const old = active.stream
     active.stream = undefined
