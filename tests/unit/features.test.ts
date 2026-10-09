@@ -46,7 +46,7 @@ let tmp: string
 let file: string
 
 /** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)·훅(hooks, 이슈 #102)·음성 입력(voice)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56).
- *  사내망 연결(lan)은 기본 켜짐이지만 모바일 연결이 꺼져 있어 같이 꺼진다, 블루투스 연결(bluetooth)은 기본 꺼짐 (이슈 #210) */
+ *  사내망 연결(lan)·블루투스 연결(bluetooth)은 기본 꺼짐 (이슈 #210, 사내망은 #268 부터 — 켜는 순간 키체인의 TLS 키를 읽는다) */
 const DEFAULT_ON = FEATURES.filter(
   (feature) => !['web', 'notifications', 'remote', 'lan', 'bluetooth', 'hooks', 'voice', 'browser'].includes(feature),
 )
@@ -413,9 +413,11 @@ describe('featureOn', () => {
     expect(featureOn({ hooks: true }, 'hooks')).toBe(true)
     expect(featureOn(undefined, 'remote')).toBe(false)
     expect(featureOn({ remote: true }, 'remote')).toBe(true)
-    // 모바일 연결의 길 (이슈 #210) — 사내망은 모바일 연결을 켜면 같이 켜지고(끌 수 있다), 블루투스는 따로 켜야 한다. 둘 다 모바일 연결이 꺼지면 꺼진다
+    // 모바일 연결의 길 (이슈 #210) — 둘 다 따로 켜야 한다(사내망도 #268 부터 기본 꺼짐 — 모바일 연결만 켜서는 TLS 키를 읽지 않는다). 둘 다 모바일 연결이 꺼지면 꺼진다
     expect(featureOn(undefined, 'lan')).toBe(false)
-    expect(featureOn({ remote: true }, 'lan')).toBe(true)
+    expect(featureOn({ remote: true }, 'lan')).toBe(false)
+    expect(featureOn({ remote: true, lan: true }, 'lan')).toBe(true)
+    expect(featureOn({ lan: true }, 'lan')).toBe(false)
     expect(featureOn({ remote: true, lan: false }, 'lan')).toBe(false)
     expect(featureOn({ remote: true }, 'bluetooth')).toBe(false)
     expect(featureOn({ remote: true, bluetooth: true }, 'bluetooth')).toBe(true)

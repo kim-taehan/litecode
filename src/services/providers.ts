@@ -40,7 +40,7 @@ export interface ProviderConfig {
 export interface ProviderSummary extends ProviderConfig {
   custom: boolean
   hasKey: boolean
-  /** 저장된 키를 지금 읽을 수 없다 (이슈 #231) — 키 저장소를 못 쓰거나(available false) 이 실행에서 풀기가 실패했다. 설정 > 모델 위쪽 안내 */
+  /** 저장된 키를 지금 읽을 수 없다 (이슈 #231) — 이 실행에서 풀어 보다 실패했다(키 저장소를 못 쓰거나 풀기가 던졌다). 설정 > 모델 위쪽 안내 */
   keyLocked?: true
 }
 
@@ -128,11 +128,12 @@ export class ProviderRegistry extends Service {
     return [...this.entries.values()]
   }
 
+  /** 키 저장소(cipher)를 부르지 않는다 (이슈 #268) — 시작·화면 목록 조회에서 macOS 키체인 허용 창이 뜨지 않게. hasKey 는 봉한 키가 파일에 있는지만,
+   *  keyLocked 는 이 실행에서 풀어 보다 실패한 것만 (키 저장소를 못 쓰는 것도 처음 풀어 볼 때 드러난다) */
   list(): ProviderSummary[] {
-    const storeDown = !this.opts.cipher?.available()
     return this.all().map((config) => {
       const hasKey = config.id in this.keys
-      const keyLocked = hasKey && (storeDown || this.lockedKeys.has(config.id))
+      const keyLocked = hasKey && this.lockedKeys.has(config.id)
       return { ...config, custom: config.custom ?? false, hasKey, ...(keyLocked && { keyLocked: true as const }) }
     })
   }
