@@ -93,7 +93,6 @@ export const S = {
   },
   bluetoothLost: '블루투스 연결이 끊겼습니다. 데스크탑 가까이에서 다시 시도해 주세요.',
   bluetoothNotYet: '블루투스로 시도 를 누르기 전에는 블루투스를 켜거나 주변을 찾지 않습니다. 누르면 "근처 기기" 허용을 한 번 물어봅니다.',
-  bluetoothBadge: '블루투스 · 느림',
   bluetoothInfo: '블루투스로 연결됨. 느린 연결이라 긴 대화는 여는 데 시간이 걸립니다.',
   loadingHistory: '이전 대화 불러오기',
   receivingKb: (kb: number) => `${kb} KB 받는 중`,
