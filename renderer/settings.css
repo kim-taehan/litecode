@@ -869,36 +869,102 @@
   padding-top: 12px;
 }
 
-/* 모바일 연결의 길 (이슈 #210, 시안 mock-ble/Desk.dc.html) — 카드 하나에 사내망·블루투스 줄, 줄마다 상태 한 줄 + 토글 */
-.mobile-paths {
-  margin-top: 16px;
-  border: 0.5px solid var(--border-strong);
-  border-radius: 20px;
-  background: var(--surface-panel); /* 기능 목록과 같은 설정 카드 재료 (이슈 #223) */
+/* 모바일 연결의 길 (이슈 #256, 시안 mock-mobile-connect/Settings.dc.html) — 둘 중 하나를 고르는 라디오 카드 + 고른 길의 정보 */
+.mobile-choices {
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
-.mobile-path {
+.mobile-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface-panel);
+  cursor: pointer;
+}
+
+.mobile-choice input {
+  position: absolute;
+  opacity: 0;
+}
+
+.mobile-choice:has(input:checked) {
+  border-color: var(--text);
+  box-shadow: 0 0 0 0.5px var(--text);
+}
+
+.mobile-choice:has(input:focus-visible) {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.mobile-choice__title {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 8px;
+  font-weight: 600;
 }
 
-.mobile-path + .mobile-path {
-  border-top: 0.5px solid var(--border);
+.mobile-choice__dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  display: grid;
+  place-items: center;
 }
 
-.mobile-path .settings-row__text {
-  padding-right: 0;
+.mobile-choice:has(input:checked) .mobile-choice__dot {
+  border-color: var(--text);
 }
 
+.mobile-choice:has(input:checked) .mobile-choice__dot::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.mobile-choice__pill {
+  font-size: 12px;
+  padding: 1px 9px;
+  border-radius: 99px;
+  color: var(--text-tertiary);
+  background: var(--surface-panel);
+  border: 0.5px solid var(--border);
+}
+
+.mobile-choice__pill--ok,
 .mobile-path__status--ok {
   color: var(--ok);
 }
 
-.mobile-paths__note {
-  margin: 8px 0 0;
-  line-height: 19px;
+.mobile-path-detail {
+  margin-top: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface-panel);
+}
+
+.mobile-path-detail__more summary {
+  cursor: pointer;
+  color: var(--text-tertiary);
 }
 
 /* 기기 줄의 지금 연결 방법 — Wi-Fi(파랑)·블루투스(주황)·끊김(회색) 알약 */
