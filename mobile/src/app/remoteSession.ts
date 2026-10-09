@@ -2,7 +2,7 @@
 // transport 를 받아 쓴다. 앱은 expo/fetch 로 만든 것을, 테스트는 Node fetch 로 만든 것을 넘긴다).
 // 상태는 전부 데스크탑에서 온다: 목록·대화·진행 줄·승인·대기열. 여기서 만드는 것은 "보내지 못했다" 같은 안내(notice)뿐이다.
 
-import type { Hello, RemoteModel } from '../../../shared/remote.ts'
+import type { Hello, ModelChoice, RemoteModel } from '../../../shared/remote.ts'
 import { Connection, newClientMessageId, RemoteClient, RemoteError, RoamingClient, type Transport } from '../core/index.ts'
 import type { AppSession, Carrier, DesktopInfo, SessionNotice } from './session.ts'
 
@@ -53,6 +53,13 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
   const listeners = new Set<() => void>()
   let models: RemoteModel[] = []
   let notice: SessionNotice | undefined
+  /** 폰에서 고른 모델 (#269) — 보낼 때마다 싣는다. 데스크탑 목록의 그 대화 모델이 이것이 되면 지운다 (그 전에는 머리 이름이 옛 것으로 돌아가지 않게) */
+  const chosen = new Map<string, ModelChoice>()
+  const conversationOf = (cid: string) =>
+    Object.values(connection.state.conversations)
+      .flat()
+      .find((conversation) => conversation.id === cid)
+  const sameModel = (a: ModelChoice | undefined, b: ModelChoice): boolean => a?.providerId === b.providerId && a.modelId === b.modelId
   /** 목록(프로젝트·대화·모델)을 받았거나 받는 중 */
   let listed = false
   let disposed = false
@@ -95,6 +102,7 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
       if (!wasConnected) for (const cid of wanted) if (!(cid in connection.state.views) && !(cid in connection.state.loading)) open(cid)
     }
     wasConnected = connected
+    for (const [cid, model] of chosen) if (sameModel(conversationOf(cid)?.model, model)) chosen.delete(cid)
     notify()
   })
   // 데스크탑이 듣는 주소가 바뀌었다 — 다음에 끊겼을 때 시도할 후보를 넓힌다. (이벤트 이름·모양은 계약 shared/remote.ts RemoteEventMap['addresses.changed'] —
@@ -139,13 +147,22 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     async send(cid, text) {
       setNotice(undefined)
       try {
-        await client.send(cid, { text, clientMessageId: newClientMessageId() })
+        const model = chosen.get(cid)
+        await client.send(cid, { text, clientMessageId: newClientMessageId(), ...(model && { model }) })
         return true
       } catch (error) {
         // 403 = 전체 권한 모드 대화 (폰에 열지 않는다 — 데스크탑에서만)
         setNotice(error instanceof RemoteError && error.status === 403 ? 'desktop-only' : 'send-failed')
         return false
       }
+    },
+    modelOf: (cid) => chosen.get(cid) ?? conversationOf(cid)?.model,
+    chooseModel(cid, model) {
+      if (connection.state.views[cid]?.running) return false
+      if (sameModel(conversationOf(cid)?.model, model)) chosen.delete(cid)
+      else chosen.set(cid, { providerId: model.providerId, modelId: model.modelId })
+      notify()
+      return true
     },
     stop(cid) {
       client.stop(cid).catch(failed)

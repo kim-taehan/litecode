@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Attention, AttentionAnswer, HistoryMessage, ShellCard, TurnItem } from '../../../../shared/contract.ts'
-import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
-import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
+import type { ModelChoice, RemoteModel } from '../../../../shared/remote.ts'
+import { useKeyboardVisible, useModelOf, useNotice, useNow, useRemoteState } from '../hooks.ts'
+import { ArrowUp, BackArrow, Check, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
 import { BluetoothInfo, HistoryProgress } from '../BluetoothBits.tsx'
 import type { AppSession, Carrier } from '../session.ts'
 import { StatusBanner } from '../StatusBanner.tsx'
@@ -28,6 +29,8 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
   const [draft, setDraft] = useState('')
   const scroll = useRef<ScrollView>(null)
   const notice = useNotice(session)
+  const chosenModel = useModelOf(session, cid)
+  const [picking, setPicking] = useState(false)
 
   // 이 대화를 받아 두고 이벤트를 따라간다 — 나가면 놓는다
   useEffect(() => {
@@ -47,7 +50,7 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
   }, [conversation, onBack])
 
   const project = state.projects.find((candidate) => candidate.path === conversation?.project)
-  const model = session.models.find((candidate) => candidate.providerId === conversation?.model?.providerId && candidate.modelId === conversation?.model?.modelId)
+  const model = session.models.find((candidate) => candidate.providerId === chosenModel?.providerId && candidate.modelId === chosenModel?.modelId)
   const jobs = runningSubtasks(view?.progress ?? [])
   const startedAt = view ? turnStartedAt(view) : undefined
   const mode = S.mode[conversation?.mode ?? 'build']
@@ -74,14 +77,18 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
         <Pressable accessibilityRole="button" accessibilityLabel={S.backToList} style={styles.back} onPress={onBack}>
           <BackArrow />
         </Pressable>
-        <View style={styles.headerText}>
+        {/* 머리를 누르면 모델 고르기 (#269) */}
+        <Pressable accessibilityRole="button" accessibilityLabel={S.modelLabel(model?.displayName ?? chosenModel?.modelId ?? '')} style={styles.headerText} onPress={() => setPicking(true)}>
           <Text style={styles.title} numberOfLines={1}>
             {conversation?.title || S.untitled}
           </Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {[model?.displayName ?? conversation?.model?.modelId, project?.name].filter(Boolean).join(' · ')}
-          </Text>
-        </View>
+          <View style={styles.subtitleRow}>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {[model?.displayName ?? chosenModel?.modelId, project?.name].filter(Boolean).join(' · ')}
+            </Text>
+            <ChevronDown size={12} />
+          </View>
+        </Pressable>
         {jobs > 0 && (
           <Pressable accessibilityRole="button" accessibilityLabel={S.runningJobs(jobs)} style={styles.jobs}>
             <View style={styles.jobsRing} />
@@ -89,6 +96,18 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
           </Pressable>
         )}
       </View>
+
+      {picking && (
+        <ModelSheet
+          models={session.models}
+          current={chosenModel}
+          busy={view?.running ?? false}
+          onPick={(picked) => {
+            if (session.chooseModel(cid, picked)) setPicking(false)
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
 
       <BluetoothInfo carrier={session.carrier} />
 
@@ -156,6 +175,51 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
         </View>
       </View>
     </KeyboardAvoidingView>
+  )
+}
+
+/** 모델 고르기 바텀시트 (#269) — 지금 것에 체크. 턴이 도는 중이면 고를 수 없다(다음 메시지부터 쓰이므로 끝난 뒤에) */
+function ModelSheet({ models, current, busy, onPick, onClose }: { models: readonly RemoteModel[]; current: ModelChoice | undefined; busy: boolean; onPick(model: RemoteModel): void; onClose(): void }) {
+  const insets = useSafeAreaInsets()
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable accessibilityRole="button" accessibilityLabel={S.close} style={styles.sheetBackdrop} onPress={onClose} />
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+        <Text style={styles.sheetTitle}>{S.modelSheetTitle}</Text>
+        {models.length === 0 ? (
+          <Text style={styles.sheetHint}>{S.noModels}</Text>
+        ) : (
+          <>
+            <Text style={styles.sheetHint}>{busy ? S.modelBusy : S.modelNextTurn}</Text>
+            <ScrollView style={styles.sheetList}>
+              {models.map((option) => {
+                const selected = option.providerId === current?.providerId && option.modelId === current?.modelId
+                return (
+                  <Pressable
+                    key={`${option.providerId}/${option.modelId}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected, disabled: busy }}
+                    disabled={busy}
+                    style={[styles.sheetRow, busy && styles.sheetRowBusy]}
+                    onPress={() => onPick(option)}
+                  >
+                    <View style={styles.sheetRowText}>
+                      <Text style={styles.sheetRowName} numberOfLines={1}>
+                        {option.displayName}
+                      </Text>
+                      <Text style={styles.sheetRowSub} numberOfLines={1}>
+                        {option.providerName}
+                      </Text>
+                    </View>
+                    {selected && <Check />}
+                  </Pressable>
+                )
+              })}
+            </ScrollView>
+          </>
+        )}
+      </View>
+    </Modal>
   )
 }
 
@@ -303,7 +367,18 @@ const styles = StyleSheet.create({
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerText: { flex: 1, minWidth: 0 },
   title: { fontSize: 15, fontWeight: '600', color: C.text },
-  subtitle: { fontSize: 12, color: C.sub },
+  subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  subtitle: { flexShrink: 1, fontSize: 12, color: C.sub },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.32)' },
+  sheet: { backgroundColor: C.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 16, paddingHorizontal: 16, gap: 8, maxHeight: '70%' },
+  sheetTitle: { fontSize: 15, fontWeight: '600', color: C.text },
+  sheetHint: { fontSize: 13, lineHeight: 18, color: C.sub },
+  sheetList: { flexGrow: 0 },
+  sheetRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.hair },
+  sheetRowBusy: { opacity: 0.45 },
+  sheetRowText: { flex: 1, minWidth: 0 },
+  sheetRowName: { fontSize: 15, color: C.text },
+  sheetRowSub: { fontSize: 12, color: C.sub },
   jobs: { height: 36, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: C.blueBorder, backgroundColor: C.blueBg, marginRight: 8 },
   jobsRing: { width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: C.link },
   jobsText: { fontSize: 13, fontWeight: '500', color: C.blueDark },
