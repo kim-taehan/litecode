@@ -4,6 +4,7 @@ export const S = {
   appName: 'litecode',
 
   connectIntro: '데스크탑의 litecode 에 연결합니다. 데스크탑에서 설정 › 모바일을 열어 QR 을 띄워 주세요.',
+  connectIntroBluetooth: '데스크탑에서 설정 › 모바일을 열어 연결 방법을 블루투스로 두고, 기기 연결의 QR 을 띄워 주세요. 이 방법은 QR 로만 연결됩니다.',
   scanQr: 'QR 스캔',
   scanHint: '데스크탑 화면의 QR 을 네모 안에 맞춰 주세요',
   closeScanner: '닫기',
