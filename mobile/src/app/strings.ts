@@ -167,7 +167,7 @@ export const S = {
   system: '시스템',
   keepAlive: '연결 유지',
   keepAliveHint: '앱을 닫아도 연결을 유지해 답 필요·완료 알림을 받습니다',
-  keepAliveLimit: '꺼 두면 앱이 뒤에 있는 동안에는 알림이 오지 않고, 다시 열 때 이어서 받습니다. 켜면 상단에 알림이 계속 떠 있습니다.',
+  keepAliveLimit: '꺼 두면 앱이 뒤에 있는 동안에는 알림이 오지 않고, 다시 열 때 이어서 받습니다. 켜면 상단에 알림이 계속 떠 있습니다. 블루투스로 연결할 때는 이 스위치와 상관없이 늘 켜집니다.',
   notifications: '알림',
   notificationsHint: '답이 필요하거나 작업이 끝나면 알립니다',
   permissionOff: '알림 권한이 꺼져 있습니다 — 시스템 설정에서 켜 주세요',
