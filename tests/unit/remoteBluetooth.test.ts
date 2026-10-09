@@ -207,14 +207,14 @@ async function connect(desktop: Awaited<ReturnType<typeof start>>, bleno: FakeBl
 }
 
 describe('블루투스 운반 — 광고 수명', () => {
-  it('켤 때 모듈을 처음 읽고 키를 만든다. 서비스 UUID 하나만 광고(이름 없음), 특성은 rx(write without response)·tx(notify). 내리면 광고를 멈추고 리스너를 다 걷는다', async () => {
+  it('켤 때 모듈을 처음 읽는다(키는 아직 — 이슈 #268). 서비스 UUID 하나만 광고(이름 없음), 특성은 rx(write without response)·tx(notify). 내리면 광고를 멈추고 리스너를 다 걷는다', async () => {
     const desktop = await start({ http: false, noiseKeyFile: noiseKeyFile() })
     await expect(fs.stat(noiseKeyFile())).rejects.toThrow() // 켜기 전에는 키 파일이 없다
     const bleno = new FakeBleno()
     const { fiber, loads } = await bluetooth(desktop, bleno)
     expect(loads()).toBe(1)
     await until(() => desktop.remote.status().bluetooth?.state === 'advertising', '광고')
-    await fs.stat(noiseKeyFile())
+    await expect(fs.stat(noiseKeyFile())).rejects.toThrow() // 광고에는 desktopId 만 — 키는 폰이 붙거나 짝짓기를 시작할 때 읽는다 (#268)
     expect(bleno.calls).toEqual(['init', 'setServices', 'startAdvertising'])
     expect(bleno.advertising).toEqual({ name: '', uuids: [bluetoothServiceUuid(desktop.remote.desktopId)] })
     expect(bleno.services.map((service) => service.options.uuid)).toEqual([bluetoothServiceUuid(desktop.remote.desktopId)])
@@ -272,15 +272,34 @@ describe('블루투스 운반 — 광고 수명', () => {
     await expect(fs.stat(noiseKeyFile())).rejects.toThrow() // 모듈을 못 읽었으면 키도 만들지 않는다
   })
 
-  it('봉한 키를 키 저장소가 안 풀어 주면 failed + keyStore 표시 — 화면이 영어 원문 대신 키체인 안내를 보인다 (이슈 #231)', async () => {
+  // 이슈 #268: 앱을 켤 때마다 macOS 키체인 허용 창이 뜨지 않게 — 광고 시작은 키 저장소를 부르지 않고, 폰이 핸드셰이크를 시작할 때 처음 읽는다
+  it('광고를 시작할 때는 키 저장소를 부르지 않는다. 폰이 붙을 때 읽고, 못 풀면 그 연결을 끊고 failed + keyStore (이슈 #231) — 다음 연결에서 다시 읽어 붙는다', async () => {
     let available = true
-    const cipher: KeyCipher = { available: () => available, encrypt: (plain) => Buffer.from(plain).reverse(), decrypt: (sealed) => Buffer.from(sealed).reverse().toString() }
+    let cipherCalls = 0
+    const cipher: KeyCipher = {
+      available: () => (cipherCalls++, available),
+      encrypt: (plain) => (cipherCalls++, Buffer.from(plain).reverse()),
+      decrypt: (sealed) => (cipherCalls++, Buffer.from(sealed).reverse().toString()),
+    }
     await loadNoiseIdentity(noiseKeyFile(), cipher)
     available = false
+    cipherCalls = 0
     const desktop = await start({ http: false, noiseKeyFile: noiseKeyFile(), cipher })
-    await bluetooth(desktop, new FakeBleno())
+    const bleno = new FakeBleno()
+    await bluetooth(desktop, bleno)
+    await until(() => desktop.remote.status().bluetooth?.state === 'advertising', '광고')
+    expect(cipherCalls).toBe(0)
+
+    bleno.central('first').subscribe()
     await until(() => desktop.remote.status().bluetooth?.state === 'failed', '실패')
-    expect(desktop.remote.status().bluetooth).toMatchObject({ state: 'failed', keyStore: true })
+    expect(cipherCalls).toBeGreaterThan(0)
+    expect(desktop.remote.status().bluetooth).toMatchObject({ state: 'failed', keyStore: true, links: 0 })
+    expect(bleno.calls).toContain('disconnect:first')
+
+    available = true // 사용자가 키체인 접근을 허용했다
+    await connect(desktop, bleno, 'second')
+    await until(() => desktop.remote.status().bluetooth?.links === 1, '핸드셰이크')
+    expect(desktop.remote.status().bluetooth).toMatchObject({ state: 'advertising', links: 1 })
   })
 })
 
@@ -478,17 +497,26 @@ describe('블루투스 단독 QR — 사내망이 꺼져 있어도 블루투스�
     expect(pairing.uri).not.toContain('&fp=')
   })
 
-  it('블루투스만 떠 있어도(HTTP 운반 없음) 짝짓기를 시작할 수 있고 QR 이 나온다', async () => {
+  it('블루투스만 떠 있어도(HTTP 운반 없음) 짝짓기를 시작할 수 있고 QR 이 나온다 — 키는 짝짓기를 시작할 때 처음 읽고 QR 을 다시 알린다 (이슈 #268)', async () => {
     const desktop = await start({ http: false, noiseKeyFile: noiseKeyFile() })
     await bluetooth(desktop, new FakeBleno())
     await until(() => desktop.remote.status().bluetooth?.state === 'advertising', '광고')
-    expect(parsePairUri(desktop.remote.startPairing().pairing!.uri!)).toMatchObject({ addresses: [], bluetoothKey: (await desktop.remote.noiseIdentity()).publicKeyText })
+    await expect(fs.stat(noiseKeyFile())).rejects.toThrow() // 광고까지는 키를 읽지 않았다
+    const changed: (string | undefined)[] = []
+    desktop.ctx.on('remote/changed', (status) => void changed.push(status.pairing?.uri))
+    expect(desktop.remote.startPairing().pairing).toBeDefined()
+    await until(() => desktop.remote.status().pairing?.uri !== undefined, 'QR')
+    expect(changed.at(-1)).toBe(desktop.remote.status().pairing!.uri) // 화면에 알렸다
+    expect(parsePairUri(desktop.remote.status().pairing!.uri!)).toMatchObject({ addresses: [], bluetoothKey: (await desktop.remote.noiseIdentity()).publicKeyText })
+    await fs.stat(noiseKeyFile())
   })
 
   it('사내망·블루투스 둘 다 켜져 있으면 한 장에 둘 다', async () => {
     const desktop = await start({ noiseKeyFile: noiseKeyFile(), tls: { addresses: () => ['127.0.0.1'], allowPeer: () => true } })
     await bluetooth(desktop, new FakeBleno())
-    const link = parsePairUri(desktop.remote.startPairing().pairing!.uri!)!
+    desktop.remote.startPairing()
+    await until(() => !!desktop.remote.status().pairing?.uri && parsePairUri(desktop.remote.status().pairing!.uri!)!.bluetoothKey !== undefined, 'QR 의 bk')
+    const link = parsePairUri(desktop.remote.status().pairing!.uri!)!
     expect(link.fingerprint).toBe(desktop.remote.status().fingerprint)
     expect(link.addresses.length).toBeGreaterThan(0)
     expect(link.bluetoothKey).toBe((await desktop.remote.noiseIdentity()).publicKeyText)
@@ -504,8 +532,9 @@ describe('hello 의 bluetoothKey — Wi-Fi 로 짝지은 폰이 키를 배운다
     expect('bluetoothKey' in before.body).toBe(false)
 
     const { fiber } = await bluetooth(desktop, new FakeBleno())
-    const identity = await desktop.remote.noiseIdentity()
-    expect((await desktop.api('GET', '/v1/hello', { token })).body.bluetoothKey).toBe(identity.publicKeyText)
+    // 아직 아무도 키를 읽지 않았다 — hello 가 읽어서 싣는다 (이슈 #268)
+    const learned = (await desktop.api('GET', '/v1/hello', { token })).body.bluetoothKey
+    expect(learned).toBe((await desktop.remote.noiseIdentity()).publicKeyText)
 
     await fiber.dispose()
     await desktop.remote.ready()

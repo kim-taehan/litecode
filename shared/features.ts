@@ -39,9 +39,10 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
  *  훅(hooks, 이슈 #102)은 기본 꺼짐 — 사용자 셸 명령을 AI 의 행동에 걸어 돌리는 기능이라 사용자가 켠다.
  *  음성 입력(voice — ctx.speech)도 기본 꺼짐 — 마이크 권한을 묻고 쓰는 동안 메모리 ~1GB 인 기능이라 사용자가 켠다. 꺼져 있으면 마이크 권한도 거절한다.
  *  브라우저(browser — ctx.browser, 이슈 #147)도 기본 꺼짐 — AI 가 Chrome 창을 조종하고, 켜면 도구 25개의 스키마(26KB)가 매 요청에 실린다.
- *  모바일 연결의 길은 둘이다 (이슈 #210, 설계 01ab "연결 수단 고르기" — 길마다 토글): 사내망 연결(lan — TLS 리스너, 기본 켜짐: 모바일 연결을 켜면 전처럼 열린다)과
- *  블루투스 연결(bluetooth — 기본 꺼짐: 켜는 순간 macOS 가 블루투스 허용을 묻고, 네이티브 모듈을 그때 읽는다). 둘 다 모바일 연결(remote)이 켜져 있어야 한다 */
-export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser', 'bluetooth']
+ *  모바일 연결의 길은 둘이다 (이슈 #210, 설계 01ab "연결 수단 고르기" — 길마다 토글): 사내망 연결(lan — TLS 리스너, 기본 꺼짐: 켜는 순간 safeStorage 로 봉한
+ *  TLS 키를 읽어 macOS 가 키체인 접근을 물을 수 있다, 이슈 #268)과 블루투스 연결(bluetooth — 기본 꺼짐: 켜는 순간 macOS 가 블루투스 허용을 묻고, 네이티브 모듈을
+ *  그때 읽는다). 둘 다 모바일 연결(remote)이 켜져 있어야 한다 — 모바일 연결만 켜면 길은 고르지 않은 상태다(설정 > 모바일에서 고른다) */
+export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser', 'lan', 'bluetooth']
 
 /** 저장된 값이 없을 때의 켜짐 */
 export function featureDefault(feature: FeatureId): boolean {
