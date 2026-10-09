@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInpu
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Attention, AttentionAnswer, HistoryMessage, ShellCard, TurnItem } from '../../../../shared/contract.ts'
 import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
-import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
+import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Mic, Warning } from '../icons.tsx'
 import { BluetoothInfo, HistoryProgress } from '../BluetoothBits.tsx'
 import type { AppSession, Carrier } from '../session.ts'
 import { StatusBanner } from '../StatusBanner.tsx'
@@ -11,6 +11,7 @@ import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 import type { QuestionView } from '../view.ts'
 import { attentionTitle, chatRows, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, SHELL_COLLAPSE_LINES, shellCardView, turnHead, turnLines, turnStartedAt, turnTexts, userMessageView } from '../view.ts'
+import { useVoiceInput } from '../voiceInput.ts'
 
 // 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages, 사이사이 데스크탑 `!` 카드 — 읽기 전용) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
 // 답은 글자 그대로 그린다 — 마크다운은 다음 라운드. 모드 칩·"작업 N" 은 모양만.
@@ -28,6 +29,7 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
   const [draft, setDraft] = useState('')
   const scroll = useRef<ScrollView>(null)
   const notice = useNotice(session)
+  const voice = useVoiceInput(draft, setDraft)
 
   // 이 대화를 받아 두고 이벤트를 따라간다 — 나가면 놓는다
   useEffect(() => {
@@ -55,6 +57,7 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
   const send = (): void => {
     const text = draft.trim()
     if (!text) return
+    voice.cancel()
     setDraft('')
     // 못 보냈으면(안내가 선다) 친 글을 돌려놓는다 — 그사이 새로 친 것이 있으면 건드리지 않는다
     void session.send(cid, text).then((sent) => {
@@ -138,12 +141,24 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
           onChangeText={setDraft}
           multiline
         />
+        {voice.problem !== undefined && <Text style={styles.voiceProblem}>{S.voiceProblem[voice.problem]}</Text>}
         <View style={styles.composerRow}>
           <Pressable accessibilityRole="button" accessibilityLabel={S.modeLabel(mode)} style={styles.mode}>
             <Text style={styles.modeText}>{mode}</Text>
             <ChevronDown size={12} />
           </Pressable>
           <View style={styles.grow} />
+          {voice.available && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={voice.listening ? S.voiceStop : S.voiceStart}
+              accessibilityState={{ selected: voice.listening }}
+              style={[styles.mic, voice.listening && styles.micOn]}
+              onPress={voice.toggle}
+            >
+              <Mic color={voice.listening ? C.blue : C.text2} />
+            </Pressable>
+          )}
           {stopping ? (
             <Pressable accessibilityRole="button" accessibilityLabel={S.stop} style={styles.action} onPress={() => session.stop(cid)}>
               <View style={styles.stopSquare} />
@@ -363,4 +378,7 @@ const styles = StyleSheet.create({
   action: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.text, alignItems: 'center', justifyContent: 'center' },
   actionIdle: { backgroundColor: C.faint },
   stopSquare: { width: 12, height: 12, borderRadius: 2, backgroundColor: C.white },
+  mic: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center' },
+  micOn: { borderColor: C.blue, backgroundColor: C.blueBg },
+  voiceProblem: { fontSize: 12, lineHeight: 17, color: C.red, paddingHorizontal: 4 },
 })

@@ -67,6 +67,16 @@ export function ArrowUp() {
   )
 }
 
+/** 마이크 — 음성 입력 (#271) */
+export function Mic({ color = C.text2 }: { color?: string }) {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 18 18" stroke={color} strokeWidth={1.6} {...line}>
+      <Rect x={6.5} y={2} width={5} height={9} rx={2.5} />
+      <Path d="M3.75 8.5a5.25 5.25 0 0 0 10.5 0M9 13.75V16" />
+    </Svg>
+  )
+}
+
 /** Wi-Fi (시안 mock-ble Main) */
 export function WifiIcon({ size = 24, color = C.sub }: { size?: number; color?: string }) {
   return (
