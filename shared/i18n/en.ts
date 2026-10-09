@@ -504,6 +504,7 @@ export const en = {
   'error.streamBroken': 'Interrupted — the event stream was cut. Please send again',
   'error.stopped': 'Interrupted — you stopped the reply',
   'error.modelStalled': 'The model has not responded for {seconds} seconds. Please check the model settings (address and key)',
+  'error.noAnswer': 'The model ended without any answer. Check the model connection (address and key)',
   'error.sessionCreate': 'Could not create the session ({status})',
   'error.modelList': 'Could not read the model list ({status})',
   'error.agentList': 'Could not list agents ({status})',

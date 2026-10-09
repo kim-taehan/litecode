@@ -1155,6 +1155,8 @@ export class LlmService extends Service {
         if (failure.name === 'MessageAbortedError') return outcome({ ok: false, error: tr('error.stopped'), interrupted: true }) // 다른 클라이언트가 멈췄다
         return outcome({ ok: false, error: failureText(failure) })
       }
+      // 오류도 거절도 없는데 모델이 아무것도 내놓지 않고 끝났다 — 게이트웨이가 닿지 않을 때 "완료" 로 보이던 것 (사용자 2026-10-09)
+      if (!declinedEnd && !tracker.hasOutput()) return outcome({ ok: false, error: tr('error.noAnswer') })
       return declinedEnd ? outcome({ ok: true, declined: true }) : outcome({ ok: true })
     }
     /** user 메시지가 생기기 전의 session.error — idle 없이 끝나는 거절(없는 에이전트 등)일 수 있다. 그 세션이 돌고 있지 않고 여전히 이 턴 user

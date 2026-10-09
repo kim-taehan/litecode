@@ -331,6 +331,11 @@ export class TurnTracker {
     return item
   }
 
+  /** 모델이 이 턴에서 뭔가 내놓았다 — 글·생각·도구 줄이 하나라도 있다 (재시도 줄만 있으면 아니다). 아무것도 없이 끝난 턴은 모델이 닿지 않은 것이다 */
+  hasOutput(): boolean {
+    return [...this.items.values()].some((item) => item.kind !== 'retry')
+  }
+
   /** 이 턴 답의 글 — 글 줄을 나타난 순서대로 잇는다 (도구 결과·생각은 빼고) */
   text(): string {
     return [...this.items.values()].map((item) => (item.kind === 'text' ? item.text : '')).join('')
