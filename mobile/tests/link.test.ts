@@ -305,6 +305,45 @@ describe('진짜 세션 (remoteSession) — 화면이 보는 것이 전부 데�
     expect(view().messages.at(-1)).toMatchObject({ role: 'assistant' })
   })
 
+  it('모델 고르기 (#269) — 고르면 바로 그 모델이 보이고, 다음 보내기에 실린다. 턴이 도는 중에는 고를 수 없다', async () => {
+    const bodies: string[] = []
+    const inner = createFetchTransport()
+    const recording: Transport = {
+      stream: (request, handlers) => inner.stream(request, handlers),
+      request: (request) => (request.url.endsWith('/messages') && bodies.push(request.body ?? ''), inner.request(request)),
+    }
+    const { session } = await linked(memoryStore(), recording)
+    session.openConversation('c_tests')
+    await until(() => session.getState().views['c_tests'] !== undefined && session.models.length === 2, '스냅샷·모델')
+    const [first, second] = session.models
+    expect(session.modelOf('c_tests')).toMatchObject({ modelId: first!.modelId })
+
+    let notified = 0
+    const off = session.subscribe(() => notified++)
+    expect(session.chooseModel('c_tests', second!)).toBe(true)
+    off()
+    expect(notified).toBeGreaterThan(0)
+    expect(session.modelOf('c_tests')).toEqual({ providerId: second!.providerId, modelId: second!.modelId }) // 보내기 전에 머리 이름이 바뀐다
+
+    expect(await session.send('c_tests', '[ask] 실행')).toBe(true)
+    expect(JSON.parse(bodies[0]!)).toMatchObject({ text: '[ask] 실행', model: { providerId: second!.providerId, modelId: second!.modelId } })
+    // 데스크탑 목록이 고른 모델을 실은 뒤에도 그대로
+    await until(() => session.getState().conversations[session.getState().projects[0]!.path]!.find((entry) => entry.id === 'c_tests')?.model?.modelId === second!.modelId, '목록의 모델')
+    expect(session.modelOf('c_tests')).toMatchObject({ modelId: second!.modelId })
+
+    // 도는 중(승인 대기) — 고를 수 없고 모델은 그대로
+    await until(() => session.getState().views['c_tests']!.running, '턴')
+    expect(session.chooseModel('c_tests', first!)).toBe(false)
+    expect(session.modelOf('c_tests')).toMatchObject({ modelId: second!.modelId })
+
+    // 데스크탑 목록과 같은 모델이면 따로 싣지 않는다
+    session.stop('c_tests')
+    await until(() => !session.getState().views['c_tests']!.running, '턴 끝')
+    expect(session.chooseModel('c_tests', second!)).toBe(true)
+    expect(await session.send('c_tests', '다음')).toBe(true)
+    expect(JSON.parse(bodies[1]!).model).toBeUndefined()
+  })
+
   it('새 대화를 만들면 열린 채로 id 가 온다', async () => {
     const { session } = await linked()
     await until(() => session.getState().projects.length > 0, '목록')
