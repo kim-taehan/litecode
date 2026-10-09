@@ -107,18 +107,20 @@ export default function App() {
   useEffect(() => alerts.view(viewing), [viewing])
 
   // 알림 권한(Android 13+)은 처음 필요할 때 묻는다 — 붙어 있고 알림이나 연결 유지가 켜져 있을 때 한 번
-  const wantsPermission = linked && (prefs.notifications || prefs.keepAlive)
+  // 블루투스로 붙어 있으면 연결 유지는 늘 켠다 — 앱이 뒤에 있어도 데스크탑이 가까워지면 저절로 다시 붙는다 (사용자 2026-10-09 "백그라운드 자동 연결")
+  const keepAlive = prefs.keepAlive || (state.phase === 'linked' && state.carrier === 'bluetooth')
+  const wantsPermission = linked && (prefs.notifications || keepAlive)
   useEffect(() => {
     // 물었는데 허용하지 않았으면 이번 실행에서는 다시 묻지 않는다(denied) — 설정 화면이 "권한이 꺼져 있습니다" 와 설정 열기를 보인다
     if (wantsPermission && permission === 'undetermined') void requestNotificationPermission().then((answer) => setPermission(answer === 'granted' ? 'granted' : 'denied'), () => undefined)
   }, [wantsPermission, permission])
 
-  // 연결 유지: 붙어 있고 스위치가 켜져 있는 동안만 서비스가 떠 있다 — 끄거나 연결 해제·기기 해제되면 내려간다
+  // 연결 유지: 짝이 있고 스위치가 켜져 있거나 블루투스로 붙는 동안만 서비스가 떠 있다 — 끄거나 연결 해제·기기 해제되면 내려간다
   useEffect(() => {
-    if (desktopName === undefined || !prefs.keepAlive) return
+    if (desktopName === undefined || !keepAlive) return
     startKeepAlive(S.keepAliveTitle, S.keepAliveText(desktopName), S.channelKeepAlive)
     return () => stopKeepAlive()
-  }, [desktopName, prefs.keepAlive])
+  }, [desktopName, keepAlive])
 
   return (
     <SafeAreaProvider>
