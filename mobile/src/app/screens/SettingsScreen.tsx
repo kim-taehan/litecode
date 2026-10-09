@@ -61,9 +61,11 @@ export function SettingsScreen({
               <Fact label={S.lastConnected} value={S.justNow} />
               <Fact label={S.connectMethod} value={S.carrierShort[session.carrier]} />
             </View>
-            <Pressable accessibilityRole="button" style={styles.disconnect} onPress={() => onCarrier(session.carrier === 'wifi' ? 'bluetooth' : 'wifi')}>
-              <Text style={styles.carrierText}>{S.switchTo[session.carrier === 'wifi' ? 'bluetooth' : 'wifi']}</Text>
-            </Pressable>
+            {session.carrier === 'wifi' && (
+              <Pressable accessibilityRole="button" style={styles.disconnect} onPress={() => onCarrier('bluetooth')}>
+                <Text style={styles.carrierText}>{S.switchTo.bluetooth}</Text>
+              </Pressable>
+            )}
             <Pressable accessibilityRole="button" style={styles.disconnect} onPress={onDisconnect}>
               <Text style={styles.disconnectText}>{S.disconnect}</Text>
             </Pressable>

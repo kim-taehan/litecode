@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Attention, AttentionAnswer, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
 import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
 import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
-import { BluetoothInfo, CarrierSwitch, HistoryProgress } from '../BluetoothBits.tsx'
+import { BluetoothInfo, HistoryProgress } from '../BluetoothBits.tsx'
 import type { AppSession, Carrier } from '../session.ts'
 import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
@@ -124,7 +124,6 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
         </Pressable>
       )}
 
-      <CarrierSwitch carrier={session.carrier} onCarrier={onCarrier} />
 
       <View style={[styles.composer, { marginBottom: composerBottomMargin(insets.bottom, keyboardVisible) }]}>
         <TextInput
