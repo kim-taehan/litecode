@@ -9,7 +9,7 @@
 // - `turn.interjected` 는 도는 턴의 진행 줄을 그 앞의 답으로 얼리고 말풍선을 끼운다 (규칙은 데스크탑과 같은 shared/chatReducer.ts)
 // - `conversations.changed` → 그 프로젝트 목록이 낡았다고 적는다(staleProjects) — 다시 받는 것은 연결의 몫
 
-import type { Attention, HistoryMessage, NoticeState, TurnItem } from '../../../shared/contract.ts'
+import type { Attention, HistoryMessage, NoticeState, ShellCard, TurnItem } from '../../../shared/contract.ts'
 import type { ConversationSnapshot, Hello, RemoteConversation, RemoteEvent, RemoteProject } from '../../../shared/remote.ts'
 import { endedMessages, interjectInView, placeInView } from '../../../shared/chatReducer.ts'
 
@@ -26,6 +26,8 @@ export interface ConversationView {
   queue: string[]
   missingFolder?: boolean
   error?: string
+  /** 데스크탑 `!명령` 결과 카드 (#265) — 스냅샷에서만 온다(읽기 전용). 새로 돈 카드는 다시 받을 때 보인다 */
+  shells?: ShellCard[]
   /** 이 모습이 반영한 마지막 seq — 이 이하 이벤트는 이미 들어 있다 */
   seq: number
 }
@@ -121,6 +123,7 @@ function viewOf(snapshot: ConversationSnapshot): ConversationView {
     queue: snapshot.live?.queue ?? [],
     missingFolder: snapshot.history.missingFolder,
     error: snapshot.history.error,
+    shells: snapshot.shells,
     seq: snapshot.seq,
   }
 }

@@ -107,6 +107,14 @@ describe('리듀서 — 스냅샷과 스트림 사이', () => {
     const state = reduce(initialState, { type: 'conversation.loaded', cid: 'c1', snapshot: snapshot(3, { live }) })
     expect(state.views['c1']).toMatchObject({ running: true, progress: live.progress, queue: ['q'] })
   })
+
+  it('스냅샷의 `!` 카드(shells)를 모습에 싣고, 턴 이벤트가 지나가도 그대로 둔다 (#265)', () => {
+    const shells = [{ id: 's1', at: 1, position: 0, command: 'ls', output: 'a', exitCode: 0, status: 'done' as const, truncated: false }]
+    const loaded = run([{ type: 'conversation.loaded', cid: 'c1', snapshot: snapshot(10, { shells }) }], opened())
+    expect(loaded.views['c1']!.shells).toEqual(shells)
+    expect(run([started(11), ended(12)], loaded).views['c1']!.shells).toEqual(shells)
+    expect(opened().views['c1']!.shells).toBeUndefined()
+  })
 })
 
 describe('리듀서 — 다시 받기', () => {

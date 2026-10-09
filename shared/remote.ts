@@ -3,7 +3,7 @@
 // 양쪽이 이 파일 하나를 import 한다 — 계약이 바뀌면 앱 빌드가 깨진다. 이 계약을 말하는 서버는 ctx.remote 와 개발용 mobile/dev/fake-desktop.mts 다.
 // Node·React Native 어느 쪽 API 도 쓰지 않는다 (타입 + 경로 문자열 + 상수).
 
-import type { Attention, Conversation, ConversationStatus, History, HistoryMessage, NoticeState, Project, TurnItem, TurnUsage } from './contract.ts'
+import type { Attention, Conversation, ConversationStatus, History, HistoryMessage, NoticeState, Project, ShellCard, TurnItem, TurnUsage } from './contract.ts'
 import type { Mode } from './modes.ts'
 
 /** 경로의 `/v1` 과 hello.apiVersion */
@@ -166,7 +166,7 @@ export function parsePairUri(text: string): PairLink | undefined {
 export type RemoteProject = Project
 
 /** GET /v1/conversations?project= 의 항목 — 목록 정보 중 서버가 실제로 싣는 것(ctx.remote 의 toRemote)만 + 상태 점. usage·labels·첨부 표·
- *  고정·`!` 카드(shells — 폰에 셸을 열지 않는다)는 오지 않는다 */
+ *  고정·`!` 카드(shells)는 오지 않는다 — 카드는 대화 스냅샷(ConversationSnapshot.shells)에 읽기 전용으로 온다 (폰에 셸을 열지 않는다) */
 export interface RemoteConversation extends Pick<Conversation, 'id' | 'project' | 'title' | 'updatedAt' | 'engineSessionId' | 'model' | 'mode'> {
   status?: ConversationStatus
 }
@@ -191,6 +191,8 @@ export interface ConversationSnapshot {
   history: History
   /** 턴이 도는 중일 때만 */
   live?: LiveTurn
+  /** 이 대화의 `!명령` 결과 카드 (#265) — 읽기 전용. 카드가 없으면 필드가 없다. 새로 돈 카드는 스트림으로 오지 않는다 — 다시 읽을 때 보인다 */
+  shells?: ShellCard[]
   seq: number
 }
 
