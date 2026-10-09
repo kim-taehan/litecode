@@ -21,20 +21,19 @@ export function ConnectScreen({
   onPair,
   onPairQr,
   lanBlockedApi,
-  carrier,
   onCarrier,
 }: {
   state: Extract<LinkState, { phase: 'unpaired' | 'pairing' }>
   defaultDeviceName: string
   /** 이 폰의 API 레벨 — 사내망(TLS 1.3) 연결을 못 하는 폰(Android 10 미만)일 때만 준다. 안내를 띄우고 QR 을 막는다(이 컴퓨터 안 평문 입력은 그대로) */
   lanBlockedApi?: number
-  /** 짝지을 통신 방법 — 고른 것을 기억한다(QR 에 두 길이 다 있을 때 이 길로 짝짓는다). 블루투스는 QR 로만 짝짓고, Wi-Fi 는 주소·코드 직접 입력도 된다 */
-  carrier: Carrier
+  /** 짝지을 통신 방법 — 이 화면에 들어오면 아무것도 고른 상태가 아니고, 고르면 기억한다(QR 에 두 길이 다 있을 때 이 길로 짝짓는다). 블루투스는 QR 로만 짝짓고, Wi-Fi 는 주소·코드 직접 입력도 된다 */
   onCarrier(carrier: Carrier): void
   onPair(input: PairInput): void
   onPairQr(text: string, deviceName: string): void
 }) {
   const insets = useSafeAreaInsets()
+  const [carrier, setCarrier] = useState<Carrier>()
   const [open, setOpen] = useState(false)
   const [address, setAddress] = useState(DEFAULT_ADDRESS)
   const [code, setCode] = useState('')
@@ -78,7 +77,7 @@ export function ConnectScreen({
       <ScrollView ref={scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 28, paddingBottom: insets.bottom + 32 }]} keyboardShouldPersistTaps="handled">
         <View style={styles.intro}>
           <Text style={styles.title}>{S.appName}</Text>
-          <Text style={styles.lead}>{carrier === 'bluetooth' ? S.connectIntroBluetooth : S.connectIntro}</Text>
+          <Text style={styles.lead}>{carrier === 'bluetooth' ? S.connectIntroBluetooth : carrier === 'wifi' ? S.connectIntro : S.connectChoose}</Text>
         </View>
 
         <View style={styles.methods}>
@@ -87,14 +86,14 @@ export function ConnectScreen({
             {(['bluetooth', 'wifi'] as const).map((method) => {
               const selected = method === carrier
               return (
-                <Pressable key={method} accessibilityRole="button" accessibilityState={{ selected }} disabled={pairing} style={[styles.method, selected && styles.methodSelected]} onPress={() => onCarrier(method)}>
+                <Pressable key={method} accessibilityRole="button" accessibilityState={{ selected }} disabled={pairing} style={[styles.method, selected && styles.methodSelected]} onPress={() => (setCarrier(method), onCarrier(method))}>
                   {method === 'wifi' ? <WifiIcon color={selected ? C.link : C.sub} /> : <BluetoothIcon color={selected ? C.link : C.sub} />}
                   <Text style={styles.methodName}>{S.carrierName[method]}</Text>
                 </Pressable>
               )
             })}
           </View>
-          <Text style={styles.methodHint}>{S.carrierHint[carrier]}</Text>
+          {carrier !== undefined && <Text style={styles.methodHint}>{S.carrierHint[carrier]}</Text>}
         </View>
 
         {(revoked || fingerprintChanged) && (
@@ -109,6 +108,8 @@ export function ConnectScreen({
           </View>
         )}
 
+        {carrier !== undefined && (
+          <>
         <View style={styles.qrCard}>
           <View style={styles.qrBox}>
             <QrFrame />
@@ -187,6 +188,9 @@ export function ConnectScreen({
             </Pressable>
           </View>
         )}
+          </>
+        )}
+
           </>
         )}
 

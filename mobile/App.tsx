@@ -126,7 +126,7 @@ export default function App() {
       {state.phase === 'loading' ? (
         <View style={{ flex: 1, backgroundColor: C.white }} />
       ) : state.phase !== 'linked' ? (
-        <ConnectScreen state={state} defaultDeviceName={defaultDeviceName()} lanBlockedApi={lanUnsupported(platform, apiLevel) ? apiLevel : undefined} carrier={prefs.carrier} onCarrier={(carrier) => preferences.set({ carrier })} onPair={(input) => void link.pair(input)} onPairQr={(text, deviceName) => void link.pairQr(text, deviceName)} />
+        <ConnectScreen state={state} defaultDeviceName={defaultDeviceName()} lanBlockedApi={lanUnsupported(platform, apiLevel) ? apiLevel : undefined} onCarrier={(carrier) => preferences.set({ carrier })} onPair={(input) => void link.pair(input)} onPairQr={(text, deviceName) => void link.pairQr(text, deviceName)} />
       ) : (
         <Gate session={state.session} desktopName={state.desktop.desktopName} onCarrier={chooseCarrier}>
           {route.name === 'chat' ? (
