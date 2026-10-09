@@ -73,7 +73,7 @@ export const S = {
   },
   connectVia: { wifi: 'Wi-Fi 로 연결', bluetooth: '블루투스로 연결' },
   tryVia: { wifi: 'Wi-Fi 로 시도', bluetooth: '블루투스로 시도' },
-  switchTo: { wifi: 'Wi-Fi 로 바꾸기', bluetooth: '블루투스로 바꾸기' },
+  switchTo: { bluetooth: '블루투스로 바꾸기' },
   connectingNow: '연결 중…',
   notConnected: '연결 안 됨',
   connectRemember: '마지막에 고른 방법을 기억합니다. 안 되더라도 다른 방법으로 몰래 넘어가지 않습니다.',

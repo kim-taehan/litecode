@@ -29,19 +29,6 @@ export function HistoryProgress({ session, loading }: { session: AppSession; loa
   )
 }
 
-/** 입력창 위 "연결 방법: 블루투스 [Wi-Fi 로 바꾸기]" */
-export function CarrierSwitch({ carrier, onCarrier }: { carrier: Carrier; onCarrier(carrier: Carrier): void }) {
-  if (carrier !== 'bluetooth') return null
-  return (
-    <View style={styles.switchRow}>
-      <Text style={styles.switchLabel}>{S.connectMethodValue(S.carrierShort.bluetooth)}</Text>
-      <Pressable accessibilityRole="button" style={styles.switchButton} onPress={() => onCarrier('wifi')}>
-        <Text style={styles.switchButtonText}>{S.switchTo.wifi}</Text>
-      </Pressable>
-    </View>
-  )
-}
-
 const styles = StyleSheet.create({
   info: { paddingVertical: 8, paddingHorizontal: 16, backgroundColor: C.surface, fontSize: 12.5, lineHeight: 19, color: C.text2 },
   progress: { borderWidth: 0.5, borderColor: C.borderStrong, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, gap: 8 },
@@ -49,8 +36,4 @@ const styles = StyleSheet.create({
   track: { height: 6, borderRadius: 3, backgroundColor: '#ebecee', overflow: 'hidden' },
   fill: { height: 6, backgroundColor: C.blue },
   progressText: { fontSize: 12, color: C.sub },
-  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 8 },
-  switchLabel: { flex: 1, fontSize: 12.5, color: C.sub },
-  switchButton: { height: 44, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: C.borderStrong, backgroundColor: C.white, justifyContent: 'center' },
-  switchButtonText: { fontSize: 13.5, fontWeight: '500', color: C.text },
 })
