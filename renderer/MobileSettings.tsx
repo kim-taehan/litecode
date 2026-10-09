@@ -9,8 +9,8 @@ import { useFocusTrap } from './focusTrap.ts'
 
 // 설정 > 모바일 (이슈 #56) — 폰 앱이 이 PC 에 붙는 문(ctx.remote)의 화면. 기능 `remote` 가 켜졌을 때만 메뉴에 보인다.
 // 일반 페이지의 행(이름 + 회색 설명, 오른쪽 컨트롤)과 버튼을 그대로 쓴다: 연결 상태(사내망·이 PC 안 주소, 지문, 마지막 수신 시도) → 기기 연결 → 짝지은 기기.
-// 모바일 연결 전체를 켜고 끄는 스위치는 여기 없다 — 설정 > 기능의 카드 하나다 (#124). 그 안의 길(사내망·블루투스)마다의 토글은 여기 있다
-// (이슈 #210, 시안 _workspace/mock-ble/Desk.dc.html): 카드 하나에 `사내망 연결`·`블루투스 연결` 줄(상태 한 줄 + 토글 — 기능 lan·bluetooth 와 같은 값),
+// 모바일 연결 전체를 켜고 끄는 스위치는 여기 없다 — 설정 > 기능의 카드 하나다 (#124). 그 안의 길(사내망·블루투스)은 여기서 **둘 중 하나**를 고른다
+// (이슈 #256, 시안 _workspace/mock-mobile-connect/Settings.dc.html): 라디오 카드 둘 — 고르면 기능 lan·bluetooth 중 그 길만 켜고 다른 길은 끈다. 고른 길의 정보만 아래에 보인다.
 // 기기 줄에는 지금 연결 방법 배지(Wi-Fi / 블루투스 / 끊김 — 붙어 있으면 그 스트림의 운반).
 // [기기 연결] 은 모달이다: QR(사내망 TLS 주소나 블루투스가 있을 때 — 블루투스만이면 블루투스 단독 QR, #229) + 직접 입력(주소·코드·지문 앞 8자) + 남은 시간. 코드를 쓰거나 만료되면 닫힌다.
 // "마지막 수신 시도" 는 진단이다 — 회사 Wi-Fi 의 기기 간 통신 차단·방화벽은 조용히 막아 서버가 알 수 없다. 시도가 없으면 그대로 "없음" 을 보인다.
@@ -47,11 +47,13 @@ function useSecondsLeft(until: number | undefined): number {
 
 const PLATFORM = { android: 'Android', ios: 'iOS' } as const
 
-/** 기능 하나를 켜거나 끈다 — 설정 > 기능의 카드와 같은 값 (기본값과 같으면 지운다) */
-function setFeature(stored: Partial<Record<FeatureId, boolean>>, feature: FeatureId, on: boolean): Promise<unknown> {
+/** 기능 여러 개를 한 번에 켜거나 끈다 (기본값과 같으면 지운다) */
+function setFeatures(stored: Partial<Record<FeatureId, boolean>>, changes: Partial<Record<FeatureId, boolean>>): Promise<unknown> {
   const next = { ...stored }
-  if (on === featureDefault(feature)) delete next[feature]
-  else next[feature] = on
+  for (const [feature, on] of Object.entries(changes) as [FeatureId, boolean][]) {
+    if (on === featureDefault(feature)) delete next[feature]
+    else next[feature] = on
+  }
   return updateSettings({ features: next })
 }
 
@@ -77,11 +79,6 @@ export function MobilePage() {
   const local = status.addresses.filter((address) => isLoopbackHost(hostOf(address)))
   const lanOn = featureOn(features, 'lan')
   const bluetoothOn = featureOn(features, 'bluetooth')
-  const lanLine = !lanOn
-    ? t('remote.lan.off')
-    : lan.length > 0
-      ? [t('remote.lan.waiting', { addresses: lan.join(', ') }), ...(status.fingerprintCode ? [t('remote.lan.fingerprint', { code: status.fingerprintCode })] : [])].join(' · ')
-      : t('remote.status.noLan')
   const bluetooth = status.bluetooth
   const bluetoothLine = !bluetoothOn
     ? t('remote.bluetooth.off')
@@ -100,7 +97,9 @@ export function MobilePage() {
           : bluetooth.state === 'failed'
             ? t('remote.bluetooth.failed', { reason: bluetooth.keyStore ? t('error.keyStore') : (bluetooth.reason ?? '') })
             : t(`remote.bluetooth.${bluetooth.state}`)
-  const toggle = (feature: FeatureId, on: boolean) => run(() => setFeature(features, feature, on))
+  // 길은 둘 중 하나다 (사용자 결정 2026-10-09) — 고르면 그 길만 켜고 다른 길은 끈다. 예전 설정에 둘 다 켜져 있으면 사내망으로 본다(고르는 순간 하나로 정리된다)
+  const path = lanOn ? 'lan' : bluetoothOn ? 'bluetooth' : undefined
+  const choose = (next: 'lan' | 'bluetooth') => run(() => setFeatures(features, { lan: next === 'lan', bluetooth: next === 'bluetooth' }))
   const via = (device: RemoteDeviceInfo) => (!device.connected ? 'none' : device.via === 'bluetooth' ? 'bluetooth' : 'wifi')
   const detail = (device: RemoteDeviceInfo) =>
     [
@@ -116,69 +115,80 @@ export function MobilePage() {
           {error}
         </p>
       )}
-      <div className="mobile-paths">
-        <div className="mobile-path" data-path="lan">
-          <div className="settings-row__text">
-            <div className="settings-row__title">{t('remote.lan')}</div>
-            <div className="settings-row__description" data-testid="remote-lan-status">
-              {lanLine}
-            </div>
-            {(local.length > 0 || lan.length > 0) && (
-              <dl className="mobile-pairing mobile-page__status">
-                {local.length > 0 && (
-                  <>
-                    <dt>{t('remote.status.local')}</dt>
-                    <dd>
-                      <code>{local.join(', ')}</code>
-                      <span className="mobile-pairing__note">{t('remote.pair.emulator', { port: status.port })}</span>
-                    </dd>
-                  </>
-                )}
-                {lan.length > 0 && (
-                  <>
-                    <dt>{t('remote.status.lastAttempt')}</dt>
-                    <dd data-testid="remote-last-attempt">
-                      {status.lastAttemptAt ? date(status.lastAttemptAt) : <span className="mobile-pairing__note">{t('remote.status.noAttempt')}</span>}
-                    </dd>
-                  </>
-                )}
-              </dl>
+      <fieldset className="mobile-choices" role="radiogroup" aria-label={t('remote.path.title')}>
+        <label className="mobile-choice" data-path="lan">
+          <input type="radio" name="remote-path" checked={path === 'lan'} onChange={() => choose('lan')} />
+          <span className="mobile-choice__title">
+            <span className="mobile-choice__dot" />
+            {t('remote.lan')}
+          </span>
+          <span className="settings-row__description">{t('remote.lan.hint')}</span>
+          <span className={`mobile-choice__pill${path === 'lan' ? ' mobile-choice__pill--ok' : ''}`}>{path === 'lan' ? t('remote.path.on') : t('remote.lan.off')}</span>
+        </label>
+        <label className="mobile-choice" data-path="bluetooth">
+          <input type="radio" name="remote-path" checked={path === 'bluetooth'} onChange={() => choose('bluetooth')} />
+          <span className="mobile-choice__title">
+            <span className="mobile-choice__dot" />
+            {t('remote.bluetooth')}
+          </span>
+          <span className="settings-row__description">{t('remote.bluetooth.hint')}</span>
+          <span className={`mobile-choice__pill${path === 'bluetooth' && bluetooth?.state === 'advertising' ? ' mobile-choice__pill--ok' : ''}`}>
+            {path === 'bluetooth' ? t('remote.path.on') : t('remote.bluetooth.off')}
+          </span>
+        </label>
+      </fieldset>
+
+      {path === 'lan' && (
+        <div className="mobile-path-detail" data-path-detail="lan">
+          <dl className="mobile-pairing">
+            <dt>{t('remote.pair.address')}</dt>
+            <dd data-testid="remote-lan-status">{lan.length > 0 ? <code>{lan.join(', ')}</code> : t('remote.status.noLan')}</dd>
+            {status.fingerprintCode && (
+              <>
+                <dt>{t('remote.status.fingerprint')}</dt>
+                <dd>
+                  <code className="mobile-pairing__code">{status.fingerprintCode}</code>
+                  <span className="mobile-pairing__note">{t('remote.pair.fingerprintNote')}</span>
+                </dd>
+              </>
             )}
-            {status.error && status.error.code !== 'ENOLAN' && (
-              <div className="settings-error" role="alert">
-                {status.error.code === 'EADDRINUSE'
-                  ? t('remote.error.portInUse', { port: status.port })
-                  : t('remote.error.listen', { message: status.error.keyStore ? t('error.keyStore') : status.error.message })}
-              </div>
-            )}
-          </div>
-          <button type="button" role="switch" className="settings-switch" aria-checked={lanOn} aria-label={t('remote.lan')} onClick={() => toggle('lan', !lanOn)}>
-            <span className="settings-switch__thumb" />
-          </button>
-        </div>
-        <div className="mobile-path" data-path="bluetooth">
-          <div className="settings-row__text">
-            <div className="settings-row__title">{t('remote.bluetooth')}</div>
-            <div
-              className={`settings-row__description${bluetoothOn && bluetooth?.state === 'advertising' ? ' mobile-path__status--ok' : ''}`}
-              data-testid="remote-bluetooth-status"
-            >
-              {bluetoothLine}
+          </dl>
+          {status.error && status.error.code !== 'ENOLAN' && (
+            <div className="settings-error" role="alert">
+              {status.error.code === 'EADDRINUSE'
+                ? t('remote.error.portInUse', { port: status.port })
+                : t('remote.error.listen', { message: status.error.keyStore ? t('error.keyStore') : status.error.message })}
             </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            className="settings-switch"
-            aria-checked={bluetoothOn}
-            aria-label={t('remote.bluetooth')}
-            onClick={() => toggle('bluetooth', !bluetoothOn)}
-          >
-            <span className="settings-switch__thumb" />
-          </button>
+          )}
+          <details className="mobile-path-detail__more">
+            <summary>{t('remote.path.more')}</summary>
+            <dl className="mobile-pairing mobile-page__status">
+              {local.length > 0 && (
+                <>
+                  <dt>{t('remote.status.local')}</dt>
+                  <dd>
+                    <code>{local.join(', ')}</code>
+                    <span className="mobile-pairing__note">{t('remote.pair.emulator', { port: status.port })}</span>
+                  </dd>
+                </>
+              )}
+              <dt>{t('remote.status.lastAttempt')}</dt>
+              <dd data-testid="remote-last-attempt">
+                {status.lastAttemptAt ? date(status.lastAttemptAt) : <span className="mobile-pairing__note">{t('remote.status.noAttempt')}</span>}
+              </dd>
+            </dl>
+          </details>
         </div>
-      </div>
-      <p className="mobile-pairing__note mobile-paths__note">{t('remote.paths.note')}</p>
+      )}
+      {path === 'bluetooth' && (
+        <div className="mobile-path-detail" data-path-detail="bluetooth">
+          <div className={`settings-row__title${bluetooth?.state === 'advertising' ? ' mobile-path__status--ok' : ''}`} data-testid="remote-bluetooth-status">
+            {bluetoothLine}
+          </div>
+          <div className="settings-row__description">{t('remote.bluetooth.note')}</div>
+        </div>
+      )}
+      {!path && <p className="mobile-pairing__note">{t('remote.path.none')}</p>}
 
       <div className="settings-row">
         <div className="settings-row__text">

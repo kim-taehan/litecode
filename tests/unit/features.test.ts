@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsService } from '../../src/services/settings.ts'
 import { FeaturesService, type FeatureDefinition } from '../../src/services/features.ts'
 import { missingServices } from '../../electron/resilience.ts'
-import { CHOOSABLE_FEATURES, FEATURE_GROUPS, FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
+import { CHOOSABLE_FEATURES, FEATURE_GROUPS, FEATURES, MOBILE_PATH_FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
 import { bluetoothProblem } from '../../src/services/remote/bluetooth.ts'
 import { speechProblem } from '../../src/services/speech.ts'
 
@@ -441,9 +441,9 @@ describe('settings.features', () => {
 })
 
 describe('FEATURE_GROUPS — 설정 > 기능의 중분류', () => {
-  it('고르는 기능을 빠짐없이 한 번씩 담는다 — 새 기능을 더하면 묶음에도 넣어야 한다', () => {
+  it('고르는 기능을 빠짐없이 한 번씩 담는다(모바일 연결의 길은 설정 > 모바일 로 뺐다) — 새 기능을 더하면 묶음에도 넣어야 한다', () => {
     const grouped = FEATURE_GROUPS.flatMap((group) => group.features)
-    expect([...grouped].sort()).toEqual([...CHOOSABLE_FEATURES].sort())
+    expect([...grouped].sort()).toEqual(CHOOSABLE_FEATURES.filter((feature) => !MOBILE_PATH_FEATURES.includes(feature)).sort())
     expect(new Set(grouped).size).toBe(grouped.length)
   })
 })

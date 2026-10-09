@@ -20,12 +20,15 @@ export type ChoosableFeatureId = Exclude<FeatureId, keyof typeof FIXED>
 /** 사용자가 켜고 끄는 기능 (설정 > 기능의 카드) */
 export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
 
+/** 설정 > 기능에 카드를 두지 않는 기능 — 모바일 연결의 길(사내망·블루투스)은 설정 > 모바일 한 곳에서만 켜고 끈다 (사용자 결정 2026-10-09: "기능 화면에서는 하나만") */
+export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
+
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
 export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
   { id: 'ai', features: ['appMcp', 'web', 'browser'] },
   { id: 'automation', features: ['hooks'] },
-  { id: 'devices', features: ['voice', 'remote', 'lan', 'bluetooth', 'notifications'] },
+  { id: 'devices', features: ['voice', 'remote', 'notifications'] },
 ]
 
 /** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다),
