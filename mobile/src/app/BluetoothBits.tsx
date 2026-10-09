@@ -1,23 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useReceivedSince } from './hooks.ts'
-import { BluetoothIcon } from './icons.tsx'
 import type { AppSession, Carrier } from './session.ts'
 import { S } from './strings.ts'
 import { C } from './theme.ts'
 import { receivingText } from './view.ts'
 
 // 블루투스로 붙어 있을 때만 보이는 조각 (시안 _workspace/mock-ble ② Bt, 이슈 #211). Wi-Fi 면 아무것도 그리지 않는다.
-
-/** 상단 배지 "블루투스 · 느림" */
-export function BluetoothBadge({ carrier }: { carrier: Carrier }) {
-  if (carrier !== 'bluetooth') return null
-  return (
-    <View style={styles.badge}>
-      <BluetoothIcon size={12} color={C.amberText} strokeWidth={2.2} />
-      <Text style={styles.badgeText}>{S.bluetoothBadge}</Text>
-    </View>
-  )
-}
 
 /** 머리 아래 안내 한 줄 */
 export function BluetoothInfo({ carrier }: { carrier: Carrier }) {
@@ -55,8 +43,6 @@ export function CarrierSwitch({ carrier, onCarrier }: { carrier: Carrier; onCarr
 }
 
 const styles = StyleSheet.create({
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 28, paddingHorizontal: 10, borderRadius: 14, backgroundColor: C.amberBg, borderWidth: 1, borderColor: C.amberBorder },
-  badgeText: { fontSize: 12, fontWeight: '600', color: C.amberText },
   info: { paddingVertical: 8, paddingHorizontal: 16, backgroundColor: C.surface, fontSize: 12.5, lineHeight: 19, color: C.text2 },
   progress: { borderWidth: 0.5, borderColor: C.borderStrong, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, gap: 8 },
   progressTitle: { fontSize: 12.5, color: C.sub },
