@@ -268,6 +268,10 @@ const CONNECT_TIMEOUT_MS = 10_000
 /** /event 의 무바이트 한도 기본값 — 레거시 /event 는 10초마다 heartbeat 를 보낸다(01w). 세 번 연달아 안 오면 연결이 FIN 없이 죽은 것으로 보고
  *  "중단됨" 으로 끝낸다 (끊긴 연결을 기다리며 턴이 영원히 도는 것을 막는다 — 01q 와 같은 정책) */
 export const STREAM_IDLE_TIMEOUT_MS = 30_000
+/** 모델 무응답 한도 (이슈 #264) — 엔진이 프롬프트를 받은 뒤 이 턴 메시지·하위 작업 이벤트가 이만큼 하나도 없으면 게이트웨이가 요청을 받고 답하지
+ *  않는 것으로 보고 멈추고(abort) 실패로 끝낸다. server.heartbeat(10초, sessionID 없음)는 진행이 아니다(01w). 도구가 running 인 동안은 세지 않는다
+ *  (긴 bash·승인 대기 — 묻는 순간 그 도구는 이미 running 이다, PRE_TOOL_WAIT_MS) */
+export const MODEL_STALL_TIMEOUT_MS = 120_000
 
 export interface LlmConfig {
   /** /event SSE 의 무바이트 한도(ms). 기본 STREAM_IDLE_TIMEOUT_MS, 0 = 없음. 시험이 끊김을 짧게 재현할 때 준다 */
@@ -1106,10 +1110,27 @@ export class LlmService extends Service {
     const awaiting = new Set<string>()
     let idleDeferred = false
     let over = false
+    /** 모델 무응답 감시 (이슈 #264) — 엔진이 프롬프트를 받은 뒤 이 턴의 이벤트마다 다시 건다. running 인 도구 호출이 있으면 걸지 않는다 */
+    const toolsRunning = new Set<string>()
+    let watching = false
+    let stallTimer: ReturnType<typeof setTimeout> | undefined
+    const progressed = (): void => {
+      clearTimeout(stallTimer)
+      stallTimer = watching && !over && toolsRunning.size === 0 ? setTimeout(stalled, MODEL_STALL_TIMEOUT_MS) : undefined
+    }
+    const stalled = (): void => {
+      void this.abort(conn, sessionId, workdir)
+      finish(outcome({ ok: false, error: tr('error.modelStalled', { seconds: MODEL_STALL_TIMEOUT_MS / 1000 }) }))
+    }
+    void admitted.then((sent) => {
+      watching = sent
+      progressed()
+    })
     let resolveFinish!: (outcome: TurnOutcome) => void
     const finished = new Promise<TurnOutcome>((resolve) => (resolveFinish = resolve))
     const finish = (value: TurnOutcome): void => {
       over = true
+      clearTimeout(stallTimer)
       resolveFinish(value)
     }
     const outcome = (base: Omit<TurnOutcome, 'text' | 'usage'>): TurnOutcome => ({ text: tracker.text(), usage: meter.usage(), ...base })
@@ -1152,6 +1173,14 @@ export class LlmService extends Service {
       const props = event.properties ?? {}
       if (event.type === 'server.connected') return connected()
       const role = scope.of(event.type, props)
+      if (role) {
+        const part = props['part'] as EnginePart | undefined
+        if (role === 'assistant' && part?.type === 'tool' && part.callID) {
+          if (part.state?.status === 'running') toolsRunning.add(part.callID)
+          else toolsRunning.delete(part.callID)
+        }
+        progressed()
+      }
       if (role === 'summary') {
         // 요약 답 — 글은 답이 아니다. 끝나면 요약 줄을 구분선으로, 실패(한도 초과로 요약도 못 함)면 그 사유로 턴이 끝난다 (idle 이 뒤따른다)
         if (event.type !== 'message.updated') return
@@ -1289,7 +1318,7 @@ export class LlmService extends Service {
     const timer = setTimeout(() => failConnect(new Error(tr('error.subscribe', { status: 'timeout' }))), CONNECT_TIMEOUT_MS)
     void connecting.finally(() => clearTimeout(timer)).catch(() => {})
 
-    void result.finally(() => (over = true)).catch(() => {})
+    void result.finally(() => ((over = true), clearTimeout(stallTimer))).catch(() => {})
 
     return {
       connected: connecting,

@@ -527,6 +527,7 @@ export const ko = {
   'error.interrupted': '중단됨 — 엔진(opencode)이 재시작되거나 끝나서 답을 끝까지 받지 못했습니다. 다시 보내 주세요',
   'error.streamBroken': '중단됨 — 이벤트 스트림이 끊겼습니다. 다시 보내 주세요',
   'error.stopped': '중단됨 — 답변을 멈췄습니다',
+  'error.modelStalled': '모델이 {seconds}초 동안 응답하지 않습니다. 모델 설정(주소·키)을 확인해 주세요',
   'error.sessionCreate': '세션 생성 실패 ({status})',
   'error.modelList': '모델 목록 조회 실패 ({status})',
   'error.agentList': '에이전트 목록 조회 실패 ({status})',
