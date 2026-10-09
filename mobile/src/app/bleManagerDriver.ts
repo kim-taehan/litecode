@@ -103,5 +103,24 @@ export function createBleManagerDriver(apiLevel: number | undefined): BleDriver 
       drop(deviceId)
       await BleManager.disconnect(deviceId)
     },
+
+    // 상태 변화 이벤트(ACTION_STATE_CHANGED 수신기 — BleManager.start 가 등록한다. bluetooth-off 는 start 뒤에 나오니 이미 떠 있다).
+    // 구독 전에 켜졌을 수 있어 한 번 직접 본다. 두 번 불려도 Connection 이 한 번만 다시 붙는다
+    onBluetoothOn(listener) {
+      let stopped = false
+      const subscription = BleManager.onDidUpdateState(({ state }) => {
+        if (!stopped && state === BleState.On) listener()
+      })
+      BleManager.checkState().then(
+        (state) => {
+          if (!stopped && state === BleState.On) listener()
+        },
+        () => undefined,
+      )
+      return () => {
+        stopped = true
+        subscription.remove()
+      }
+    },
   }
 }

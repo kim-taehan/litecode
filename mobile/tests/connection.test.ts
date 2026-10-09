@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Hello } from '../../shared/remote.ts'
 import { startFakeDesktop } from '../dev/fake-desktop.mts'
-import { backoffMs, Connection, RemoteClient, type ConnectionStatus } from '../src/core/index.ts'
+import { backoffMs, BluetoothError, Connection, RemoteClient, type ConnectionStatus } from '../src/core/index.ts'
 import { ManualTransport, pairedClient, sse, until } from './support.ts'
 
 // 연결 상태 전이 — 손으로 움직이는 transport + 가짜 시계. 맨 아래 묶음만 가짜 데스크탑(진짜 http)에 붙는다.
@@ -276,6 +276,104 @@ describe('연결 상태', () => {
     expect(transport.last.closed).toBe(true)
     await vi.advanceTimersByTimeAsync(120_000)
     expect(connection.status).toEqual({ kind: 'idle' })
+  })
+})
+
+describe('블루투스가 꺼져 있다가 켜지면 (이슈 #270)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  /** hello 가 radio 상태에 따라 BluetoothError 로 실패하는 블루투스 세션 — 켜짐 구독은 손으로 울린다 */
+  function bluetoothSetup(failure: 'bluetooth-off' | 'permission') {
+    const transport = new ManualTransport()
+    const radio = { blocked: true }
+    transport.respond = (request) => {
+      if (radio.blocked) throw new BluetoothError(failure)
+      const path = new URL(request.url).pathname
+      if (path === '/v1/hello') return json(hello('A', 5))
+      return json([])
+    }
+    const listeners = new Set<() => void>()
+    const whenBluetoothOn = vi.fn((listener: () => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    })
+    const connection = new Connection(new RemoteClient({ transport, baseUrl: 'bt://d', token: 't' }), { whenBluetoothOn })
+    const turnOn = () => {
+      radio.blocked = false
+      for (const listener of [...listeners]) listener()
+    }
+    return { transport, connection, listeners, whenBluetoothOn, turnOn }
+  }
+
+  it('bluetooth-off 는 needs-action(사유 문구)을 보이며 켜짐을 듣고 — 폴링 없이 기다리다 켜지면 곧바로 connecting → connected', async () => {
+    const { transport, connection, listeners, turnOn } = bluetoothSetup('bluetooth-off')
+    connection.start()
+    await flush()
+    expect(connection.status).toEqual({ kind: 'needs-action' })
+    expect(connection.failure).toMatchObject({ reason: 'bluetooth-off' })
+    expect(listeners.size).toBe(1)
+
+    // 기다리는 동안 다시 시도하지 않는다 (타이머 없음)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(transport.requests).toHaveLength(1)
+    expect(connection.status).toEqual({ kind: 'needs-action' })
+
+    turnOn()
+    expect(connection.status).toEqual({ kind: 'connecting' })
+    expect(listeners.size).toBe(0) // 다시 붙기 시작하면 구독을 거둔다
+    await flush()
+    transport.last.handlers.onOpen(200)
+    expect(connection.status).toEqual({ kind: 'connected' })
+    expect(connection.failure).toBeUndefined()
+  })
+
+  it('켜졌지만 아직 못 붙으면(또 꺼짐) 다시 켜짐을 기다린다 — 구독은 하나뿐', async () => {
+    const { connection, listeners } = bluetoothSetup('bluetooth-off')
+    connection.start()
+    await flush()
+    for (const listener of [...listeners]) listener() // 켜짐 이벤트가 왔지만 어댑터는 아직 꺼짐으로 답한다
+    await flush()
+    expect(connection.status).toEqual({ kind: 'needs-action' })
+    expect(listeners.size).toBe(1)
+  })
+
+  it('permission 은 그대로 멈춘다 — 켜짐을 듣지 않고 저절로 다시 시도하지 않는다', async () => {
+    const { transport, connection, whenBluetoothOn } = bluetoothSetup('permission')
+    connection.start()
+    await flush()
+    expect(connection.status).toEqual({ kind: 'needs-action' })
+    expect(whenBluetoothOn).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(transport.requests).toHaveLength(1)
+  })
+
+  it('기다리는 중에 stop(세션 닫기)하면 구독을 거두고, 그 뒤 켜져도 붙지 않는다', async () => {
+    const { transport, connection, listeners, turnOn } = bluetoothSetup('bluetooth-off')
+    connection.start()
+    await flush()
+    expect(listeners.size).toBe(1)
+    connection.stop()
+    expect(listeners.size).toBe(0)
+    turnOn()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(connection.status).toEqual({ kind: 'idle' })
+    expect(transport.requests).toHaveLength(1)
+  })
+
+  it('기다리는 중에 [다시 시도] 를 눌러도 구독은 겹치지 않는다', async () => {
+    const { connection, listeners, whenBluetoothOn } = bluetoothSetup('bluetooth-off')
+    connection.start()
+    await flush()
+    connection.retry()
+    expect(listeners.size).toBe(0)
+    await flush()
+    expect(connection.status).toEqual({ kind: 'needs-action' })
+    expect(listeners.size).toBe(1)
+    expect(whenBluetoothOn).toHaveBeenCalledTimes(2)
   })
 })
 

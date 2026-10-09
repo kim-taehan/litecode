@@ -34,11 +34,16 @@ interface FakeBle {
   /** 데스크탑이 멀어졌다 — 폰 쪽에 끊김이 온다 */
   dropRemote(): void
   advertising: boolean
+  /** 폰의 블루투스를 켰다 — onBluetoothOn 을 듣는 쪽에 알린다 */
+  turnOn(): void
+  /** onBluetoothOn 을 듣는 수 */
+  readonly onListeners: number
 }
 
 /** 가짜 라디오 — serve 는 폰이 알림을 구독할 때마다 데스크탑 쪽 링크를 받는다 */
 function fakeBle(serviceUuid: string, serve: (desk: ByteLink) => void, options: { mtu?: number | 'fail'; prepare?: () => void; subscribeFails?: boolean } = {}): FakeBle {
   const disconnectListeners = new Set<() => void>()
+  const onListeners = new Set<() => void>()
   let conn: { closed: boolean; notify?: (bytes: Uint8Array) => void; data: ((chunk: Uint8Array) => void)[]; close: ((error?: unknown) => void)[]; maxChunk: number } | undefined
   let writing = 0
   const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -57,6 +62,12 @@ function fakeBle(serviceUuid: string, serve: (desk: ByteLink) => void, options: 
     connections: 0,
     advertising: true,
     dropRemote: () => cut(true),
+    turnOn: () => {
+      for (const listener of [...onListeners]) listener()
+    },
+    get onListeners() {
+      return onListeners.size
+    },
     driver: {
       async prepare() {
         fake.log.push('prepare')
@@ -130,6 +141,10 @@ function fakeBle(serviceUuid: string, serve: (desk: ByteLink) => void, options: 
       async disconnect() {
         fake.log.push('disconnect')
         cut(false)
+      },
+      onBluetoothOn(listener) {
+        onListeners.add(listener)
+        return () => void onListeners.delete(listener)
       },
     },
   }
@@ -360,6 +375,35 @@ describe('연결 수단 고르기 — 고른 길로만, 자동 전환 없음', (
     expect(session.getStatus().kind).toBe('connecting')
     await until(() => desk.got.some((message) => message.type === FRAME.REQ), '허용 뒤 hello 가 블루투스로')
     expect(ble.log.filter((entry) => entry === 'prepare')).toHaveLength(2)
+  })
+
+  it('폰의 블루투스가 꺼져 있으면 사유를 보이며 기다리다 — 켜면 [다시 시도] 없이 붙는다, 세션을 거두면 듣기를 그만둔다 (이슈 #270)', async () => {
+    const keys = generateNoiseKeyPair()
+    let on = false
+    const desk = handDesktop(keys)
+    const ble = fakeBle(SERVICE, desk.serve, { prepare: () => { if (!on) throw new BluetoothError('bluetooth-off') } })
+    const link = newLink({ saved: { ...SAVED, bluetoothKey: encodeNoiseKey(keys.publicKey) }, carrier: choice('bluetooth'), bluetooth: ble.driver })
+    await link.restore()
+    const session = sessionOf(link)
+    await until(() => session.getStatus().kind === 'needs-action', 'needs-action')
+    expect(showsGate(session.getStatus(), session.hasConnected())).toBe(true)
+    expect(gateView(session.getStatus(), session.getFailure(), 'bluetooth', '')).toMatchObject({ kind: 'failed', body: S.bluetoothFailure['bluetooth-off'] })
+    expect(ble.onListeners).toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 1_200))
+    expect(ble.log).toEqual(['prepare']) // 기다리는 동안 라디오를 다시 건드리지 않는다
+    on = true
+    ble.turnOn()
+    await until(() => desk.got.some((message) => message.type === FRAME.REQ), '켜진 뒤 hello 가 블루투스로')
+    expect(ble.onListeners).toBe(0)
+
+    // 다시 꺼져 멈춘 사이에 세션을 거두면 구독도 거둔다
+    link.dispose()
+    on = false
+    const again = newLink({ saved: { ...SAVED, bluetoothKey: encodeNoiseKey(keys.publicKey) }, carrier: choice('bluetooth'), bluetooth: ble.driver })
+    await again.restore()
+    await until(() => ble.onListeners === 1, '두 번째 세션이 켜짐을 듣는다')
+    again.dispose()
+    expect(ble.onListeners).toBe(0)
   })
 
   it('데스크탑을 못 찾으면(멀다·꺼져 있다) 사유를 보이고 기존 백오프로 다시 찾는다', async () => {
