@@ -158,6 +158,12 @@ export const S = {
   message: '메시지',
   mode: { plan: '계획', build: '기본', ask: '매번 묻기', full: '전체 권한' },
   modeLabel: (name: string) => `모드: ${name}`,
+  modelLabel: (name: string) => `모델: ${name} — 바꾸기`,
+  modelSheetTitle: '모델',
+  noModels: '데스크탑에 설정된 모델이 없습니다',
+  modelBusy: '답이 끝난 뒤에 바꿀 수 있습니다.',
+  modelNextTurn: '고른 모델은 다음 메시지부터 쓰입니다.',
+  close: '닫기',
   stop: '중지',
   send: '보내기',
   // 음성 입력 (#271, 폰 자체 인식)

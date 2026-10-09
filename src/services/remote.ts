@@ -200,7 +200,7 @@ export class RemoteService extends Service {
   /** 이 실행에서 마지막으로 알린 주소 목록 (쉼표로 이음) — 바뀌면 addresses.changed */
   private announced?: string
   private noise?: Promise<NoiseIdentity>
-  /** 읽어 둔 블루투스 키 — 블루투스 운반이 noiseIdentity() 를 부른 뒤에만 있다. 짝짓기 응답·QR 의 bk */
+  /** 읽어 둔 블루투스 키 — noiseIdentity() 를 부른 뒤에만 있다(폰의 핸드셰이크·짝짓기 시작·hello, 이슈 #268). 짝짓기 응답·QR 의 bk */
   private noiseKey?: NoiseIdentity
   /** 기기 id → 이 실행에서 마지막으로 요청이 온 운반 id */
   private via = new Map<string, string>()
@@ -347,13 +347,25 @@ export class RemoteService extends Service {
 
   /** 짝짓기 응답·QR 에 실을 블루투스 키 — 블루투스 운반이 올라와 있고 키를 읽어 둔 때만. 여기서 키를 읽지 않는다(블루투스를 안 쓰는 사용자에게 키 파일을 만들지 않는다) */
   private bluetoothKey(): string | undefined {
-    return [...this.carriers].some((carrier) => carrier.id === BLUETOOTH_CARRIER) ? this.noiseKey?.publicKeyText : undefined
+    return this.bluetoothOn() ? this.noiseKey?.publicKeyText : undefined
+  }
+
+  private bluetoothOn(): boolean {
+    return [...this.carriers].some((carrier) => carrier.id === BLUETOOTH_CARRIER)
+  }
+
+  /** bluetoothKey 와 같되, 블루투스가 켜져 있고 아직 안 읽었으면 지금 읽는다 (이슈 #268 — 광고를 시작할 때는 읽지 않는다). 못 읽으면 없다 */
+  private async loadBluetoothKey(): Promise<string | undefined> {
+    if (this.bluetoothOn()) await this.noiseIdentity().catch(() => undefined)
+    return this.bluetoothKey()
   }
 
   /** [기기 연결] — 새 짝짓기 코드 (2분·1회용). 앞 코드는 버린다 */
   startPairing(): RemoteStatus {
     if (!this.live()) throw new Error(tr('remote.error.notListening'))
     this.code = { code: newPairCode(), shortCode: newShortPairCode(), expiresAt: this.now() + PAIR_CODE_TTL_MS, failures: 0 }
+    // QR 의 bk — 블루투스 키를 아직 안 읽었으면 지금 읽고(이슈 #268), 읽히면 QR 을 다시 알린다
+    if (this.bluetoothOn() && !this.noiseKey) void this.loadBluetoothKey().then((key) => key && !this.disposed && this.code && this.changed())
     return this.changed()
   }
 
@@ -566,9 +578,8 @@ export class RemoteService extends Service {
             if (!this.disposed) this.changed()
             return
           }
-          void this.store.add(deviceName, platform).then(
-            ({ device, token }) => {
-              const bluetoothKey = this.bluetoothKey()
+          void Promise.all([this.store.add(deviceName, platform), this.loadBluetoothKey()]).then(
+            ([{ device, token }, bluetoothKey]) => {
               resolve({ status: 200, body: { deviceId: device.id, token, ...(bluetoothKey && { bluetoothKey }) } satisfies PairResponse })
               this.changed()
             },
@@ -587,21 +598,24 @@ export class RemoteService extends Service {
   }
 
   private routes: Record<string, (input: RouteInput) => Promise<Reply> | Reply> = {
-    'GET /v1/hello': () => [
-      200,
-      {
-        desktopId: this.store.desktopId,
-        name: this.opts.name ?? os.hostname(),
-        appVersion: this.opts.appVersion ?? '',
-        apiVersion: REMOTE_API_VERSION,
-        runId: this.log.runId,
-        seq: this.log.seq,
-        addresses: this.listening(),
-        ...(this.fingerprint() && { fingerprint: this.fingerprint() }),
-        // 블루투스가 켜져 있으면 공개키 — Wi-Fi 로 짝지은 폰이 다시 짝짓지 않고 블루투스 키를 배운다 (이슈 #229). 폰은 TLS 로 받은 것만 믿는다
-        ...(this.bluetoothKey() && { bluetoothKey: this.bluetoothKey() }),
-      } satisfies Hello,
-    ],
+    'GET /v1/hello': async () => {
+      const bluetoothKey = await this.loadBluetoothKey()
+      return [
+        200,
+        {
+          desktopId: this.store.desktopId,
+          name: this.opts.name ?? os.hostname(),
+          appVersion: this.opts.appVersion ?? '',
+          apiVersion: REMOTE_API_VERSION,
+          runId: this.log.runId,
+          seq: this.log.seq,
+          addresses: this.listening(),
+          ...(this.fingerprint() && { fingerprint: this.fingerprint() }),
+          // 블루투스가 켜져 있으면 공개키 — Wi-Fi 로 짝지은 폰이 다시 짝짓지 않고 블루투스 키를 배운다 (이슈 #229). 폰은 TLS 로 받은 것만 믿는다
+          ...(bluetoothKey && { bluetoothKey }),
+        } satisfies Hello,
+      ]
+    },
 
     'GET /v1/projects': async () => [200, (await this.ctx.projects.list()) satisfies RemoteProject[]],
 

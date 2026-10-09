@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Keyboard } from 'react-native'
+import type { ModelChoice } from '../../../shared/remote.ts'
 import type { ConnectionStatus, RemoteState } from '../core/index.ts'
 import type { DesktopLink, LinkState } from './link.ts'
 import type { Preferences, Prefs } from './prefs.ts'
@@ -8,6 +9,11 @@ import type { AppSession, SessionNotice } from './session.ts'
 /** 세션의 리듀서 상태 — 바뀌면 다시 그린다 */
 export function useRemoteState(session: AppSession): RemoteState {
   return useSyncExternalStore(session.subscribe, session.getState)
+}
+
+/** 그 대화의 모델 — 폰에서 고르면 바로 바뀐다 (#269) */
+export function useModelOf(session: AppSession, cid: string): ModelChoice | undefined {
+  return useSyncExternalStore(session.subscribe, () => session.modelOf(cid))
 }
 
 export function useConnectionStatus(session: AppSession): ConnectionStatus {

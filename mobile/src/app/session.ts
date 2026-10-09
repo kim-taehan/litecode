@@ -3,7 +3,7 @@
 // (테스트에는 네트워크 없이 리듀서에 이벤트를 흘리는 견본 구현이 하나 더 있다 — mobile/tests/demoSession.ts.)
 
 import type { Attention, AttentionAnswer } from '../../../shared/contract.ts'
-import type { RemoteEvent, RemoteModel } from '../../../shared/remote.ts'
+import type { ModelChoice, RemoteEvent, RemoteModel } from '../../../shared/remote.ts'
 import type { ConnectionStatus, RemoteState } from '../core/index.ts'
 
 /** 설정 화면 "연결된 데스크탑" 카드에 보일 것 */
@@ -50,6 +50,10 @@ export interface AppSession {
   closeConversation(cid: string): void
   /** 턴이 도는 중이면 데스크탑이 대기열에 넣는다. 받아들여졌으면 true — false 면 안내(notice)가 서고 화면은 친 글을 돌려놓는다 */
   send(cid: string, text: string): Promise<boolean>
+  /** 그 대화의 모델 (#269) — 폰에서 고른 것이 아직 데스크탑 목록에 안 실렸으면 그것, 아니면 목록의 것. subscribe 로 바뀜을 안다 */
+  modelOf(cid: string): ModelChoice | undefined
+  /** 그 대화의 모델을 고른다 — 다음 보내기에 실려 그 턴부터 그 대화의 모델이 된다. 턴이 도는 중이면 고르지 않고 false */
+  chooseModel(cid: string, model: ModelChoice): boolean
   stop(cid: string): void
   /** 대기열 되돌리기 — 합친 글 (입력창에 넣는다) */
   takeQueue(cid: string): Promise<string>

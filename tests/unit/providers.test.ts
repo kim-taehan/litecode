@@ -120,6 +120,31 @@ describe('ProviderRegistry', () => {
     expect(providers.list().map((provider) => provider.keyLocked)).toEqual([true, undefined])
   })
 
+  // 이슈 #268: 키 저장소(macOS 키체인)는 앱을 켤 때·목록을 볼 때 부르지 않는다 — 키를 저장하거나 풀어야 하는 순간에만
+  it('생성·목록 조회는 cipher 를 부르지 않는다(봉한 키가 있어도 hasKey 는 파일로만) — 키 저장·키 풀기 때만 부른다', async () => {
+    const first = await registry(files)
+    first.save({ ...config, apiKey: 'sk-secret-123' })
+    const calls: string[] = []
+    const counting: KeyCipher = {
+      available: () => (calls.push('available'), true),
+      encrypt: (plain) => (calls.push('encrypt'), reversing.encrypt(plain)),
+      decrypt: (sealed) => (calls.push('decrypt'), reversing.decrypt(sealed)),
+    }
+    const providers = await registry({ ...files, cipher: counting })
+    expect(providers.list()[0]).toMatchObject({ id: 'gw', hasKey: true })
+    expect(providers.list()[0]!.keyLocked).toBeUndefined()
+    providers.all()
+    providers.get('gw')
+    providers.save({ ...config, displayName: 'Renamed' }) // 키 없이 저장 — 키 저장소가 필요 없다
+    expect(calls).toEqual([])
+
+    expect(providers.apiKey('gw')).toBe('sk-secret-123') // 키 프록시가 요청에 키를 붙일 때
+    expect(calls).toEqual(['available', 'decrypt'])
+    calls.length = 0
+    providers.save({ ...config, apiKey: 'sk-new-456' })
+    expect(calls).toEqual(['available', 'encrypt'])
+  })
+
   // 03_qa 2차: 헤더에 못 쓰는 문자가 든 키는 키 프록시의 http.request 가 동기로 던져 메인 프로세스를 흔든다 — 저장부터 막는다
   it('헤더에 쓸 수 없는 문자(줄바꿈·제어 문자·보이지 않는 문자·비ASCII)가 든 키는 거부하고, 메시지에 키가 없으며 아무것도 안 바뀐다', async () => {
     const providers = await registry(files)

@@ -15,7 +15,6 @@ import type { RemoteService } from '../remote.ts'
 import type { FeatureReason } from '../../../shared/features.ts'
 import { BLUETOOTH_CARRIER, type RemoteCarrierStatus, type RemoteRadioState, type RemoteRadioStatus } from './carrier.ts'
 import { serveFramed, type FramedServer } from './framed.ts'
-import type { NoiseIdentity } from './noiseIdentity.ts'
 
 // 블루투스 운반 (이슈 #210, 설계 _workspace/01ab_mobile_bluetooth.md 5절) — ctx.remote 밑의 운반 플러그인이다(`inject: ['remote']`, 자기 ctx 키 없음).
 // 기능 `bluetooth`(기본 꺼짐)의 묶음이라 토글이 곧 이 플러그인의 올리고 내리기다: 내리면 광고를 멈추고 붙어 있던 폰을 끊는다.
@@ -33,6 +32,8 @@ import type { NoiseIdentity } from './noiseIdentity.ts'
 //   그래서 Mac·Windows 에서는 (b) 가 실제 되밀림이다 — 속도 상한은 실측 전 값이다(설계 4절 "나쁨 20 KB/s·보통 50 KB/s" 사이).
 // - 끊김 신호: Windows·Linux 는 disconnect, macOS 는 없다(CoreBluetooth 주변기기는 연결 끊김을 알리지 않는다) — tx 구독 해제를 끊김으로 본다.
 //   우리가 끊는 것(bleno.disconnect)도 macOS 에서는 효과가 없다: 그 연결의 쓰기를 무시하고, 폰이 구독을 풀면(끊고 다시 붙으면) 새로 받는다.
+// - Noise 비밀키(ctx.remote.noiseIdentity — safeStorage 로 봉해 있다)는 광고를 시작할 때 읽지 않는다 (이슈 #268 — 앱을 켤 때마다 macOS 키체인 허용 창이
+//   뜨지 않게). 광고에는 desktopId(공개)만 쓰고, 폰이 붙어 핸드셰이크를 시작할 때 처음 읽는다. 못 읽으면 그 연결을 끊고 failed(keyStore) — 다음 연결에서 다시 읽어 본다.
 
 /** 링크가 위층에 알리는 한 번에 받는 크기 — 실제 알림 조각은 이것을 다시 그 연결의 MTU−3 으로 나눈다(조각 크기가 연결 중에 바뀌어도 위층은 모른다) */
 const LINK_CHUNK = BLUETOOTH_REQUESTED_MTU - 3
@@ -118,7 +119,6 @@ interface Connection {
 
 class BluetoothCarrier {
   private bleno?: BlenoLike
-  private identity?: NoiseIdentity
   private state: RemoteRadioState = 'starting'
   private reason?: string
   /** 마지막 fail() 의 원인이 키 저장소다 (이슈 #231) — failed 일 때만 내보낸다 (fail 이 매번 다시 정한다) */
@@ -162,16 +162,8 @@ class BluetoothCarrier {
       if (generation === this.generation) this.fail('unsupported', error)
       return
     }
-    let identity: NoiseIdentity
-    try {
-      identity = await this.remote.noiseIdentity()
-    } catch (error) {
-      if (generation === this.generation) this.fail('failed', error)
-      return
-    }
     if (generation !== this.generation) return // 기다리는 사이 껐다
     this.bleno = bleno
-    this.identity = identity
     const serviceUuid = bluetoothServiceUuid(this.remote.desktopId)
     const prologue = bluetoothPrologue(this.remote.desktopId)
 
@@ -246,7 +238,6 @@ class BluetoothCarrier {
     this.attached = false
     this.advertisingRequested = false
     this.bleno = undefined
-    this.identity = undefined
     this.state = 'starting'
     this.reason = undefined
   }
@@ -268,7 +259,7 @@ class BluetoothCarrier {
     const key = String(handle)
     const known = this.connections.get(key)
     if (known) return known
-    if (this.refused.has(key) || !this.running || !this.identity) return undefined
+    if (this.refused.has(key) || !this.running || !this.bleno) return undefined
     if (this.connections.size >= BLUETOOTH_MAX_CENTRALS) {
       this.refused.add(key)
       this.disconnect(handle)
@@ -278,17 +269,40 @@ class BluetoothCarrier {
     const connection: Connection = { key, handle, link }
     this.connections.set(key, connection)
     connection.timer = setTimeout(() => this.drop(key), this.options.handshakeTimeoutMs ?? BLUETOOTH_HANDSHAKE_TIMEOUT_MS)
-    secureResponder(link, this.identity, { prologue }).then(
-      (secure) => {
-        if (this.connections.get(key) !== connection) return secure.close()
-        clearTimeout(connection.timer)
-        connection.timer = undefined
-        connection.server = serveFramed(secure, this.remote, { carrier: BLUETOOTH_CARRIER, key })
-        this.remote.carrierChanged()
-      },
-      // 틀린 키·깨진 메시지·시간 초과 — SecureLink 가 이미 링크를 닫았다. 같은 열쇠로 새로 붙은 연결은 건드리지 않는다
-      () => void (this.connections.get(key) === connection && this.drop(key)),
-    )
+    // 키는 여기서 처음 읽는다 (이슈 #268) — 읽는 사이 온 메시지 1 은 CentralLink 가 쥐고 있다가 응답자가 들을 때 넘긴다
+    this.remote
+      .noiseIdentity()
+      .then(
+        (identity) => {
+          if (this.connections.get(key) !== connection) throw new Error('link closed') // 읽는 사이 떠났다(끊김·끄기)
+          if (this.state === 'failed') {
+            // 앞서 키를 못 읽어 실패로 보였다(failed 는 키 읽기 실패뿐이다) — 이번엔 읽었다
+            this.state = 'advertising'
+            this.reason = undefined
+            this.keyStore = false
+            this.remote.carrierChanged()
+          }
+          return secureResponder(link, identity, { prologue })
+        },
+        (error: unknown) => {
+          if (this.connections.get(key) === connection) {
+            this.drop(key)
+            this.fail('failed', error)
+          }
+          throw error
+        },
+      )
+      .then(
+        (secure) => {
+          if (this.connections.get(key) !== connection) return secure.close()
+          clearTimeout(connection.timer)
+          connection.timer = undefined
+          connection.server = serveFramed(secure, this.remote, { carrier: BLUETOOTH_CARRIER, key })
+          this.remote.carrierChanged()
+        },
+        // 틀린 키·깨진 메시지·시간 초과 — SecureLink 가 이미 링크를 닫았다. 같은 열쇠로 새로 붙은 연결은 건드리지 않는다
+        () => void (this.connections.get(key) === connection && this.drop(key)),
+      )
     return connection
   }
 
@@ -333,6 +347,8 @@ export class CentralLink implements ByteLink {
   private pending?: { resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
   private sending: Promise<void> = Promise.resolve()
   private dataListeners: ((chunk: Uint8Array) => void)[] = []
+  /** 듣는 이가 붙기 전에 온 것 — 운반이 키를 읽는 사이 폰이 보낸 핸드셰이크 메시지 1 (이슈 #268) */
+  private early: Uint8Array[] = []
   private closeListeners: ((error?: unknown) => void)[] = []
   private done = false
 
@@ -370,6 +386,7 @@ export class CentralLink implements ByteLink {
 
   receive(chunk: Uint8Array): void {
     if (this.done) return
+    if (this.dataListeners.length === 0) return void this.early.push(chunk)
     for (const listener of this.dataListeners) listener(chunk)
   }
 
@@ -394,6 +411,7 @@ export class CentralLink implements ByteLink {
 
   onData(listener: (chunk: Uint8Array) => void): void {
     this.dataListeners.push(listener)
+    for (const chunk of this.early.splice(0)) listener(chunk)
   }
 
   onClose(listener: (error?: unknown) => void): void {

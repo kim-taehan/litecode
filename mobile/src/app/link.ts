@@ -421,6 +421,7 @@ export class DesktopLink {
       desktop: { name: desktop.desktopName, address: desktop.address, fingerprint: desktop.fingerprint && fingerprintCode(desktop.fingerprint) },
       receivedBytes: () => transport.receivedBytes,
       release: () => transport.close(),
+      whenBluetoothOn: (listener) => (bluetooth ?? unsupportedDriver).onBluetoothOn(listener),
     })
   }
 
@@ -488,4 +489,5 @@ const unsupportedDriver: BleDriver = {
   write: () => Promise.reject(new Error('unsupported')),
   onDisconnect: () => () => {},
   disconnect: () => Promise.resolve(),
+  onBluetoothOn: () => () => {},
 }
