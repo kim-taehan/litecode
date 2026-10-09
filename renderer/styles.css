@@ -623,6 +623,49 @@ button {
   outline-offset: -2px;
 }
 
+/* 새 버전 알림 (이슈 #273) — 설정 줄 바로 위 한 줄. 설정 줄과 같은 글자(13/20)·둥근 모서리, 테두리만 */
+.update-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 4px 4px 4px 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.update-notice__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-notice__download,
+.update-notice__close {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.update-notice__close {
+  color: var(--text-secondary);
+}
+
+.update-notice__download:hover,
+.update-notice__close:hover {
+  background: var(--fill-hover);
+}
+
 .status-dot {
   width: 7px;
   height: 7px;

@@ -58,6 +58,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `hooks` | `hooks` | `hooks.ts` + `hooks/*` | AI 행동에 거는 사용자 셸 훅 | `chat`, `sessions`, `llm` | **꺼짐** |
 | `voice` | `speech` | `speech.ts` | 음성 입력(내장 인식 엔진) | `settings` | **꺼짐** |
 | `browser` | `browser` | `browser.ts` + `browser/*` | Chrome 조종(Playwright MCP 를 MCP 서버로 등록) | `mcp` | **꺼짐** |
+| `updates` | `updates` | `updates.ts` (+ 순수 `shared/updates.ts`) | 새 버전 알림 — GitHub 릴리즈(또는 설정 `updateUrl`)에 묻기만, 설치본에서만(#273) | `settings` | **꺼짐** |
 
 - `FEATURE_REQUIRES`: `bang → shell`, `appMcp → mcp`, `browser → mcp`, `lan → remote`, `bluetooth → remote` (필요한 기능이 꺼지면 같이 못 뜬다).
 - `skills`·`web`·`appMcp`·`browser` 는 **엔진 설정에도 영향**이 있다 — `features/changed` 를 `ctx.engine` 이 듣고 설정을 다시 쓰고 엔진을 재시작한다(도는 턴은 끊긴다).
