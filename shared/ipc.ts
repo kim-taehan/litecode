@@ -20,6 +20,7 @@ import type { McpToolSelection } from './mcpTools.ts'
 import type { HookCandidate, HookDraft, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
+import type { UpdateStatus } from './updates.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Mode } from './modes.ts'
@@ -41,6 +42,7 @@ export type { McpTool } from '../src/services/mcpClient.ts'
 export type { McpToolSelection } from './mcpTools.ts'
 export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
+export type { UpdateState, UpdateStatus } from './updates.ts'
 export type { SpeechErrorCode, SpeechLanguage, SpeechPartial, SpeechReply, SpeechState, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened, SpeechTranscript, SpeechUnavailable } from './speech.ts'
 
 export const Channel = {
@@ -189,6 +191,14 @@ export const Channel = {
   SPEECH_STREAM_CANCEL: 'speech:stream-cancel',
   /** 메인 → 화면 (SpeechStreamEvent) — 지금까지 확정된 글·임시 글, 또는 그 스트림이 죽었다(error) */
   SPEECH_PARTIAL: 'speech:partial',
+  /** 새 버전 알림(ctx.updates, 이슈 #273) — 기능 `updates` 가 켜졌을 때만 있다 */
+  UPDATES_STATUS: 'updates:status',
+  /** 화면 → 메인 — 지금 확인 (UpdateStatus) */
+  UPDATES_CHECK: 'updates:check',
+  /** 화면 → 메인 (url) — 릴리즈 페이지를 기본 브라우저로. 허용 주소가 아니면 false */
+  UPDATES_OPEN: 'updates:open',
+  /** 메인 → 화면 (UpdateStatus) */
+  UPDATES_CHANGED: 'updates:changed',
 } as const
 
 export interface LitecodeBridge {
@@ -411,6 +421,13 @@ export interface LitecodeBridge {
   stopSpeechStream(stream: number): Promise<SpeechReply>
   cancelSpeechStream(stream: number): Promise<void>
   onSpeechPartial(listener: (event: SpeechStreamEvent) => void): () => void
+  /** 새 버전 확인 상태 (ctx.updates, 이슈 #273) — **기능 `updates` 가 켜져 있을 때만 부른다** (꺼져 있으면 채널이 없다) */
+  updateStatus(): Promise<UpdateStatus>
+  /** 지금 묻는다 — 끝난 상태. 개발 실행(설치본 아님)이면 묻지 않고 지금 상태 */
+  checkForUpdate(): Promise<UpdateStatus>
+  /** [내려받기] — 릴리즈 페이지를 기본 브라우저로. https 이고 github.com 이거나 확인 주소의 호스트일 때만 (아니면 false) */
+  openUpdate(url: string): Promise<boolean>
+  onUpdateChanged(listener: (status: UpdateStatus) => void): () => void
 }
 
 declare global {

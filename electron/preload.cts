@@ -115,6 +115,10 @@ const Channel = {
   SPEECH_STREAM_STOP: 'speech:stream-stop',
   SPEECH_STREAM_CANCEL: 'speech:stream-cancel',
   SPEECH_PARTIAL: 'speech:partial',
+  UPDATES_STATUS: 'updates:status',
+  UPDATES_CHECK: 'updates:check',
+  UPDATES_OPEN: 'updates:open',
+  UPDATES_CHANGED: 'updates:changed',
 } as const
 
 /** 경로 없는 이미지(붙여넣은 스크린숏)를 읽어 메인에 넘길 상한 — shared/attachments.ts 의 imageBytes 와 같아야 한다 (메인이 다시 본다) */
@@ -271,6 +275,10 @@ const bridge: LitecodeBridge = {
   stopSpeechStream: (stream) => ipcRenderer.invoke(Channel.SPEECH_STREAM_STOP, stream),
   cancelSpeechStream: (stream) => ipcRenderer.invoke(Channel.SPEECH_STREAM_CANCEL, stream),
   onSpeechPartial: (listener) => listen(Channel.SPEECH_PARTIAL, listener),
+  updateStatus: () => ipcRenderer.invoke(Channel.UPDATES_STATUS),
+  checkForUpdate: () => ipcRenderer.invoke(Channel.UPDATES_CHECK),
+  openUpdate: (url) => ipcRenderer.invoke(Channel.UPDATES_OPEN, url),
+  onUpdateChanged: (listener) => listen(Channel.UPDATES_CHANGED, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

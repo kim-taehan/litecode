@@ -7,6 +7,8 @@ import { ConfirmFullAccess } from './ModeChip.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../shared/fontSize.ts'
 import { useFeatures } from './featuresStore.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
+import { DEFAULT_UPDATE_URL } from '../shared/updates.ts'
+import { updateResult, useUpdateStatus } from './updates.ts'
 
 // 설정 > 일반 — dsh ui-settings-general GeneralSection 의 행 모양(이름 + 회색 설명, 오른쪽 컨트롤, 행 사이 0.5px 선)과
 // 행들(locale LanguageRow · ui-theme AppearanceRow·FontSizeRow · DeveloperToolsRow)을 따른다. 바꾸면 곧바로 메인(ctx.settings)에
@@ -65,7 +67,9 @@ export function GeneralPage() {
   /** 새 대화 기본 모드로 전체 권한을 고르는 중 — 확인 대화상자 (dsh PermissionRow) */
   const [confirmingFull, setConfirmingFull] = useState(false)
   const [version, setVersion] = useState<string>()
-  const voiceOn = useFeatures().has('voice')
+  const features = useFeatures()
+  const voiceOn = features.has('voice')
+  const updatesOn = features.has('updates')
   useEffect(() => void window.litecode.getAppVersion().then(setVersion, () => {}), [])
   const save = (patch: Partial<Settings>): void =>
     void updateSettings(patch).then(
@@ -216,9 +220,63 @@ export function GeneralPage() {
         </div>
       )}
 
+      {/* 새 버전 알림 (이슈 #273) — 기능이 켜져 있을 때만: 확인 주소(비우면 기본) + [지금 확인] 과 결과 한 줄 */}
+      {updatesOn && <UpdateRows updateUrl={settings.updateUrl ?? ''} onSave={(updateUrl) => save({ updateUrl })} />}
+
       {/* 맨 아래 한 줄 — dsh CurrentVersionRow. 못 받으면 줄째 없다 */}
       {version && <div className="settings-version">{t('settings.currentVersion', { version })}</div>}
     </div>
+  )
+}
+
+/** 확인 주소(칸을 떠나거나 Enter 면 저장 — 잘못된 주소는 메인이 거절해 위에 한 줄) + [지금 확인] 과 결과 한 줄 */
+function UpdateRows({ updateUrl, onSave }: { updateUrl: string; onSave(next: string): void }) {
+  const t = useT()
+  const status = useUpdateStatus(true)
+  const [draft, setDraft] = useState(updateUrl)
+  useEffect(() => setDraft(updateUrl), [updateUrl])
+  const commit = (): void => {
+    if (draft.trim() !== updateUrl) onSave(draft.trim())
+  }
+  const result = updateResult(status)
+  return (
+    <>
+      <div className="settings-row settings-row--stacked" data-setting="updateUrl">
+        <div className="settings-row__text">
+          <div className="settings-row__title">{t('settings.updateUrl')}</div>
+          <div className="settings-row__description">{t('settings.updateUrl.description')}</div>
+        </div>
+        <input
+          className="settings-input"
+          type="url"
+          spellCheck={false}
+          aria-label={t('settings.updateUrl')}
+          placeholder={DEFAULT_UPDATE_URL}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => event.key === 'Enter' && commit()}
+        />
+      </div>
+      <div className="settings-row" data-setting="updateCheck">
+        <div className="settings-row__text">
+          <div className="settings-row__title">{t('settings.updateCheck')}</div>
+          {result && (
+            <div className="settings-row__description" role="status">
+              {t(result.key, result.vars)}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          className="settings-button"
+          disabled={status.state === 'checking'}
+          onClick={() => void window.litecode.checkForUpdate().catch(() => {})}
+        >
+          {t('settings.updateCheck.now')}
+        </button>
+      </div>
+    </>
   )
 }
 
