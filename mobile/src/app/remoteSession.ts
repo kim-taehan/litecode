@@ -27,6 +27,8 @@ export interface RemoteSessionOptions {
   release?(): void
   /** 붙을 때마다 받은 hello (이슈 #229 — 짝이 블루투스 키를 배운다) */
   onHello?(hello: Hello): void
+  /** 블루투스가 켜지면 — bluetooth-off 로 멈춘 연결이 저절로 다시 붙는다 (이슈 #270, Connection 에 그대로 넘긴다) */
+  whenBluetoothOn?(listener: () => void): () => void
 }
 
 export function createRemoteSession(options: RemoteSessionOptions): AppSession {
@@ -49,7 +51,7 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     const hello = client.hello.bind(client)
     client.hello = () => hello().then((answer) => (onHello(answer), answer))
   }
-  const connection = new Connection(client)
+  const connection = new Connection(client, { whenBluetoothOn: options.whenBluetoothOn })
   const listeners = new Set<() => void>()
   let models: RemoteModel[] = []
   let notice: SessionNotice | undefined

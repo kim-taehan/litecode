@@ -29,6 +29,7 @@ const ATT_HEADER = 3
 export type BluetoothFailure = 'no-key' | 'unsupported' | 'permission' | 'bluetooth-off' | 'not-found' | 'location-off' | 'connect-failed' | 'handshake-failed'
 
 /** 사람이 무엇을 해야 풀리는 사유 — 저절로 다시 시도하지 않는다(권한 창을 되풀이해 띄우지 않는다). 사용자가 [다시 시도] 를 누를 때까지 멈춘다 */
+// (bluetooth-off 는 멈추되 Connection 이 BleDriver.onBluetoothOn 으로 켜짐을 듣고 저절로 다시 붙는다 — 이슈 #270)
 const NEEDS_USER: readonly BluetoothFailure[] = ['no-key', 'unsupported', 'permission', 'bluetooth-off']
 
 export class BluetoothError extends Error {
@@ -61,6 +62,8 @@ export interface BleDriver {
   /** 상대가 끊었다(멀어졌다·데스크탑이 껐다). 돌려준 함수로 그만 듣는다 */
   onDisconnect(deviceId: string, listener: () => void): () => void
   disconnect(deviceId: string): Promise<void>
+  /** 폰의 블루투스가 켜지면 listener (듣기 시작할 때 이미 켜져 있어도 한 번). 돌려준 함수로 그만 듣는다 — bluetooth-off 로 멈춘 연결이 다시 붙는 신호 */
+  onBluetoothOn(listener: () => void): () => void
 }
 
 export interface BleLink extends ByteLink {
