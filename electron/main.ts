@@ -6,6 +6,8 @@ import { Context } from 'cordis'
 import { ProviderRegistry, type KeyCipher, type ProviderInput } from '../src/services/providers.ts'
 import { LlmService, type AttentionAnswer } from '../src/services/llm.ts'
 import { ChatService } from '../src/services/chat.ts'
+import { autoTitle } from '../src/services/autoTitle.ts'
+import { commandChanges } from '../src/services/commandChanges.ts'
 import { AttachmentsService } from '../src/services/attachmentsService.ts'
 import { systemAttachmentsHost } from './attachmentsHost.ts'
 import { ReportService } from '../src/services/report.ts'
@@ -51,6 +53,7 @@ import { PresentTool } from '../src/services/appMcp/tools/present.ts'
 import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
 import { RemoteHttps } from '../src/services/remote/https.ts'
+import { RemoteBluetooth, bluetoothProblem, type BlenoLike } from '../src/services/remote/bluetooth.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { attentionTarget } from '../shared/delegation.ts'
@@ -58,7 +61,7 @@ import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
 import { allowPermission, grantPermission, missingServices, reloadGuard, withDeadline } from './resilience.ts'
 import { speechBridgeStreams } from '../src/services/speech/bridge.ts'
-import { SpeechService } from '../src/services/speech.ts'
+import { SpeechService, speechProblem } from '../src/services/speech.ts'
 import { bundledSpeechDir, devSpeechDir } from '../src/services/speech/assets.ts'
 import { systemSpeechHost } from './speechHost.ts'
 import { BrowserService } from '../src/services/browser.ts'
@@ -272,6 +275,8 @@ function bootstrap(ctx: Context): void {
   // 켜진 기능 — 화면은 이것을 보고 꺼진 기능의 버튼·탭·단축키를 그리지 않는다. 바뀌면 (묶음을 다 올리고 내린 뒤) 모든 창에
   handle(ctx, Channel.GET_FEATURES, async () => ctx.features.enabled())
   ctx.on('features/changed', (enabled) => broadcast(Channel.FEATURES_CHANGED, enabled))
+  handle(ctx, Channel.GET_FEATURE_STATUSES, async () => ctx.features.statuses())
+  ctx.on('features/status', (statuses) => broadcast(Channel.FEATURE_STATUSES_CHANGED, statuses))
 }
 // 바탕 연결 — 대화·엔진·설정·provider·프로젝트·대화 저장·트리거 등록소. 끌 수 없다. 기능마다의 연결은 아래 기능 묶음에 있어
 // 기능 하나를 빼도(끄거나 서비스가 못 떠도) 이 연결은 그대로 뜬다. 'llm' 은 본문이 안 쓰지만 둔다 — 부팅 진단(checkBoot)이 이 목록으로 ctx.llm 을 본다
@@ -298,12 +303,17 @@ function chatBridge(ctx: Context): void {
   ctx.on('chat/turn-progress', ({ cid, item }) => broadcast(Channel.TURN_PROGRESS, cid, item))
   ctx.on('chat/turn-attention', ({ cid, requests }) => broadcast(Channel.TURN_ATTENTION, cid, requests))
   ctx.on('chat/turn-ended', (data) => broadcast(Channel.TURN_ENDED, data))
+  ctx.on('chat/turn-interjected', (data) => broadcast(Channel.TURN_INTERJECTED, data))
   ctx.on('chat/queue-changed', (data) => broadcast(Channel.QUEUE_CHANGED, data))
   ctx.on('chat/conversations-changed', (data) => broadcast(Channel.CONVERSATIONS_CHANGED, data))
 }
 chatBridge.inject = ['chat']
 mounted.push(ctx.plugin(ChatService))
 mounted.push(ctx.plugin(chatBridge))
+// 자동 대화 제목 (이슈 #215) — 설정(autoTitle)이 켜져 있으면 첫 턴 뒤 제목을 AI 가 짧게 정리한다. 턴 이벤트만 듣는다 (끄면 듣고도 안 묻는다)
+mounted.push(ctx.plugin(autoTitle))
+// 명령으로 바뀐 파일 (이슈 #213) — 턴 앞뒤 git 스냅숏의 차이를 턴 끝 진행 줄로 (고친 파일 카드가 합친다)
+mounted.push(ctx.plugin(commandChanges))
 
 // 첨부 (ctx.attachments, 이슈 #97) — 고르기·놓기·붙여넣기를 칩으로 만들고 붙여넣은 이미지의 임시 파일(userData/pasted-images)을 쥔다.
 // 여기는 채널만 잇는다. 파일 고르기 대화상자는 host 가 요청을 보낸 창에 붙인다 (event.sender)
@@ -313,6 +323,7 @@ function attachmentsBridge(ctx: Context): void {
     ctx.attachments.drop(conversationId, input, held, model),
   )
   handle(ctx, Channel.DISCARD_ATTACHMENTS, async (_event, paths: unknown) => ctx.attachments.discard(paths))
+  handle(ctx, Channel.ATTACHMENT_PREVIEW, async (_event, file: unknown) => ctx.attachments.preview(file))
 }
 attachmentsBridge.inject = ['attachments']
 mounted.push(ctx.plugin(AttachmentsService, { host: systemAttachmentsHost, pastedDir: path.join(userData, 'pasted-images') }))
@@ -452,6 +463,7 @@ const openInHost = openInTest ? recordingOpenInHost(openInTest) : systemOpenInHo
 function openInBridge(ctx: Context): void {
   handle(ctx, Channel.OPEN_IN_APPS, async () => ctx.openIn.apps())
   handle(ctx, Channel.OPEN_IN, async (_event, appId: string, directory: string) => ctx.openIn.open(appId, directory))
+  handle(ctx, Channel.OPEN_IN_FILE, async (_event, directory: string, token: string) => ctx.openIn.openFile(directory, token))
 }
 openInBridge.inject = ['openIn']
 
@@ -518,6 +530,23 @@ function speechBridge(ctx: Context): void {
   ctx.effect(() => () => streams.cancel())
 }
 speechBridge.inject = ['speech']
+
+/** 블루투스 라디오의 문제(꺼짐·권한 없음·미지원·실패)를 설정 > 기능의 블루투스 연결 줄에도 알린다 (이슈 #224). 광고·켜는 중은 문제가 아니다.
+ *  묶음이 내려가면 ctx.features 가 문제를 지운다 */
+function bluetoothProblems(ctx: Context): void {
+  const report = (): void => ctx.features.problem('bluetooth', bluetoothProblem(ctx.remote.status().bluetooth))
+  report()
+  ctx.on('remote/changed', report)
+}
+bluetoothProblems.inject = ['remote', 'features']
+
+/** 음성 엔진·모델 파일이 없거나 손상됐으면 설정 > 기능의 음성 입력 줄에 알린다 (이슈 #224) */
+function speechProblems(ctx: Context): void {
+  const report = (): void => ctx.features.problem('voice', speechProblem(ctx.speech.status()))
+  report()
+  ctx.on('speech/changed', report)
+}
+speechProblems.inject = ['speech', 'features']
 
 /** 기능 묶음 — ctx.features 가 settings 의 켜기 값을 보고 올리고 내린다 (재시작 없이). 순서는 shared/features.ts 의 FEATURES 와 같게
  *  (web 만 묶음이 없다). service 는 묶음이 올리는 서비스 키 — 부팅 진단이 켜진 기능의 서비스가 떴는지 본다 */
@@ -599,15 +628,29 @@ const features: FeatureDefinition[] = [
       ctx.plugin(RemoteService, {
         file: path.join(userData, 'remote-devices.json'),
         appVersion: app.getVersion(),
-        // 블루투스 Noise 키 — 블루투스 운반(#171 ③)이 처음 부를 때 만든다. 지금은 아무도 부르지 않는다
+        // 블루투스 Noise 키 — 블루투스 운반(기능 bluetooth, #210)이 켤 때 처음 부르면 만든다. 블루투스를 안 켜면 파일이 생기지 않는다
         noiseKeyFile: path.join(userData, 'remote-noise-key.json'),
         cipher: keyCipher,
       })
-      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 평문 HTTP(127.0.0.1:47600, 에뮬레이터용)와 사내망 TLS(사설 IPv4 주소마다 :47600,
-      // 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다). 블루투스 운반이 이 옆에 올라온다
+      // 운반은 ctx.remote 밑의 플러그인이다 (이슈 #68) — 여기는 평문 HTTP(127.0.0.1:47600, 에뮬레이터용). 사내망 TLS 와 블루투스는
+      // 길마다 따로 켜고 끄는 기능 묶음이다(lan·bluetooth — 아래, 이슈 #210)
       ctx.plugin(RemoteHttp)
-      ctx.plugin(RemoteHttps, { keyFile: path.join(userData, 'remote-tls-key.json'), cipher: keyCipher })
       ctx.plugin(remoteBridge)
+    },
+  },
+  {
+    // 사내망 연결 (이슈 #210) — 모바일 연결의 TLS 운반(사설 IPv4 주소마다 :47600, 자체 서명 + 지문 고정 — 키는 provider 키와 같은 safeStorage 로 봉한다).
+    // 기본 켜짐(모바일 연결을 켜면 전처럼 열린다). 설정 > 모바일의 "사내망 연결" 토글이 이것이다 — 끄면 포트를 닫고 블루투스만 남길 수 있다
+    id: 'lan',
+    plugin: (ctx) => void ctx.plugin(RemoteHttps, { keyFile: path.join(userData, 'remote-tls-key.json'), cipher: keyCipher }),
+  },
+  {
+    // 블루투스 연결 (이슈 #210) — 기본 꺼짐. 설정 > 모바일의 "블루투스 연결" 토글. 네이티브 모듈(@stoprocent/bleno)은 켤 때 처음 읽는다 —
+    // 안 켜면 로드도 macOS 블루투스 허용 창도 없다. 못 읽으면(프리빌드 없는 플랫폼) 상태 줄에 사유만 남는다
+    id: 'bluetooth',
+    plugin: (ctx) => {
+      ctx.plugin(RemoteBluetooth, { load: async () => (await import('@stoprocent/bleno')).default as unknown as BlenoLike })
+      ctx.plugin(bluetoothProblems)
     },
   },
   {
@@ -645,6 +688,7 @@ const features: FeatureDefinition[] = [
         root: app.isPackaged ? bundledSpeechDir(process.resourcesPath) : devSpeechDir(path.join(__dirname, '../..')),
       })
       ctx.plugin(speechBridge)
+      ctx.plugin(speechProblems)
     },
   },
   {

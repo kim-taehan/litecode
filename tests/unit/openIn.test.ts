@@ -147,3 +147,41 @@ describe('OpenInService', () => {
     expect((await openIn.apps()).map((entry) => entry.id)).not.toContain('zed')
   })
 })
+
+describe('OpenInService.openFile — 패널의 PDF 를 기본 앱으로 (이슈 #214)', () => {
+  const PDF = '%PDF-1.7\n'
+
+  it('등록된 프로젝트 안의 .pdf(머리 %PDF-)를 OS 열기로 — 경로는 realpath', async () => {
+    await fs.writeFile(path.join(project, 'doc.pdf'), PDF)
+    await fs.symlink(path.join(project, 'doc.pdf'), path.join(project, 'alias.pdf'))
+    const host = recorder()
+    const { openIn, projects } = await service(host)
+    await projects.open(project)
+    await openIn.openFile(project, 'doc.pdf')
+    await openIn.openFile(project, './alias.pdf')
+    expect(host.launches).toEqual([
+      { kind: 'os-open', path: path.join(project, 'doc.pdf') },
+      { kind: 'os-open', path: path.join(project, 'doc.pdf') },
+    ])
+  })
+
+  it('pdf 가 아닌 것·이름만 pdf·프로젝트 밖·밖을 가리키는 링크·등록 안 된 폴더는 거절하고 실행기를 부르지 않는다', async () => {
+    const outside = path.join(tmp, 'outside')
+    await fs.mkdir(outside)
+    await fs.writeFile(path.join(outside, 'secret.pdf'), PDF)
+    await fs.symlink(path.join(outside, 'secret.pdf'), path.join(project, 'leak.pdf'))
+    await fs.writeFile(path.join(project, 'doc.pdf'), PDF)
+    await fs.writeFile(path.join(project, 'run.command'), '#!/bin/sh\n')
+    await fs.writeFile(path.join(project, 'fake.pdf'), 'not a pdf')
+    const host = recorder()
+    const { openIn, projects } = await service(host)
+    await expect(openIn.openFile(project, 'doc.pdf')).rejects.toThrow() // 등록 전
+    await projects.open(project)
+    await expect(openIn.openFile(project, 'run.command')).rejects.toThrow()
+    await expect(openIn.openFile(project, 'fake.pdf')).rejects.toThrow()
+    await expect(openIn.openFile(project, '../outside/secret.pdf')).rejects.toThrow()
+    await expect(openIn.openFile(project, 'leak.pdf')).rejects.toThrow()
+    await expect(openIn.openFile(project, 7 as unknown as string)).rejects.toThrow()
+    expect(host.launches).toEqual([])
+  })
+})

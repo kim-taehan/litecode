@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { Attention, AttentionAnswer, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
-import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
-import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
-import type { AppSession } from '../session.ts'
+import type { Attention, AttentionAnswer, HistoryMessage, ShellCard, TurnItem } from '../../../../shared/contract.ts'
+import type { ModelChoice, RemoteModel } from '../../../../shared/remote.ts'
+import { useKeyboardVisible, useModelOf, useNotice, useNow, useRemoteState } from '../hooks.ts'
+import { ArrowUp, BackArrow, Check, ChevronDown, ChevronRight, Mic, Warning } from '../icons.tsx'
+import { BluetoothInfo, HistoryProgress } from '../BluetoothBits.tsx'
+import type { AppSession, Carrier } from '../session.ts'
 import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 import type { QuestionView } from '../view.ts'
-import { attentionTitle, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, turnHead, turnLines, turnStartedAt, turnTexts, userMessageView } from '../view.ts'
+import { attentionTitle, chatRows, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, SHELL_COLLAPSE_LINES, shellCardView, turnHead, turnLines, turnStartedAt, turnTexts, userMessageView } from '../view.ts'
+import { useVoiceInput } from '../voiceInput.ts'
 
-// 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
+// 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages, 사이사이 데스크탑 `!` 카드 — 읽기 전용) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
 // 답은 글자 그대로 그린다 — 마크다운은 다음 라운드. 모드 칩·"작업 N" 은 모양만.
 // 명령(보내기·중지·되돌리기·답)은 전부 데스크탑으로 간다. 안 된 것은 입력창 위 안내 띠(notice)로 — 누르면 닫힌다.
-export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid: string; onBack(): void }) {
+// 블루투스로 붙어 있으면(시안 mock-ble ②): 머리 아래 안내 한 줄(배지는 뺐다 — 사용자 2026-10-09), 대화를 받는 동안 받은 KB, 입력창 위 [Wi-Fi 로 바꾸기].
+export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSession; cid: string; onBack(): void; onCarrier(carrier: Carrier): void }) {
   const insets = useSafeAreaInsets()
   const keyboardVisible = useKeyboardVisible()
   const state = useRemoteState(session)
@@ -26,6 +30,9 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
   const [draft, setDraft] = useState('')
   const scroll = useRef<ScrollView>(null)
   const notice = useNotice(session)
+  const voice = useVoiceInput(draft, setDraft)
+  const chosenModel = useModelOf(session, cid)
+  const [picking, setPicking] = useState(false)
 
   // 이 대화를 받아 두고 이벤트를 따라간다 — 나가면 놓는다
   useEffect(() => {
@@ -45,7 +52,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
   }, [conversation, onBack])
 
   const project = state.projects.find((candidate) => candidate.path === conversation?.project)
-  const model = session.models.find((candidate) => candidate.providerId === conversation?.model?.providerId && candidate.modelId === conversation?.model?.modelId)
+  const model = session.models.find((candidate) => candidate.providerId === chosenModel?.providerId && candidate.modelId === chosenModel?.modelId)
   const jobs = runningSubtasks(view?.progress ?? [])
   const startedAt = view ? turnStartedAt(view) : undefined
   const mode = S.mode[conversation?.mode ?? 'build']
@@ -53,6 +60,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
   const send = (): void => {
     const text = draft.trim()
     if (!text) return
+    voice.cancel()
     setDraft('')
     // 못 보냈으면(안내가 선다) 친 글을 돌려놓는다 — 그사이 새로 친 것이 있으면 건드리지 않는다
     void session.send(cid, text).then((sent) => {
@@ -63,7 +71,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
     const text = await session.takeQueue(cid)
     if (text) setDraft((current) => (current ? `${current}\n${text}` : text))
   }
-  // 턴이 도는 중이고 입력이 비었으면 중지, 아니면 보내기(턴 중이면 데스크탑이 대기열에 넣는다)
+  // 턴이 도는 중이고 입력이 비었으면 중지, 아니면 보내기(턴 중이면 데스크탑이 그 턴에 끼워 넣는다 — 이슈 #250)
   const stopping = (view?.running ?? false) && !draft.trim()
 
   return (
@@ -72,14 +80,18 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
         <Pressable accessibilityRole="button" accessibilityLabel={S.backToList} style={styles.back} onPress={onBack}>
           <BackArrow />
         </Pressable>
-        <View style={styles.headerText}>
+        {/* 머리를 누르면 모델 고르기 (#269) */}
+        <Pressable accessibilityRole="button" accessibilityLabel={S.modelLabel(model?.displayName ?? chosenModel?.modelId ?? '')} style={styles.headerText} onPress={() => setPicking(true)}>
           <Text style={styles.title} numberOfLines={1}>
             {conversation?.title || S.untitled}
           </Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {[model?.displayName ?? conversation?.model?.modelId, project?.name].filter(Boolean).join(' · ')}
-          </Text>
-        </View>
+          <View style={styles.subtitleRow}>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {[model?.displayName ?? chosenModel?.modelId, project?.name].filter(Boolean).join(' · ')}
+            </Text>
+            <ChevronDown size={12} />
+          </View>
+        </Pressable>
         {jobs > 0 && (
           <Pressable accessibilityRole="button" accessibilityLabel={S.runningJobs(jobs)} style={styles.jobs}>
             <View style={styles.jobsRing} />
@@ -88,18 +100,36 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
         )}
       </View>
 
+      {picking && (
+        <ModelSheet
+          models={session.models}
+          current={chosenModel}
+          busy={view?.running ?? false}
+          onPick={(picked) => {
+            if (session.chooseModel(cid, picked)) setPicking(false)
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
+
+      <BluetoothInfo carrier={session.carrier} />
+
       <View style={styles.status}>
         <StatusBanner session={session} />
       </View>
 
       <ScrollView ref={scroll} style={styles.body} contentContainerStyle={styles.bodyContent} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
-        {view?.messages.map((message, index) => (message.role === 'user' ? <UserMessage key={index} message={message} /> : <Answer key={index} message={message} />))}
+        {view &&
+          chatRows(view.messages, view.shells).map((row) =>
+            row.kind === 'shell' ? <ShellCardBox key={row.key} card={row.card} /> : row.message.role === 'user' ? <UserMessage key={row.key} message={row.message} /> : <Answer key={row.key} message={row.message} />,
+          )}
         {view?.running && (
           <Turn head={turnHead(S.running, startedAt === undefined ? undefined : now - startedAt, view.progress)} items={view.progress} initiallyOpen />
         )}
         {view?.attention.map((request) => (
           <AttentionCard key={request.id} request={request} onAnswer={(answer) => session.reply(request, answer)} />
         ))}
+        <HistoryProgress session={session} loading={cid in state.loading} />
       </ScrollView>
 
       {view !== undefined && view.queue.length > 0 && (
@@ -119,6 +149,7 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
         </Pressable>
       )}
 
+
       <View style={[styles.composer, { marginBottom: composerBottomMargin(insets.bottom, keyboardVisible) }]}>
         <TextInput
           accessibilityLabel={S.message}
@@ -129,12 +160,24 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
           onChangeText={setDraft}
           multiline
         />
+        {voice.problem !== undefined && <Text style={styles.voiceProblem}>{S.voiceProblem[voice.problem]}</Text>}
         <View style={styles.composerRow}>
           <Pressable accessibilityRole="button" accessibilityLabel={S.modeLabel(mode)} style={styles.mode}>
             <Text style={styles.modeText}>{mode}</Text>
             <ChevronDown size={12} />
           </Pressable>
           <View style={styles.grow} />
+          {voice.available && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={voice.listening ? S.voiceStop : S.voiceStart}
+              accessibilityState={{ selected: voice.listening }}
+              style={[styles.mic, voice.listening && styles.micOn]}
+              onPress={voice.toggle}
+            >
+              <Mic color={voice.listening ? C.blue : C.text2} />
+            </Pressable>
+          )}
           {stopping ? (
             <Pressable accessibilityRole="button" accessibilityLabel={S.stop} style={styles.action} onPress={() => session.stop(cid)}>
               <View style={styles.stopSquare} />
@@ -147,6 +190,51 @@ export function ChatScreen({ session, cid, onBack }: { session: AppSession; cid:
         </View>
       </View>
     </KeyboardAvoidingView>
+  )
+}
+
+/** 모델 고르기 바텀시트 (#269) — 지금 것에 체크. 턴이 도는 중이면 고를 수 없다(다음 메시지부터 쓰이므로 끝난 뒤에) */
+function ModelSheet({ models, current, busy, onPick, onClose }: { models: readonly RemoteModel[]; current: ModelChoice | undefined; busy: boolean; onPick(model: RemoteModel): void; onClose(): void }) {
+  const insets = useSafeAreaInsets()
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable accessibilityRole="button" accessibilityLabel={S.close} style={styles.sheetBackdrop} onPress={onClose} />
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+        <Text style={styles.sheetTitle}>{S.modelSheetTitle}</Text>
+        {models.length === 0 ? (
+          <Text style={styles.sheetHint}>{S.noModels}</Text>
+        ) : (
+          <>
+            <Text style={styles.sheetHint}>{busy ? S.modelBusy : S.modelNextTurn}</Text>
+            <ScrollView style={styles.sheetList}>
+              {models.map((option) => {
+                const selected = option.providerId === current?.providerId && option.modelId === current?.modelId
+                return (
+                  <Pressable
+                    key={`${option.providerId}/${option.modelId}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected, disabled: busy }}
+                    disabled={busy}
+                    style={[styles.sheetRow, busy && styles.sheetRowBusy]}
+                    onPress={() => onPick(option)}
+                  >
+                    <View style={styles.sheetRowText}>
+                      <Text style={styles.sheetRowName} numberOfLines={1}>
+                        {option.displayName}
+                      </Text>
+                      <Text style={styles.sheetRowSub} numberOfLines={1}>
+                        {option.providerName}
+                      </Text>
+                    </View>
+                    {selected && <Check />}
+                  </Pressable>
+                )
+              })}
+            </ScrollView>
+          </>
+        )}
+      </View>
+    </Modal>
   )
 }
 
@@ -171,6 +259,7 @@ function UserMessage({ message }: { message: HistoryMessage }) {
           <Text style={styles.bubbleText}>{shape.text}</Text>
         </View>
       )}
+      {shape.unanswered && <Text style={styles.userMeta}>{S.unanswered}</Text>}
     </View>
   )
 }
@@ -206,6 +295,32 @@ function Turn({ head, items, initiallyOpen = false, error }: { head: string; ite
         </Text>
       ))}
       {error !== undefined && <Text style={styles.error}>{error}</Text>}
+    </View>
+  )
+}
+
+/** 데스크탑 `!명령` 결과 카드 (#265) — 읽기 전용: 실행·멈춤·"AI 에게 보내기" 는 데스크탑에만 있다. 모양은 view.ts shellCardView 가 정한다 */
+function ShellCardBox({ card }: { card: ShellCard }) {
+  const [expanded, setExpanded] = useState(false)
+  const shape = shellCardView(card)
+  return (
+    <View style={styles.shell}>
+      <View style={styles.shellHead}>
+        <Text style={styles.shellCommand} numberOfLines={2}>
+          $ {shape.command}
+        </Text>
+        <Text style={[styles.shellBadge, shape.tone === 'ok' ? styles.shellOk : shape.tone === 'failed' ? styles.shellFailed : undefined]}>{shape.badge}</Text>
+      </View>
+      <Text style={styles.shellOutput} numberOfLines={shape.long && !expanded ? SHELL_COLLAPSE_LINES : undefined} selectable>
+        {shape.output}
+      </Text>
+      {shape.long && (
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded }} style={styles.shellMore} onPress={() => setExpanded(!expanded)}>
+          <Text style={styles.shellMoreText}>{expanded ? S.shellCollapse : S.shellExpand}</Text>
+        </Pressable>
+      )}
+      {shape.truncated && <Text style={styles.shellNote}>{S.shellTruncated}</Text>}
+      {shape.shared && <Text style={styles.shellNote}>{S.shellShared}</Text>}
     </View>
   )
 }
@@ -267,7 +382,18 @@ const styles = StyleSheet.create({
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerText: { flex: 1, minWidth: 0 },
   title: { fontSize: 15, fontWeight: '600', color: C.text },
-  subtitle: { fontSize: 12, color: C.sub },
+  subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  subtitle: { flexShrink: 1, fontSize: 12, color: C.sub },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.32)' },
+  sheet: { backgroundColor: C.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 16, paddingHorizontal: 16, gap: 8, maxHeight: '70%' },
+  sheetTitle: { fontSize: 15, fontWeight: '600', color: C.text },
+  sheetHint: { fontSize: 13, lineHeight: 18, color: C.sub },
+  sheetList: { flexGrow: 0 },
+  sheetRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.hair },
+  sheetRowBusy: { opacity: 0.45 },
+  sheetRowText: { flex: 1, minWidth: 0 },
+  sheetRowName: { fontSize: 15, color: C.text },
+  sheetRowSub: { fontSize: 12, color: C.sub },
   jobs: { height: 36, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: C.blueBorder, backgroundColor: C.blueBg, marginRight: 8 },
   jobsRing: { width: 8, height: 8, borderRadius: 4, borderWidth: 2, borderColor: C.link },
   jobsText: { fontSize: 13, fontWeight: '500', color: C.blueDark },
@@ -289,6 +415,16 @@ const styles = StyleSheet.create({
   lineMono: { fontFamily: MONO, fontSize: 12, color: C.text2 },
   answer: { fontSize: 15, lineHeight: 24, color: C.text },
   error: { fontSize: 13, color: C.red },
+  shell: { borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, gap: 8 },
+  shellHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  shellCommand: { flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 13, fontWeight: '600', color: C.text },
+  shellBadge: { fontSize: 12, color: C.sub },
+  shellOk: { color: C.green },
+  shellFailed: { color: C.red },
+  shellOutput: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: C.text2 },
+  shellMore: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' },
+  shellMoreText: { fontSize: 13, fontWeight: '500', color: C.link },
+  shellNote: { fontSize: 12, color: C.sub },
   card: { borderWidth: 1, borderColor: C.amberBorder, backgroundColor: C.amberBg, borderRadius: 16, padding: 14, gap: 12 },
   cardTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardTitleText: { fontSize: 15, fontWeight: '600', color: C.amberText },
@@ -317,4 +453,7 @@ const styles = StyleSheet.create({
   action: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.text, alignItems: 'center', justifyContent: 'center' },
   actionIdle: { backgroundColor: C.faint },
   stopSquare: { width: 12, height: 12, borderRadius: 2, backgroundColor: C.white },
+  mic: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center' },
+  micOn: { borderColor: C.blue, backgroundColor: C.blueBg },
+  voiceProblem: { fontSize: 12, lineHeight: 17, color: C.red, paddingHorizontal: 4 },
 })

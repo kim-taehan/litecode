@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { queryFresh, replaceSpan, triggerOpen, type AskedQuery } from '../../renderer/useTriggers.ts'
+import { nextDismissed, queryFresh, replaceSpan, triggerOpen, type AskedQuery } from '../../renderer/useTriggers.ts'
 import { slashName } from '../../renderer/TriggerPopup.tsx'
 import type { TriggerQuery } from '../../shared/ipc.ts'
 
@@ -72,5 +72,26 @@ describe('slashName', () => {
     expect(slashName({ icon: 'skill', label: '/review-pr' })).toBe('review-pr')
     expect(slashName({ icon: 'file', label: 'README.md' })).toBe('README.md')
     expect(slashName({ icon: 'folder', label: '/odd/' })).toBe('/odd/')
+  })
+})
+
+
+// 이슈 #236 — Esc 로 닫은 표시는 메뉴가 다른 자리·질의를 가리키거나 사라지면 잊는다 (안 그러면 같은 자리에 `@` 를 다시 쳐도 안 열린다)
+describe('nextDismissed', () => {
+  it('같은 자리·질의를 가리키는 동안은 닫은 표시를 쥔다', () => {
+    expect(nextDismissed('0:', '0:')).toBe('0:')
+  })
+
+  it('메뉴가 사라지면(트리거 글자를 지움) 잊는다 — 다시 `@` 를 치면 열린다', () => {
+    expect(nextDismissed('0:', null)).toBeUndefined()
+  })
+
+  it('다른 질의로 바뀌면 잊는다', () => {
+    expect(nextDismissed('0:', '0:no')).toBeUndefined()
+  })
+
+  it('닫은 표시가 없으면 그대로 없다', () => {
+    expect(nextDismissed(undefined, '0:')).toBeUndefined()
+    expect(nextDismissed(undefined, null)).toBeUndefined()
   })
 })

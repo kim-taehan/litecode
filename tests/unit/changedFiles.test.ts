@@ -73,6 +73,36 @@ describe('changedFiles — 턴의 줄에서 파일별로 묶기', () => {
   })
 })
 
+// 명령으로 바뀐 파일 (이슈 #213) — 턴 끝에 메인이 git 스냅숏 차이를 진행 줄 하나(kind 'changes')로 싣는다
+const commands = (diffs: FileDiff[], truncated = false): TurnItem => ({ kind: 'changes', id: 'changes_1', diffs, ...(truncated && { truncated: true }) })
+
+describe('changedFiles — 명령으로 바뀐 파일 합치기', () => {
+  it('③ 도구 diff 가 있는 파일은 도구 쪽만 — 명령 쪽은 도구가 안 건드린 파일만 더한다', () => {
+    const edited = diff('a.ts', 1, 0)
+    const changes = changedFiles([tool('1', [edited]), text('t'), commands([diff('a.ts', 5, 5), diff('gen/out.ts', 9, 0, { status: 'added' })])])!
+    expect(changes.files.map((file) => [file.path, file.edits, file.added])).toEqual([
+      ['a.ts', 1, 1],
+      ['gen/out.ts', 1, 9],
+    ])
+    expect(changes.files[0]!.diffs).toEqual([edited])
+    expect(changes).toMatchObject({ added: 10, removed: 0, commands: true, truncated: false })
+  })
+
+  it('도구 없이 명령으로만 바뀌어도 카드가 생긴다', () => {
+    expect(changedFiles([commands([diff('a.txt', 1, 1)])])!.files.map((file) => file.path)).toEqual(['a.txt'])
+  })
+
+  it('스냅숏이 없던 턴은 commands false, 빈 스냅숏이면 true', () => {
+    expect(changedFiles([tool('1', [diff('a.ts', 1, 0)])])).toMatchObject({ commands: false, truncated: false })
+    expect(changedFiles([tool('1', [diff('a.ts', 1, 0)]), commands([])])).toMatchObject({ commands: true, truncated: false })
+    expect(changedFiles([commands([])])).toBeUndefined()
+  })
+
+  it('⑤ 상한에 걸렸으면 truncated', () => {
+    expect(changedFiles([tool('1', [diff('a.ts', 1, 0)]), commands([], true)])).toMatchObject({ truncated: true })
+  })
+})
+
 describe('splitPath — 이름과 흐리게 보일 폴더', () => {
   it('폴더가 있으면 가른다', () => {
     expect(splitPath('src/services/llm.ts')).toEqual({ name: 'llm.ts', folder: 'src/services' })
@@ -121,5 +151,20 @@ describe('AssistantTurn 의 고친 파일 카드', () => {
     const out = render([tool('1', [diff('gone.ts', 0, 2, { status: 'deleted' })], 'done', 'apply_patch'), text('t')])
     expect(out).toContain('삭제됨')
     expect(out).not.toContain('changed-files__open')
+  })
+
+  it('명령 스냅숏이 있으면 안내가 바뀌고, 그 줄은 작업 줄·접힘 머리를 만들지 않는다', () => {
+    const out = render([text('t'), commands([diff('gen/out.ts', 2, 0, { status: 'added' })])])
+    expect(out).toContain('AI 가 고친 파일 1')
+    expect(out).toContain('명령으로 바뀐 파일도')
+    expect(out).not.toContain('명령으로 바꾼 파일은')
+    expect(out).not.toContain('turn__work')
+    expect(out).not.toContain('class="turn__head" aria-expanded') // 접히는 머리(버튼)가 아니다
+    expect(out).toContain('<div class="bubble bubble--assistant">') // 답은 그대로 답이다 (끝의 changes 줄이 답을 작업으로 밀지 않는다)
+  })
+
+  it('⑤ 상한에 걸렸으면 "일부만 보임" 한 줄', () => {
+    const out = render([tool('1', [diff('a.ts', 1, 0)]), text('t'), commands([diff('b.ts', 1, 0)], true)])
+    expect(out).toContain('변경이 너무 많아 일부만 보입니다')
   })
 })

@@ -53,6 +53,23 @@ describe('리듀서 — 턴 이벤트', () => {
     expect(reduce(waiting, ended(14)).views['c1']).toMatchObject({ attention: [], queue: ['다음'] })
   })
 
+  it('끼워 넣은 말 (이슈 #250): 진행 줄을 그 앞의 답으로 얼리고 말풍선을 끼운다 — 얼린 줄의 갱신은 그 자리에서, 턴 끝에 답 없음 표시', () => {
+    const tool = (seq: number, status: 'running' | 'done'): RemoteAction => ev({ event: 'turn.progress', seq, data: { cid: 'c1', item: { kind: 'tool', id: 'tool1', name: 'bash', status } } })
+    const said = { id: 'm2', role: 'user' as const, text: '끼운 말', interjected: true }
+    const state = run(
+      [started(11), tool(12, 'running'), ev({ event: 'turn.interjected', seq: 13, data: { cid: 'c1', message: said } }), text(14, 'B 답', true), tool(15, 'done')],
+      opened(),
+    )
+    expect(state.views['c1']).toMatchObject({
+      running: true,
+      messages: [{ role: 'user', text: '안녕' }, { role: 'assistant', items: [{ id: 'tool1', status: 'done' }] }, said],
+      progress: [{ id: 't1', text: 'B 답' }],
+    })
+    const after = reduce(state, ev({ event: 'turn.ended', seq: 16, data: { cid: 'c1', outcome: 'interrupted', message: { role: 'assistant', text: '' }, unanswered: ['m2'] } }))
+    expect(after.views['c1']!.messages[2]).toEqual({ ...said, unanswered: true })
+    expect(after.views['c1']!.running).toBe(false)
+  })
+
   it('열지 않은 대화의 이벤트는 seq 만 넘긴다', () => {
     const state = run([{ type: 'hello', hello: hello('A', 10) }, started(11)])
     expect(state.views).toEqual({})
@@ -89,6 +106,14 @@ describe('리듀서 — 스냅샷과 스트림 사이', () => {
     const live = { progress: [{ kind: 'think' as const, id: 'k', text: '…', done: false }], attention: [], queue: ['q'] }
     const state = reduce(initialState, { type: 'conversation.loaded', cid: 'c1', snapshot: snapshot(3, { live }) })
     expect(state.views['c1']).toMatchObject({ running: true, progress: live.progress, queue: ['q'] })
+  })
+
+  it('스냅샷의 `!` 카드(shells)를 모습에 싣고, 턴 이벤트가 지나가도 그대로 둔다 (#265)', () => {
+    const shells = [{ id: 's1', at: 1, position: 0, command: 'ls', output: 'a', exitCode: 0, status: 'done' as const, truncated: false }]
+    const loaded = run([{ type: 'conversation.loaded', cid: 'c1', snapshot: snapshot(10, { shells }) }], opened())
+    expect(loaded.views['c1']!.shells).toEqual(shells)
+    expect(run([started(11), ended(12)], loaded).views['c1']!.shells).toEqual(shells)
+    expect(opened().views['c1']!.shells).toBeUndefined()
   })
 })
 

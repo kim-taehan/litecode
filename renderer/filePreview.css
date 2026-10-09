@@ -380,6 +380,31 @@
 }
 
 /* HTML 렌더 — 본문을 가장자리까지 채운다(dsh HtmlBody) */
+/* 이미지 (이슈 #214) — 가운데, 패널 폭에 맞춰 줄이고 늘리지 않는다. 바탕은 투명 이미지가 보이게 옅은 칸 */
+.file-preview__image {
+  box-sizing: border-box;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.file-preview__image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  background: var(--fill-selector);
+}
+
+/* PDF 안내 — 빈 상태 한 줄 아래에 버튼 */
+.file-preview__pdf {
+  flex-direction: column;
+  gap: 10px;
+  text-align: center;
+}
+
 .file-preview__body--frame {
   overflow: hidden;
 }

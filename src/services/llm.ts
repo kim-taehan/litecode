@@ -13,6 +13,8 @@ import { instructionsNote, projectInstructions } from './instructions.ts'
 import { carryOver, previousHistory, readPreviousMessages } from './migrate.ts'
 import { failureText, historyMessages, interruptedError, modeOf, unfinishedCompactions } from './history.ts'
 import { realDirectory } from './projectPath.ts'
+import { turnError } from './contextOverflow.ts'
+import { httpStatusOf } from '../../shared/httpError.ts'
 import { describeEnginePlugins, findEnginePlugins } from './enginePlugins.ts'
 import { tr } from '../i18n.ts'
 import './engine.ts'
@@ -140,6 +142,17 @@ export interface ChatResult {
   interrupted?: boolean
   /** 사용자가 승인·질문을 거절해 끝났다 — 실패가 아니다 (ok 는 true) */
   declined?: boolean
+  /** 이 턴에 끼워 넣은(reserve) 말 중 답을 못 받은 것의 메시지 id — 승인 거절·중지로 루프가 끝났거나 보내지 못했다 (이슈 #250). 없으면 빠진다 */
+  unanswered?: string[]
+}
+
+/** 도는 턴에 잡아 둔 끼워 넣기 자리 하나 (reserve, 이슈 #250) — send 나 cancel 중 하나를 꼭 부른다 (그때까지 턴이 이 말을 기다린다) */
+export interface Interjection {
+  /** 끼워 넣을 말을 보낸다 — 모델·모드·지시문·도구는 도는 턴 것 그대로, context 는 이 말에 더할 맥락 (지시문 뒤에 붙는다).
+   *  턴이 이미 끝났거나(멈춤 등) 엔진이 거절하면 보내지 못하고 false — 그 말은 답 없음(unanswered)으로 남는다 */
+  send(input: { prompt: string; images?: readonly ChatImage[]; context?: string }): Promise<boolean>
+  /** 보내지 않기로 했다 — 턴이 이 말을 더 기다리지 않는다 (답 없음으로 남는다) */
+  cancel(): void
 }
 
 /** 메시지에 붙여 보낼 이미지 하나 (이슈 #44) — 읽은 바이트 그대로. 종류는 부르는 쪽이 매직 바이트로 정한다 (attachments.ts) */
@@ -194,6 +207,16 @@ export interface EngineSkill {
   content?: string
 }
 
+/** 도는 턴 하나 (LlmService.running) — turnMessageId 는 그 턴을 시작한 user 메시지, reserve 는 엔진이 그 턴을 받은 뒤에만 있다 */
+interface RunningTurn {
+  tracker: TurnTracker
+  workdir: string
+  sessionId: string
+  calls: ToolCalls
+  turnMessageId: string
+  reserve?: (messageId: string) => Interjection | undefined
+}
+
 interface TurnOutcome {
   ok: boolean
   text: string
@@ -220,6 +243,22 @@ export const AGENT_LIST_TIMEOUT_MS = 10_000
 /** 한 턴에 자동 요약이 이만큼 넘게 돌면 멈춘다 — 레거시는 요약 뒤 스스로 "Continue" 턴을 돌리고, 모델 한도가 작으면(한도 − 출력 한도가 프롬프트보다
  *  작으면 — renderer/compaction.ts) 요약 → 다시 넘침이 끝없이 돈다 (01w 자동 요약 행, 가짜 LLM 30초에 10회 이상). 출력 한도를 넣은 뒤(#27)로는 안전망. 요약 줄·이음 답은 TurnScope */
 export const MAX_COMPACTIONS_PER_TURN = 3
+/** 한 스텝의 재시도가 이만큼 넘으면(attempt > 이 값) 앱이 멈추고 실패로 끝낸다 (이슈 #207). opencode 1.18.18 은 일시 오류를 5번까지
+ *  지수 백오프(2·4·8·16·30초 상한)로 재시도해 꺼진 게이트웨이에 1분 반을 기다린다 (바이너리 SessionRetry: RETRY_MAX_RETRIES=5).
+ *  attempt 는 한 스텝(한 번의 모델 호출) 안의 순번이다 — 재시도 사이 busy 에도 이어지고, 다음 스텝은 1 부터 다시 */
+export const MAX_RETRIES_PER_TURN = 3
+/** 연결 자체가 안 되는 재시도 사유 — 서버가 꺼져 있으면 몇 초 더 기다려도 안 켜진다 → 1번째 알림에서 멈춘다. retry status 의 message 는
+ *  게이트웨이 오류 본문의 error.message 다 (바이너리 SessionRetry.retryable: APIError 면 e.data.message) — 키 프록시가 "(ECONNREFUSED)" 처럼 코드를 싣는다 */
+const UNREACHABLE = /\b(?:ECONNREFUSED|ENOTFOUND|EHOSTUNREACH)\b/i
+/** 키 프록시가 게이트웨이 연결 실패를 답하는 상태 (keyProxy.ts — tr('error.proxyGateway')) */
+const UNREACHABLE_STATUS = 502
+
+export function connectionRefused(message: string): boolean {
+  return UNREACHABLE.test(message)
+}
+/** 저장된 모델 키를 못 푼다 (이슈 #231, providers.ts KEY_STORE_CODE) — 키 프록시가 502 에 안내 문구째 싣는다. 키체인 허용은 앱을 다시 열어야 바뀌어
+ *  몇 번을 다시 보내도 풀리지 않는다 → 1번째 알림에서 멈추고, 안내 문구가 그대로 보이게 turnError(HTTP 문구 덧씌우기)를 거치지 않는다 */
+const KEY_STORE = /\bEKEYSTORE\b/
 /** MCP 호출 요청을 받고 그 running 도구 파트를 기다리는 한도 — 이벤트는 요청 1~3ms 뒤에 온다 (01z 1-2, 10/10) */
 export const CALLER_WAIT_MS = 2_000
 /** 승인 요청을 받고 그 running 도구 파트(도구 이름·인자)를 기다리는 한도 — 묻는 순간 이미 running 이다 (01z 1-3, 3/3). 넘기면 요청에 실린 것으로 */
@@ -229,6 +268,10 @@ const CONNECT_TIMEOUT_MS = 10_000
 /** /event 의 무바이트 한도 기본값 — 레거시 /event 는 10초마다 heartbeat 를 보낸다(01w). 세 번 연달아 안 오면 연결이 FIN 없이 죽은 것으로 보고
  *  "중단됨" 으로 끝낸다 (끊긴 연결을 기다리며 턴이 영원히 도는 것을 막는다 — 01q 와 같은 정책) */
 export const STREAM_IDLE_TIMEOUT_MS = 30_000
+/** 모델 무응답 한도 (이슈 #264) — 엔진이 프롬프트를 받은 뒤 이 턴 메시지·하위 작업 이벤트가 이만큼 하나도 없으면 게이트웨이가 요청을 받고 답하지
+ *  않는 것으로 보고 멈추고(abort) 실패로 끝낸다. server.heartbeat(10초, sessionID 없음)는 진행이 아니다(01w). 도구가 running 인 동안은 세지 않는다
+ *  (긴 bash·승인 대기 — 묻는 순간 그 도구는 이미 running 이다, PRE_TOOL_WAIT_MS) */
+export const MODEL_STALL_TIMEOUT_MS = 120_000
 
 export interface LlmConfig {
   /** /event SSE 의 무바이트 한도(ms). 기본 STREAM_IDLE_TIMEOUT_MS, 0 = 없음. 시험이 끊김을 짧게 재현할 때 준다 */
@@ -249,14 +292,16 @@ export class LlmService extends Service {
   /** 턴이 도는 세션 — addContext 가 막는다 */
   private busy = new Set<string>()
   /** 기다리는 요청 id → 요청한 세션(하위 작업이면 자식)·그 요청을 기다리는 턴의 세션·폴더·종류·도구 호출 (reply 가 쓴다). 턴이 끝나면 지운다 */
-  private requests = new Map<string, { sessionId: string; turn: string; directory: string; kind: Attention['kind']; callID?: string }>()
+  private requests = new Map<string, { sessionId: string; turn: string; directory: string; kind: Attention['kind']; callID?: string; action?: string; resources?: string[] }>()
+  /** 대화(턴의 엔진 세션) → [항상 허용]한 폴더 밖 접근 패턴 (allowKey). 그 대화의 같은 요청은 카드 없이 once 로 답한다 (이슈 #242). 저장하지 않는다 */
+  private allowed = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 앱이 거절한 도구 호출 id. 그 도구가 error 로 끝나고 idle 이 오면 거절로 끝난 턴이다 */
   private declined = new Map<string, Set<string>>()
   /** 턴이 도는 세션 → 그 턴의 대기 목록 (reply 가 답한 요청을 바로 뺀다) */
   private watchers = new Map<string, { answered(requestId: string): void }>()
   /** 도는 턴의 진행 줄과 폴더 — stopSubtask 가 하위 작업 줄 id 로 그 자식 세션을 찾는다. calls 는 그 턴의 도구 호출 장부 (callerOf·승인 기록).
    *  턴이 끝나면 지운다 */
-  private running = new Set<{ tracker: TurnTracker; workdir: string; sessionId: string; calls: ToolCalls }>()
+  private running = new Set<RunningTurn>()
   /** 폴더(realpath) → 마지막으로 본 그 인스턴스의 MCP 서버 이름 — 도구 이름 `<서버>_<도구>` 를 가른다 (mcpTool) */
   private mcpServers = new Map<string, string[]>()
   /** 폴더(realpath) → 모델에 안 보일 MCP 도구 (서버 → MCP 서버가 준 도구 이름들, 이슈 #164). ctx.mcp 가 매 턴 전(llm/before-turn)에 바꾼다 */
@@ -378,6 +423,16 @@ export class LlmService extends Service {
       this.gateIfIdle()
       this.reloadIfIdle()
     }
+  }
+
+  /** 도는 턴에 사용자 말 하나를 끼워 넣을 자리를 잡는다 (이슈 #250). turnMessageId 는 그 턴을 시작한 chat 의 messageId, messageId 는 끼워 넣을
+   *  말의 id(newMessageId). 엔진이 그 턴을 아직 안 받았거나(보내기 전 — 먼저 보내면 끼워 넣은 말이 턴의 시작이 된다) 이미 끝났으면 undefined —
+   *  부른 쪽이 대기열로 보낸다. 자리를 잡은 순간부터 그 턴은 이 말을 본 뒤의 idle 에서만 끝난다 (Interjection.send·cancel).
+   *  실측 01ar (opencode 1.18.18 레거시, docs/opencode-protocol.md): 도는 세션에 prompt_async 를 또 보내면 204 즉시, 도는 스텝이 끝난 직후의
+   *  다음 모델 호출에 실린다. 그 뒤 스텝은 마지막 user 의 agent·system·tools 를 쓴다 — 그래서 도는 턴과 같은 값을 싣는다 */
+  reserve(turnMessageId: string, messageId: string): Interjection | undefined {
+    for (const live of this.running) if (live.turnMessageId === turnMessageId) return live.reserve?.(messageId)
+    return undefined
   }
 
   /** 실행 전에 판정('llm/pre-tool')을 받을 도구를 정한다 (이슈 #102 2단계). matchers 는 도구 이름의 `|` 나열·정규식(shared/hooks.ts matchesTool),
@@ -517,7 +572,7 @@ export class LlmService extends Service {
       const scope = new TurnScope(id, userMessageId)
       const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
       const calls = new ToolCalls()
-      const live = { tracker, workdir, sessionId: id, calls }
+      const live: RunningTurn = { tracker, workdir, sessionId: id, calls, turnMessageId: userMessageId }
       this.running.add(live)
       this.declined.set(id, declined) // 아래 try 의 finally 가 거둔다 — 그 앞(지시문 읽기·옛 글 넣기)이 던져도 남지 않게 여기서 적는다
       const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention, calls, mode)
@@ -531,17 +586,16 @@ export class LlmService extends Service {
         // 개인 지시문(.local.md)이 실렸거나 지시문이 잘렸으면 진행 줄 맨 앞에 알린다 (이슈 #176 — 다시 열면 historyMessages 가 info.system 으로 같은 줄)
         const note = instructionsNote(instructions, workdir)
         if (note) onProgress?.({ kind: 'context', id: `${userMessageId}:instructions`, text: note })
+        // 이 턴의 프롬프트 — 끼워 넣는 말(reserve)도 같은 model·agent·system·tools 를 싣는다 (그 뒤 스텝은 마지막 user 의 것을 쓴다, 01ar E)
+        const turnFields = (messageID: string, extraSystem?: string) => {
+          const joined = [system, extraSystem].filter(Boolean).join('\n\n')
+          return { messageID, model: { providerID: providerId, modelID: modelId }, agent: MODE_AGENT[mode], ...(joined && { system: joined }), tools }
+        }
+        const tools = promptTools(this.hiddenMcpTools.get(workdir))
         const send = await fetch(`${conn.url}/session/${id}/prompt_async?${at(workdir)}`, {
           method: 'POST',
           headers: { ...conn.headers, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            messageID: userMessageId,
-            model: { providerID: providerId, modelID: modelId },
-            agent: MODE_AGENT[mode],
-            ...(system && { system }),
-            tools: promptTools(this.hiddenMcpTools.get(workdir)),
-            parts: promptParts(prompt, images),
-          }),
+          body: JSON.stringify({ ...turnFields(userMessageId), parts: promptParts(prompt, images) }),
         }).catch((error: unknown) => {
           admitted(false)
           events.stop()
@@ -555,9 +609,43 @@ export class LlmService extends Service {
         admitted(true)
         admittedTurn.sessionId = id
         this.ctx.emit('llm/turn-started', { sessionId: id, directory })
+        // 끼워 넣기 자리 (이슈 #250) — 엔진이 이 턴을 받은 뒤에만. 보내기 전에 이 턴 것으로 받아 두고(scope.adopt) 끝 판정이 그 말을 기다리게 한다
+        const engine = conn
+        live.reserve = (messageId) => {
+          if (events.over()) return undefined
+          scope.adopt(messageId)
+          events.expect(messageId)
+          let settled = false
+          return {
+            send: async ({ prompt: text, images: attached = [], context: extra }) => {
+              if (settled) return false
+              settled = true
+              const res = events.over()
+                ? undefined
+                : await fetch(`${engine.url}/session/${turnSession}/prompt_async?${at(workdir)}`, {
+                    method: 'POST',
+                    headers: { ...engine.headers, 'content-type': 'application/json' },
+                    body: JSON.stringify({ ...turnFields(messageId, extra), parts: promptParts(text, attached) }),
+                  }).catch(() => undefined)
+              if (!res?.ok) {
+                events.forget(messageId)
+                return false
+              }
+              // 보내는 사이에 멈췄다 — 늦게 닿은 말은 새 루프를 돌린다(01ar H) → 그것도 멈춘다
+              if (stop?.aborted) void this.abort(engine, turnSession, workdir)
+              return true
+            },
+            cancel: () => {
+              if (settled) return
+              settled = true
+              events.forget(messageId)
+            },
+          }
+        }
 
         const result = await events.result
         const usage = result.usage && { ...result.usage, messageTokens: await this.messageTokens(conn, id, workdir) }
+        const unanswered = scope.unanswered()
         return {
           ok: result.ok,
           sessionId: id,
@@ -566,6 +654,7 @@ export class LlmService extends Service {
           usage,
           ...(result.interrupted && { interrupted: true }),
           ...(result.declined && { declined: true }),
+          ...(unanswered.length > 0 && { unanswered }),
         }
       } finally {
         events.stop()
@@ -652,6 +741,64 @@ export class LlmService extends Service {
     while (!(await Promise.race([settled, new Promise<false>((resolve) => setTimeout(() => resolve(false), 100))]))) await this.abort(conn, sessionId, workdir)
     for (const id of unfinishedCompactions(await this.engineMessages(conn, sessionId, workdir))) {
       await fetch(`${conn.url}/session/${sessionId}/message/${id}?${at(workdir)}`, { method: 'DELETE', headers: conn.headers })
+    }
+  }
+
+  /** 한 번 묻고 답 글만 받는다 (자동 대화 제목, 이슈 #215) — 대화와 무관한 **임시 세션**을 그 폴더에 만들어 보내고, 끝나면(성공·실패·멈춤) 그 세션을
+   *  지운다. 턴이 아니다: 'llm/turn-*'·'llm/before-turn'(MCP 붙이기)·승인 카드('llm/attention*'·'llm/pre-tool')·통계·프로젝트 지시문이 없다.
+   *  도구는 전부 끈다 — tools `{"*": false}` 는 세션 permission 을 `*` deny 하나로 바꾼다(#164 실측의 와일드카드. `*` 하나로 전부 빠지는지는 안 쟀다).
+   *  모델·에이전트(기본 모드)는 늘 그렇듯 싣는다. stop 이 걸리면(부르는 쪽의 시간 초과) 엔진 턴을 멈춘다. 재시도 상한은 턴과 같다(#207 — 연결 실패는
+   *  첫 재시도에서 끝난다). 모델 카탈로그·주소 확인은 안 한다 — 부르는 쪽이 방금 같은 모델로 턴을 돌렸다 */
+  async askOnce({ providerId, modelId, directory, prompt, stop }: { providerId: string; modelId: string; directory: string; prompt: string; stop?: AbortSignal }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+    if (!this.ctx.providers.get(providerId)) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
+    this.turns++ // DB 정리·엔진 재시작이 이 요청을 끊지 않게 (끝나면 준다)
+    let conn: EngineConnection | undefined
+    let id: string | undefined
+    try {
+      conn = await this.ctx.engine.connection()
+      const folder = await this.engineFolder(directory)
+      if ('error' in folder) return { ok: false, error: folder.error }
+      const { workdir } = folder
+      if (stop?.aborted) return { ok: false, error: tr('error.stopped') }
+      id = await this.createSession(conn, providerId, modelId, workdir, sessionTitle(prompt))
+      const messageId = this.newMessageId()
+      let admitted!: (sent: boolean) => void
+      const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
+      const events = this.follow(conn, new TurnScope(id, messageId), tracker, workdir, new Promise<boolean>((resolve) => (admitted = resolve)), undefined, new Set(), () => {}, stop)
+      try {
+        await events.connected
+        if (stop?.aborted) {
+          admitted(false)
+          return { ok: false, error: tr('error.stopped') }
+        }
+        const send = await fetch(`${conn.url}/session/${id}/prompt_async?${at(workdir)}`, {
+          method: 'POST',
+          headers: { ...conn.headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ messageID: messageId, model: { providerID: providerId, modelID: modelId }, agent: MODE_AGENT[DEFAULT_MODE], tools: { '*': false }, parts: promptParts(prompt) }),
+        }).catch((error: unknown) => {
+          admitted(false)
+          throw error
+        })
+        if (!send.ok) {
+          admitted(false)
+          return { ok: false, error: tr('error.promptSend', { status: send.status }) }
+        }
+        admitted(true)
+        const result = await events.result
+        return result.ok ? { ok: true, text: result.text } : { ok: false, error: result.error ?? '' }
+      } finally {
+        events.stop()
+      }
+    } catch (error) {
+      if (conn?.closed.aborted) return { ok: false, error: interruptedError() }
+      return { ok: false, error: tr('error.opencodeConnect', { message: (error as Error).message }) }
+    } finally {
+      // 임시 세션은 늘 지운다 — 못 지우면 엔진 DB 에만 남는다 (대화 목록엔 처음부터 없다)
+      if (id) await this.deleteSession(id).catch((error: unknown) => console.warn('[llm] 임시 세션 지우기 실패', (error as Error).message))
+      this.turns--
+      this.purgeIfIdle()
+      this.gateIfIdle()
+      this.reloadIfIdle()
     }
   }
 
@@ -933,7 +1080,17 @@ export class LlmService extends Service {
     onAttentionSignal: (type: string, properties: Record<string, unknown>) => void,
     userStop?: AbortSignal,
     calls?: ToolCalls,
-  ): { connected: Promise<void>; result: Promise<TurnOutcome>; stop: () => void } {
+  ): {
+    connected: Promise<void>
+    result: Promise<TurnOutcome>
+    stop: () => void
+    /** 끼워 넣을 user 메시지를 기다린다 (이슈 #250) — 그 user 를 보기 전의 idle 로는 끝내지 않는다 */
+    expect(messageId: string): void
+    /** 그 말을 더 기다리지 않는다 (못 보냈다) — 기다리느라 미룬 idle 이 있었으면 그때 끝낸다 */
+    forget(messageId: string): void
+    /** 이 턴이 끝났다 (끝 판정·멈춤·끊김) — 더 끼워 넣지 않는다 */
+    over(): boolean
+  } {
     const sessionId = scope.sessionId
     const controller = new AbortController()
     const meter = new TurnMeter()
@@ -948,8 +1105,34 @@ export class LlmService extends Service {
     let compactionSeen = false
     let failure: EngineMessageInfo['error']
     let declinedEnd = false
-    let finish!: (outcome: TurnOutcome) => void
-    const finished = new Promise<TurnOutcome>((resolve) => (finish = resolve))
+    /** 끼워 넣었지만 아직 이벤트로 못 본 user 메시지 (이슈 #250) — 이것이 남아 있는 동안 온 idle 은 미룬다 (A 의 idle 과 엇갈려 늦게 닿은 말은
+     *  새 루프·자기 idle 을 받는다, 01ar H 8/8) */
+    const awaiting = new Set<string>()
+    let idleDeferred = false
+    let over = false
+    /** 모델 무응답 감시 (이슈 #264) — 엔진이 프롬프트를 받은 뒤 이 턴의 이벤트마다 다시 건다. running 인 도구 호출이 있으면 걸지 않는다 */
+    const toolsRunning = new Set<string>()
+    let watching = false
+    let stallTimer: ReturnType<typeof setTimeout> | undefined
+    const progressed = (): void => {
+      clearTimeout(stallTimer)
+      stallTimer = watching && !over && toolsRunning.size === 0 ? setTimeout(stalled, MODEL_STALL_TIMEOUT_MS) : undefined
+    }
+    const stalled = (): void => {
+      void this.abort(conn, sessionId, workdir)
+      finish(outcome({ ok: false, error: tr('error.modelStalled', { seconds: MODEL_STALL_TIMEOUT_MS / 1000 }) }))
+    }
+    void admitted.then((sent) => {
+      watching = sent
+      progressed()
+    })
+    let resolveFinish!: (outcome: TurnOutcome) => void
+    const finished = new Promise<TurnOutcome>((resolve) => (resolveFinish = resolve))
+    const finish = (value: TurnOutcome): void => {
+      over = true
+      clearTimeout(stallTimer)
+      resolveFinish(value)
+    }
     const outcome = (base: Omit<TurnOutcome, 'text' | 'usage'>): TurnOutcome => ({ text: tracker.text(), usage: meter.usage(), ...base })
     /** 끝난 도구 호출을 호출마다 한 번 알린다 ('llm/tool-done') — 끝난 파트가 다시 와도(메타데이터 갱신) 한 번 */
     const toolsDone = new Set<string>()
@@ -972,6 +1155,8 @@ export class LlmService extends Service {
         if (failure.name === 'MessageAbortedError') return outcome({ ok: false, error: tr('error.stopped'), interrupted: true }) // 다른 클라이언트가 멈췄다
         return outcome({ ok: false, error: failureText(failure) })
       }
+      // 오류도 거절도 없는데 모델이 아무것도 내놓지 않고 끝났다 — 게이트웨이가 닿지 않을 때 "완료" 로 보이던 것 (사용자 2026-10-09)
+      if (!declinedEnd && !tracker.hasOutput()) return outcome({ ok: false, error: tr('error.noAnswer') })
       return declinedEnd ? outcome({ ok: true, declined: true }) : outcome({ ok: true })
     }
     /** user 메시지가 생기기 전의 session.error — idle 없이 끝나는 거절(없는 에이전트 등)일 수 있다. 그 세션이 돌고 있지 않고 여전히 이 턴 user
@@ -990,6 +1175,14 @@ export class LlmService extends Service {
       const props = event.properties ?? {}
       if (event.type === 'server.connected') return connected()
       const role = scope.of(event.type, props)
+      if (role) {
+        const part = props['part'] as EnginePart | undefined
+        if (role === 'assistant' && part?.type === 'tool' && part.callID) {
+          if (part.state?.status === 'running') toolsRunning.add(part.callID)
+          else toolsRunning.delete(part.callID)
+        }
+        progressed()
+      }
       if (role === 'summary') {
         // 요약 답 — 글은 답이 아니다. 끝나면 요약 줄을 구분선으로, 실패(한도 초과로 요약도 못 함)면 그 사유로 턴이 끝난다 (idle 이 뒤따른다)
         if (event.type !== 'message.updated') return
@@ -1001,7 +1194,11 @@ export class LlmService extends Service {
       }
       if (role) {
         if (role === 'assistant' || event.type === 'message.updated') meter.observe(event.type, props) // user 의 글 파트는 출력이 아니다
-        if (role === 'user' && event.type === 'message.updated') seenUser = true
+        if (role === 'user' && event.type === 'message.updated') {
+          seenUser = true
+          // 기다리던 끼워 넣은 말이다 — 그 앞에 미룬 idle 은 앞 루프의 것이었고, 이 말은 자기 루프·idle 을 받는다
+          if (awaiting.delete((props['info'] as EngineMessageInfo).id)) idleDeferred = false
+        }
         if (role === 'user' && (props['part'] as EnginePart | undefined)?.type === 'compaction') {
           compactionSeen = true
           seenUser = true // 손으로 부른 요약은 이 요약 user 가 턴의 시작이다 (자동 요약이면 이미 참)
@@ -1039,8 +1236,19 @@ export class LlmService extends Service {
       if (props['sessionID'] !== sessionId) return
       if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal(event.type, props)
       if (event.type === 'session.status' && seenUser) {
-        const item = tracker.status(props['status'] as Parameters<TurnTracker['status']>[0])
+        const status = props['status'] as Parameters<TurnTracker['status']>[0]
+        const item = tracker.status(status)
         if (item) onProgress?.(item)
+        // 재시도 상한 (이슈 #207): 엔진의 재시도를 끝까지 기다리지 않는다 — 연결 실패는 첫 알림에서, 그 밖은 MAX_RETRIES_PER_TURN 을 넘으면
+        if (status?.type === 'retry') {
+          const message = status.message ?? ''
+          const unreachable = connectionRefused(message)
+          const keyStore = KEY_STORE.test(message)
+          if (unreachable || keyStore || (status.attempt ?? 1) > MAX_RETRIES_PER_TURN) {
+            void this.abort(conn, sessionId, workdir)
+            finish(outcome({ ok: false, error: keyStore ? message : turnError(message, unreachable ? (httpStatusOf(message) ?? UNREACHABLE_STATUS) : undefined) }))
+          }
+        }
         return
       }
       if (event.type === 'session.error') {
@@ -1051,7 +1259,10 @@ export class LlmService extends Service {
         else void settleError(error)
         return
       }
-      if (event.type === 'session.idle' && seenUser) finish(ended())
+      if (event.type === 'session.idle' && seenUser) {
+        if (awaiting.size === 0) finish(ended())
+        else idleDeferred = true // 끼워 넣은 말이 아직 엔진에 안 닿았다 — 그 말의 idle 까지
+      }
       if (event.type === 'session.compacted' && seenUser && ++compactions > MAX_COMPACTIONS_PER_TURN) {
         void this.abort(conn, sessionId, workdir)
         finish(outcome({ ok: false, error: tr('error.contextOverflow') }))
@@ -1109,7 +1320,19 @@ export class LlmService extends Service {
     const timer = setTimeout(() => failConnect(new Error(tr('error.subscribe', { status: 'timeout' }))), CONNECT_TIMEOUT_MS)
     void connecting.finally(() => clearTimeout(timer)).catch(() => {})
 
-    return { connected: connecting, result, stop: () => controller.abort() }
+    void result.finally(() => ((over = true), clearTimeout(stallTimer))).catch(() => {})
+
+    return {
+      connected: connecting,
+      result,
+      stop: () => controller.abort(),
+      expect: (messageId) => void awaiting.add(messageId),
+      forget: (messageId) => {
+        if (!awaiting.delete(messageId) || awaiting.size > 0 || !idleDeferred || over) return
+        finish(ended())
+      },
+      over: () => over || controller.signal.aborted || !!userStop?.aborted || conn.closed.aborted,
+    }
   }
 
   /** 승인·질문 대기 목록을 지켜본다. refresh 마다 정본 목록(GET /permission·/question?directory= — 그 폴더 전부)을 다시 읽어 이 턴 답 메시지의
@@ -1201,7 +1424,10 @@ export class LlmService extends Service {
         const answer =
           typeof decision === 'object'
             ? { reply: 'reject', message: decision.reason.trim() || 'Blocked before running.' }
-            : decision !== 'ask' && conn.gated(entry.permission) && modePermission(mode, entry.permission, { resources: entry.patterns, child }) === 'allow'
+            : decision !== 'ask' &&
+                ((conn.gated(entry.permission) && modePermission(mode, entry.permission, { resources: entry.patterns, child }) === 'allow') ||
+                  // 이 대화에서 [항상 허용]한 폴더 밖 패턴 (이슈 #242) — 사용자가 미리 정한 허용이지만 이 호출을 본 것은 아니라 장부에는 적지 않는다
+                  this.allowedAlready(sessionId, entry.permission, entry.patterns))
               ? { reply: 'once' }
               : undefined
         if (answer) {
@@ -1252,7 +1478,9 @@ export class LlmService extends Service {
         }),
         ...(questions?.map((entry): Attention => ({ kind: 'question', id: entry.id, ...origin(entry), questions: entry.questions })) ?? pending.filter((entry) => entry.kind === 'question')),
       ]
-      for (const entry of permissions) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID })
+      for (const entry of permissions) {
+        this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'permission', callID: entry.tool?.callID, action: entry.permission, resources: entry.patterns ?? [] })
+      }
       for (const entry of questions ?? []) this.requests.set(entry.id, { sessionId: origin(entry).sessionId, turn: sessionId, directory: workdir, kind: 'question', callID: entry.tool?.callID })
       publish(next)
     }
@@ -1287,28 +1515,31 @@ export class LlmService extends Service {
    *  그 도구가 error 로 끝나고 오는 idle 이 거절로 끝난 턴이다. 이미 풀렸거나 모르는 요청이면 던진다.
    *  **`always` 는 보내지 않는다** — 그 폴더의 모든 세션에서 더는 묻지 않게 된다 (01z 1-3).
    *  허용(once)한 도구 호출은 그 턴의 장부에 적는다 — 앱 MCP 서버가 "사용자가 앱에서 누른 허용" 만 받게 (callerOf 의 approved, 01z 1-4).
-   *  target 은 허용하며 사용자가 고른 받을 대화 (이슈 #67) — 장부에만 적는다. **엔진에는 보내지 않는다**(엔진에 가는 답은 once 그대로) */
+   *  target 은 허용하며 사용자가 고른 받을 대화 (이슈 #67) — 장부에만 적는다. **엔진에는 보내지 않는다**(엔진에 가는 답은 once 그대로).
+   *  always(항상 허용, 이슈 #242)는 폴더 밖 접근(external_directory)에만 — 엔진에는 once 로 보내고, 성공하면 그 대화(request.turn) + 그 패턴을
+   *  기억해 다음 요청은 카드 없이 once 로 답하고(watchAttention 의 judge), 이미 떠 있는 같은 패턴의 카드도 once 로 함께 푼다 */
   async reply(sessionId: string, requestId: string, answer: AttentionAnswer, target?: AttentionTarget): Promise<void> {
     const request = this.requests.get(requestId)
     if (!request || request.sessionId !== sessionId) throw new Error(tr('error.attentionGone'))
+    const always = answer === 'always'
     const valid =
       answer === 'reject' ||
       (request.kind === 'permission'
-        ? answer === 'once'
+        ? answer === 'once' || (always && request.action === ALLOW_ALWAYS_ACTION)
         : Array.isArray(answer) && answer.length > 0 && answer.every((entry) => Array.isArray(entry) && entry.length > 0 && entry.every((label) => typeof label === 'string' && label.trim() !== '')))
     if (!valid) throw new Error(tr('error.attentionAnswer'))
     const conn = await this.ctx.engine.connection()
     // 하위 작업의 요청을 거절하면 그 자식만 그 도구 오류로 이어 가고 부모 턴은 계속 돈다 — 부모 턴의 "거절로 끝남" 이 아니다
     const declined = answer === 'reject' && request.callID && request.sessionId === request.turn ? this.declined.get(sessionId) : undefined
     declined?.add(request.callID!) // 보내기 전에 — 도구 error 가 응답보다 먼저 올 수 있다
-    const approving = answer === 'once' && request.kind === 'permission' && request.callID ? [...this.running].find((live) => live.sessionId === request.turn)?.calls : undefined
+    const approving = (answer === 'once' || always) && request.kind === 'permission' && request.callID ? [...this.running].find((live) => live.sessionId === request.turn)?.calls : undefined
     approving?.approve(request.callID!, target) // 보내기 전에 — 허용된 도구의 MCP 호출이 응답보다 먼저 올 수 있다
     const base = `${conn.url}/${request.kind}/${requestId}`
     const query = at(request.directory)
     const json = { ...conn.headers, 'content-type': 'application/json' }
     const res =
       request.kind === 'permission'
-        ? await fetch(`${base}/reply?${query}`, { method: 'POST', headers: json, body: JSON.stringify({ reply: answer }) })
+        ? await fetch(`${base}/reply?${query}`, { method: 'POST', headers: json, body: JSON.stringify({ reply: always ? 'once' : answer }) })
         : answer === 'reject'
           ? await fetch(`${base}/reject?${query}`, { method: 'POST', headers: json, body: '{}' })
           : await fetch(`${base}/reply?${query}`, { method: 'POST', headers: json, body: JSON.stringify({ answers: answer }) })
@@ -1319,7 +1550,28 @@ export class LlmService extends Service {
     }
     this.requests.delete(requestId)
     this.watchers.get(request.turn)?.answered(requestId)
+    if (!always) return
+    const key = allowKey(request.resources ?? [])
+    const remembered = this.allowed.get(request.turn) ?? new Set<string>()
+    remembered.add(key)
+    this.allowed.set(request.turn, remembered)
+    // 이미 떠 있는 같은 대화·같은 패턴의 카드 — 하나가 실패해도 그 카드만 남는다(다시 누를 수 있다)
+    const same = [...this.requests].filter(([, other]) => other.turn === request.turn && other.kind === 'permission' && other.action === ALLOW_ALWAYS_ACTION && allowKey(other.resources ?? []) === key)
+    await Promise.all(same.map(([id, other]) => this.reply(other.sessionId, id, 'once').catch(() => {})))
   }
+
+  /** 이 대화(턴의 엔진 세션)에서 [항상 허용]한 폴더 밖 접근 패턴의 요청이다 (이슈 #242) */
+  private allowedAlready(turn: string, permission: string, patterns: readonly string[] | undefined): boolean {
+    return permission === ALLOW_ALWAYS_ACTION && !!this.allowed.get(turn)?.has(allowKey(patterns ?? []))
+  }
+}
+
+/** [항상 허용]을 받는 권한 — 폴더 밖 접근만 (이슈 #242). 다른 권한·보내기·만들기·질문은 늘 묻는다 */
+const ALLOW_ALWAYS_ACTION = 'external_directory'
+
+/** 요청 패턴의 비교 열쇠 — 패턴 목록이 같아야 같은 요청이다 */
+function allowKey(patterns: readonly string[]): string {
+  return JSON.stringify([...patterns].sort())
 }
 
 /** 끝난(completed·error) 도구 파트 → 'llm/tool-done' 의 중립 모양. 아직 도는 파트·도구가 아닌 파트면 undefined.

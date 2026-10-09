@@ -16,8 +16,24 @@ files:
   - dist/**/*
   - package.json
   - '!**/*.map'
+  # 블루투스(@stoprocent/bleno, 이슈 #210)에 딸려 오는 것 중 설치본에 필요 없는 것 — Linux 용 HCI 소켓 드라이버(선택 의존성: usb·serialport, 네이티브 ~12MB),
+  # 빌드 때만 쓰는 patch-package·node-addon-api(헤더), bleno 의 예제·시험·C++ 소스. macOS·Windows 는 lib/mac·lib/win 의 프리빌드만 읽는다
+  - '!node_modules/@stoprocent/bluetooth-hci-socket{,/**}'
+  - '!node_modules/usb{,/**}'
+  - '!node_modules/serialport{,/**}'
+  - '!node_modules/@serialport{,/**}'
+  - '!node_modules/patch-package{,/**}'
+  - '!node_modules/node-addon-api{,/**}'
+  - '!node_modules/@stoprocent/bleno/node_modules/node-addon-api{,/**}'
+  - '!node_modules/@stoprocent/bleno/{examples,test,patches,lib/mac/src,lib/win/src,lib/common}{,/**}'
+  - '!node_modules/@stoprocent/bleno/prebuilds/{android-*,linux-*,win32-ia32}{,/**}'
 
 asar: true
+# bleno 의 네이티브 프리빌드(.node)는 asar 밖에 둔다 — 네이티브 모듈은 asar 안에서 dlopen 되지 않는다 (Electron 이 app.asar.unpacked 로 찾아 준다)
+asarUnpack:
+  - node_modules/@stoprocent/bleno/prebuilds/**
+# 네이티브 의존성을 Electron 용으로 다시 빌드하지 않는다 — bleno 는 N-API 프리빌드라 그대로 맞고, 다시 빌드하면 소스 컴파일(Xcode·헤더 내려받기)을 하려 든다
+npmRebuild: false
 
 # 받는 것은 scripts/fetch-opencode.mjs (build/vendor/ 는 gitignore). 런타임 자리는 src/services/opencodeBinary.ts bundledPaths:
 #   mac  Contents/Resources/opencode/opencode · Contents/Resources/rg/rg
@@ -52,10 +68,18 @@ mac:
   # hardened runtime 이 아니라 entitlement 는 필요 없다 (공증으로 가면 device.audio-input + disable-library-validation — 실측 01ag §2.4)
   extendInfo:
     NSMicrophoneUsageDescription: litecode uses the microphone for voice input. Speech is transcribed on this computer.
+    # 블루투스 연결(기능 bluetooth, 이슈 #210)을 켤 때 macOS 가 보여 준다 — Electron 기본 문구("This app needs access to Bluetooth")를 우리 것으로
+    NSBluetoothAlwaysUsageDescription: litecode uses Bluetooth so your phone can connect to this computer.
+  # bleno 프리빌드는 mac 것만 (Windows 것은 빼고)
+  files:
+    - '!node_modules/@stoprocent/bleno/prebuilds/win32-*{,/**}'
 
 win:
   target:
     - target: nsis
       arch: [x64]
+  # bleno 프리빌드는 Windows 것만 (mac 것은 빼고). win32-arm64 프리빌드는 없다 — 그 PC 에서는 블루투스 연결이 "지원 안 함" 으로 뜬다
+  files:
+    - '!node_modules/@stoprocent/bleno/prebuilds/darwin-*{,/**}'
 
 artifactName: litecode-${os}-${arch}.${ext}

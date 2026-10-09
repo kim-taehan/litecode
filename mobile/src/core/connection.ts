@@ -6,10 +6,13 @@
 //   30초 동안 아무 바이트도 안 옴(ping 도) → unresponsive ("데스크탑 응답 없음(잠자기?)") — 뒤에서 같은 백오프로 계속 붙어 본다
 //   `device.revoked` 이벤트 또는 401 → revoked — 다시 붙지 않는다 (다시 짝지어야 한다)
 //   지금 주소의 서버 지문이 다르고 다른 후보에도 닿지 못했다 → fingerprint-changed (옛 후보의 다른 지문은 닿지 않음으로 — roaming.ts) — 자동으로 믿지 않는다, 다시 붙지 않는다 (다시 짝지어야 한다)
+//   블루투스 권한 없음·꺼짐·키 없음(BluetoothError.needsUser) → needs-action — 저절로 다시 시도하지 않는다(권한 창을 되풀이하지 않는다). retry() 로 다시
+//   단 꺼짐(bluetooth-off)은 needs-action 을 보이면서 블루투스가 켜지기를 듣고(whenBluetoothOn — 폴링 없음), 켜지면 retry() 처럼 곧바로 다시 붙는다 (이슈 #270)
 // 다시 붙을 때: hello(runId 대조) → events?run=&after=<적용한 마지막 seq>. 이을 수 없으면 리듀서가 resync 를 올리고, 여기서 목록과
 // 열린 대화의 스냅샷을 다시 받는다.
 
 import { REMOTE_SILENCE_TIMEOUT_MS, type RemoteEvent } from '../../../shared/remote.ts'
+import { BluetoothError } from './bluetoothLink.ts'
 import { RemoteError, type RemoteClient } from './client.ts'
 import { NetError } from './net.ts'
 import { initialState, reduce, type RemoteAction, type RemoteState } from './state.ts'
@@ -24,6 +27,8 @@ export type ConnectionStatus =
   | { kind: 'revoked' }
   /** 데스크탑 인증서 지문이 짝지을 때와 다르다 (다시 설치했거나 다른 PC) */
   | { kind: 'fingerprint-changed' }
+  /** 사람이 무엇을 해야 붙는다(블루투스 권한·꺼짐·키 없음 — BluetoothError.needsUser). 저절로 다시 시도하지 않는다 — retry() 를 기다린다 (꺼짐만은 켜지면 저절로) */
+  | { kind: 'needs-action' }
 
 const BACKOFF_BASE_MS = 1_000
 const BACKOFF_MAX_MS = 30_000
@@ -33,8 +38,14 @@ export function backoffMs(attempt: number): number {
   return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1))
 }
 
+export interface ConnectionOptions {
+  /** 블루투스가 켜지면 listener (구독할 때 이미 켜져 있으면 곧바로). 돌려준 함수로 그만 듣는다 — 블루투스 세션만 준다 (BleDriver.onBluetoothOn) */
+  whenBluetoothOn?(listener: () => void): () => void
+}
+
 export class Connection {
   readonly client: RemoteClient
+  private readonly options: ConnectionOptions
   private current: RemoteState = initialState
   private currentStatus: ConnectionStatus = { kind: 'idle' }
   private readonly listeners = new Set<() => void>()
@@ -46,12 +57,17 @@ export class Connection {
   private closeStream: (() => void) | undefined
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private silenceTimer: ReturnType<typeof setTimeout> | undefined
+  /** bluetooth-off 로 멈춘 동안 켜짐을 듣는 구독 — teardown 이 거둔다 */
+  private offBluetooth: (() => void) | undefined
   private syncing = false
   /** 스냅샷을 다 받아 둔 resync 번호 */
   private synced = 0
+  /** 마지막으로 붙지 못한 까닭 — 붙으면 지운다 */
+  private lastFailure: unknown
 
-  constructor(client: RemoteClient) {
+  constructor(client: RemoteClient, options: ConnectionOptions = {}) {
     this.client = client
+    this.options = options
   }
 
   get state(): RemoteState {
@@ -60,6 +76,11 @@ export class Connection {
 
   get status(): ConnectionStatus {
     return this.currentStatus
+  }
+
+  /** 마지막으로 붙지 못했거나 끊긴 까닭(운반이 던진 것 그대로) — 붙어 있으면 undefined. 화면이 사유 문구를 고른다 */
+  get failure(): unknown {
+    return this.lastFailure
   }
 
   /** 상태(state·status)가 바뀔 때마다 부른다. 돌려준 함수로 그만 듣는다 */
@@ -94,6 +115,16 @@ export class Connection {
   /** 앱이 앞으로 돌아왔다 — 기다리던 재시도를 지금 한다 */
   wake(): void {
     if (this.currentStatus.kind !== 'reconnecting' && this.currentStatus.kind !== 'unresponsive') return
+    void this.connect()
+  }
+
+  /** 사용자가 [다시 시도] 를 눌렀다 — 기다리던 재시도든, 사람을 기다리며 멈춘 것(needs-action)이든 지금 처음부터 붙어 본다 */
+  retry(): void {
+    const kind = this.currentStatus.kind
+    if (kind !== 'reconnecting' && kind !== 'unresponsive' && kind !== 'needs-action') return
+    this.attempt = 0
+    this.silent = false
+    this.setStatus({ kind: 'connecting' })
     void this.connect()
   }
 
@@ -141,6 +172,7 @@ export class Connection {
           if (stale()) return
           this.attempt = 0
           this.silent = false
+          this.lastFailure = undefined
           this.setStatus({ kind: 'connected' })
           void this.sync()
         },
@@ -164,8 +196,14 @@ export class Connection {
 
   /** 붙지 못했거나 끊겼다 — 백오프 뒤 다시 */
   private failed(error?: unknown): void {
+    this.lastFailure = error
     if (error instanceof RemoteError && error.status === 401) return this.revoked()
     if (error instanceof NetError && error.kind === 'pin-mismatch') return this.halt({ kind: 'fingerprint-changed' })
+    if (error instanceof BluetoothError && error.needsUser) {
+      this.halt({ kind: 'needs-action' })
+      if (error.reason === 'bluetooth-off') this.waitForBluetooth()
+      return
+    }
     this.teardown()
     this.attempt += 1
     const delay = backoffMs(this.attempt)
@@ -177,10 +215,23 @@ export class Connection {
     this.halt({ kind: 'revoked' })
   }
 
-  /** 다시 붙지 않는다 — 다시 짝지어야 한다 */
-  private halt(status: Extract<ConnectionStatus, { kind: 'revoked' | 'fingerprint-changed' }>): void {
+  /** 저절로는 다시 붙지 않는다 — 다시 짝지어야 한다(revoked·fingerprint-changed) 또는 사람이 고친 뒤 retry() (needs-action) */
+  private halt(status: Extract<ConnectionStatus, { kind: 'revoked' | 'fingerprint-changed' | 'needs-action' }>): void {
     this.teardown()
     this.setStatus(status)
+  }
+
+  /** 사람이 블루투스를 켜면 곧바로 다시 붙는다. 그사이 [다시 시도]·stop 이 먼저 오면 teardown 이 구독을 거둔다 */
+  private waitForBluetooth(): void {
+    const generation = this.generation
+    this.offBluetooth = this.options.whenBluetoothOn?.(() => {
+      if (generation === this.generation) this.retry()
+    })
+    // 구독하는 자리에서 곧바로 불려 이미 다시 붙기 시작했다 — 이 구독은 남길 까닭이 없다
+    if (generation !== this.generation) {
+      this.offBluetooth?.()
+      this.offBluetooth = undefined
+    }
   }
 
   private armSilence(): void {
@@ -197,6 +248,8 @@ export class Connection {
     this.closeStream = undefined
     clearTimeout(this.retryTimer)
     clearTimeout(this.silenceTimer)
+    this.offBluetooth?.()
+    this.offBluetooth = undefined
   }
 
   /** 리듀서가 "다시 받아라" 고 적어 둔 것을 받는다. 실패하면 그대로 두고, 다음 이벤트·다시 붙을 때 또 한다 */

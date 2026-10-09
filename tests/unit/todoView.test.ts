@@ -1,9 +1,10 @@
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { HistoryMessage, TodoItem, TurnItem } from '../../shared/contract.ts'
 import { AssistantTurn } from '../../renderer/ChatTurn.tsx'
-import { TodoDock } from '../../renderer/Todo.tsx'
+import { TodoDock, TodoList, TodoRow } from '../../renderer/Todo.tsx'
 import { currentTodos, latestTodos, todoCounts, todoDock } from '../../renderer/todoView.ts'
 import { translate } from '../../shared/i18n/index.ts'
 
@@ -119,5 +120,54 @@ describe('화면', () => {
   it('입력 카드 위: 목록이 없거나 다 끝났으면 아무것도 그리지 않는다', () => {
     expect(renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: undefined, running: false }))).toBe('')
     expect(renderToStaticMarkup(createElement(TodoDock, { messages: [user, answer(write('a', [todo('x', 'done')]))], progress: undefined, running: false }))).toBe('')
+  })
+})
+
+// 살아 있는 표시 (이슈 #252) — 진행 중 항목은 도는 동그라미, 판 머리 "지금: …" 앞엔 맥박 점. 도는 턴이 없으면(running=false) 둘 다 없다:
+// 그때 active 는 이미 "멈춤"(stalled) 으로 그려지므로 도는 표시가 붙을 자리가 없다
+describe('살아 있는 표시 (#252)', () => {
+  const list = [todo('읽기', 'done'), todo('고치기', 'active'), todo('검사', 'pending')]
+  const spins = (html: string) => html.match(/todo-mark--spin/g)?.length ?? 0
+  const row = (html: string, status: string) => html.match(new RegExp(`<li[^>]*data-status="${status}"[\\s\\S]*?</li>`))![0]
+
+  it('진행 중 항목에만 도는 표시 — 대기·완료 항목엔 없다', () => {
+    const html = renderToStaticMarkup(createElement(TodoList, { rows: todoDock(list, true)!.rows, live: true }))
+    expect(spins(html)).toBe(1)
+    expect(row(html, 'active')).toContain('todo-mark--spin')
+    expect(row(html, 'done')).not.toContain('todo-mark--spin')
+    expect(row(html, 'pending')).not.toContain('todo-mark--spin')
+  })
+
+  it('도는 턴이 없으면 멈춘다 — 남은 active 는 멈춤 표시, 도는 표시 없음', () => {
+    const html = renderToStaticMarkup(createElement(TodoList, { rows: todoDock(list, false)!.rows, live: true }))
+    expect(spins(html)).toBe(0)
+    expect(html).toContain('data-status="stalled"')
+  })
+
+  it('대화 안의 할 일 줄(그 시점의 기록)은 돌지 않는다', () => {
+    expect(spins(renderToStaticMarkup(createElement(TodoList, { rows: list.map((item) => ({ text: item.text, mark: item.status })) })))).toBe(0)
+    expect(spins(renderToStaticMarkup(createElement(TodoRow, { todos: list })))).toBe(0)
+  })
+
+  it('판 머리: 진행 항목이 있고 턴이 돌 때만 "지금" 앞 맥박 점', () => {
+    const live = renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: [write('m:p1', list)], running: true }))
+    expect(live).toMatch(/class="todo-dock__pulse"[^>]*aria-hidden="true"/)
+    expect(live.indexOf('todo-dock__pulse')).toBeLessThan(live.indexOf('todo-dock__current'))
+    const stalled = renderToStaticMarkup(createElement(TodoDock, { messages: [user, answer(write('m:p1', list))], progress: undefined, running: false }))
+    expect(stalled).toContain('todo-dock__current')
+    expect(stalled).not.toContain('todo-dock__pulse')
+    const waiting = renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: [write('m:p1', [todo('a', 'done'), todo('b')])], running: true }))
+    expect(waiting).not.toContain('todo-dock__pulse')
+  })
+
+  it('CSS: 회전·맥박 애니메이션이 있고 reduced-motion 이면 끈다', () => {
+    const css = readFileSync(new URL('../../renderer/todo.css', import.meta.url), 'utf8')
+    expect(css).toMatch(/\.todo-mark--spin\s*\{[^}]*animation:/)
+    expect(css).toMatch(/\.todo-dock__pulse\s*\{[^}]*animation:/)
+    const at = css.indexOf('@media (prefers-reduced-motion: reduce)')
+    expect(at).toBeGreaterThan(-1)
+    const reduced = css.slice(at)
+    expect(reduced).toMatch(/\.todo-mark--spin[\s\S]*animation: none/)
+    expect(reduced).toMatch(/\.todo-dock__pulse[\s\S]*animation: none/)
   })
 })

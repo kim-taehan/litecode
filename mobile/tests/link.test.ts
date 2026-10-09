@@ -122,6 +122,23 @@ describe('짝짓기', () => {
     expect(store.value).toBeUndefined()
   })
 
+  it('2자리 코드로 짝지으면 짝짓기 응답의 bluetoothKey 와 hello 의 desktopId 를 저장한다 (이슈 #211 — 블루투스 키는 TLS 안에서 받는다)', async () => {
+    const bk = 'C'.repeat(42) + 'A'
+    const inner = createFetchTransport()
+    // 가짜 데스크탑은 블루투스 키를 안 준다 — 짝짓기 응답에 얹는다
+    const withKey: Transport = {
+      stream: (request, handlers) => inner.stream(request, handlers),
+      async request(request) {
+        const response = await inner.request(request)
+        if (!request.url.endsWith('/v1/pair') || response.status !== 200) return response
+        return { ...response, body: JSON.stringify({ ...JSON.parse(response.body), bluetoothKey: bk }) }
+      },
+    }
+    const store = memoryStore()
+    await linked(store, withKey)
+    expect(store.value).toMatchObject({ bluetoothKey: bk, desktopId: 'fake-desktop' })
+  })
+
   it('틀린 코드는 wrong-code — 허용 대기까지 가지 않는다', async () => {
     const link = newLink()
     await link.restore()
@@ -286,6 +303,45 @@ describe('진짜 세션 (remoteSession) — 화면이 보는 것이 전부 데�
     session.stop('c_tests')
     await until(() => !view().running, '턴 끝')
     expect(view().messages.at(-1)).toMatchObject({ role: 'assistant' })
+  })
+
+  it('모델 고르기 (#269) — 고르면 바로 그 모델이 보이고, 다음 보내기에 실린다. 턴이 도는 중에는 고를 수 없다', async () => {
+    const bodies: string[] = []
+    const inner = createFetchTransport()
+    const recording: Transport = {
+      stream: (request, handlers) => inner.stream(request, handlers),
+      request: (request) => (request.url.endsWith('/messages') && bodies.push(request.body ?? ''), inner.request(request)),
+    }
+    const { session } = await linked(memoryStore(), recording)
+    session.openConversation('c_tests')
+    await until(() => session.getState().views['c_tests'] !== undefined && session.models.length === 2, '스냅샷·모델')
+    const [first, second] = session.models
+    expect(session.modelOf('c_tests')).toMatchObject({ modelId: first!.modelId })
+
+    let notified = 0
+    const off = session.subscribe(() => notified++)
+    expect(session.chooseModel('c_tests', second!)).toBe(true)
+    off()
+    expect(notified).toBeGreaterThan(0)
+    expect(session.modelOf('c_tests')).toEqual({ providerId: second!.providerId, modelId: second!.modelId }) // 보내기 전에 머리 이름이 바뀐다
+
+    expect(await session.send('c_tests', '[ask] 실행')).toBe(true)
+    expect(JSON.parse(bodies[0]!)).toMatchObject({ text: '[ask] 실행', model: { providerId: second!.providerId, modelId: second!.modelId } })
+    // 데스크탑 목록이 고른 모델을 실은 뒤에도 그대로
+    await until(() => session.getState().conversations[session.getState().projects[0]!.path]!.find((entry) => entry.id === 'c_tests')?.model?.modelId === second!.modelId, '목록의 모델')
+    expect(session.modelOf('c_tests')).toMatchObject({ modelId: second!.modelId })
+
+    // 도는 중(승인 대기) — 고를 수 없고 모델은 그대로
+    await until(() => session.getState().views['c_tests']!.running, '턴')
+    expect(session.chooseModel('c_tests', first!)).toBe(false)
+    expect(session.modelOf('c_tests')).toMatchObject({ modelId: second!.modelId })
+
+    // 데스크탑 목록과 같은 모델이면 따로 싣지 않는다
+    session.stop('c_tests')
+    await until(() => !session.getState().views['c_tests']!.running, '턴 끝')
+    expect(session.chooseModel('c_tests', second!)).toBe(true)
+    expect(await session.send('c_tests', '다음')).toBe(true)
+    expect(JSON.parse(bodies[1]!).model).toBeUndefined()
   })
 
   it('새 대화를 만들면 열린 채로 id 가 온다', async () => {

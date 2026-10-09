@@ -7,6 +7,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ProviderRegistry, type KeyCipher, type ProviderRegistryOptions } from '../../src/services/providers.ts'
 import { canSealKeys } from '../../electron/keyStorage.ts'
+import { tr } from '../../src/i18n.ts'
 
 const config = {
   id: 'gw',
@@ -83,6 +84,65 @@ describe('ProviderRegistry', () => {
 
     expect(() => providers.save({ ...config, displayName: 'X', apiKey: 'sk-1' })).toThrow('안전하게 저장할 수 없')
     expect(providers.list()[0]!.displayName).toBe('Gateway')
+  })
+
+  // 이슈 #231: 다시 빌드한 앱을 열면 macOS 가 키체인 접근을 다시 묻고, 거부하면 그 실행 동안 safeStorage 가 던지거나 사용 불가다
+  it('봉한 키를 못 풀면(복호화가 던짐) apiKey 가 EKEYSTORE 코드의 안내 오류를 던지고, 목록에 keyLocked 가 보인다 — 다시 풀리면 지워진다', async () => {
+    const first = await registry(files)
+    first.save({ ...config, apiKey: 'sk-secret-123' })
+    let deny = true
+    const providers = await registry({
+      ...files,
+      cipher: { ...reversing, decrypt: (sealed) => (deny ? (() => { throw new Error('Error while decrypting the ciphertext') })() : reversing.decrypt(sealed)) },
+    })
+    expect(providers.list()[0]!.keyLocked).toBeUndefined() // 아직 풀어 보지 않았다 — 추측하지 않는다
+    let thrown: (Error & { code?: string }) | undefined
+    try {
+      providers.apiKey('gw')
+    } catch (error) {
+      thrown = error as Error & { code?: string }
+    }
+    expect(thrown).toMatchObject({ code: 'EKEYSTORE', message: tr('error.modelKeyStore') })
+    expect(thrown!.message).not.toContain('sk-secret')
+    expect(providers.list()[0]).toMatchObject({ hasKey: true, keyLocked: true })
+    deny = false
+    expect(providers.apiKey('gw')).toBe('sk-secret-123')
+    expect(providers.list()[0]!.keyLocked).toBeUndefined()
+  })
+
+  it('키 저장소를 못 쓰면(available false) 봉한 키가 있는 provider 는 apiKey 가 EKEYSTORE, 목록에 keyLocked — 키 없는 provider 는 그대로', async () => {
+    const first = await registry(files)
+    first.save({ ...config, apiKey: 'sk-secret-123' })
+    first.save({ displayName: 'NoKey', baseURL: 'http://nokey/v1', protocol: 'openai-chat-completions', models: [{ id: 'a', displayName: 'A' }] })
+    const providers = await registry({ ...files, cipher: { ...reversing, available: () => false } })
+    expect(() => providers.apiKey('gw')).toThrow(expect.objectContaining({ code: 'EKEYSTORE' }))
+    expect(providers.apiKey('nokey')).toBeUndefined()
+    expect(providers.list().map((provider) => provider.keyLocked)).toEqual([true, undefined])
+  })
+
+  // 이슈 #268: 키 저장소(macOS 키체인)는 앱을 켤 때·목록을 볼 때 부르지 않는다 — 키를 저장하거나 풀어야 하는 순간에만
+  it('생성·목록 조회는 cipher 를 부르지 않는다(봉한 키가 있어도 hasKey 는 파일로만) — 키 저장·키 풀기 때만 부른다', async () => {
+    const first = await registry(files)
+    first.save({ ...config, apiKey: 'sk-secret-123' })
+    const calls: string[] = []
+    const counting: KeyCipher = {
+      available: () => (calls.push('available'), true),
+      encrypt: (plain) => (calls.push('encrypt'), reversing.encrypt(plain)),
+      decrypt: (sealed) => (calls.push('decrypt'), reversing.decrypt(sealed)),
+    }
+    const providers = await registry({ ...files, cipher: counting })
+    expect(providers.list()[0]).toMatchObject({ id: 'gw', hasKey: true })
+    expect(providers.list()[0]!.keyLocked).toBeUndefined()
+    providers.all()
+    providers.get('gw')
+    providers.save({ ...config, displayName: 'Renamed' }) // 키 없이 저장 — 키 저장소가 필요 없다
+    expect(calls).toEqual([])
+
+    expect(providers.apiKey('gw')).toBe('sk-secret-123') // 키 프록시가 요청에 키를 붙일 때
+    expect(calls).toEqual(['available', 'decrypt'])
+    calls.length = 0
+    providers.save({ ...config, apiKey: 'sk-new-456' })
+    expect(calls).toEqual(['available', 'encrypt'])
   })
 
   // 03_qa 2차: 헤더에 못 쓰는 문자가 든 키는 키 프록시의 http.request 가 동기로 던져 메인 프로세스를 흔든다 — 저장부터 막는다

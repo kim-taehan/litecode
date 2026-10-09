@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 음성 입력 (#271) — 폰 자체 음성 인식(Android SpeechRecognizer, 보통 구글 음성 서비스). 런타임 허용은 처음 마이크를 누를 때 묻는다 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Android 11+ 패키지 가시성: 이것이 없으면 인식 서비스가 깔려 있어도 isRecognitionAvailable 이 false 다 -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+</manifest>

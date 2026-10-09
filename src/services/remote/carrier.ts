@@ -15,6 +15,9 @@ export interface RemoteRequest {
   body?: string
 }
 
+/** 블루투스 운반의 id — ctx.remote 가 이 운반이 올라와 있으면 짝짓기 응답·QR 에 블루투스 키(bk)를 싣는다 */
+export const BLUETOOTH_CARRIER = 'bluetooth'
+
 /** 누가 보냈나 — 인증 실패 제한의 열쇠다 (HTTP 는 IP, 블루투스는 연결 id) */
 export interface RemotePeer {
   /** 운반의 id ('http' · 'bluetooth' …) */
@@ -63,12 +66,27 @@ export interface RemoteCarrierStatus {
   addresses: string[]
   /** 듣는(또는 들을) 포트 — 포트가 없는 운반은 없다 */
   port?: number
-  /** 켰는데 못 뜬 사유 */
-  error?: { code?: string; message: string }
+  /** 켰는데 못 뜬 사유 — keyStore: 키 저장소(키체인)가 봉한 키를 안 풀어 줬다 (화면은 원문 대신 키체인 안내, 이슈 #231) */
+  error?: { code?: string; message: string; keyStore?: true }
   /** 폰이 공개키 지문으로 고정하는 운반(TLS)의 지문 — SPKI SHA-256 base64url */
   fingerprint?: string
   /** 마지막으로 접속이 들어온 시각 (막은 것도) — 진단용. 세지 않는 운반은 없다 */
   lastAttemptAt?: number
+  /** 라디오 운반(블루투스)의 상태 — 설정 > 모바일의 상태 한 줄. 라디오가 꺼져 있거나 권한이 없는 것은 "못 뜬 사유"(error)가 아니라 여기에 둔다 */
+  radio?: RemoteRadioStatus
+}
+
+/** starting: 모듈·라디오를 기다린다 · advertising: 광고 중(폰이 붙을 수 있다) · poweredOff: 블루투스가 꺼져 있다 · unauthorized: 권한 없음 ·
+ *  unsupported: 이 PC 에서 못 쓴다(모듈 로드 실패·어댑터가 주변기기 역할을 못 한다 — reason) · failed: 그 밖의 이유로 못 켰다(키를 못 열었다 — reason) */
+export type RemoteRadioState = 'starting' | 'advertising' | 'poweredOff' | 'unauthorized' | 'unsupported' | 'failed'
+
+export interface RemoteRadioStatus {
+  state: RemoteRadioState
+  reason?: string
+  /** failed 의 원인이 키 저장소(키체인)다 — 화면은 reason(영어 원문) 대신 키체인 안내를 보인다 (이슈 #231) */
+  keyStore?: true
+  /** 핸드셰이크를 마친 연결 수 */
+  links: number
 }
 
 /** 운반 하나 — `ctx.remote.carrier(carrier)` 로 올린다. 모바일 연결이 켜져 있는 동안만 ctx.remote 가 start 한다 */

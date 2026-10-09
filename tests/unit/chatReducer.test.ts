@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { emptyChatView, reduceChat, withHistory, withLive, type ChatView } from '../../shared/chatReducer.ts'
 import { queueLabel, titleFrom, TITLE_MAX, type ChatEvent } from '../../shared/chat.ts'
-import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from '../../renderer/chatState.ts'
+import { applyChat, applyHistory, applyLive, planEnded, switchedMode, withStoredTitles, type ChatFields } from '../../renderer/chatState.ts'
 import type { Attention, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
 // 화면 상태 리듀서 (이슈 #52) — 화면은 ctx.chat 의 이벤트·스냅샷·불러온 기록만으로 말풍선·진행 줄·대기열을 그린다.
@@ -73,6 +73,58 @@ describe('reduceChat', () => {
   it('같은 id 의 내 말이 이미 있으면(스냅샷으로 먼저 받음) 그 자리를 바꾼다 — 두 번 붙이지 않는다', () => {
     const view = run({ ...emptyChatView, messages: [asked('m1', 'hi')] }, started(asked('m1', 'hi')))
     expect(view.messages).toHaveLength(1)
+  })
+})
+
+describe('reduceChat — 도는 턴에 끼워 넣은 말 (이슈 #250)', () => {
+  const said = (id: string, text: string, patch: Partial<HistoryMessage> = {}) => asked(id, text, { interjected: true, ...patch })
+  const interjected = (message: HistoryMessage): ChatEvent => ({ event: 'turn.interjected', data: { cid: 'c1', message } })
+  const text = (id: string, body: string): TurnItem => ({ kind: 'text', id, text: body, done: true })
+
+  it('말풍선을 도는 턴 사이에 끼운다 — 그때까지의 진행 줄은 그 앞의 답으로 얼리고, 뒤 진행 줄은 그 아래로', () => {
+    const view = run(emptyChatView, started(asked('m1', 'A')), progress(tool), progress(text('a', 'A 중간 글')), interjected(said('m2', 'B')), progress(think))
+    expect(view.messages).toEqual([asked('m1', 'A'), { role: 'assistant', text: 'A 중간 글', items: [tool, text('a', 'A 중간 글')] }, said('m2', 'B')])
+    expect(view).toMatchObject({ running: true, startedAt: 1_000, progress: [think] })
+  })
+
+  it('끼우기 전에 생긴 줄이 늦게 바뀌면(도는 도구가 끝남) 얼린 답 안의 그 자리를 바꾼다 — 아래에 또 생기지 않는다', () => {
+    const finished: TurnItem = { ...tool, status: 'done' } as TurnItem
+    const view = run(emptyChatView, started(asked('m1', 'A')), progress(tool), interjected(said('m2', 'B')), progress(think), progress(finished))
+    expect(view.messages[1]).toMatchObject({ role: 'assistant', items: [finished] })
+    expect(view.progress).toEqual([think])
+  })
+
+  it('진행 줄이 없을 때 끼우면 빈 답을 만들지 않는다. 연달아 끼워도 순서대로', () => {
+    const view = run(emptyChatView, started(asked('m1', 'A')), interjected(said('m2', 'B')), progress(think), interjected(said('m3', 'C')))
+    expect(view.messages.map((message) => message.role === 'user' ? message.text : `[${message.items?.map((item) => item.id).join(',')}]`)).toEqual(['A', 'B', '[t1]', 'C'])
+  })
+
+  it('턴 끝: 마지막 답을 붙이고, 답을 못 받은 끼워 넣은 말(unanswered)에 표시', () => {
+    const view = run(
+      emptyChatView,
+      started(asked('m1', 'A')),
+      progress(tool),
+      interjected(said('m2', 'B')),
+      { event: 'turn.ended', data: { cid: 'c1', message: answered('', { declined: true }), outcome: 'done', unanswered: ['m2'] } },
+    )
+    expect(view.messages.at(-2)).toEqual(said('m2', 'B', { unanswered: true }))
+    expect(view.messages.at(-1)).toMatchObject({ role: 'assistant', declined: true })
+    expect(view.running).toBe(false)
+  })
+
+  it('턴이 안 도는 대화에 늦게 온 끼워 넣기는 버린다', () => {
+    expect(run(emptyChatView, interjected(said('m2', 'B')))).toEqual(emptyChatView)
+  })
+
+  it('스냅샷(withLive): 얼린 답·끼워 넣은 말을 그 턴의 내 말 뒤에 — 다시 불러와도 두 번 붙지 않는다', () => {
+    const frozen: HistoryMessage = { role: 'assistant', text: '', items: [tool] }
+    const live = { turn: { message: asked('m1', 'A'), startedAt: 5_000, progress: [think], attention: [], interjections: [frozen, said('m2', 'B')] }, queue: { cid: 'c1', items: [], held: false, attachments: [] } }
+    const once = withLive(emptyChatView, live)
+    expect(once.messages).toEqual([asked('m1', 'A'), frozen, said('m2', 'B')])
+    expect(withLive(once, live).messages).toEqual(once.messages)
+    // 기록을 다시 읽으면(withHistory) 끼워 넣은 말까지 기록의 것, 그 말풍선은 화면 것 그대로
+    const loaded = [asked('m1', 'A'), answered('A 쓰다 만'), asked('m2', 'B'), answered('B 쓰다 만')]
+    expect(withHistory(once, loaded).messages).toEqual([asked('m1', 'A'), answered('A 쓰다 만'), said('m2', 'B')])
   })
 })
 
@@ -160,10 +212,13 @@ describe('대화 화면의 판정 (App.tsx 에서 옮김)', () => {
     expect(titleFrom('')).toBe('')
   })
 
-  it('queueLabel: 보일 글 > 본문 > (글 없이 첨부만) 파일 이름들', () => {
+  it('queueLabel: 보일 글 > 본문, 첨부가 있으면 뒤에 파일 이름들 (글 없이 첨부만이면 이름만 — 이슈 #246)', () => {
+    const files = [{ kind: 'file' as const, path: '/w/a.md', name: 'a.md', size: 1 }, { kind: 'image' as const, path: '/w/b.png', name: 'b.png', size: 2 }]
     expect(queueLabel({ text: 'expanded', display: '/hi' })).toBe('/hi')
     expect(queueLabel({ text: 'plain' })).toBe('plain')
-    expect(queueLabel({ text: '', attachments: [{ kind: 'file', path: '/w/a.md', name: 'a.md', size: 1 }, { kind: 'image', path: '/w/b.png', name: 'b.png', size: 2 }] })).toBe('a.md, b.png')
+    expect(queueLabel({ text: '', attachments: files })).toBe('a.md, b.png')
+    expect(queueLabel({ text: '봐 줘', attachments: files })).toBe('봐 줘 · a.md, b.png')
+    expect(queueLabel({ text: 'expanded', display: '/hi', attachments: [files[1]!] })).toBe('/hi · b.png')
   })
 
   it('switchedMode: 앞 내 말과 모드가 다른 내 말 자리에 구분선 — 첫 내 말·모드 없는 말은 아니다', () => {
@@ -179,5 +234,18 @@ describe('대화 화면의 판정 (App.tsx 에서 옮김)', () => {
     expect(planEnded([plan, answered('', { declined: true })])).toBe(false)
     expect(planEnded([asked('m1', 'x', { mode: 'build' }), answered('답')])).toBe(false)
     expect(planEnded([plan])).toBe(false)
+  })
+})
+
+describe('withStoredTitles — 메인이 바꾼 제목 (자동 대화 제목 #215·다른 손님의 이름 바꾸기)', () => {
+  const session = (id: string, title: string, renamed?: true) => ({ id, title, ...(renamed && { renamed }) })
+  it('메인 목록의 제목·이름 바꿈 표시를 그 대화에 입힌다 — 목록에 없는 대화(빈 새 대화)·같은 제목은 그대로(같은 객체)', () => {
+    const blank = session('new', '')
+    const same = session('b', 'B')
+    const next = withStoredTitles([session('a', 'old'), blank, same], [{ id: 'a', title: 'Fix login bug' }, { id: 'b', title: 'B' }])
+    expect(next[0]).toEqual({ id: 'a', title: 'Fix login bug' })
+    expect(next[1]).toBe(blank)
+    expect(next[2]).toBe(same)
+    expect(withStoredTitles([session('a', 'old')], [{ id: 'a', title: 'Mine', renamed: true }])[0]).toEqual({ id: 'a', title: 'Mine', renamed: true })
   })
 })

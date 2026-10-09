@@ -8,7 +8,7 @@ import { hashToken } from '../../src/services/remote/devices.ts'
 import { EventLog } from '../../src/services/remote/eventLog.ts'
 import { confirmCode, newPairCode, newShortPairCode, normalizePairCode } from '../../src/services/remote/pairing.ts'
 import { tr } from '../../src/i18n.ts'
-import type { Attention, AttentionAnswer, TurnItem } from '../../shared/contract.ts'
+import type { Attention, AttentionAnswer, ShellCard, TurnItem } from '../../shared/contract.ts'
 import type { ConversationSnapshot, Hello, PairRejected, RemoteConversation, RemoteModel } from '../../shared/remote.ts'
 import { MODEL, box, parseFrames, setUp, start, tearDown, until } from './support/remoteHarness.ts'
 
@@ -562,6 +562,49 @@ describe('REST', () => {
     expect(live.seq).toBe((await api<Hello>('GET', '/v1/hello', { token })).body.seq)
     expect((await api('GET', '/v1/conversations/nope', { token })).status).toBe(404)
     llm.calls[1]!.finish()
+  })
+
+  it('스냅샷에 그 대화의 `!` 카드(shells)가 실린다 — 카드가 없는 대화·새 대화는 필드가 없다. 목록에는 싣지 않는다 (#265)', async () => {
+    const { ctx, api, pair, save } = await start()
+    const { token } = await pair()
+    await save('c1')
+    await save('c2')
+    const card: ShellCard = { id: 's1', at: 1, position: 0, command: 'ls', output: 'a.txt\n', exitCode: 0, status: 'done', truncated: false }
+    const shared: ShellCard = { ...card, id: 's2', at: 2, command: 'git status', sharedMessageId: 'msg_9' }
+    await ctx.sessions.addShell('c1', card)
+    await ctx.sessions.addShell('c1', shared)
+
+    expect((await api<ConversationSnapshot>('GET', '/v1/conversations/c1', { token })).body).toEqual({ history: { messages: [] }, shells: [card, shared], seq: 0 })
+    expect((await api<ConversationSnapshot>('GET', '/v1/conversations/c2', { token })).body).toEqual({ history: { messages: [] }, seq: 0 })
+    const draft = (await api<RemoteConversation>('POST', '/v1/conversations', { token, body: { project } })).body
+    expect((await api<ConversationSnapshot>('GET', `/v1/conversations/${draft.id}`, { token })).body).not.toHaveProperty('shells')
+    const list = (await api<RemoteConversation[]>('GET', `/v1/conversations?project=${encodeURIComponent(project)}`, { token })).body
+    expect(list.every((entry) => !('shells' in entry))).toBe(true)
+  })
+
+  it('끼워 넣기 (이슈 #250) — 폰 글은 202 interjected, turn.interjected 가 스트림에 가고, 스냅샷 기록에 얼린 답·끼워 넣은 말이 실린다. 턴 끝에 unanswered', async () => {
+    const { api, pair, save, turn, llm, events } = await start()
+    const { token } = await pair()
+    await save('c1')
+    llm.steerable = true
+    const stream = await events(token)
+    await api('POST', '/v1/conversations/c1/messages', { token, body: { text: '하나', clientMessageId: 'a' } })
+    const running = await turn(1)
+    const tool: TurnItem = { kind: 'tool', id: 't1', name: 'bash', status: 'running' }
+    running.progress(tool)
+    expect(await api('POST', '/v1/conversations/c1/messages', { token, body: { text: '둘', clientMessageId: 'b' } })).toMatchObject({ status: 202, body: { state: 'interjected' } })
+    await until(() => llm.interjected.length === 1, '끼워 넣은 말이 엔진에')
+    expect(llm.interjected).toEqual(['둘'])
+    await until(() => parseFrames(stream.raw()).some((frame) => frame.event === 'turn.interjected'), 'turn.interjected')
+    const said = parseFrames(stream.raw()).find((frame) => frame.event === 'turn.interjected')!
+    expect(said.data).toMatchObject({ cid: 'c1', message: { role: 'user', text: '둘', interjected: true } })
+    const snapshot = (await api<ConversationSnapshot>('GET', '/v1/conversations/c1', { token })).body
+    expect(snapshot.history.messages).toMatchObject([{ role: 'user', text: '하나' }, { role: 'assistant', items: [tool] }, { role: 'user', text: '둘', interjected: true }])
+    expect(snapshot.live).toMatchObject({ progress: [], queue: [] })
+    const id = (said.data as { message: { id: string } }).message.id
+    running.finish({ declined: true, unanswered: [id] })
+    await until(() => parseFrames(stream.raw()).some((frame) => frame.event === 'turn.ended'), 'turn.ended')
+    expect(parseFrames(stream.raw()).find((frame) => frame.event === 'turn.ended')!.data).toMatchObject({ unanswered: [id] })
   })
 
   it('중지 — 도는 턴을 멈추고(interrupted), 대기열 되돌리기는 이 기기가 쌓은 것을 합쳐 준다', async () => {

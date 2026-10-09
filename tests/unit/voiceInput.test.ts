@@ -10,7 +10,6 @@ import { changeDraft, draftOf, type Drafts } from '../../renderer/drafts.ts'
 import {
   barLevel,
   captureFailure,
-  elapsedLabel,
   insertTranscript,
   notReady,
   pushLevel,
@@ -27,23 +26,24 @@ import {
 } from '../../renderer/voiceView.ts'
 
 // 음성 입력 화면 (이슈 #109 2단계)의 순수 규칙. 마이크·오디오 API(voiceRecorder.ts)와 그림(VoiceInput.tsx)은 단위로 못 잡는다 —
-// 여기서 고정하는 것: 녹음 상태 기계(취소된 녹음의 늦은 사건을 버린다) / 말하는 동안의 글 / PCM 변환과 길이 상한 / 워크렛의 조각 모으기 / 받아쓴 글을 넣는 자리 / 실패 문구 / 경과 초
+// 여기서 고정하는 것: 녹음 상태 기계(취소된 녹음의 늦은 사건을 버린다) / 말하는 동안의 글 / PCM 변환과 길이 상한 / 워크렛의 조각 모으기 / 받아쓴 글을 넣는 자리 / 실패 문구.
+// 받아쓰기 전용(끝내기를 눌러야 입력창에 넣는 녹음·경과 초·정지 버튼)은 #244 에서 없앴다 — 녹음은 늘 음성 대화다 (voiceChat.test.ts)
 
 // 화면 설정 저장소는 메인에서 값을 받아야 해서 여기선 한국어 사전으로 바로 번역한다
 vi.mock('../../renderer/settingsStore.ts', () => ({ useT: () => (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('ko', key, vars) }))
 
 const run = (events: VoiceEvent[], from: VoiceState = VOICE_IDLE): VoiceState => events.reduce(voiceReducer, from)
-const EMPTY: VoiceNotice = { tone: 'info', key: 'voice.empty' }
+const ELSEWHERE: VoiceNotice = { tone: 'info', key: 'voice.elsewhere' }
 const FAILED: VoiceNotice = { tone: 'error', key: 'voice.error.failed' }
 
 describe('녹음 상태 기계', () => {
   it('대기 → 권한 요청 → 녹음 중 → 받아쓰는 중 → 대기', () => {
     let state = voiceReducer(VOICE_IDLE, { type: 'start', run: 1, sessionId: 'a' })
-    expect(state).toEqual({ phase: 'requesting', run: 1, sessionId: 'a' })
+    expect(state).toEqual({ phase: 'requesting', run: 1, sessionId: 'a', chat: true })
     state = voiceReducer(state, { type: 'granted', run: 1 })
     expect(state.phase).toBe('recording')
     state = voiceReducer(state, { type: 'stop', run: 1 })
-    expect(state).toEqual({ phase: 'transcribing', run: 1, sessionId: 'a' })
+    expect(state).toEqual({ phase: 'transcribing', run: 1, sessionId: 'a', chat: true })
     state = voiceReducer(state, { type: 'done', run: 1 })
     expect(state).toEqual({ phase: 'idle', run: 1 })
     expect(voiceBusy(state)).toBe(false)
@@ -71,7 +71,7 @@ describe('녹음 상태 기계', () => {
       const cancelled = run([{ type: 'start', run: 1, sessionId: 'a' }, ...before, { type: 'cancel' }])
       expect(cancelled).toEqual({ phase: 'idle', run: 1 })
       // 권한 창이 뒤늦게 승인됐다 / 인식 결과가 뒤늦게 왔다 / 뒤늦게 실패했다
-      expect(run([{ type: 'granted', run: 1 }, { type: 'stop', run: 1 }, { type: 'done', run: 1, notice: EMPTY }, { type: 'failed', run: 1, notice: FAILED }], cancelled)).toBe(cancelled)
+      expect(run([{ type: 'granted', run: 1 }, { type: 'stop', run: 1 }, { type: 'done', run: 1, notice: ELSEWHERE }, { type: 'failed', run: 1, notice: FAILED }], cancelled)).toBe(cancelled)
     }
   })
 
@@ -95,22 +95,15 @@ describe('녹음 상태 기계', () => {
     }
   })
 
-  it('말이 없었으면 끝나면서 한 줄을 남기고, 닫으면 사라진다', () => {
-    const done = run([{ type: 'start', run: 1, sessionId: 'a' }, { type: 'granted', run: 1 }, { type: 'stop', run: 1 }, { type: 'done', run: 1, notice: EMPTY }])
-    expect(done).toEqual({ phase: 'idle', run: 1, notice: EMPTY })
+  it('끝나면서 한 줄을 남기고, 닫으면 사라진다', () => {
+    const done = run([{ type: 'start', run: 1, sessionId: 'a' }, { type: 'granted', run: 1 }, { type: 'stop', run: 1 }, { type: 'done', run: 1, notice: ELSEWHERE }])
+    expect(done).toEqual({ phase: 'idle', run: 1, notice: ELSEWHERE })
     expect(voiceReducer(done, { type: 'dismiss' })).toEqual({ phase: 'idle', run: 1 })
   })
 
   it('다시 녹음을 시작하면 남아 있던 줄은 지워진다', () => {
     const failed = run([{ type: 'start', run: 1, sessionId: 'a' }, { type: 'failed', run: 1, notice: FAILED }])
-    expect(voiceReducer(failed, { type: 'start', run: 2, sessionId: 'a' })).toEqual({ phase: 'requesting', run: 2, sessionId: 'a' })
-  })
-
-  it('준비 안 됨 알림은 대기일 때만 — 녹음을 시작하지 않는다', () => {
-    const notice: VoiceNotice = { tone: 'error', key: 'voice.error.unavailable' }
-    expect(voiceReducer(VOICE_IDLE, { type: 'notify', notice })).toEqual({ phase: 'idle', run: 0, notice })
-    const recording = run([{ type: 'start', run: 1, sessionId: 'a' }, { type: 'granted', run: 1 }])
-    expect(voiceReducer(recording, { type: 'notify', notice })).toBe(recording)
+    expect(voiceReducer(failed, { type: 'start', run: 2, sessionId: 'a' })).toEqual({ phase: 'requesting', run: 2, sessionId: 'a', chat: true })
   })
 
   it('아무 일도 없는 사건은 같은 상태를 돌려준다 (다시 그리지 않는다)', () => {
@@ -128,7 +121,7 @@ describe('말하는 동안의 글 (실시간 받아쓰기)', () => {
 
   it('녹음 중에 온 확정·임시 글을 쥔다 — 새 글이 앞의 것을 통째로 바꾼다', () => {
     const first = voiceReducer(recording, { type: 'partial', run: 1, live: { final: '', tentative: '로그인 버' } })
-    expect(first).toEqual({ phase: 'recording', run: 1, sessionId: 'a', live: { final: '', tentative: '로그인 버' } })
+    expect(first).toEqual({ phase: 'recording', run: 1, sessionId: 'a', chat: true, live: { final: '', tentative: '로그인 버' } })
     const second = voiceReducer(first, { type: 'partial', run: 1, live: { final: '로그인 버튼을 눌렀을 때.', tentative: '' } })
     expect(second.live).toEqual({ final: '로그인 버튼을 눌렀을 때.', tentative: '' })
   })
@@ -273,21 +266,6 @@ describe('음량 막대', () => {
   })
 })
 
-describe('경과 초', () => {
-  it('분:초', () => {
-    expect(elapsedLabel(0)).toBe('0:00')
-    expect(elapsedLabel(999)).toBe('0:00')
-    expect(elapsedLabel(7_300)).toBe('0:07')
-    expect(elapsedLabel(65_000)).toBe('1:05')
-  })
-
-  it('상한을 넘겨 그리지 않고, 음수도 0 이다', () => {
-    expect(elapsedLabel(120_000)).toBe('2:00')
-    expect(elapsedLabel(125_000)).toBe('2:00')
-    expect(elapsedLabel(-50)).toBe('0:00')
-  })
-})
-
 describe('받아쓴 글을 넣는 자리', () => {
   it('빈 입력창엔 그대로', () => {
     expect(insertTranscript('', '안녕하세요', { text: '', at: 0 })).toEqual({ text: '안녕하세요', cursor: 5 })
@@ -397,57 +375,28 @@ describe('실패 문구', () => {
   })
 })
 
-describe('마이크 버튼·녹음 띠의 그림 (정적 렌더)', () => {
-  const voice = (state: VoiceState, on = true): VoiceInput => ({ on, state, since: undefined, toggle() {}, cancel() {}, dismiss() {}, level: () => 0 })
+describe('띠의 그림 (정적 렌더)', () => {
+  const voice = (state: VoiceState, on = true): VoiceInput => ({ on, state, dismiss() {}, level: () => 0, answering: false, toggleChat() {}, hold() {} })
   const button = (state: VoiceState, on = true) => renderToStaticMarkup(createElement(VoiceButton, { voice: voice(state, on) }))
   const strip = (state: VoiceState, on = true) => renderToStaticMarkup(createElement(VoiceStrip, { voice: voice(state, on) }))
-  const recording: VoiceState = { phase: 'recording', run: 1, sessionId: 'a' }
+  const recording: VoiceState = { phase: 'recording', run: 1, sessionId: 'a', chat: true }
 
   it('기능이 꺼져 있으면 버튼도 띠도 없다', () => {
     expect(button(VOICE_IDLE, false)).toBe('')
     expect(strip(recording, false)).toBe('')
   })
 
-  it('대기 — 버튼은 눌리지 않은 모양이고 띠는 없다', () => {
-    const html = button(VOICE_IDLE)
-    expect(html).toContain('class="composer__voice"')
-    expect(html).toContain('aria-pressed="false"')
-    expect(html).toContain(`aria-label="${ko['voice.start']}"`)
+  it('대기 — 띠는 없다', () => {
     expect(strip(VOICE_IDLE)).toBe('')
   })
 
-  it('녹음 중 — 버튼은 눌린 모양(정지), 띠엔 취소 · 상태 글 · 음량 · 경과 · 정지', () => {
-    const html = button(recording)
-    expect(html).toContain('aria-pressed="true"')
-    expect(html).toContain('data-voice="recording"')
-    expect(html).toContain(`aria-label="${ko['voice.stop']}"`)
-    const band = strip(recording)
-    expect(band).toContain('class="voice-strip" data-voice="recording"')
-    expect(band).toContain('data-voice-action="cancel"')
-    expect(band).toContain('data-voice-action="stop"')
-    expect(band).toContain('role="status"')
-    expect(band).toContain('녹음 중')
-    expect(band).toContain('voice-strip__meter')
-    expect(band).toMatch(/role="timer"[^>]*>0:00 \/ 2:00</)
-    expect(band).not.toContain('data-voice-action="dismiss"')
-  })
-
-  it('받아쓰는 중 — 버튼은 못 누르고, 띠엔 취소와 "받아쓰는 중"', () => {
-    const state: VoiceState = { phase: 'transcribing', run: 1, sessionId: 'a' }
-    expect(button(state)).toContain('disabled=""')
-    const band = strip(state)
-    expect(band).toContain('받아쓰는 중')
-    expect(band).toContain('data-voice-action="cancel"')
-    expect(band).not.toContain('data-voice-action="stop"')
-  })
-
-  it('말하는 동안 받아쓴 글 — 띠 아래에 확정 글과 임시 글(흐리게)을 잇는다. 받아쓰는 중에도 남아 있다', () => {
+  it('말하는 동안 받아쓴 글 — 띠 아래에 확정 글과 임시 글(흐리게)을 잇는다. 보내는 중에도 남아 있다', () => {
     const band = strip({ ...recording, live: { final: '로그인 버튼을 눌렀을 때.', tentative: '서버에서 <오백>' } })
     expect(band).toMatch(/<\/div><div class="voice-live" data-voice-live="true">/) // 띠 다음에
     expect(band).toContain('<span data-voice-final="true">로그인 버튼을 눌렀을 때.</span> <span class="voice-live__tentative" data-voice-tentative="true">서버에서 &lt;오백&gt;</span>')
     const onlyTentative = strip({ ...recording, live: { final: '', tentative: '로그' } })
     expect(onlyTentative).toContain('data-voice-live="true"><span class="voice-live__tentative"')
-    expect(strip({ phase: 'transcribing', run: 1, sessionId: 'a', live: { final: '하나.', tentative: '' } })).toContain('<span data-voice-final="true">하나.</span></div>')
+    expect(strip({ ...recording, phase: 'transcribing', live: { final: '하나.', tentative: '' } })).toContain('<span data-voice-final="true">하나.</span></div>')
   })
 
   it('아직 받아쓴 글이 없으면 그 칸이 없다', () => {
@@ -455,14 +404,14 @@ describe('마이크 버튼·녹음 띠의 그림 (정적 렌더)', () => {
     expect(strip({ ...recording, live: { final: '', tentative: '' } })).not.toContain('voice-live')
   })
 
-  it('끝난 뒤의 한 줄 — 말소리 없음은 안내, 실패는 오류 모양이고 닫기가 있다', () => {
-    const empty = strip({ phase: 'idle', run: 1, notice: EMPTY })
-    expect(empty).toContain('data-tone="info"')
-    expect(empty).toContain('말소리를 찾지 못했습니다')
+  it('끝난 뒤의 한 줄 — 안내와 오류 모양이 다르고 닫기가 있다', () => {
+    const elsewhere = strip({ phase: 'idle', run: 1, notice: ELSEWHERE })
+    expect(elsewhere).toContain('data-tone="info"')
+    expect(elsewhere).toContain(ko['voice.elsewhere'])
     const failed = strip({ phase: 'idle', run: 1, notice: { tone: 'error', key: 'voice.error.permission.mac' } })
     expect(failed).toContain('data-tone="error"')
     expect(failed).toContain('시스템 설정 &gt; 개인정보 보호 및 보안 &gt; 마이크')
     expect(failed).toContain('data-voice-action="dismiss"')
-    expect(failed).not.toContain('data-voice-action="cancel"')
+    expect(failed).not.toContain('data-voice-action="end-chat"')
   })
 })

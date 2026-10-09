@@ -40,6 +40,16 @@
 .todo-list__item[data-status='active'] { color: var(--text); font-weight: 500; }
 .todo-list__item[data-status='active'] .todo-list__mark { color: var(--accent); }
 
+/* 진행 중 표시가 돈다 (이슈 #252) — 입력 카드 위 판에서 턴이 도는 동안만 붙는다. 길이·이징은 작업 버튼 스피너(jobs.css jobs-spin)와 같다 */
+.todo-mark--spin {
+  animation: todo-spin 1s linear infinite;
+}
+.todo-mark__track { opacity: 0.3; }
+
+@keyframes todo-spin {
+  to { transform: rotate(360deg); }
+}
+
 .todo-list__item[data-status='stalled'] { color: var(--text); }
 .todo-list__item[data-status='stalled'] .todo-list__mark { color: var(--warn); }
 
@@ -116,6 +126,29 @@
 
 .todo-dock__current[data-stalled] {
   color: var(--warn);
+}
+
+/* "지금: …" 앞 맥박 점 (이슈 #252) — 진행 항목이 있고 턴이 돌 때만. 숨쉬기는 알림 점(notices.css notice-breathe)과 같은 1.5s ease-in-out */
+.todo-dock__pulse {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: -2px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: todo-breathe 1.5s ease-in-out infinite;
+}
+
+@keyframes todo-breathe {
+  50% { opacity: 0.35; }
+}
+
+/* 움직임을 줄이면 지금처럼 정적으로 — 도는 호를 숨기고 테두리를 되돌린다(원 + 점), 맥박 점은 멈춘 점 */
+@media (prefers-reduced-motion: reduce) {
+  .todo-mark--spin { animation: none; }
+  .todo-mark--spin .todo-mark__arc { display: none; }
+  .todo-mark--spin .todo-mark__track { opacity: 1; }
+  .todo-dock__pulse { animation: none; }
 }
 
 .todo-dock__chevron {

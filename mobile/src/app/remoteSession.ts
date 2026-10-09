@@ -2,9 +2,9 @@
 // transport 를 받아 쓴다. 앱은 expo/fetch 로 만든 것을, 테스트는 Node fetch 로 만든 것을 넘긴다).
 // 상태는 전부 데스크탑에서 온다: 목록·대화·진행 줄·승인·대기열. 여기서 만드는 것은 "보내지 못했다" 같은 안내(notice)뿐이다.
 
-import type { RemoteModel } from '../../../shared/remote.ts'
-import { Connection, newClientMessageId, RemoteError, RoamingClient, type Transport } from '../core/index.ts'
-import type { AppSession, DesktopInfo, SessionNotice } from './session.ts'
+import type { Hello, ModelChoice, RemoteModel } from '../../../shared/remote.ts'
+import { Connection, newClientMessageId, RemoteClient, RemoteError, RoamingClient, type Transport } from '../core/index.ts'
+import type { AppSession, Carrier, DesktopInfo, SessionNotice } from './session.ts'
 
 export interface RemoteSessionOptions {
   /** https 면 지문 고정 운반 (link.ts 가 고른다) */
@@ -17,26 +17,58 @@ export interface RemoteSessionOptions {
   desktop: DesktopInfo
   /** 다른 주소로 옮겼거나 새 주소를 배웠다 */
   onAddresses?(current: string, addresses: string[]): void
+  /** 길 (기본 wifi). bluetooth 면 주소를 옮겨 다니지 않는다 — 운반(BluetoothTransport)이 스캔으로 찾는다 */
+  carrier?: Carrier
+  /** 보통 요청의 기한 — 느린 길(블루투스)은 늘린다 */
+  requestTimeoutMs?: number
+  /** 링크로 받은 바이트 누계 (블루투스 운반) */
+  receivedBytes?(): number
+  /** 세션을 거둘 때 운반도 거둔다 (블루투스 링크를 끊는다) */
+  release?(): void
+  /** 붙을 때마다 받은 hello (이슈 #229 — 짝이 블루투스 키를 배운다) */
+  onHello?(hello: Hello): void
+  /** 블루투스가 켜지면 — bluetooth-off 로 멈춘 연결이 저절로 다시 붙는다 (이슈 #270, Connection 에 그대로 넘긴다) */
+  whenBluetoothOn?(listener: () => void): () => void
 }
 
 export function createRemoteSession(options: RemoteSessionOptions): AppSession {
-  const client = new RoamingClient({
-    transport: options.transport,
-    baseUrl: options.baseUrl,
-    token: options.token,
-    addresses: options.addresses ?? [options.baseUrl.replace(/^https?:\/\//, '')],
-    onAddresses: options.onAddresses,
-  })
-  const connection = new Connection(client)
+  const carrier = options.carrier ?? 'wifi'
+  const roaming =
+    carrier === 'wifi'
+      ? new RoamingClient({
+          transport: options.transport,
+          baseUrl: options.baseUrl,
+          token: options.token,
+          requestTimeoutMs: options.requestTimeoutMs,
+          addresses: options.addresses ?? [options.baseUrl.replace(/^https?:\/\//, '')],
+          onAddresses: options.onAddresses,
+        })
+      : undefined
+  const client = roaming ?? new RemoteClient({ transport: options.transport, baseUrl: options.baseUrl, token: options.token, requestTimeoutMs: options.requestTimeoutMs })
+  const { onHello } = options
+  if (onHello) {
+    // 붙을 때 첫 호출이 hello 다(Connection.connect) — 받은 것을 짝에게도 보인다
+    const hello = client.hello.bind(client)
+    client.hello = () => hello().then((answer) => (onHello(answer), answer))
+  }
+  const connection = new Connection(client, { whenBluetoothOn: options.whenBluetoothOn })
   const listeners = new Set<() => void>()
   let models: RemoteModel[] = []
   let notice: SessionNotice | undefined
+  /** 폰에서 고른 모델 (#269) — 보낼 때마다 싣는다. 데스크탑 목록의 그 대화 모델이 이것이 되면 지운다 (그 전에는 머리 이름이 옛 것으로 돌아가지 않게) */
+  const chosen = new Map<string, ModelChoice>()
+  const conversationOf = (cid: string) =>
+    Object.values(connection.state.conversations)
+      .flat()
+      .find((conversation) => conversation.id === cid)
+  const sameModel = (a: ModelChoice | undefined, b: ModelChoice): boolean => a?.providerId === b.providerId && a.modelId === b.modelId
   /** 목록(프로젝트·대화·모델)을 받았거나 받는 중 */
   let listed = false
   let disposed = false
   /** 화면이 열어 둔 대화 — 받지 못했으면(끊긴 사이에 열었다) 다시 붙을 때 받는다 */
   const wanted = new Set<string>()
   let wasConnected = false
+  let everConnected = false
   const open = (cid: string): void => {
     connection.openConversation(cid).catch(() => undefined) // 못 받았으면 화면은 빈 채다 — 다시 붙을 때 또 받아 본다
   }
@@ -67,10 +99,12 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
   const off = connection.subscribe(() => {
     const connected = connection.status.kind === 'connected'
     if (connected && !disposed) {
+      everConnected = true
       if (!listed) void list()
       if (!wasConnected) for (const cid of wanted) if (!(cid in connection.state.views) && !(cid in connection.state.loading)) open(cid)
     }
     wasConnected = connected
+    for (const [cid, model] of chosen) if (sameModel(conversationOf(cid)?.model, model)) chosen.delete(cid)
     notify()
   })
   // 데스크탑이 듣는 주소가 바뀌었다 — 다음에 끊겼을 때 시도할 후보를 넓힌다. (이벤트 이름·모양은 계약 shared/remote.ts RemoteEventMap['addresses.changed'] —
@@ -78,7 +112,7 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
   const offAddresses = connection.onEvent((event) => {
     if (event.event !== 'addresses.changed') return
     const addresses: unknown = event.data?.addresses
-    if (Array.isArray(addresses)) client.adopt(addresses.filter((address): address is string => typeof address === 'string'))
+    if (Array.isArray(addresses)) roaming?.adopt(addresses.filter((address): address is string => typeof address === 'string'))
   })
   connection.start()
 
@@ -92,11 +126,16 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
       return () => listeners.delete(listener)
     },
     get desktop() {
-      return { ...options.desktop, address: client.address }
+      return { ...options.desktop, address: roaming?.address ?? options.desktop.address }
     },
     get models() {
       return models
     },
+    carrier,
+    hasConnected: () => everConnected,
+    getFailure: () => connection.failure,
+    receivedBytes: () => options.receivedBytes?.() ?? 0,
+    retry: () => connection.retry(),
 
     openConversation(cid) {
       wanted.add(cid)
@@ -110,13 +149,22 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
     async send(cid, text) {
       setNotice(undefined)
       try {
-        await client.send(cid, { text, clientMessageId: newClientMessageId() })
+        const model = chosen.get(cid)
+        await client.send(cid, { text, clientMessageId: newClientMessageId(), ...(model && { model }) })
         return true
       } catch (error) {
         // 403 = 전체 권한 모드 대화 (폰에 열지 않는다 — 데스크탑에서만)
         setNotice(error instanceof RemoteError && error.status === 403 ? 'desktop-only' : 'send-failed')
         return false
       }
+    },
+    modelOf: (cid) => chosen.get(cid) ?? conversationOf(cid)?.model,
+    chooseModel(cid, model) {
+      if (connection.state.views[cid]?.running) return false
+      if (sameModel(conversationOf(cid)?.model, model)) chosen.delete(cid)
+      else chosen.set(cid, { providerId: model.providerId, modelId: model.modelId })
+      notify()
+      return true
     },
     stop(cid) {
       client.stop(cid).catch(failed)
@@ -153,6 +201,7 @@ export function createRemoteSession(options: RemoteSessionOptions): AppSession {
       off()
       offAddresses()
       connection.stop()
+      options.release?.()
       listeners.clear()
     },
   }

@@ -1,9 +1,12 @@
 // 상태 → 화면에 쓸 글·모양 (순수 함수, React 없음 — tests/view.test.ts). 화면 컴포넌트는 이것을 그리기만 한다.
 
-import type { Attention, ConversationStatus, HistoryMessage, QuestionAttention, TurnItem } from '../../../shared/contract.ts'
+import type { Attention, ConversationStatus, HistoryMessage, QuestionAttention, ShellCard, TurnItem } from '../../../shared/contract.ts'
+import { stripAnsi } from '../../../shared/ansi.ts'
 import { stopFeedbackReason } from '../../../shared/hooks.ts'
 import type { RemoteConversation } from '../../../shared/remote.ts'
-import type { ConnectionStatus, ConversationView } from '../core/index.ts'
+import { BluetoothError, diagnosticDetail, type BluetoothFailure, type ConnectionStatus, type ConversationView } from '../core/index.ts'
+import { failureDetail, type PairFailure } from './link.ts'
+import type { Carrier } from './session.ts'
 import { S } from './strings.ts'
 
 const SECOND = 1_000
@@ -55,7 +58,7 @@ export function questionView(request: QuestionAttention): QuestionView {
  * bubble: 첨부 이름(있으면) + 다른 대화가 보낸 지시면 그 대화 제목(origin)과 보낸 프로젝트 이름(originProject — 다른 프로젝트에서 왔다, 이슈 #137.
  * 그 전에 같은 프로젝트의 대화가 보낸 기록에는 없다) + 글. 글이 비면(첨부만 보냄) 말풍선은 그리지 않는다
  */
-export type UserMessageView = { kind: 'hook'; reason: string } | { kind: 'bubble'; text: string; attachments: string[]; origin?: string; originProject?: string }
+export type UserMessageView = { kind: 'hook'; reason: string } | { kind: 'bubble'; text: string; attachments: string[]; origin?: string; originProject?: string; unanswered?: true }
 
 export function userMessageView(message: HistoryMessage): UserMessageView {
   const reason = stopFeedbackReason(message.text)
@@ -66,6 +69,7 @@ export function userMessageView(message: HistoryMessage): UserMessageView {
     attachments: (message.attachments ?? []).map((attachment) => attachment.name),
     ...(message.origin && { origin: message.origin.title || S.untitled }),
     ...(message.origin?.project && { originProject: message.origin.project }),
+    ...(message.unanswered && { unanswered: true as const }), // 끼워 넣었지만 답을 못 받은 말 (이슈 #250)
   }
 }
 
@@ -157,6 +161,50 @@ export function turnStartedAt(view: ConversationView): number | undefined {
   return [...view.messages].reverse().find((message) => message.role === 'user')?.at
 }
 
+/** 끝난 말풍선 줄의 한 칸 — 말풍선, 또는 그 앞에 끼운 데스크탑 `!` 카드 (#265) */
+export type ChatRow = { kind: 'message'; key: string; message: HistoryMessage } | { kind: 'shell'; key: string; card: ShellCard }
+
+/** 말풍선 사이에 `!` 카드를 끼운다 — 카드의 position(앞 말풍선 수) 자리에, 같은 자리는 실행 순서로. 말풍선 수 이상이면 끝에 (데스크탑 App.tsx shellCards 와 같은 자리) */
+export function chatRows(messages: readonly HistoryMessage[], shells: readonly ShellCard[] = []): ChatRow[] {
+  const card = (shell: ShellCard): ChatRow => ({ kind: 'shell', key: `s:${shell.id}`, card: shell })
+  return [
+    ...messages.flatMap((message, index): ChatRow[] => [...shells.filter((shell) => shell.position === index).map(card), { kind: 'message', key: `m:${index}`, message }]),
+    ...shells.filter((shell) => shell.position >= messages.length).map(card),
+  ]
+}
+
+/** 접힌 카드가 보이는 줄 수 — 화면이 numberOfLines 로도 쓴다 */
+export const SHELL_COLLAPSE_LINES = 8
+
+export interface ShellCardView {
+  command: string
+  /** 오른쪽 글 — 종료 코드 또는 끝난 사정 */
+  badge: string
+  /** ok: 종료 코드 0(초록) · failed: 0 아님·실행 못 함(빨강) · muted: 멈춤·기한 초과 */
+  tone: 'ok' | 'failed' | 'muted'
+  /** 색 코드를 뗀 출력 (끝 빈 줄 없이). 비었으면 "(출력 없음)" */
+  output: string
+  /** 접을 만큼 길다 — [전체 보기] 를 단다 */
+  long: boolean
+  /** 데스크탑이 가운데를 생략했다 */
+  truncated: boolean
+  /** "AI 에게 보내기" 로 맥락에 넣었다 */
+  shared: boolean
+}
+
+/** 데스크탑 `!` 카드의 읽기 전용 모양 (데스크탑 renderer/ShellCard.tsx 의 badge·접기와 같은 판정) */
+export function shellCardView(card: ShellCard): ShellCardView {
+  const output = stripAnsi(card.output).replace(/\n+$/, '')
+  const badge =
+    card.status === 'stopped' ? S.shellStopped
+    : card.status === 'timeout' ? S.shellTimeout
+    : card.status === 'error' ? S.shellError(card.error ?? '')
+    : card.exitCode === null ? S.shellStopped
+    : S.shellExit(card.exitCode)
+  const tone = card.status === 'error' ? 'failed' : card.status !== 'done' || card.exitCode === null ? 'muted' : card.exitCode === 0 ? 'ok' : 'failed'
+  return { command: card.command, badge, tone, output: output || S.shellNoOutput, long: output.split('\n').length > SHELL_COLLAPSE_LINES, truncated: card.truncated, shared: !!card.sharedMessageId }
+}
+
 /** 입력 카드 아래 여백(dp) */
 const COMPOSER_GAP = 12
 
@@ -182,7 +230,39 @@ export function statusBanner(status: ConnectionStatus, now: number): string | un
       return S.fingerprintChangedShort
     case 'connecting':
       return S.connecting
+    case 'needs-action':
+      return S.needsAction
     default:
       return undefined
   }
+}
+
+/**
+ * 연결 화면(시안 mock-ble ①·③)에 무엇을 그리나 — 아직 한 번도 못 붙었거나 사람을 기다리며 멈췄을 때 앱이 목록 대신 보인다.
+ * choose: 수단 카드 둘 + [X 로 연결] (connecting 이면 붙는 중) · failed: 사유 + [다시 시도] + [다른 길로 시도] (버튼으로만 권한다)
+ */
+export type GateView = { kind: 'choose'; connecting: boolean } | { kind: 'failed'; title: string; body: string; detail: string }
+
+/** 앱이 목록 대신 연결 화면을 보일 때인가 */
+export function showsGate(status: ConnectionStatus, hasConnected: boolean): boolean {
+  return !hasConnected || status.kind === 'needs-action'
+}
+
+export function gateView(status: ConnectionStatus, failure: unknown, carrier: Carrier, address: string): GateView {
+  const waiting = status.kind === 'reconnecting' || status.kind === 'unresponsive' || status.kind === 'needs-action'
+  if (!waiting || failure === undefined) return { kind: 'choose', connecting: status.kind === 'connecting' || waiting }
+  if (failure instanceof BluetoothError) return { kind: 'failed', title: S.cannotReach.bluetooth, body: S.bluetoothFailure[failure.reason], detail: diagnosticDetail(failure.reason, failure.message) }
+  if (carrier === 'bluetooth') return { kind: 'failed', title: S.cannotReach.bluetooth, body: S.bluetoothLost, detail: failureDetail(failure) }
+  // 블루투스 단독으로 짝지은 데스크탑은 사내망 주소가 없다 (이슈 #229)
+  return { kind: 'failed', title: S.cannotReach.wifi, body: address ? S.wifiFailure(address) : S.wifiNoAddress, detail: failureDetail(failure) }
+}
+
+/** 짝짓기 실패의 글 — 블루투스로 못 붙었으면 연결 화면과 같은 블루투스 사유 문구 (이슈 #229) */
+export function pairFailureText(failure: PairFailure, bluetooth?: BluetoothFailure): string {
+  return failure === 'bluetooth' && bluetooth ? S.bluetoothFailure[bluetooth] : S.pairFailure[failure]
+}
+
+/** 받은 바이트 → "186 KB 받는 중" */
+export function receivingText(bytes: number): string {
+  return S.receivingKb(Math.round(bytes / 1024))
 }

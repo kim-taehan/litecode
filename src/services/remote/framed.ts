@@ -41,7 +41,10 @@ export function serveFramed(link: ByteLink, remote: Handler, peer: RemotePeer, o
   const channel = new FrameChannel(link, {
     codec: options.codec ?? zlibCodec,
     maxMessageBytes: MAX_REQUEST_BYTES,
-    onMessage: (message) => void receive(message),
+    // 다음 마이크로태스크에 다룬다 (순서는 그대로) — 보안 링크(SecureLink)는 핸드셰이크 사이에 먼저 온 요청을 쥐고 있다가 이 채널이 듣는 순간,
+    // 즉 이 생성자 안에서 넘긴다. 그때 곧바로 다루면 스트림을 여는 요청(OPEN)이 아직 만들어지지 않은 channel 을 건드려 죽는다(TDZ)
+    // (이슈 #210 — 블루투스에서 폰은 메시지 2 를 받자마자 보내고, 데스크탑은 메시지 2 를 다 실은 뒤에 이 채널을 붙인다)
+    onMessage: (message) => queueMicrotask(() => void receive(message)),
     onClose: () => {
       for (const entry of [...open.values()]) leave(entry)
       open.clear()
@@ -101,6 +104,7 @@ export function serveFramed(link: ByteLink, remote: Handler, peer: RemotePeer, o
 
   async function receive(message: FrameMessage): Promise<void> {
     const { type, id } = message
+    if (channel.closed) return // 받은 뒤 다루기 전에 링크가 끊겼다 — 떠난 상대의 요청은 다루지 않는다
     if (type === FRAME.CANCEL) {
       const entry = open.get(id)
       if (!entry) return

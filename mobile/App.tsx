@@ -1,33 +1,45 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AppState, BackHandler, Linking, StatusBar, View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { startKeepAlive, stopKeepAlive } from './modules/litecode-keepalive/index.ts'
 import { AlertBanner } from './src/app/AlertBanner.tsx'
 import { AlertCenter } from './src/app/alerts.ts'
-import { useLinkState, usePrefs } from './src/app/hooks.ts'
+import { useConnectionStatus, useHasConnected, useLinkState, usePrefs } from './src/app/hooks.ts'
 import { DesktopLink, lanUnsupported } from './src/app/link.ts'
 import { alertHost, notificationPermission, onNotificationOpen, requestNotificationPermission, setUpNotificationChannels, type NotificationPermission } from './src/app/notifications.ts'
-import { apiLevel, defaultDeviceName, desktopStore, pinnedNet, platform, prefsStore, transport } from './src/app/platform.ts'
+import { apiLevel, bluetooth, defaultDeviceName, desktopStore, pinnedNet, platform, prefsStore, transport } from './src/app/platform.ts'
 import { Preferences } from './src/app/prefs.ts'
+import { CarrierScreen } from './src/app/screens/CarrierScreen.tsx'
 import { ChatScreen } from './src/app/screens/ChatScreen.tsx'
 import { ConnectScreen } from './src/app/screens/ConnectScreen.tsx'
 import { ListScreen } from './src/app/screens/ListScreen.tsx'
 import { SettingsScreen } from './src/app/screens/SettingsScreen.tsx'
+import type { AppSession, Carrier } from './src/app/session.ts'
 import { S } from './src/app/strings.ts'
 import { C } from './src/app/theme.ts'
+import { showsGate } from './src/app/view.ts'
 
 // 앱은 데스크탑 litecode 에 붙은 화면이다 (이슈 #62) — 대화의 정본은 데스크탑에 있고, 짝이 없으면 연결 화면뿐이다.
 // 짝(DesktopLink): 불러오는 중 → 짝 없음(연결 화면) ⇄ 허용 대기 → 붙음(목록·대화·설정). 화면 넷은 상태 하나로 오간다.
+// 붙음이라도 그 세션이 아직 한 번도 못 붙었거나 사람을 기다리면(needs-action) 연결 방법 화면(CarrierScreen — Wi-Fi/블루투스 고르기·안 될 때)이 앞에 선다 (이슈 #211).
 // 알림(이슈 #71): 세션의 이벤트를 AlertCenter 가 받아 앞이면 띠, 뒤면 시스템 로컬 알림으로. 연결 유지를 켜면 포그라운드 서비스가 뒤에서도 연결을 붙든다.
 
 type Route = { name: 'list' } | { name: 'chat'; cid: string } | { name: 'settings' }
 
-/** 앱 하나에 짝 하나 — 저장소는 Keystore, 전송은 지문 고정 모듈(https)·expo/fetch(이 컴퓨터 안 평문) (platform.ts) */
-const link = new DesktopLink({ store: desktopStore, transport, pinned: pinnedNet, platform, apiLevel })
-void link.restore()
-
 const preferences = new Preferences(prefsStore)
-void preferences.restore()
+
+/** 앱 하나에 짝 하나 — 저장소는 Keystore, 전송은 지문 고정 모듈(https)·expo/fetch(이 컴퓨터 안 평문)·블루투스(ble-manager) (platform.ts).
+ *  길(Wi-Fi | 블루투스)은 마지막으로 고른 것 — 설정을 먼저 읽고 붙는다 (이슈 #211) */
+const link = new DesktopLink({
+  store: desktopStore,
+  transport,
+  pinned: pinnedNet,
+  platform,
+  apiLevel,
+  bluetooth,
+  carrier: { get: () => preferences.value.carrier, set: (carrier) => preferences.set({ carrier }) },
+})
+void preferences.restore().then(() => link.restore())
 
 const alerts = new AlertCenter({ host: alertHost, prefs: () => preferences.value, foreground: () => AppState.currentState === 'active' })
 void setUpNotificationChannels().catch(() => undefined)
@@ -43,6 +55,7 @@ export default function App() {
   const session = linked ? state.session : undefined
   const desktopName = linked ? state.desktop.desktopName : undefined
   const toList = (): void => setRoute({ name: 'list' })
+  const chooseCarrier = (carrier: Carrier): void => link.chooseCarrier(carrier)
 
   // 짝이 풀리면(해제·연결 해제) 다음에 붙었을 때 목록부터. 붙었는데 알림으로 열 대화가 있으면 그리로
   useEffect(() => {
@@ -94,18 +107,20 @@ export default function App() {
   useEffect(() => alerts.view(viewing), [viewing])
 
   // 알림 권한(Android 13+)은 처음 필요할 때 묻는다 — 붙어 있고 알림이나 연결 유지가 켜져 있을 때 한 번
-  const wantsPermission = linked && (prefs.notifications || prefs.keepAlive)
+  // 블루투스로 붙어 있으면 연결 유지는 늘 켠다 — 앱이 뒤에 있어도 데스크탑이 가까워지면 저절로 다시 붙는다 (사용자 2026-10-09 "백그라운드 자동 연결")
+  const keepAlive = prefs.keepAlive || (state.phase === 'linked' && state.carrier === 'bluetooth')
+  const wantsPermission = linked && (prefs.notifications || keepAlive)
   useEffect(() => {
     // 물었는데 허용하지 않았으면 이번 실행에서는 다시 묻지 않는다(denied) — 설정 화면이 "권한이 꺼져 있습니다" 와 설정 열기를 보인다
     if (wantsPermission && permission === 'undetermined') void requestNotificationPermission().then((answer) => setPermission(answer === 'granted' ? 'granted' : 'denied'), () => undefined)
   }, [wantsPermission, permission])
 
-  // 연결 유지: 붙어 있고 스위치가 켜져 있는 동안만 서비스가 떠 있다 — 끄거나 연결 해제·기기 해제되면 내려간다
+  // 연결 유지: 짝이 있고 스위치가 켜져 있거나 블루투스로 붙는 동안만 서비스가 떠 있다 — 끄거나 연결 해제·기기 해제되면 내려간다
   useEffect(() => {
-    if (desktopName === undefined || !prefs.keepAlive) return
+    if (desktopName === undefined || !keepAlive) return
     startKeepAlive(S.keepAliveTitle, S.keepAliveText(desktopName), S.channelKeepAlive)
     return () => stopKeepAlive()
-  }, [desktopName, prefs.keepAlive])
+  }, [desktopName, keepAlive])
 
   return (
     <SafeAreaProvider>
@@ -113,23 +128,35 @@ export default function App() {
       {state.phase === 'loading' ? (
         <View style={{ flex: 1, backgroundColor: C.white }} />
       ) : state.phase !== 'linked' ? (
-        <ConnectScreen state={state} defaultDeviceName={defaultDeviceName()} lanBlockedApi={lanUnsupported(platform, apiLevel) ? apiLevel : undefined} onPair={(input) => void link.pair(input)} onPairQr={(text, deviceName) => void link.pairQr(text, deviceName)} />
-      ) : route.name === 'chat' ? (
-        <ChatScreen key={route.cid} session={state.session} cid={route.cid} onBack={toList} />
-      ) : route.name === 'settings' ? (
-        <SettingsScreen
-          session={state.session}
-          prefs={prefs}
-          permission={permission}
-          onPrefs={(change) => preferences.set(change)}
-          onOpenSystemSettings={() => void Linking.openSettings()}
-          onBack={toList}
-          onDisconnect={() => void link.disconnect()}
-        />
+        <ConnectScreen state={state} defaultDeviceName={defaultDeviceName()} lanBlockedApi={lanUnsupported(platform, apiLevel) ? apiLevel : undefined} onCarrier={(carrier) => preferences.set({ carrier })} onPair={(input) => void link.pair(input)} onPairQr={(text, deviceName) => void link.pairQr(text, deviceName)} />
       ) : (
-        <ListScreen session={state.session} onOpen={(cid) => setRoute({ name: 'chat', cid })} onSettings={() => setRoute({ name: 'settings' })} />
+        <Gate session={state.session} desktopName={state.desktop.desktopName} onCarrier={chooseCarrier}>
+          {route.name === 'chat' ? (
+            <ChatScreen key={route.cid} session={state.session} cid={route.cid} onBack={toList} onCarrier={chooseCarrier} />
+          ) : route.name === 'settings' ? (
+            <SettingsScreen
+              session={state.session}
+              prefs={prefs}
+              permission={permission}
+              onPrefs={(change) => preferences.set(change)}
+              onOpenSystemSettings={() => void Linking.openSettings()}
+              onBack={toList}
+              onDisconnect={() => void link.disconnect()}
+              onCarrier={chooseCarrier}
+            />
+          ) : (
+            <ListScreen session={state.session} onOpen={(cid) => setRoute({ name: 'chat', cid })} onSettings={() => setRoute({ name: 'settings' })} />
+          )}
+        </Gate>
       )}
       {linked && <AlertBanner center={alerts} onOpen={(cid) => setRoute({ name: 'chat', cid })} />}
     </SafeAreaProvider>
   )
+}
+
+/** 아직 한 번도 못 붙었거나 사람을 기다리며 멈췄으면(needs-action) 목록 대신 연결 화면(수단 고르기·안 될 때) — 시안 mock-ble ①③ */
+function Gate({ session, desktopName, onCarrier, children }: { session: AppSession; desktopName: string; onCarrier(carrier: Carrier): void; children: ReactNode }) {
+  const status = useConnectionStatus(session)
+  const hasConnected = useHasConnected(session)
+  return showsGate(status, hasConnected) ? <CarrierScreen session={session} desktopName={desktopName} onCarrier={onCarrier} /> : <>{children}</>
 }

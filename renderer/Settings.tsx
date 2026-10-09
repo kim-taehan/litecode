@@ -185,11 +185,15 @@ function OpenFileAction() {
 /** 편집 중인 카드 — provider id, 새로 추가하는 중이면 NEW */
 const NEW = Symbol('new')
 
-function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalProps, 'onClose'>) {
+export function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalProps, 'onClose'>) {
   const t = useT()
   const [editing, setEditing] = useState<string | typeof NEW>()
   const [confirmingDelete, setConfirmingDelete] = useState<string>()
   const [error, setError] = useState<string>()
+  // 키를 못 푼 기록(keyLocked, 이슈 #231)은 대화 도중에 생긴다 — 페이지를 열 때 목록을 다시 읽는다
+  useEffect(() => {
+    void window.litecode.listProviders().then(onProvidersChange, () => {})
+  }, [])
 
   async function remove(id: string): Promise<void> {
     setConfirmingDelete(undefined)
@@ -204,6 +208,11 @@ function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalProps, '
     <div className="models-page">
       <h2 className="models-page__title">{t('models.title')}</h2>
       <p className="models-page__hint">{t('models.hint')}</p>
+      {providers.some((provider) => provider.keyLocked) && (
+        <p className="settings-notice" role="status">
+          {t('models.keyStoreLocked')}
+        </p>
+      )}
       {error && (
         <p className="settings-error" role="alert">
           {error}
@@ -223,20 +232,20 @@ function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalProps, '
             <span className="provider-card__actions">
               {confirmingDelete === provider.id ? (
                 <>
-                  <button type="button" className="settings-button settings-button--danger" onClick={() => void remove(provider.id)}>
+                  <button type="button" className="settings-button settings-button--compact settings-button--danger" onClick={() => void remove(provider.id)}>
                     {t('models.confirmDelete')}
                   </button>
-                  <button type="button" className="settings-button" onClick={() => setConfirmingDelete(undefined)}>
+                  <button type="button" className="settings-button settings-button--compact" onClick={() => setConfirmingDelete(undefined)}>
                     {t('models.cancel')}
                   </button>
                 </>
               ) : (
                 editing !== provider.id && (
                   <>
-                    <button type="button" className="settings-button" onClick={() => setEditing(provider.id)}>
+                    <button type="button" className="settings-button settings-button--compact" onClick={() => setEditing(provider.id)}>
                       {t('models.edit')}
                     </button>
-                    <button type="button" className="settings-button" onClick={() => setConfirmingDelete(provider.id)}>
+                    <button type="button" className="settings-button settings-button--compact settings-button--ghost-danger" onClick={() => setConfirmingDelete(provider.id)}>
                       {t('models.delete')}
                     </button>
                   </>
@@ -286,7 +295,7 @@ interface ProviderEditorProps {
   onDone(saved?: ProviderSummary[]): void
 }
 
-function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
+export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
   const t = useT()
   const [displayName, setDisplayName] = useState(provider?.displayName ?? '')
   const [baseURL, setBaseURL] = useState(provider?.baseURL ?? '')
@@ -435,10 +444,10 @@ function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
       ))}
       <ContextLengthNotes models={models} />
       <div className="provider-editor__model-actions">
-        <button type="button" className="settings-button" disabled={busy} onClick={() => setModels((current) => [...current, { id: '', displayName: '' }])}>
+        <button type="button" className="settings-button settings-button--compact" disabled={busy} onClick={() => setModels((current) => [...current, { id: '', displayName: '' }])}>
           {t('models.addModel')}
         </button>
-        <button type="button" className="settings-button" disabled={busy || !baseURL.trim()} onClick={() => void fetchModels()}>
+        <button type="button" className="settings-button settings-button--compact" disabled={busy || !baseURL.trim()} onClick={() => void fetchModels()}>
           {t('models.fetch')}
         </button>
       </div>

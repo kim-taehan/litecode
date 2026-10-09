@@ -5,7 +5,7 @@ import { useConnectionStatus } from '../hooks.ts'
 import { BackArrow } from '../icons.tsx'
 import type { NotificationPermission } from '../notifications.ts'
 import type { Prefs } from '../prefs.ts'
-import type { AppSession } from '../session.ts'
+import type { AppSession, Carrier } from '../session.ts'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 
@@ -20,6 +20,7 @@ export function SettingsScreen({
   onOpenSystemSettings,
   onBack,
   onDisconnect,
+  onCarrier,
 }: {
   session: AppSession
   prefs: Prefs
@@ -28,6 +29,8 @@ export function SettingsScreen({
   onOpenSystemSettings(): void
   onBack(): void
   onDisconnect(): void
+  /** 연결 방법 바꾸기 — 지금 연결을 끊고 그 길로 새로 붙는다 */
+  onCarrier(carrier: Carrier): void
 }) {
   const insets = useSafeAreaInsets()
   const status = useConnectionStatus(session)
@@ -56,7 +59,13 @@ export function SettingsScreen({
               <Fact label={S.address} value={session.desktop.address} mono />
               <Fact label={S.fingerprint} value={session.desktop.fingerprint ?? S.fingerprintNone} mono={session.desktop.fingerprint !== undefined} />
               <Fact label={S.lastConnected} value={S.justNow} />
+              <Fact label={S.connectMethod} value={S.carrierShort[session.carrier]} />
             </View>
+            {session.carrier === 'wifi' && (
+              <Pressable accessibilityRole="button" style={styles.disconnect} onPress={() => onCarrier('bluetooth')}>
+                <Text style={styles.carrierText}>{S.switchTo.bluetooth}</Text>
+              </Pressable>
+            )}
             <Pressable accessibilityRole="button" style={styles.disconnect} onPress={onDisconnect}>
               <Text style={styles.disconnectText}>{S.disconnect}</Text>
             </Pressable>
@@ -144,6 +153,7 @@ const styles = StyleSheet.create({
   factValue: { flex: 1, fontSize: 13, color: C.text },
   disconnect: { height: 44, borderRadius: 10, borderWidth: 1, borderColor: C.borderStrong, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center' },
   disconnectText: { fontSize: 15, fontWeight: '500', color: C.red },
+  carrierText: { fontSize: 15, fontWeight: '500', color: C.text },
   row: { minHeight: 52, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
   rowBorder: { borderTopWidth: 1, borderTopColor: C.hair },
   rowLabel: { flex: 1, fontSize: 15, color: C.text },

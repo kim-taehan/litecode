@@ -131,6 +131,10 @@ export class TurnScope {
   private started = false
   /** 요약 user 를 받았다 — 다음 user 메시지가 그 이음(Continue·복사본)이다. 요약이 실패하면 이음이 없다 */
   private awaitingContinuation = false
+  /** 도는 턴에 끼워 넣은 user 메시지 (adopt, 이슈 #250) */
+  private readonly adopted = new Set<string>()
+  /** 답 메시지가 달린 user 메시지 (답의 parentID) */
+  private readonly replied = new Set<string>()
 
   constructor(
     readonly sessionId: string,
@@ -158,6 +162,7 @@ export class TurnScope {
       }
       if (info.parentID !== undefined && this.users.has(info.parentID) && !this.summaries.has(info.id) && !this.assistants.has(info.id)) {
         ;(info.summary === true ? this.summaries : this.assistants).add(info.id)
+        this.replied.add(info.parentID)
       }
       if (this.summaries.has(info.id)) {
         if (info.error) this.awaitingContinuation = false // 요약 실패 — 이음 없이 끝난다
@@ -180,6 +185,18 @@ export class TurnScope {
   /** 이 턴의 답 메시지인가 (승인·질문 요청의 tool.messageID 를 가린다) */
   owns(messageId: string | undefined): boolean {
     return messageId !== undefined && this.assistants.has(messageId)
+  }
+
+  /** 도는 턴에 끼워 넣을 user 메시지를 이 턴 것으로 받는다 (이슈 #250) — 그 뒤 답(parentID = 이 id)·승인 요청이 이 턴 것이 된다.
+   *  보내기 **전에** 부른다: 그 user 의 이벤트가 보내기 응답보다 먼저 올 수 있다 */
+  adopt(messageId: string): void {
+    this.adopted.add(messageId)
+    this.users.add(messageId)
+  }
+
+  /** 끼워 넣었지만 답 메시지가 달리지 않은 user 메시지 (승인 거절·중지로 루프가 끝났거나 보내지 못했다 — 실측 01ar F'·G) */
+  unanswered(): string[] {
+    return [...this.adopted].filter((id) => !this.replied.has(id))
   }
 }
 
@@ -312,6 +329,11 @@ export class TurnTracker {
     this.items.set(id, item)
     this.retries++
     return item
+  }
+
+  /** 모델이 이 턴에서 뭔가 내놓았다 — 글·생각·도구 줄이 하나라도 있다 (재시도 줄만 있으면 아니다). 아무것도 없이 끝난 턴은 모델이 닿지 않은 것이다 */
+  hasOutput(): boolean {
+    return [...this.items.values()].some((item) => item.kind !== 'retry')
   }
 
   /** 이 턴 답의 글 — 글 줄을 나타난 순서대로 잇는다 (도구 결과·생각은 빼고) */

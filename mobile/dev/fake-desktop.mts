@@ -67,6 +67,8 @@ export interface FakeDesktopOptions {
   onPairRequest?(request: { deviceName: string; confirm: string }): void
   /** 주면 https 로 연다 (시험용 자체 서명 인증서 — tests/fixtures). 확인 코드는 인증서 지문 앞 8자가 된다 */
   tls?: { key: string; cert: string }
+  /** 주면 hello 에 싣는다 — 블루투스가 켜진 데스크탑처럼 (이슈 #229, 폰이 키를 배운다) */
+  bluetoothKey?: string
 }
 
 export interface FakeDesktop {
@@ -274,7 +276,19 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
   // ── REST ───────────────────────────────────────────────────────────────────────────────────
 
   const routes: Record<string, (ctx: { params: string[]; query: URLSearchParams; body: unknown; deviceId: string }) => [number, unknown]> = {
-    'GET /v1/hello': () => [200, { desktopId: 'fake-desktop', name: '가짜 데스크탑 (개발용)', appVersion: '0.0.0-fake', apiVersion: REMOTE_API_VERSION, runId, seq, addresses: listening } satisfies Hello],
+    'GET /v1/hello': () => [
+      200,
+      {
+        desktopId: 'fake-desktop',
+        name: '가짜 데스크탑 (개발용)',
+        appVersion: '0.0.0-fake',
+        apiVersion: REMOTE_API_VERSION,
+        runId,
+        seq,
+        addresses: listening,
+        ...(options.bluetoothKey !== undefined && { bluetoothKey: options.bluetoothKey }),
+      } satisfies Hello,
+    ],
     'GET /v1/projects': () => [200, PROJECTS],
     'GET /v1/conversations': ({ query }) => {
       const project = query.get('project')

@@ -40,6 +40,8 @@ export interface ProviderConfig {
 export interface ProviderSummary extends ProviderConfig {
   custom: boolean
   hasKey: boolean
+  /** 저장된 키를 지금 읽을 수 없다 (이슈 #231) — 이 실행에서 풀어 보다 실패했다(키 저장소를 못 쓰거나 풀기가 던졌다). 설정 > 모델 위쪽 안내 */
+  keyLocked?: true
 }
 
 /** 설정 화면의 [적용] — id 가 없거나 모르는 id 면 새 provider. apiKey 가 비었으면 저장된 키를 그대로 둔다 */
@@ -53,6 +55,10 @@ export interface ProviderInput {
 }
 
 /** 키 암호화 — 앱에서는 Electron safeStorage. 메인 프로세스 밖(테스트)에서도 서비스를 돌릴 수 있게 주입받는다 */
+/** 봉한 키를 풀 수 없다(키 저장소를 못 쓰거나 복호화가 던졌다)는 오류 코드 (이슈 #231) — macOS 는 다시 빌드한 앱을 열 때 키체인 접근을 다시 묻고,
+ *  거부·닫기면 그 실행 동안 safeStorage 가 던지거나 사용 불가다. 키 프록시가 이 코드를 502 에 싣고, ctx.llm 은 첫 재시도 알림에서 멈춘다 */
+export const KEY_STORE_CODE = 'EKEYSTORE'
+
 export interface KeyCipher {
   available(): boolean
   encrypt(plain: string): Buffer
@@ -85,6 +91,8 @@ export class ProviderRegistry extends Service {
   private keys: Record<string, string> = {}
   /** 두 파일 중 하나를 못 읽었다(권한 등 — 없는 것과 다르다). 기본값으로 뜨되 저장을 거절한다 — 덮으면 등록한 provider·키가 사라진다 (이슈 #195) */
   private unreadable?: Error
+  /** 이 실행에서 봉한 키를 풀지 못한 provider (이슈 #231) — 다시 풀리거나 키를 새로 저장하면 빠진다. 추측하지 않는다: 풀어 본 것만 */
+  private lockedKeys = new Set<string>()
 
   constructor(
     ctx: Context,
@@ -120,8 +128,14 @@ export class ProviderRegistry extends Service {
     return [...this.entries.values()]
   }
 
+  /** 키 저장소(cipher)를 부르지 않는다 (이슈 #268) — 시작·화면 목록 조회에서 macOS 키체인 허용 창이 뜨지 않게. hasKey 는 봉한 키가 파일에 있는지만,
+   *  keyLocked 는 이 실행에서 풀어 보다 실패한 것만 (키 저장소를 못 쓰는 것도 처음 풀어 볼 때 드러난다) */
   list(): ProviderSummary[] {
-    return this.all().map((config) => ({ ...config, custom: config.custom ?? false, hasKey: config.id in this.keys }))
+    return this.all().map((config) => {
+      const hasKey = config.id in this.keys
+      const keyLocked = hasKey && this.lockedKeys.has(config.id)
+      return { ...config, custom: config.custom ?? false, hasKey, ...(keyLocked && { keyLocked: true as const }) }
+    })
   }
 
   save(input: ProviderInput): ProviderSummary[] {
@@ -161,7 +175,10 @@ export class ProviderRegistry extends Service {
     }
     const id = existing?.id ?? providerIdFor(displayName, (candidate) => this.entries.has(candidate))
     this.entries.set(id, { id, displayName, baseURL, protocol: input.protocol, models, custom: existing ? existing.custom : true })
-    if (apiKey) this.keys[id] = cipher!.encrypt(apiKey).toString('base64')
+    if (apiKey) {
+      this.keys[id] = cipher!.encrypt(apiKey).toString('base64')
+      this.lockedKeys.delete(id)
+    }
     this.persist()
     this.ctx.emit('providers/changed')
     return this.list()
@@ -171,6 +188,7 @@ export class ProviderRegistry extends Service {
     if (this.unreadable) throw this.unreadable
     this.entries.delete(id)
     delete this.keys[id]
+    this.lockedKeys.delete(id)
     this.persist()
     this.ctx.emit('providers/changed')
     return this.list()
@@ -204,9 +222,22 @@ export class ProviderRegistry extends Service {
     return this.storedKey(id)
   }
 
+  /** 봉한 키를 푼다. 키 저장소를 못 쓰거나 풀기가 던지면 KEY_STORE_CODE 오류(안내 문구, 키 값 없음) — 원인은 로그에만 */
   private storedKey(id?: string): string | undefined {
     const sealed = id ? this.keys[id] : undefined
-    return sealed && this.opts.cipher ? this.opts.cipher.decrypt(Buffer.from(sealed, 'base64')) : undefined
+    if (!id || !sealed) return undefined
+    const cipher = this.opts.cipher
+    let plain: string
+    try {
+      if (!cipher?.available()) throw new Error('the key store is unavailable')
+      plain = cipher.decrypt(Buffer.from(sealed, 'base64'))
+    } catch (cause) {
+      this.lockedKeys.add(id)
+      console.error(`[providers] cannot unseal the key of ${id} (${KEY_STORE_CODE}): ${cause instanceof Error ? cause.message : String(cause)}`)
+      throw Object.assign(new Error(tr('error.modelKeyStore')), { code: KEY_STORE_CODE })
+    }
+    this.lockedKeys.delete(id)
+    return plain
   }
 
   private persist(): void {

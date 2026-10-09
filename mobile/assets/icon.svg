@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <!-- 폰 앱 아이콘 원본 (시안 A — 데스크탑 build/icon.svg 와 같은 모양). 적응형 아이콘 격자(108) 기준 — 중앙 66 안에 모양이 든다.
+       PNG(icon.png · adaptive-foreground.png · adaptive-monochrome.png)는 이 좌표를 그대로 그린 것이다 -->
+  <rect width="108" height="108" fill="#4176e6"/>
+  <path d="M37.1 39.2L51.9 54L37.1 68.8M58.2 70.9H75.2" stroke="#ffffff" stroke-width="7.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

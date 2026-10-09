@@ -3,7 +3,7 @@
 // 양쪽이 이 파일 하나를 import 한다 — 계약이 바뀌면 앱 빌드가 깨진다. 이 계약을 말하는 서버는 ctx.remote 와 개발용 mobile/dev/fake-desktop.mts 다.
 // Node·React Native 어느 쪽 API 도 쓰지 않는다 (타입 + 경로 문자열 + 상수).
 
-import type { Attention, Conversation, ConversationStatus, History, HistoryMessage, NoticeState, Project, TurnItem, TurnUsage } from './contract.ts'
+import type { Attention, Conversation, ConversationStatus, History, HistoryMessage, NoticeState, Project, ShellCard, TurnItem, TurnUsage } from './contract.ts'
 import type { Mode } from './modes.ts'
 
 /** 경로의 `/v1` 과 hello.apiVersion */
@@ -58,6 +58,8 @@ export interface PairResponse {
   deviceId: string
   /** 기기 토큰 — 이후 모든 요청의 `Authorization: Bearer` */
   token: string
+  /** 블루투스 연결이 켜져 있으면 데스크탑의 Noise 정적 공개키(X25519, base64url) — QR 없이 2자리 코드로 짝지은 폰이 블루투스 키를 TLS 안에서 받는다 (이슈 #171) */
+  bluetoothKey?: string
 }
 
 /** GET /v1/hello — 재연결 첫 호출. addresses(`ip:port`)로 폰이 새 주소를 배운다 */
@@ -74,6 +76,9 @@ export interface Hello {
   addresses: string[]
   /** 사내망(TLS) 리스너의 인증서 지문 — SPKI SHA-256 base64url (fingerprintCode 참고). TLS 리스너가 없으면 없다 */
   fingerprint?: string
+  /** 블루투스 연결이 켜져 있으면 Noise 정적 공개키(QR 의 bk 와 같다, 이슈 #229). Wi-Fi 로 짝지은 폰이 이것을 배워 다시 짝짓지 않고 블루투스를 고를 수 있다.
+   *  폰은 지문으로 고정한 TLS 로 받은 hello 의 것만 저장한다 — 평문(루프백)·블루투스로 받은 것은 믿지 않는다 */
+  bluetoothKey?: string
 }
 
 // ── 사내망 연결 (TLS + 지문 고정 + QR, 01t 3절) ─────────────────────────────────────────────────────
@@ -87,7 +92,9 @@ export function isLoopbackHost(host: string): boolean {
   return bare === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare)
 }
 
-/** QR 에 싣는 것 — `litecode://pair?v=1&d=…&n=…&a=ip:port,…&fp=…&c=…&x=…[&bk=…]` (값은 encodeURIComponent, 순서는 이대로) */
+/** QR 에 싣는 것 — `litecode://pair?v=1&d=…&n=…[&a=ip:port,…&fp=…]&c=…&x=…[&bk=…]` (값은 encodeURIComponent, 순서는 이대로).
+ *  사내망 경로(a·fp)와 블루투스 경로(bk) 중 하나는 있어야 한다. a·fp 는 둘 다 있거나 둘 다 없다 — 둘 다 없으면 블루투스 단독 QR 이다 (이슈 #229,
+ *  Wi-Fi 가 없는 곳에서 짝짓기). v 는 그대로 1: 이것을 모르는 옛 폰은 a·fp 가 없는 QR 을 "내용이 올바르지 않다"(qr-invalid)로 거절한다 */
 export interface PairLink {
   /** v — REMOTE_API_VERSION */
   version: number
@@ -95,10 +102,10 @@ export interface PairLink {
   desktopId: string
   /** n — PC 이름 */
   name: string
-  /** a — https 로 붙을 주소 (`ip:port`, 쉼표로 이음). 루프백은 싣지 않는다 */
+  /** a — https 로 붙을 주소 (`ip:port`, 쉼표로 이음). 루프백은 싣지 않는다. 블루투스 단독 QR 이면 빈 목록 */
   addresses: string[]
-  /** fp — SPKI SHA-256 base64url */
-  fingerprint: string
+  /** fp — SPKI SHA-256 base64url. 블루투스 단독 QR 이면 없다 */
+  fingerprint?: string
   /** c — 짝짓기 코드 12자 (Crockford base32, 칸 나눔 없음). POST /v1/pair 의 code 에 그대로 */
   code: string
   /** x — 코드 만료 (unix 초) */
@@ -110,13 +117,19 @@ export interface PairLink {
 
 export const PAIR_URI_PREFIX = 'litecode://pair?'
 
+/** 블루투스 단독 QR(주소·지문이 없다)이면 a·fp 를 아예 싣지 않는다 */
 export function pairUri(link: PairLink): string {
+  const lan = link.addresses.length > 0 || link.fingerprint !== undefined
   const fields: [string, string][] = [
     ['v', String(link.version)],
     ['d', link.desktopId],
     ['n', link.name],
-    ['a', link.addresses.join(',')],
-    ['fp', link.fingerprint],
+    ...(lan
+      ? [
+          ['a', link.addresses.join(',')] as [string, string],
+          ['fp', link.fingerprint ?? ''] as [string, string],
+        ]
+      : []),
     ['c', link.code],
     ['x', String(link.expiresAt)],
     ...(link.bluetoothKey !== undefined ? [['bk', link.bluetoothKey] as [string, string]] : []),
@@ -141,16 +154,19 @@ export function parsePairUri(text: string): PairLink | undefined {
   const addresses = (fields.get('a') ?? '').split(',').filter(Boolean)
   const fingerprint = fields.get('fp') ?? ''
   const { d: desktopId = '', n: name = '', c: code = '', bk: bluetoothKey } = Object.fromEntries(fields)
-  if (!Number.isInteger(version) || !Number.isFinite(expiresAt) || !desktopId || !code || addresses.length === 0 || !/^[A-Za-z0-9_-]{43}$/.test(fingerprint)) return undefined
+  if (!Number.isInteger(version) || !Number.isFinite(expiresAt) || !desktopId || !code) return undefined
   if (bluetoothKey !== undefined && !/^[A-Za-z0-9_-]{43}$/.test(bluetoothKey)) return undefined
-  return { version, desktopId, name, addresses, fingerprint, code, expiresAt, ...(bluetoothKey !== undefined && { bluetoothKey }) }
+  // 사내망 경로는 a·fp 가 둘 다 있어야 한다. 둘 다 없어도 되는 것은 bk 가 있을 때뿐(블루투스 단독)
+  const lan = addresses.length > 0 || fingerprint !== ''
+  if ((lan || bluetoothKey === undefined) && (addresses.length === 0 || !/^[A-Za-z0-9_-]{43}$/.test(fingerprint))) return undefined
+  return { version, desktopId, name, addresses, ...(lan && { fingerprint }), code, expiresAt, ...(bluetoothKey !== undefined && { bluetoothKey }) }
 }
 
 /** GET /v1/projects */
 export type RemoteProject = Project
 
 /** GET /v1/conversations?project= 의 항목 — 목록 정보 중 서버가 실제로 싣는 것(ctx.remote 의 toRemote)만 + 상태 점. usage·labels·첨부 표·
- *  고정·`!` 카드(shells — 폰에 셸을 열지 않는다)는 오지 않는다 */
+ *  고정·`!` 카드(shells)는 오지 않는다 — 카드는 대화 스냅샷(ConversationSnapshot.shells)에 읽기 전용으로 온다 (폰에 셸을 열지 않는다) */
 export interface RemoteConversation extends Pick<Conversation, 'id' | 'project' | 'title' | 'updatedAt' | 'engineSessionId' | 'model' | 'mode'> {
   status?: ConversationStatus
 }
@@ -171,10 +187,12 @@ export interface LiveTurn {
 
 /** GET /v1/conversations/{cid} — 스냅샷 + 그 시점 seq. 이 대화의 이벤트는 seq 초과분만 적용한다 (스냅샷과 스트림 사이에 틈이 없다) */
 export interface ConversationSnapshot {
-  /** 끝난 말풍선들 + (턴이 도는 중이면) 그 턴의 user 말까지. 도는 턴의 진행 줄은 live.progress 에 있다 */
+  /** 끝난 말풍선들 + (턴이 도는 중이면) 그 턴의 user 말까지, 끼워 넣은 말이 있으면 그 앞에 얼린 답과 그 말까지 (이슈 #250). 도는 턴의 진행 줄은 live.progress 에 있다 */
   history: History
   /** 턴이 도는 중일 때만 */
   live?: LiveTurn
+  /** 이 대화의 `!명령` 결과 카드 (#265) — 읽기 전용. 카드가 없으면 필드가 없다. 새로 돈 카드는 스트림으로 오지 않는다 — 다시 읽을 때 보인다 */
+  shells?: ShellCard[]
   seq: number
 }
 
@@ -186,8 +204,8 @@ export interface SendMessageRequest {
   model?: ModelChoice
 }
 export interface SendMessageResponse {
-  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중이라 그 대화 대기열에 들어갔다 */
-  state: 'sent' | 'queued'
+  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중이라 그 대화 대기열에 들어갔다. interjected: 도는 턴에 끼워 넣었다 (이슈 #250 — 'turn.interjected') */
+  state: 'sent' | 'queued' | 'interjected'
 }
 
 /** POST /v1/conversations/{cid}/stop */
@@ -233,7 +251,9 @@ export interface RemoteEventMap {
   'turn.progress': { cid: string; item: TurnItem }
   /** 그 대화가 지금 기다리는 승인·질문 전부 (빈 배열 = 더 없다) */
   'turn.attention': { cid: string; requests: Attention[] }
-  'turn.ended': { cid: string; message: HistoryMessage; usage?: TurnUsage; outcome: TurnOutcome }
+  /** 도는 턴에 사람이 친 말을 끼워 넣었다 (이슈 #250) — ChatEventMap 과 같다 */
+  'turn.interjected': { cid: string; message: HistoryMessage }
+  'turn.ended': { cid: string; message: HistoryMessage; usage?: TurnUsage; outcome: TurnOutcome; unanswered?: string[] }
   'queue.changed': { cid: string; items: string[] }
   /** 그 프로젝트의 대화 목록을 다시 받아라 */
   'conversations.changed': { project: string }

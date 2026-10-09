@@ -41,6 +41,10 @@ export type TurnItem =
   /** 사용자 훅 하나가 돌았다 (이슈 #102) — 끝난 뒤에만 온다. command 는 명령 앞부분, seconds 는 걸린 시간(0.1초 단위),
    *  reason 은 막은 사유(stderr)나 실패 사유(종료 코드·시간 초과). 엔진 기록에는 없다 — 도는 턴과 방금 끝난 턴에만 보인다 */
   | { kind: 'hook'; id: string; event: HookEvent; command: string; outcome: HookOutcome; seconds: number; reason?: string }
+  /** 턴 앞뒤 git 스냅숏의 차이 — 명령(sed·포매터·코드 생성기)으로 바뀐 파일까지 (이슈 #213). 턴 끝에 하나, 화면은 작업 줄로 그리지 않고
+   *  "고친 파일" 카드에만 합친다(도구 diff 가 있는 파일은 도구 쪽). diffs 가 비어도 온다 — 스냅숏을 떴다는 뜻.
+   *  truncated: 상한(바뀐 파일 수·턴 전부터 더러운 파일 수)에 걸려 일부만 실었다. 엔진 기록에는 없다 — 도는 턴과 방금 끝난 턴에만 보인다 */
+  | { kind: 'changes'; id: string; diffs: FileDiff[]; truncated?: true }
 
 export interface Subtask {
   kind: 'subtask'
@@ -148,8 +152,10 @@ export interface AttentionQuestion {
   multiple?: boolean
 }
 
-/** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'. "항상 허용" 은 없다(사용자 결정) */
-export type AttentionAnswer = 'once' | 'reject' | string[][]
+/** 카드의 답 — 권한: 'once'(한 번 허용)|'reject'. 질문: 질문 순서대로 고른(또는 쓴) 답 목록, 또는 'reject'.
+ *  'always'(항상 허용, 이슈 #242)는 폴더 밖 접근(external_directory) 카드에만 — 엔진에는 once 로 가고, 앱이 그 대화 + 그 패턴을 기억해
+ *  다음 요청을 카드 없이 once 로 답한다(앱을 다시 켜면 잊는다). 폰은 보내지 못한다 */
+export type AttentionAnswer = 'once' | 'always' | 'reject' | string[][]
 
 /** 승인 카드에서 사용자가 고른 "받을 대화" (이슈 #67·#137) — 다른 프로젝트에 지시를 보내는 도구의 허용(once)에 함께 싣는다. 고른 프로젝트의
  *  마지막에 보던 대화 하나다. 엔진은 모른다(엔진에 가는 답은 once 뿐) — 앱이 허용 기록에 적어 두고 앱 MCP 서버의 도구가 실행할 때 쓴다 */
@@ -206,6 +212,10 @@ export interface HistoryMessage {
   attachments?: Attachment[]
   /** user: 사람이 친 글이 아니라 다른 대화가 보낸 지시다 (이슈 #55) — 화면이 "다른 대화에서 온 지시" 딱지를 단다 */
   origin?: MessageOrigin
+  /** user: 도는 턴에 끼워 넣은 말 (이슈 #250) — 그 턴의 진행 사이에 놓인다. 도는 턴과 방금 끝난 턴에만 있다 (엔진 기록엔 보통 말풍선이다) */
+  interjected?: boolean
+  /** user: 끼워 넣었지만 답을 못 받았다 (승인 거절·중지로 턴이 끝났다) — 화면이 그 말풍선에 "답 없음" 을 단다. 맥락에는 남아 있다 */
+  unanswered?: boolean
   /** assistant: 그 턴의 진행 줄 (생각·도구·글·지시문) — 실시간 턴의 chat onProgress 와 같은 모양 */
   items?: TurnItem[]
   /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */

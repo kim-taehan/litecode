@@ -329,6 +329,10 @@
   background: var(--mask);
 }
 
+.confirm-mask--above-settings {
+  z-index: 300; /* 설정 창(z-index 200)이 열려 있을 때도 모바일 연결 승인 확인이 앞에 뜬다 */
+}
+
 .confirm-dialog {
   width: 420px;
   max-width: calc(100vw - 48px);

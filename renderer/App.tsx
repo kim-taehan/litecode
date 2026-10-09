@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Attention, AttentionAnswer, AttentionTarget, AttachmentKind, ChatEvent, Conversation, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend, TurnItem } from '../shared/ipc.ts'
 import { titleFrom, TITLE_MAX } from '../shared/chat.ts'
-import { applyChat, applyHistory, applyLive, planEnded, switchedMode, type ChatFields } from './chatState.ts'
+import { applyChat, applyHistory, applyLive, planEnded, switchedMode, withStoredTitles, type ChatFields } from './chatState.ts'
 import { ago } from './ago.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap, useFollowBottom } from './Minimap.tsx'
@@ -26,6 +26,7 @@ import { otherProjectsStatus, projectStatus } from './noticeView.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
 import { PlusMenu } from './PlusMenu.tsx'
 import { useVoiceInput, VoiceButton, VoiceStrip } from './VoiceInput.tsx'
+import { voiceChatBlock } from './voiceView.ts'
 import { AttachmentChips } from './Attachments.tsx'
 import { pasteIntent, useFileDrop } from './dropPaste.ts'
 import { DropVeil } from './DropVeil.tsx'
@@ -277,8 +278,13 @@ export function App() {
       window.litecode.onTurnProgress((cid, item) => apply({ event: 'turn.progress', data: { cid, item } })),
       window.litecode.onTurnAttention((cid, requests) => apply({ event: 'turn.attention', data: { cid, requests } })),
       window.litecode.onTurnEnded((data) => apply({ event: 'turn.ended', data })),
+      window.litecode.onTurnInterjected((data) => apply({ event: 'turn.interjected', data })),
       window.litecode.onQueueChanged((data) => apply({ event: 'queue.changed', data })),
-      window.litecode.onConversationsChanged((data) => forgetPruned(data.removed)),
+      window.litecode.onConversationsChanged((data) => {
+        forgetPruned(data.removed)
+        // 메인이 바꾼 제목(자동 대화 제목 #215 등)은 턴 이벤트에 안 실린다 — 목록을 다시 읽어 입힌다
+        void window.litecode.listConversations().then((stored) => setSessions((sessionsNow) => withStoredTitles(sessionsNow, stored)), () => {})
+      }),
     ]
     return () => offs.forEach((off) => off())
   }, [])
@@ -427,12 +433,25 @@ export function App() {
       return started.ok ? undefined : started.error
     },
   })
-  /** 음성 입력 (이슈 #109) — 받아쓴 글은 녹음을 시작한 대화의 초안에 넣기만 한다 (VoiceInput.tsx) */
+  /** 음성 대화가 보는 지금 대화의 턴 상태 — 도는 턴·대기열·붙잡힌 대기열, 승인·질문 카드 */
+  const voiceActivity = {
+    busy: !!active && (!!active.pending || (active.queue?.length ?? 0) > 0 || !!active.held),
+    attention: (active?.attention?.length ?? 0) > 0,
+  }
+  /** 음성 대화 (이슈 #109·#238·#244) — 말을 멈추면 받아쓴 글을 보내고, 끄면 들은 글은 녹음을 시작한 대화의 초안에 넣는다 (VoiceInput.tsx) */
   const voice = useVoiceInput({
     sessionId: active?.id,
     inputRef: trigger.inputRef,
     hasSession: (id) => sessions.some((session) => session.id === id),
     edit: (id, change) => changeDraftOf(id, (now) => ({ ...now, text: change(now.text) })),
+    // 음성 대화 모드 (#238) — 받아쓴 글만 보낸다(첨부·트리거 없이). 보낼 수 없는 경우는 send 가 말없이 돌아가기 전에 금지 표가 사유로 막는다.
+    // 답이 오는 중이면 메인이 그 턴에 끼워 넣는다 (#240·#250)
+    chat: {
+      activity: voiceActivity,
+      block: (transcript) =>
+        voiceChatBlock({ draft, attachments: attached.length, model: !!findModel(providers, selected), writable: !!active && canWrite(active), attention: voiceActivity.attention }, transcript),
+      send: (text) => send({ text, attachments: [] }),
+    },
   })
   /** Enter·보내기 — 입력 트리거(`/`·`!`)가 다루지 않으면 평범하게 보낸다 */
   const submit = () =>
@@ -625,7 +644,7 @@ export function App() {
   }
 
   /** command: `/` 명령 — text 를 보내고 말풍선·제목엔 display. mode: 이 턴부터 그 모드로 ("이 계획대로 실행").
-   *  보내기는 메인(ctx.chat)에 부탁한다 — 그 대화의 턴이 도는 중이면 메인이 대기열에 쌓고 턴 끝에 합쳐 보낸다. 내 말·답은 이벤트로 온다.
+   *  보내기는 메인(ctx.chat)에 부탁한다 — 그 대화의 턴이 도는 중이면 메인이 그 턴에 끼워 넣는다(#250, 엔진이 아직 안 받았으면 대기열). 내 말·답은 이벤트로 온다.
    *  첨부는 command.attachments(없음을 뜻하는 빈 목록), 안 주면 입력 카드의 칩 — 보내면 칩을 비운다 */
   function send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts: { mode?: Mode } = {}): void {
     const target = active
@@ -1047,7 +1066,7 @@ export function App() {
                     </div>
                   )}
                   {message.role === 'user' ? (
-                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} origin={message.origin} />
+                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} origin={message.origin} unanswered={message.unanswered} />
                   ) : (
                     <AssistantTurn
                       items={message.items ?? NO_ITEMS}

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { tr } from '../i18n.ts'
+import { projectFile } from './fileMentions.ts'
 
 // "다른 앱에서 열기" — 지금 대화의 프로젝트 폴더를 설치된 앱(편집기·Git GUI·터미널)에서 연다 (사용자 결정 2026-10-02, _workspace/01m_open_in.md).
 // 첫 버전은 mac 만. 앱 목록은 정해 둔 허용 목록이고(dsh open-in-app 의 mac 항목과 같은 범위), 그중 /Applications·~/Applications 에
@@ -86,6 +87,19 @@ export interface OpenInOptions extends DetectOptions {
   platform?: NodeJS.Platform
 }
 
+async function startsWithPdf(file: string): Promise<boolean> {
+  const handle = await fs.promises.open(file, 'r').catch(() => undefined)
+  if (!handle) return false
+  try {
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(5), 0, 5, 0)
+    return buffer.subarray(0, bytesRead).toString('latin1') === '%PDF-'
+  } catch {
+    return false
+  } finally {
+    await handle.close()
+  }
+}
+
 const DEFAULT_FIXED ={ finder: '/System/Library/CoreServices/Finder.app', terminal: '/System/Applications/Utilities/Terminal.app' }
 
 /** 허용 목록 중 지금 있는 것 (목록 순서). 디스크 조회만 — 앱을 실행하지 않는다 */
@@ -132,6 +146,20 @@ export class OpenInService extends Service {
     } catch (error) {
       this.detected = undefined // 지운 앱이면 다음 목록에서 빠진다
       throw new Error(tr('openIn.failed', { app: target.name, message: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  /** 오른쪽 패널의 PDF 를 OS 기본 앱으로 연다 (이슈 #214 — 앱 창 안의 내장 PDF 뷰어는 쓰지 않는다: 창이 plugins 를 켜지 않았고,
+   *  미리보기 하위 프레임은 이동·권한이 막혀 있다). 등록된 프로젝트 안(realpath, 링크로 밖 금지)의 `.pdf` 이면서 머리가 `%PDF-` 인 것만 —
+   *  답·화면은 모델이 쓴 글이라, 실행 파일 같은 다른 종류를 OS 에 열라고 넘기지 않는다 */
+  async openFile(directory: string, token: string): Promise<void> {
+    const registered = typeof directory === 'string' && typeof token === 'string' && (await this.ctx.projects.has(directory))
+    const file = registered ? await projectFile(directory, token) : undefined
+    if (!file || path.extname(file).toLowerCase() !== '.pdf' || !(await startsWithPdf(file))) throw new Error(tr('openIn.notPdf'))
+    try {
+      await this.opts.host.launch({ kind: 'os-open', path: file })
+    } catch (error) {
+      throw new Error(tr('openIn.fileFailed', { name: path.basename(file), message: error instanceof Error ? error.message : String(error) }))
     }
   }
 

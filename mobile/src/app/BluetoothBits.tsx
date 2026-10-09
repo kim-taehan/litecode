@@ -1,0 +1,39 @@
+import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { useReceivedSince } from './hooks.ts'
+import type { AppSession, Carrier } from './session.ts'
+import { S } from './strings.ts'
+import { C } from './theme.ts'
+import { receivingText } from './view.ts'
+
+// 블루투스로 붙어 있을 때만 보이는 조각 (시안 _workspace/mock-ble ② Bt, 이슈 #211). Wi-Fi 면 아무것도 그리지 않는다.
+
+/** 머리 아래 안내 한 줄 */
+export function BluetoothInfo({ carrier }: { carrier: Carrier }) {
+  if (carrier !== 'bluetooth') return null
+  return <Text style={styles.info}>{S.bluetoothInfo}</Text>
+}
+
+/** 긴 대화를 받는 진행 — 받은 KB (전체 크기는 미리 모른다 — 막대는 흐르는 모양) */
+export function HistoryProgress({ session, loading }: { session: AppSession; loading: boolean }) {
+  const active = loading && session.carrier === 'bluetooth'
+  const bytes = useReceivedSince(session, active)
+  if (!active) return null
+  return (
+    <View accessibilityRole="progressbar" style={styles.progress}>
+      <Text style={styles.progressTitle}>{S.loadingHistory}</Text>
+      <View style={styles.track}>
+        <View style={[styles.fill, { width: `${20 + ((bytes / 1024) % 80)}%` as `${number}%` }]} />
+      </View>
+      <Text style={styles.progressText}>{receivingText(bytes)}</Text>
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  info: { paddingVertical: 8, paddingHorizontal: 16, backgroundColor: C.surface, fontSize: 12.5, lineHeight: 19, color: C.text2 },
+  progress: { borderWidth: 0.5, borderColor: C.borderStrong, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, gap: 8 },
+  progressTitle: { fontSize: 12.5, color: C.sub },
+  track: { height: 6, borderRadius: 3, backgroundColor: '#ebecee', overflow: 'hidden' },
+  fill: { height: 6, backgroundColor: C.blue },
+  progressText: { fontSize: 12, color: C.sub },
+})

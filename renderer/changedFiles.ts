@@ -9,6 +9,10 @@ import type { FileDiff, TurnItem } from '../shared/contract.ts'
 // - 만들었다 지웠거나 고쳤다 되돌린 파일도 고친 것으로 나온다
 // 엔진의 턴 요약(user 메시지 info.summary.diffs — snapshot 을 켜야 나온다, 지금은 꺼 둠)으로 갈아 끼울 자리가 이 함수다:
 // 그때는 source 'engine' 을 더하고 화면은 source 로 안내 문구를 가른다
+//
+// 명령으로 바뀐 파일 (이슈 #213): 메인이 턴 앞뒤 git 스냅숏 차이를 턴 끝 줄 하나(kind 'changes')로 싣는다(src/services/commandChanges.ts).
+// 도구 diff 가 있는 파일은 도구 쪽을 쓰고(호출별 diff·횟수가 더 자세하다), 도구가 안 건드린 파일만 더한다. 그 줄이 있으면(commands)
+// 카드가 "명령으로 바뀐 파일도" 라고 말하고, 없으면(git 저장소 아님·git 없음·시간 초과·다시 연 대화) 위 한계 그대로다
 
 /** 파일 하나 — 이 턴에서 고친 것의 합 */
 export interface ChangedFile {
@@ -33,8 +37,12 @@ export interface TurnChanges {
   added: number
   removed: number
   unknownBefore: boolean
-  /** tools: 도구 줄을 모은 것 — 명령으로 바꾼 파일은 빠진다 */
+  /** tools: 도구 줄을 모은 것 — 명령으로 바꾼 파일은 commands 일 때만 들어 있다 */
   source: 'tools'
+  /** 턴 앞뒤 git 스냅숏을 비교했다 — 명령으로 바뀐 파일도 들어 있다 */
+  commands: boolean
+  /** 스냅숏이 상한에 걸려 명령으로 바뀐 파일은 일부만 들어 있다 */
+  truncated: boolean
 }
 
 /** 카드가 한 번에 보이는 파일 수 — 넘으면 접고 "N개 더" */
@@ -44,6 +52,10 @@ export const CHANGED_FILES_FOLD = 8
 export function changedFiles(items: readonly TurnItem[]): TurnChanges | undefined {
   const files = new Map<string, ChangedFile>()
   collect(items, files)
+  const snapshots = items.filter((item): item is Extract<TurnItem, { kind: 'changes' }> => item.kind === 'changes')
+  for (const diff of snapshots.flatMap((item) => item.diffs)) {
+    if (!files.has(diff.path)) files.set(diff.path, fileOf(diff)) // 도구 diff 가 있는 파일은 도구 쪽
+  }
   if (files.size === 0) return undefined
   const list = [...files.values()]
   return {
@@ -52,7 +64,13 @@ export function changedFiles(items: readonly TurnItem[]): TurnChanges | undefine
     removed: list.reduce((sum, file) => sum + file.removed, 0),
     unknownBefore: list.some((file) => file.unknownBefore),
     source: 'tools',
+    commands: snapshots.length > 0,
+    truncated: snapshots.some((item) => item.truncated === true),
   }
+}
+
+function fileOf(diff: FileDiff): ChangedFile {
+  return { path: diff.path, status: diff.status, added: diff.added, removed: diff.removed, unknownBefore: diff.unknownBefore === true, edits: 1, diffs: [diff] }
 }
 
 function collect(items: readonly TurnItem[], files: Map<string, ChangedFile>): void {
@@ -62,7 +80,7 @@ function collect(items: readonly TurnItem[], files: Map<string, ChangedFile>): v
     for (const diff of item.diffs) {
       const file = files.get(diff.path)
       if (!file) {
-        files.set(diff.path, { path: diff.path, status: diff.status, added: diff.added, removed: diff.removed, unknownBefore: diff.unknownBefore === true, edits: 1, diffs: [diff] })
+        files.set(diff.path, fileOf(diff))
         continue
       }
       // 이 턴에 만든 파일은 뒤에 고쳐도 새 파일이다. 지웠으면 삭제, 지운 자리에 다시 썼으면 그 상태

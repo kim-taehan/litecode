@@ -27,12 +27,12 @@ export async function loadNoiseIdentity(file: string, cipher?: KeyCipher): Promi
   const stored = (await readJsonFile(file, 'object')) as Partial<StoredKey> | undefined
   let secretKey: Uint8Array
   if (typeof stored?.key === 'string') {
-    if (stored.sealed && !cipher?.available()) throw keyError('the bluetooth key is sealed and the key store is unavailable')
+    if (stored.sealed && !cipher?.available()) throw keyError('the bluetooth key is sealed and the key store is unavailable', true)
     let text: string
     try {
       text = stored.sealed ? cipher!.decrypt(Buffer.from(stored.key, 'base64')) : stored.key
     } catch {
-      throw keyError('cannot unseal the bluetooth key')
+      throw keyError('cannot unseal the bluetooth key', true)
     }
     const decoded = decodeNoiseKey(text)
     if (!decoded) throw keyError('the stored bluetooth key is malformed')
@@ -48,6 +48,7 @@ export async function loadNoiseIdentity(file: string, cipher?: KeyCipher): Promi
   return { secretKey, publicKey, publicKeyText: encodeNoiseKey(publicKey), code: noiseKeyCode(publicKey) }
 }
 
-function keyError(message: string): Error {
-  return Object.assign(new Error(message), { code: 'ENOISEKEY' })
+/** keyStore: 키 저장소(키체인)가 풀어 주지 않았다 — 화면이 영어 원문 대신 키체인 안내(error.keyStore)를 보인다 (이슈 #231) */
+function keyError(message: string, keyStore?: true): Error {
+  return Object.assign(new Error(message), { code: 'ENOISEKEY' }, keyStore && { keyStore })
 }

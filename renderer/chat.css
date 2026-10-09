@@ -18,6 +18,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 끼워 넣었지만 답을 못 받은 말 (이슈 #250) — 시각 옆 작은 알약 */
+.user-turn__unanswered {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .user-turn__copy {
   width: 24px;
   height: 24px;

@@ -4,9 +4,11 @@ import { Keyboard, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleShee
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { groupCode, normalizePairCode, PAIR_CODE_LENGTH, PAIR_DEVICE_NAME_MAX, PAIR_SHORT_CODE_LENGTH } from '../../../../shared/remotePairing.ts'
 import { DEFAULT_ADDRESS } from '../address.ts'
-import { ChevronDown, ChevronRight, QrFrame } from '../icons.tsx'
+import { BluetoothIcon, ChevronDown, ChevronRight, QrFrame, WifiIcon } from '../icons.tsx'
 import type { LinkState, PairInput } from '../link.ts'
+import type { Carrier } from '../session.ts'
 import { S } from '../strings.ts'
+import { pairFailureText } from '../view.ts'
 import { C, MONO } from '../theme.ts'
 
 // 1 연결 (시안 Main). 짝이 없으면 이 화면뿐이다 — 앱은 데스크탑 없이 대화를 쥐지 않는다.
@@ -19,15 +21,19 @@ export function ConnectScreen({
   onPair,
   onPairQr,
   lanBlockedApi,
+  onCarrier,
 }: {
   state: Extract<LinkState, { phase: 'unpaired' | 'pairing' }>
   defaultDeviceName: string
   /** 이 폰의 API 레벨 — 사내망(TLS 1.3) 연결을 못 하는 폰(Android 10 미만)일 때만 준다. 안내를 띄우고 QR 을 막는다(이 컴퓨터 안 평문 입력은 그대로) */
   lanBlockedApi?: number
+  /** 짝지을 통신 방법 — 이 화면에 들어오면 아무것도 고른 상태가 아니고, 고르면 기억한다(QR 에 두 길이 다 있을 때 이 길로 짝짓는다). 블루투스는 QR 로만 짝짓고, Wi-Fi 는 주소·코드 직접 입력도 된다 */
+  onCarrier(carrier: Carrier): void
   onPair(input: PairInput): void
   onPairQr(text: string, deviceName: string): void
 }) {
   const insets = useSafeAreaInsets()
+  const [carrier, setCarrier] = useState<Carrier>()
   const [open, setOpen] = useState(false)
   const [address, setAddress] = useState(DEFAULT_ADDRESS)
   const [code, setCode] = useState('')
@@ -37,11 +43,15 @@ export function ConnectScreen({
   const [, requestCamera] = useCameraPermissions()
   const pairing = state.phase === 'pairing'
   const failure = state.phase === 'unpaired' ? state.failure : undefined
+  // 블루투스로 짝지으려다 못 붙은 사유(권한·꺼짐·못 찾음 — 연결 화면과 같은 문구, 이슈 #229)
+  const bluetoothFailure = state.phase === 'unpaired' ? state.bluetooth : undefined
   // 진단 글 — 실제 폰에서 원인이 사유 글 하나로 뭉개지지 않게 늘 작은 글씨로 (link.ts failureDetail)
   const detail = state.phase === 'unpaired' ? state.detail : undefined
   const revoked = state.phase === 'unpaired' && state.revoked === true
   const fingerprintChanged = state.phase === 'unpaired' && state.fingerprintChanged === true
   const scroll = useRef<ScrollView>(null)
+  // Android 10 미만은 사내망(TLS 1.3)을 못 쓴다 — 블루투스로는 QR 이 된다
+  const qrBlocked = carrier === 'wifi' && lanBlockedApi !== undefined
 
   // 권한을 물어 허용되면 카메라를, 아니면 직접 입력을 연다
   const scan = async (): Promise<void> => {
@@ -67,7 +77,23 @@ export function ConnectScreen({
       <ScrollView ref={scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 28, paddingBottom: insets.bottom + 32 }]} keyboardShouldPersistTaps="handled">
         <View style={styles.intro}>
           <Text style={styles.title}>{S.appName}</Text>
-          <Text style={styles.lead}>{S.connectIntro}</Text>
+          <Text style={styles.lead}>{carrier === 'bluetooth' ? S.connectIntroBluetooth : carrier === 'wifi' ? S.connectIntro : S.connectChoose}</Text>
+        </View>
+
+        <View style={styles.methods}>
+          <Text style={styles.methodLabel}>{S.connectMethod}</Text>
+          <View style={styles.methodRow}>
+            {(['bluetooth', 'wifi'] as const).map((method) => {
+              const selected = method === carrier
+              return (
+                <Pressable key={method} accessibilityRole="button" accessibilityState={{ selected }} disabled={pairing} style={[styles.method, selected && styles.methodSelected]} onPress={() => (setCarrier(method), onCarrier(method))}>
+                  {method === 'wifi' ? <WifiIcon color={selected ? C.link : C.sub} /> : <BluetoothIcon color={selected ? C.link : C.sub} />}
+                  <Text style={styles.methodName}>{S.carrierName[method]}</Text>
+                </Pressable>
+              )
+            })}
+          </View>
+          {carrier !== undefined && <Text style={styles.methodHint}>{S.carrierHint[carrier]}</Text>}
         </View>
 
         {(revoked || fingerprintChanged) && (
@@ -76,21 +102,23 @@ export function ConnectScreen({
           </View>
         )}
 
-        {lanBlockedApi !== undefined && (
+        {carrier === 'wifi' && lanBlockedApi !== undefined && (
           <View style={styles.revoked}>
             <Text style={styles.revokedText}>{S.lanUnsupported(lanBlockedApi)}</Text>
           </View>
         )}
 
+        {carrier !== undefined && (
+          <>
         <View style={styles.qrCard}>
           <View style={styles.qrBox}>
             <QrFrame />
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: pairing || lanBlockedApi !== undefined }}
-            disabled={pairing || lanBlockedApi !== undefined}
-            style={[styles.primary, (pairing || lanBlockedApi !== undefined) && styles.disabled]}
+            accessibilityState={{ disabled: pairing || qrBlocked }}
+            disabled={pairing || qrBlocked}
+            style={[styles.primary, (pairing || qrBlocked) && styles.disabled]}
             onPress={() => void scan()}
           >
             <Text style={styles.primaryText}>{S.scanQr}</Text>
@@ -100,11 +128,13 @@ export function ConnectScreen({
         {cameraDenied && <Text style={styles.failure}>{S.cameraDenied}</Text>}
         {failure !== undefined && !open && (
           <Text accessibilityRole="alert" style={[styles.failure, styles.failureAlone]}>
-            {S.pairFailure[failure]}
+            {pairFailureText(failure, bluetoothFailure)}
             {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
           </Text>
         )}
 
+        {carrier === 'wifi' && (
+          <>
         <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} style={styles.manual} onPress={() => setOpen(!open)}>
           <Text style={styles.body}>{S.enterManually}</Text>
           {open ? <ChevronDown /> : <ChevronRight />}
@@ -148,7 +178,7 @@ export function ConnectScreen({
 
             {failure !== undefined && (
               <Text accessibilityRole="alert" style={styles.failure}>
-                {S.pairFailure[failure]}
+                {pairFailureText(failure, bluetoothFailure)}
                 {detail !== undefined && <Text style={styles.detail}>{`\n${detail}`}</Text>}
               </Text>
             )}
@@ -157,6 +187,11 @@ export function ConnectScreen({
               <Text style={styles.primaryText}>{pairing ? S.waitingForAllow : S.connect}</Text>
             </Pressable>
           </View>
+        )}
+          </>
+        )}
+
+          </>
         )}
 
         {state.phase === 'pairing' &&
@@ -173,7 +208,7 @@ export function ConnectScreen({
           ))}
 
         <View style={styles.grow} />
-        <Text style={styles.footnote}>{S.connectFootnote}</Text>
+        {carrier === 'wifi' && <Text style={styles.footnote}>{S.connectFootnote}</Text>}
       </ScrollView>
       {scanning && (
         <QrScanner
@@ -260,6 +295,13 @@ const styles = StyleSheet.create({
   scanHint: { position: 'absolute', left: 24, right: 24, textAlign: 'center', fontSize: 15, color: C.white },
   scanClose: { position: 'absolute', alignSelf: 'center', minWidth: 120, height: 48, borderRadius: 24, paddingHorizontal: 24, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   scanCloseText: { color: C.white, fontSize: 15, fontWeight: '600' },
+  methods: { gap: 8, marginTop: 8 },
+  methodLabel: { fontSize: 12.5, fontWeight: '600', color: C.sub },
+  methodRow: { flexDirection: 'row', gap: 10 },
+  method: { flex: 1, minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 14, backgroundColor: C.white },
+  methodSelected: { borderWidth: 2, borderColor: C.link, backgroundColor: C.blueBg },
+  methodName: { fontSize: 15, fontWeight: '600', color: C.text },
+  methodHint: { fontSize: 13, lineHeight: 19, color: C.sub },
   grow: { flexGrow: 1, minHeight: 24 },
   footnote: { fontSize: 13, lineHeight: 20, color: C.sub },
 })

@@ -32,8 +32,21 @@ import './hooks.css'
 // 내 말·답은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도(초안이 App 의 state) 바뀌지 않은 턴은 다시 그리지 않는다
 // (dsh "바뀌지 않은 형제는 다시 그리지 않는다"). App 은 이 둘에 매번 새로 만든 배열·함수를 넘기지 않는다
 
-/** 내 말 — 말풍선 아래에 보낸 시각과 복사. origin: 사람이 친 글이 아니라 다른 대화가 보낸 지시 (이슈 #55) — 위에 딱지, 말풍선 테두리가 다르다 */
-export const UserMessage = memo(function UserMessage({ text, at, attachments, origin }: { text: string; at?: number; attachments?: readonly Attachment[]; origin?: MessageOrigin }) {
+/** 내 말 — 말풍선 아래에 보낸 시각과 복사. origin: 사람이 친 글이 아니라 다른 대화가 보낸 지시 (이슈 #55) — 위에 딱지, 말풍선 테두리가 다르다.
+ *  unanswered: 도는 턴에 끼워 넣었지만 답을 못 받았다 (이슈 #250) — 시각 옆에 작게 "답 없음" */
+export const UserMessage = memo(function UserMessage({
+  text,
+  at,
+  attachments,
+  origin,
+  unanswered = false,
+}: {
+  text: string
+  at?: number
+  attachments?: readonly Attachment[]
+  origin?: MessageOrigin
+  unanswered?: boolean
+}) {
   const t = useT()
   const [copied, setCopied] = useCopied()
   // 턴 끝 훅이 막아서 앱이 이어 보낸 글 (이슈 #102) — 내가 친 글이 아니라 말풍선으로 그리지 않는다: 구분되는 줄 "턴 끝 훅이 이어서 보냄" + 사유
@@ -56,6 +69,7 @@ export const UserMessage = memo(function UserMessage({ text, at, attachments, or
       {text.trim() && <div className={`bubble bubble--user${origin ? ' bubble--delegated' : ''}`}>{text.trim()}</div>}
       <div className="user-turn__meta">
         {at !== undefined && <time dateTime={new Date(at).toISOString()}>{clockTime(at)}</time>}
+        {unanswered && <span className="user-turn__unanswered">{t('chat.unanswered')}</span>}
         <button
           type="button"
           className="user-turn__copy"
@@ -105,8 +119,9 @@ interface AssistantTurnProps {
 const NO_ATTENTION: readonly Attention[] = []
 
 export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
-  // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다
-  const { compactions, rest } = takeCompactions(running ? items : items.filter((item) => item.kind !== 'retry'))
+  // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다.
+  // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
+  const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
   const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(rest)
   const foldable = !running && !failed && work.length > 0
   const [open, setOpen] = useState(false)
@@ -191,6 +206,7 @@ function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { k
   // 성공한 할 일 목록 쓰기 (이슈 #83) — 도구 줄 대신 "할 일 · 완료 2/5" + 체크리스트
   if (item.kind === 'tool' && item.todos) return <TodoRow todos={item.todos} />
   if (item.kind === 'hook') return <HookRow item={item} />
+  if (item.kind === 'changes') return null // 고친 파일 카드에만 (AssistantTurn 이 미리 뺀다)
   if (item.kind === 'text') {
     if (!item.text.trim()) return null
     return (

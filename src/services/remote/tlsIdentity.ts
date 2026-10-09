@@ -43,8 +43,14 @@ export async function loadTlsIdentity(file: string, cipher?: KeyCipher, now: Dat
   const stored = (await readJsonFile(file, 'object')) as Partial<StoredKey> | undefined
   let privateKey: KeyObject
   if (typeof stored?.key === 'string') {
-    if (stored.sealed && !cipher?.available()) throw Object.assign(new Error('the TLS key is sealed and the key store is unavailable'), { code: 'ETLSKEY' })
-    const pem = stored.sealed ? cipher!.decrypt(Buffer.from(stored.key, 'base64')) : stored.key
+    // keyStore: 키 저장소(키체인)가 풀어 주지 않았다 — 화면이 영어 원문 대신 키체인 안내를 보인다 (이슈 #231)
+    if (stored.sealed && !cipher?.available()) throw Object.assign(new Error('the TLS key is sealed and the key store is unavailable'), { code: 'ETLSKEY', keyStore: true })
+    let pem: string
+    try {
+      pem = stored.sealed ? cipher!.decrypt(Buffer.from(stored.key, 'base64')) : stored.key
+    } catch (error) {
+      throw Object.assign(new Error(`cannot unseal the TLS key: ${(error as Error).message}`), { code: 'ETLSKEY', keyStore: true })
+    }
     privateKey = createPrivateKey(pem)
   } else {
     privateKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey

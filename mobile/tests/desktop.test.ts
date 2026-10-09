@@ -33,6 +33,7 @@ interface Desktop {
   ctx: {
     on(name: 'remote/changed', listener: (status: DesktopStatus) => void): () => void
     chat: { send(cid: string, input: { text: string }): Promise<unknown>; snapshot(): Record<string, unknown> }
+    sessions: { list(): Promise<{ id: string; model?: unknown }[]> }
   }
   remote: {
     startPairing(): DesktopStatus
@@ -255,6 +256,37 @@ describe('앱의 짝짓기·세션(DesktopLink) ↔ ctx.remote', () => {
     await until(() => link.state.phase === 'unpaired', '해제')
     expect(link.state).toEqual({ phase: 'unpaired', revoked: true })
     expect(saved).toBeUndefined()
+  })
+
+  it('폰에서 고른 모델(#269)이 다음 보내기부터 그 대화의 모델로 저장된다', async () => {
+    const { ctx, remote, save, base, turn } = await start()
+    await save('c1')
+    const store: DesktopStore = { load: async () => undefined, save: async () => undefined, clear: async () => undefined }
+    const link = new DesktopLink({ store, transport: createFetchTransport(), pinned: createNativePinnedNet(nodePinnedNative()), platform: 'android' })
+    cleanups.push(() => link.dispose())
+    await link.restore()
+    const code = remote.startPairing().pairing!.code
+    const off = ctx.on('remote/changed', (status) => {
+      if (status.requests[0]) remote.answerPair(status.requests[0].id, true)
+    })
+    await link.pair({ address: base().replace('http://', ''), code, deviceName: 'Pixel 8' })
+    off()
+    if (link.state.phase !== 'linked') throw new Error(`붙지 못했다: ${JSON.stringify(link.state)}`)
+    const { session } = link.state
+    await until(() => session.getStatus().kind === 'connected' && session.models.length > 0, '목록')
+    session.openConversation('c1')
+    await until(() => session.getState().views.c1 !== undefined, '스냅샷')
+    expect(session.modelOf('c1')).toEqual({ providerId: 'gw', modelId: 'm1' })
+
+    expect(session.chooseModel('c1', session.models.find((model) => model.modelId === 'm2')!)).toBe(true)
+    expect(await session.send('c1', '폰에서')).toBe(true)
+    const running = await turn(1)
+    expect((await ctx.sessions.list()).find((entry) => entry.id === 'c1')?.model).toEqual({ providerId: 'gw', modelId: 'm2' })
+    await until(() => session.getState().views.c1!.running, '도는 중')
+    expect(session.chooseModel('c1', session.models[0]!)).toBe(false)
+    running.finish()
+    await until(() => session.getState().conversations[project]!.find((entry) => entry.id === 'c1')?.model?.modelId === 'm2', '목록의 모델')
+    expect(session.modelOf('c1')).toEqual({ providerId: 'gw', modelId: 'm2' })
   })
 
   it('데스크탑에서 거절하면 denied, 틀린 코드는 wrong-code', async () => {

@@ -33,6 +33,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `triggers` | `triggers.ts` | 입력창 트리거(`@` `/` `!`) 등록소 — 트리거 플러그인이 effect 로 등록 | — |
 | `chat` | `chat.ts` | **대화별 턴 소유** — 보내기·대기열·턴 끝 처리(제목·저장·통계)·중지. 화면은 손님이다 | `llm`, `sessions`, `providers` |
 | `attachments` | `attachmentsService.ts` | 첨부(붙인 이미지·파일 읽기) | `chat` |
+| (플러그인) | `autoTitle.ts` | 자동 대화 제목(#215, 설정 `autoTitle` 기본 꺼짐) — `chat/turn-*` 만 듣고 첫 턴 뒤 `ctx.llm.askOnce`(임시 세션, 끝나면 지운다)로 제목을 받아 `ctx.sessions.autoTitle`(사용자가 바꾼 이름은 안 덮는다), `chat/conversations-changed` 를 낸다. 키 없음 | `llm`, `sessions`, `settings` |
 | `features` | `features.ts` | **기능 레지스트리** — 켜진 기능 묶음을 올리고 내린다 (4절) | `settings` |
 | `quit` | `quit.ts` | 종료 확인(도는 턴·붙은 폰이 있으면 한 번 묻는다)·창 닫기 = 숨기기(Windows·Linux 는 트레이). `remote` 는 선택 의존 | `chat`, `settings` |
 | `report` | `report.ts` | 대화 내보내기(엔진 기록 → Trajectory 중립 레코드 → JSON 파일 하나)·문제 신고 묶음(고른 폴더에 `litecode-report-<시각>/`, 허용 목록 파일만, 글은 알려진 비밀 값 + `redactSecrets` 로 가림). 로컬 저장만. 대화상자·폴더 열기는 host. `mcp` 는 선택 의존(`ctx.get`) | `llm`, `sessions`, `settings`, `features`, `providers`, `engine` |
@@ -50,21 +51,23 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `openIn` | `openIn` | `openIn.ts` | 다른 앱에서 열기 | `projects` | 켜짐 |
 | `appMcp` | `appMcp` | `appMcp.ts` + `appMcp/tools/*` | 앱 내장 MCP 서버(`litecode_*` 도구 6개) | `mcp` | 켜짐 |
 | `notifications` | `notifications` | `notifications.ts` | 턴 끝·승인 대기 알림·토스트 | `settings`, `sessions`, `projects` | **꺼짐** |
-| `remote` | `remote` | `remote.ts` + `remote/*` | 모바일 연결 — 계약·인증·기기·짝짓기·이벤트 링 | `chat`, `sessions`, `projects`, `providers`, `settings` | **꺼짐** |
+| `remote` | `remote` | `remote.ts` + `remote/*` | 모바일 연결 — 계약·인증·기기·짝짓기·이벤트 링 (+평문 루프백 HTTP 운반) | `chat`, `sessions`, `projects`, `providers`, `settings` | **꺼짐** |
+| `lan` | — | `remote/https.ts` | 사내망 연결 — TLS 운반(설정 > 모바일의 토글, #210) | `remote` | 켜짐 (`remote` 를 켜면) |
+| `bluetooth` | — | `remote/bluetooth.ts` | 블루투스 연결 — BLE 운반(설정 > 모바일의 토글, #210). 네이티브 모듈은 켤 때 읽는다 | `remote` | **꺼짐** |
 | `web` | — | (엔진 설정만) | opencode webfetch 허용 | — | **꺼짐** |
 | `hooks` | `hooks` | `hooks.ts` + `hooks/*` | AI 행동에 거는 사용자 셸 훅 | `chat`, `sessions`, `llm` | **꺼짐** |
 | `voice` | `speech` | `speech.ts` | 음성 입력(내장 인식 엔진) | `settings` | **꺼짐** |
 | `browser` | `browser` | `browser.ts` + `browser/*` | Chrome 조종(Playwright MCP 를 MCP 서버로 등록) | `mcp` | **꺼짐** |
 
-- `FEATURE_REQUIRES`: `bang → shell`, `appMcp → mcp`, `browser → mcp` (필요한 기능이 꺼지면 같이 못 뜬다).
+- `FEATURE_REQUIRES`: `bang → shell`, `appMcp → mcp`, `browser → mcp`, `lan → remote`, `bluetooth → remote` (필요한 기능이 꺼지면 같이 못 뜬다).
 - `skills`·`web`·`appMcp`·`browser` 는 **엔진 설정에도 영향**이 있다 — `features/changed` 를 `ctx.engine` 이 듣고 설정을 다시 쓰고 엔진을 재시작한다(도는 턴은 끊긴다).
 
 ### 2-3. 하위 플러그인 — 자기 `ctx` 키가 없다
 
 | 플러그인 | 위치 | 기대는 서비스 | 하는 일 |
 |---|---|---|---|
-| `RemoteHttp` · `RemoteHttps` | `remote/http.ts` `https.ts` | `remote` | 모바일 요청을 받는 **운반**. 리스너를 열고 `ctx.remote.carrier(…)` 로 자신을 올린다 |
-| (예정) 블루투스 운반 | `remote/bluetooth` | `remote` | 같은 자리에 하나 더 — 이슈 #171, 설계 `_workspace/01ab_mobile_bluetooth.md` |
+| `RemoteHttp` · `RemoteHttps` | `remote/http.ts` `https.ts` | `remote` | 모바일 요청을 받는 **운반**. 리스너를 열고 `ctx.remote.carrier(…)` 로 자신을 올린다. `RemoteHttps` 는 기능 `lan` 의 묶음 |
+| `RemoteBluetooth` | `remote/bluetooth.ts` | `remote` | 같은 자리의 BLE 운반(기능 `bluetooth` 의 묶음, #210) — 광고하고, 폰 연결마다 Noise NK → `serveFramed` → `ctx.remote.handle` |
 | `OpenTool` · `PresentTool` · `SessionTools` · `MakeTools` | `appMcp/tools/*` | `appMcp` (+`chat` `llm` `sessions` …) | 앱 MCP 서버에 도구를 등록(effect) |
 | `AtTrigger` · `SlashTrigger` | `src/triggers/*` | `triggers`, `llm` | 트리거를 등록소에 등록(effect). 하나를 내리면 그 문자는 평범한 글자 |
 | `*Bridge` (chatBridge 등) | `electron/main.ts` | 각 서비스 | 서비스 ↔ **IPC** 연결 (5절) |
@@ -75,7 +78,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 settings ──────────────┬────────────► features ─► (기능 묶음을 올리고 내림)
                        ├────────────► quit(+chat) · notifications(+sessions,projects) · speech
 providers ─► engine ─► llm ─┬─► sessions ─► chat ─┬─► attachments
-                            │                      ├─► remote ─► RemoteHttp/Https (운반)
+                            │                      ├─► remote ─► RemoteHttp/Https/Bluetooth (운반)
                             │                      ├─► hooks (+sessions, llm)
                             │                      └─► quit
                             ├─► skills · mcp · terminals · trajectory
@@ -94,6 +97,7 @@ projects ─► openIn
 - 올리고 내리기는 **한 줄(큐)** 로 선다 — 끄자마자 다시 켜도 옛 핸들러가 다 걷힌 뒤 새로 건다(`ipcMain.handle` 은 같은 채널 두 번을 거절한다). 한 묶음이 못 떠도 나머지와 `features/changed` 는 간다.
 - 기본값: `shared/features.ts` — 설정 파일에는 **기본과 다른 값만** 남는다. 고정(`FIXED`)은 저장 값이 있어도 이긴다.
 - `services()` 는 켜진 묶음의 서비스 키 목록 — 부팅 진단이 쓴다.
+- **기능 상태**(#224) — `status(id)`·`statuses()`: 켜진 기능마다 `mounting`·`on`·`failed(reason)`, 꺼진 기능은 상태 없음. 묶음 **아래 어느 fiber** 가 던져도 그 기능의 `failed` 다(묶음이 안에서 `ctx.plugin(Service)` 를 하면 안쪽 실패가 바깥 fiber 로 안 올라온다 — cordis 4 실측, 그래서 `internal/status` 의 FAILED fiber 를 위로 따라가 묶음을 찾는다). 사유는 `failureReason` — 첫 줄만·홈 경로 `~`·`redactSecrets`·160자 상한. 묶음이 스스로 알리는 길은 `problem(id, reason | undefined)`(글 또는 `{ key, vars }` 문구 키, 꺼진 기능의 알림은 버린다) — 지금 블루투스(라디오 꺼짐·권한·미지원·실패)와 음성(엔진·모델 파일 없음/손상)이 쓴다(`electron/main.ts` `bluetoothProblems`·`speechProblems`). 끄면 사유·문제를 지우고, 다시 켜면 다시 올린다.
 
 ## 5. IPC 연결 — 브리지 패턴
 
@@ -129,6 +133,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 | `settings` | `settings/changed` | 설정 변경 → 테마·기능 레지스트리·엔진이 듣는다 |
 | `providers` | `providers/changed` | provider 변경 → 엔진 설정 갱신 |
 | `features` | `features/changed` | 켜진 묶음을 다 올리고 내린 **뒤** — 엔진이 듣고 재시작 |
+| | `features/status` | 기능 상태(`FeatureStatuses` — 켜진 기능만)가 바뀌었다(#224) — 화면(설정 > 기능)이 `features:statuses-changed` 로 받는다 |
 | `remote` | `remote/changed` | 모바일 연결 상태 |
 | `speech` · `notifications` | `speech/changed` · `notifications/changed` `toast` `open` | 상태·토스트 |
 | `shell` · `terminals` | `shell/data` · `terminal/data` `terminal/exit` | 출력 조각 |
@@ -149,11 +154,14 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 
 ## 8. 운반 플러그인 — `ctx.remote` 밑
 
-`ctx.remote` 가 **서비스**(계약·인증·기기·짝짓기·이벤트 링)이고, HTTP·(예정)블루투스는 그 밑의 **운반 플러그인**이다. 소비자가 없는 것에 `ctx.<키>` 를 주면 경계만 늘기 때문에 서비스로 만들지 않았다.
+`ctx.remote` 가 **서비스**(계약·인증·기기·짝짓기·이벤트 링)이고, HTTP·TLS·블루투스는 그 밑의 **운반 플러그인**이다. 소비자가 없는 것에 `ctx.<키>` 를 주면 경계만 늘기 때문에 서비스로 만들지 않았다.
 
 - 운반이 `ctx.remote` 에 하는 일은 둘: `ctx.remote.carrier({ id, status })` 로 자신을 올리고(effect — 설정 화면이 상태를 읽는 길), 받은 요청을 `ctx.remote.handle(RemoteRequest, RemotePeer, exchange)` 에 넘긴다.
 - 요청·응답은 **운반 중립 타입**(`remote/carrier.ts`) — `http` 도 블루투스도 없다. 이벤트 스트림은 `RemoteStreamSink`(`write` 가 `false` 면 밀림 → 그동안 쌓이는 것을 합친다).
 - 토글 = 플러그인 올리기/내리기 → 포트 닫기·광고 멈춤이 fiber dispose 로 정리된다. 네이티브 모듈(블루투스) 로드 실패가 `ctx.remote`·HTTP 를 건드리지 않는다.
+- 길마다 토글이 따로다 (#210): `remote`(서비스 + 루프백 HTTP) 아래 `lan`(TLS)·`bluetooth`(BLE) 가 각각 기능 묶음이다. 설정 > 모바일의 두 토글이 이 두 기능 값을 바꾼다.
+- 라디오 운반의 상태(꺼짐·권한 없음 등)는 `status().error`(리스너 못 뜸)가 아니라 `status().radio` 에 둔다 — `ctx.remote.status().bluetooth` 로 화면에 간다. 기기마다 지금 운반은 `devices[].via`(붙은 스트림의 운반, 없으면 이 실행의 마지막 요청).
+- 블루투스 운반 (`remote/bluetooth.ts`): `load()`(앱은 `import('@stoprocent/bleno')`)를 **start 때 처음** 부르고, `ctx.remote.noiseIdentity()` 도 그때 처음 부른다 — 이 운반이 올라와 있고 키를 읽어 둔 때만 짝짓기 응답·QR·`hello` 에 `bluetoothKey`/`bk` 가 실린다. 사내망(TLS) 경로가 없으면 QR 은 `a`·`fp` 없는 블루투스 단독 QR 이다(#229). 광고는 서비스 UUID 하나(이름 없음), 폰 2대·핸드셰이크 10초. bleno 의 notify 신호는 Linux 만 → Mac·Windows 는 속도 상한(`BLUETOOTH_PACE_BYTES_PER_SECOND`, 실측 전 값)이 되밀림이다. macOS 는 끊김 신호·끊기가 없다 — tx 구독 해제를 끊김으로 보고, 우리가 끊은 연결은 구독 해제까지 쓰기를 무시한다.
 
 ## 9. 새 서비스를 더할 때
 

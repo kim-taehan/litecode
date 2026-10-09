@@ -217,6 +217,11 @@ export function createDemoSession(): AppSession {
     openConversation: () => undefined, // 견본은 전부 받아 둔 채로 시작한다
     closeConversation: () => undefined,
     wake: () => undefined,
+    carrier: 'wifi',
+    hasConnected: () => true,
+    getFailure: () => undefined,
+    receivedBytes: () => 0,
+    retry: () => undefined,
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -233,6 +238,16 @@ export function createDemoSession(): AppSession {
       } else {
         startEcho(chat, text)
       }
+      return true
+    },
+
+    modelOf: (cid) => chats.get(cid)?.info.model,
+    // 견본은 고르면 바로 그 대화의 모델이다 (진짜 세션은 다음 보내기에 실어 데스크탑이 바꾼다)
+    chooseModel(cid, model) {
+      const chat = chats.get(cid)
+      if (!chat || chat.turn) return false
+      chat.info.model = { providerId: model.providerId, modelId: model.modelId }
+      publishList()
       return true
     },
 

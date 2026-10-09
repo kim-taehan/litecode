@@ -45,8 +45,9 @@ describe('데스크탑 정적 키 — 봉해서 userData 에', () => {
     expect(JSON.parse(text)).toMatchObject({ version: 1, sealed: true })
     expect((await loadNoiseIdentity(file, cipher)).publicKeyText).toBe(first.publicKeyText)
     available = false
-    await expect(loadNoiseIdentity(file, cipher)).rejects.toMatchObject({ code: 'ENOISEKEY' })
-    await expect(loadNoiseIdentity(file)).rejects.toMatchObject({ code: 'ENOISEKEY' })
+    // 키 저장소 탓이면 keyStore 표시 — 화면이 영어 원문 대신 키체인 안내를 보인다 (이슈 #231)
+    await expect(loadNoiseIdentity(file, cipher)).rejects.toMatchObject({ code: 'ENOISEKEY', keyStore: true })
+    await expect(loadNoiseIdentity(file)).rejects.toMatchObject({ code: 'ENOISEKEY', keyStore: true })
     expect(await fs.readFile(file, 'utf8')).toBe(text)
   })
 
@@ -54,9 +55,11 @@ describe('데스크탑 정적 키 — 봉해서 userData 에', () => {
     const file = path.join(box.root, 'remote-noise-key.json')
     const broken: KeyCipher = { available: () => true, encrypt: () => Buffer.from('x'), decrypt: () => { throw new Error('bad') } }
     await fs.writeFile(file, JSON.stringify({ version: 1, key: 'AAAA', sealed: true }))
-    await expect(loadNoiseIdentity(file, broken)).rejects.toMatchObject({ code: 'ENOISEKEY' })
+    await expect(loadNoiseIdentity(file, broken)).rejects.toMatchObject({ code: 'ENOISEKEY', keyStore: true }) // 풀기 실패 = 키체인이 거절 (#231)
     await fs.writeFile(file, JSON.stringify({ version: 1, key: 'too-short', sealed: false }))
-    await expect(loadNoiseIdentity(file)).rejects.toMatchObject({ code: 'ENOISEKEY' })
+    const malformed = await loadNoiseIdentity(file).catch((error: unknown) => error)
+    expect(malformed).toMatchObject({ code: 'ENOISEKEY' })
+    expect((malformed as { keyStore?: boolean }).keyStore).toBeUndefined() // 모양이 틀린 것은 키 저장소 탓이 아니다
     expect(JSON.parse(await fs.readFile(file, 'utf8'))).toMatchObject({ key: 'too-short' })
   })
 
@@ -105,5 +108,40 @@ describe('QR 의 bk — 선택 필드', () => {
     expect(parsePairUri(pairUri({ ...link, bluetoothKey: bk.slice(1) }))).toBeUndefined()
     expect(parsePairUri(pairUri({ ...link, bluetoothKey: '' }))).toBeUndefined()
     expect(parsePairUri(`${pairUri(link)}&bk=${'+'.repeat(43)}`)).toBeUndefined()
+  })
+})
+
+describe('블루투스 단독 QR — bk 가 있으면 a·fp 는 선택 (이슈 #229)', () => {
+  const bk = encodeNoiseKey(generateNoiseKeyPair().publicKey)
+  const both: PairLink = { version: 1, desktopId: 'abcdef0123456789', name: 'PC', addresses: ['192.168.0.10:47600'], fingerprint: 'q'.repeat(43), code: 'AB10110Z9XYZ', expiresAt: 1_800_000_000, bluetoothKey: bk }
+  const bluetoothOnly: PairLink = { version: 1, desktopId: 'abcdef0123456789', name: 'PC', addresses: [], code: 'AB10110Z9XYZ', expiresAt: 1_800_000_000, bluetoothKey: bk }
+
+  it('블루투스 단독: a·fp 를 싣지 않고, 읽으면 주소 없음·지문 없음 — v 는 그대로 1', () => {
+    const uri = pairUri(bluetoothOnly)
+    expect(uri).toBe(`${PAIR_URI_PREFIX}v=1&d=abcdef0123456789&n=PC&c=AB10110Z9XYZ&x=1800000000&bk=${bk}`)
+    const parsed = parsePairUri(uri)!
+    expect(parsed).toEqual(bluetoothOnly)
+    expect('fingerprint' in parsed).toBe(false)
+  })
+
+  it('둘 다·사내망 단독은 지금 글자 그대로 라운드트립', () => {
+    expect(parsePairUri(pairUri(both))).toEqual(both)
+    const { bluetoothKey: _, ...lanOnly } = both
+    expect(parsePairUri(pairUri(lanOnly))).toEqual(lanOnly)
+  })
+
+  it('bk 가 없으면 a·fp 는 여전히 필수 — 블루투스 단독 모양에서 bk 만 빼면 읽지 않는다', () => {
+    expect(parsePairUri(pairUri({ ...bluetoothOnly, bluetoothKey: undefined }))).toBeUndefined()
+  })
+
+  it('a 만 있고 fp 가 없거나, fp 만 있고 a 가 없으면 bk 가 있어도 거절 (사내망 경로가 반쪽)', () => {
+    expect(parsePairUri(pairUri({ ...both, fingerprint: undefined }))).toBeUndefined()
+    expect(parsePairUri(pairUri({ ...both, addresses: [] }))).toBeUndefined()
+    expect(parsePairUri(pairUri({ ...both, fingerprint: 'short' }))).toBeUndefined()
+  })
+
+  it('bk 모양이 틀리면 블루투스 단독 QR 도 읽지 않는다', () => {
+    expect(parsePairUri(pairUri({ ...bluetoothOnly, bluetoothKey: bk.slice(1) }))).toBeUndefined()
+    expect(parsePairUri(pairUri({ ...bluetoothOnly, bluetoothKey: '' }))).toBeUndefined()
   })
 })

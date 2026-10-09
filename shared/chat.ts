@@ -42,8 +42,9 @@ export interface QueuedSend {
 }
 
 export interface SendResult {
-  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중(또는 앞에 쌓인 것이 있어) 그 대화 대기열에 들어갔다 */
-  state: 'sent' | 'queued'
+  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중(또는 앞에 쌓인 것이 있어) 그 대화 대기열에 들어갔다.
+   *  interjected: 사람이 친 글을 도는 턴에 끼워 넣었다 — 그 턴의 다음 스텝이 읽는다 (이슈 #250, 말풍선은 'turn.interjected') */
+  state: 'sent' | 'queued' | 'interjected'
 }
 
 export type TurnOutcome = 'done' | 'failed' | 'interrupted'
@@ -56,8 +57,12 @@ export interface ChatEventMap {
   'turn.progress': { cid: string; item: TurnItem }
   /** 그 턴이 지금 기다리는 승인·질문 전부 (빈 배열 = 더 없다) */
   'turn.attention': { cid: string; requests: Attention[] }
-  /** 턴이 끝났다 — message 는 답(실패·중단이면 error). usage 는 이 턴 것, conversation 은 합산·저장한 뒤의 목록 정보(지워졌으면 없다) */
-  'turn.ended': { cid: string; message: HistoryMessage; usage?: TurnUsage; outcome: TurnOutcome; conversation?: Conversation }
+  /** 도는 턴에 사람이 친 말을 끼워 넣었다 (이슈 #250) — message 는 그 말(interjected). 화면은 그때까지의 진행 줄을 그 앞의 답으로 얼리고
+   *  그 아래에 말풍선을 끼운다. 그 뒤 진행 줄은 말풍선 아래로 (얼린 답 안의 줄이 바뀌면 그 자리에서 — placeItem) */
+  'turn.interjected': { cid: string; message: HistoryMessage }
+  /** 턴이 끝났다 — message 는 답(실패·중단이면 error, 끼워 넣은 말이 있었으면 마지막 말 뒤의 답). usage 는 이 턴 것, conversation 은 합산·저장한 뒤의
+   *  목록 정보(지워졌으면 없다). unanswered: 끼워 넣었지만 답을 못 받은 말의 id (말풍선에 "답 없음") */
+  'turn.ended': { cid: string; message: HistoryMessage; usage?: TurnUsage; outcome: TurnOutcome; conversation?: Conversation; unanswered?: string[] }
   /** 대기열이 바뀌었다 — items 는 줄마다 보일 글. held: 사용자가 턴을 멈춰 붙잡힌 대기열(되돌리기를 기다린다). attachments: 쌓인 첨부 칩.
    *  sources: items 와 같은 순서로 그 줄을 보낸 대화 (사람이 친 줄은 null) — 이슈 #55 */
   'queue.changed': { cid: string; items: string[]; held: boolean; attachments: Attachment[]; sources?: (MessageOrigin | null)[] }
@@ -70,8 +75,8 @@ export type ChatEvent = { [K in ChatEventName]: { event: K; data: ChatEventMap[K
 
 /** 대화 하나의 지금 모습 — 화면을 다시 불러와도(창을 닫았다 열기) 도는 턴·대기열을 이어 그린다 */
 export interface ChatLive {
-  /** 턴이 도는 중일 때만 */
-  turn?: { message: HistoryMessage; startedAt: number; progress: TurnItem[]; attention: Attention[] }
+  /** 턴이 도는 중일 때만. interjections: 끼워 넣은 말과 그 앞에 얼린 답 (내 말 뒤에 이 순서로 — 이슈 #250), 없으면 빠진다 */
+  turn?: { message: HistoryMessage; startedAt: number; progress: TurnItem[]; attention: Attention[]; interjections?: HistoryMessage[] }
   queue: ChatEventMap['queue.changed']
 }
 
@@ -95,7 +100,10 @@ export function chipsOf(picked: readonly PickedAttachment[]): Attachment[] {
   return [...picked.filter((item) => item.kind !== 'image').map(chip), ...picked.filter((item) => item.kind === 'image').map(chip)]
 }
 
-/** 대기열 한 줄에 보일 글 — 보일 글(없으면 본문), 글 없이 첨부만 쌓았으면 파일 이름 (이슈 #44) */
+/** 대기열 한 줄에 보일 글 — 보일 글(없으면 본문), 첨부가 있으면 뒤에 ` · ` 로 파일 이름들. 글 없이 첨부만이면 이름만 (이슈 #44·#246).
+ *  글이 앞이라 한 줄 말줄임에서 잘리는 쪽은 이름이다 — 전체는 줄의 title 로 본다 */
 export function queueLabel(item: QueuedSend): string {
-  return (item.display ?? item.text) || (item.attachments ?? []).map((file) => file.name).join(', ')
+  const shown = item.display ?? item.text
+  const names = (item.attachments ?? []).map((file) => file.name).join(', ')
+  return shown && names ? `${shown} · ${names}` : shown || names
 }

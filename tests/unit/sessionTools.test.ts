@@ -45,6 +45,10 @@ class FakeLlm extends Service {
   newMessageId(): string {
     return `msg_${++this.ids}`
   }
+  /** 끼워 넣기 자리 (이슈 #250) — 이 가짜는 주지 않는다: 도는 턴에 보낸 글은 지금처럼 대기열로 간다 */
+  reserve(): undefined {
+    return undefined
+  }
   async chat({ providerId, modelId, directory, prompt, sessionId, onSession, messageId, mode, onAttention, stop }: ChatOptions): Promise<ChatResult> {
     const id = sessionId ?? `ses_${this.turns.length + 1}`
     if (!sessionId) await onSession?.(id)
