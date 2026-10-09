@@ -347,7 +347,7 @@ export function RemotePairPrompt({ on }: { on: boolean }) {
   if (!request) return null
   const answer = (allow: boolean) => void window.litecode.answerRemotePair(request.id, allow).catch(() => {})
   return (
-    <div className="confirm-mask">
+    <div className="confirm-mask confirm-mask--above-settings">
       <div className="confirm-dialog" ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="remote-pair-title" aria-describedby="remote-pair-description">
         <h2 id="remote-pair-title" className="confirm-dialog__title">
           {t('remote.request.title')}
