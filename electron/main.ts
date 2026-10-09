@@ -40,6 +40,7 @@ import { isWebUrl } from '../shared/webUrl.ts'
 import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
+import { UpdatesService } from '../src/services/updates.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
 import { HooksService } from '../src/services/hooks.ts'
 import { hooksBridge } from '../src/services/hooks/bridge.ts'
@@ -531,6 +532,15 @@ function speechBridge(ctx: Context): void {
 }
 speechBridge.inject = ['speech']
 
+// 새 버전 알림 (ctx.updates, 이슈 #273) — 설정 > 일반의 [지금 확인]·사이드바 알림의 [내려받기]. 상태가 바뀌면 모든 창에
+function updatesBridge(ctx: Context): void {
+  handle(ctx, Channel.UPDATES_STATUS, async () => ctx.updates.status())
+  handle(ctx, Channel.UPDATES_CHECK, async () => ctx.updates.check())
+  handle(ctx, Channel.UPDATES_OPEN, async (_event, url: unknown) => ctx.updates.openRelease(url))
+  ctx.on('updates/changed', (status) => broadcast(Channel.UPDATES_CHANGED, status))
+}
+updatesBridge.inject = ['updates']
+
 /** 블루투스 라디오의 문제(꺼짐·권한 없음·미지원·실패)를 설정 > 기능의 블루투스 연결 줄에도 알린다 (이슈 #224). 광고·켜는 중은 문제가 아니다.
  *  묶음이 내려가면 ctx.features 가 문제를 지운다 */
 function bluetoothProblems(ctx: Context): void {
@@ -703,6 +713,16 @@ const features: FeatureDefinition[] = [
         root: app.isPackaged ? bundledBrowserDir(process.resourcesPath) : devBrowserDir(path.join(__dirname, '../..')),
         dataDir: path.join(userData, 'browser'),
       })
+    },
+  },
+  {
+    // 새 버전 알림 (이슈 #273) — 기본 꺼짐(폐쇄망: 켜기 전엔 바깥 요청 0). 알림만 — 받거나 설치하지 않는다(mac 은 ad-hoc 서명이라 자동 교체가 안 된다).
+    // 설치본에서만 묻는다 — 개발 실행은 package.json 버전이 늘 낡아 보인다
+    id: 'updates',
+    service: 'updates',
+    plugin: (ctx) => {
+      ctx.plugin(UpdatesService, { currentVersion: app.getVersion(), packaged: app.isPackaged, open: (url: string) => shell.openExternal(url) })
+      ctx.plugin(updatesBridge)
     },
   },
 ]

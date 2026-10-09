@@ -7,6 +7,7 @@ import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../shared/fontSize.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import { isFeatureSwitches, type FeatureSwitches } from '../../shared/features.ts'
 import { isSpeechLanguage, type SpeechLanguage } from '../../shared/speech.ts'
+import { isUpdateUrl } from '../../shared/updates.ts'
 
 // 앱 설정(설정 > 일반) — 언어·테마·대화 글자 크기 등. 정본은 이 서비스, 앱에서는 userData 의 settings.json 하나
 // ("설정 파일 열기" 가 여는 파일 — dsh 처럼 사용자가 텍스트로 고칠 수 있다). 손으로 고친 값은 다음 실행 때 읽는다(파일 감시 없음).
@@ -36,6 +37,10 @@ export interface Settings {
   speechLanguage?: SpeechLanguage
   /** "대화 제목을 AI 가 짧게 정리" (설정 > 일반, 이슈 #215) — 첫 턴이 잘 끝나면 모델에 한 번 더 물어 제목을 바꾼다 (autoTitle.ts). 없으면 꺼짐 */
   autoTitle?: boolean
+  /** 새 버전 확인 주소 (설정 > 일반, 기능 `updates`, 이슈 #273) — 비었거나 없으면 기본값(shared/updates.ts DEFAULT_UPDATE_URL) */
+  updateUrl?: string
+  /** 사이드바의 새 버전 알림을 닫은 버전(릴리즈 태그) — 같은 버전은 다시 안 띄운다 */
+  dismissedUpdate?: string
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 새 대화는 기본 모드(01k §6).
@@ -70,6 +75,8 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   trayNoticeShown: (value): value is boolean => typeof value === 'boolean',
   speechLanguage: isSpeechLanguage,
   autoTitle: (value): value is boolean => typeof value === 'boolean',
+  updateUrl: isUpdateUrl,
+  dismissedUpdate: (value): value is string => typeof value === 'string',
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

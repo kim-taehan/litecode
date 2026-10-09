@@ -54,6 +54,7 @@ import { HoverCard, startMarquee, stopMarquee, useHoverCard } from './hoverCard.
 import { Rail } from './Rail.tsx'
 import { MissingConversations } from './MissingConversations.tsx'
 import { ProjectPopover } from './ProjectPopover.tsx'
+import { UpdateNotice } from './UpdateNotice.tsx'
 
 /** 말풍선·도는 턴(pending·progress·sentAt·attention)·대기열·제목·시각·통계는 메인(ctx.chat)이 정한다 — 이벤트로 받아 입힌다 (chatState.ts).
  *  답이 실패·중단이면 message.error 에 사유 (`⚠️ 사유` 로 그린다) */
@@ -982,6 +983,7 @@ export function App() {
         <HoverCard card={sessionHover.card} />
 
         <div className="sidebar__foot">
+          <UpdateNotice />
           <button
             type="button"
             className="settings-trigger"
