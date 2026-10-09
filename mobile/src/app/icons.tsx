@@ -67,6 +67,15 @@ export function ArrowUp() {
   )
 }
 
+/** 체크 — 모델 목록의 지금 것 (#269) */
+export function Check({ size = 16, color = C.link }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" stroke={color} strokeWidth={1.75} {...line}>
+      <Path d="M3 8.5l3.2 3L13 4.5" />
+    </Svg>
+  )
+}
+
 /** Wi-Fi (시안 mock-ble Main) */
 export function WifiIcon({ size = 24, color = C.sub }: { size?: number; color?: string }) {
   return (
