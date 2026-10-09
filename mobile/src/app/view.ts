@@ -1,6 +1,7 @@
 // 상태 → 화면에 쓸 글·모양 (순수 함수, React 없음 — tests/view.test.ts). 화면 컴포넌트는 이것을 그리기만 한다.
 
-import type { Attention, ConversationStatus, HistoryMessage, QuestionAttention, TurnItem } from '../../../shared/contract.ts'
+import type { Attention, ConversationStatus, HistoryMessage, QuestionAttention, ShellCard, TurnItem } from '../../../shared/contract.ts'
+import { stripAnsi } from '../../../shared/ansi.ts'
 import { stopFeedbackReason } from '../../../shared/hooks.ts'
 import type { RemoteConversation } from '../../../shared/remote.ts'
 import { BluetoothError, diagnosticDetail, type BluetoothFailure, type ConnectionStatus, type ConversationView } from '../core/index.ts'
@@ -158,6 +159,50 @@ export function turnTexts(items: readonly TurnItem[]): { id: string; text: strin
 /** 도는 턴이 시작한 때 — 마지막 내 말의 시각 */
 export function turnStartedAt(view: ConversationView): number | undefined {
   return [...view.messages].reverse().find((message) => message.role === 'user')?.at
+}
+
+/** 끝난 말풍선 줄의 한 칸 — 말풍선, 또는 그 앞에 끼운 데스크탑 `!` 카드 (#265) */
+export type ChatRow = { kind: 'message'; key: string; message: HistoryMessage } | { kind: 'shell'; key: string; card: ShellCard }
+
+/** 말풍선 사이에 `!` 카드를 끼운다 — 카드의 position(앞 말풍선 수) 자리에, 같은 자리는 실행 순서로. 말풍선 수 이상이면 끝에 (데스크탑 App.tsx shellCards 와 같은 자리) */
+export function chatRows(messages: readonly HistoryMessage[], shells: readonly ShellCard[] = []): ChatRow[] {
+  const card = (shell: ShellCard): ChatRow => ({ kind: 'shell', key: `s:${shell.id}`, card: shell })
+  return [
+    ...messages.flatMap((message, index): ChatRow[] => [...shells.filter((shell) => shell.position === index).map(card), { kind: 'message', key: `m:${index}`, message }]),
+    ...shells.filter((shell) => shell.position >= messages.length).map(card),
+  ]
+}
+
+/** 접힌 카드가 보이는 줄 수 — 화면이 numberOfLines 로도 쓴다 */
+export const SHELL_COLLAPSE_LINES = 8
+
+export interface ShellCardView {
+  command: string
+  /** 오른쪽 글 — 종료 코드 또는 끝난 사정 */
+  badge: string
+  /** ok: 종료 코드 0(초록) · failed: 0 아님·실행 못 함(빨강) · muted: 멈춤·기한 초과 */
+  tone: 'ok' | 'failed' | 'muted'
+  /** 색 코드를 뗀 출력 (끝 빈 줄 없이). 비었으면 "(출력 없음)" */
+  output: string
+  /** 접을 만큼 길다 — [전체 보기] 를 단다 */
+  long: boolean
+  /** 데스크탑이 가운데를 생략했다 */
+  truncated: boolean
+  /** "AI 에게 보내기" 로 맥락에 넣었다 */
+  shared: boolean
+}
+
+/** 데스크탑 `!` 카드의 읽기 전용 모양 (데스크탑 renderer/ShellCard.tsx 의 badge·접기와 같은 판정) */
+export function shellCardView(card: ShellCard): ShellCardView {
+  const output = stripAnsi(card.output).replace(/\n+$/, '')
+  const badge =
+    card.status === 'stopped' ? S.shellStopped
+    : card.status === 'timeout' ? S.shellTimeout
+    : card.status === 'error' ? S.shellError(card.error ?? '')
+    : card.exitCode === null ? S.shellStopped
+    : S.shellExit(card.exitCode)
+  const tone = card.status === 'error' ? 'failed' : card.status !== 'done' || card.exitCode === null ? 'muted' : card.exitCode === 0 ? 'ok' : 'failed'
+  return { command: card.command, badge, tone, output: output || S.shellNoOutput, long: output.split('\n').length > SHELL_COLLAPSE_LINES, truncated: card.truncated, shared: !!card.sharedMessageId }
 }
 
 /** 입력 카드 아래 여백(dp) */

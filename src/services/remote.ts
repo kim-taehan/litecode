@@ -648,6 +648,8 @@ export class RemoteService extends Service {
       }
       const live = this.ctx.chat.snapshot()[cid]
       const turn = live?.turn
+      // `!` 카드는 읽기 전용으로 싣는다 (#265) — 폰에서 실행하는 길은 없다. 출력은 이미 OUTPUT_LIMIT 으로 잘려 있다
+      const shells = conversation.shells?.length ? { shells: conversation.shells } : {}
       const snapshot: ConversationSnapshot = turn
         ? {
             // 턴이 도는 중이면 기록은 그 턴의 내 말까지만 — 쓰다 만 답은 live.progress 가 그리고, 끝나면 turn.ended 가 붙인다.
@@ -657,9 +659,10 @@ export class RemoteService extends Service {
               messages: [...withHistory({ ...emptyChatView, running: true, messages: [turn.message] }, history.messages).messages, ...(turn.interjections ?? [])],
             },
             live: { progress: turn.progress, attention: turn.attention, queue: live.queue.items },
+            ...shells,
             seq: this.log.seq,
           }
-        : { history, seq: this.log.seq }
+        : { history, ...shells, seq: this.log.seq }
       return [200, snapshot]
     },
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { Attention, AttentionAnswer, HistoryMessage, TurnItem } from '../../../../shared/contract.ts'
+import type { Attention, AttentionAnswer, HistoryMessage, ShellCard, TurnItem } from '../../../../shared/contract.ts'
 import { useKeyboardVisible, useNotice, useNow, useRemoteState } from '../hooks.ts'
 import { ArrowUp, BackArrow, ChevronDown, ChevronRight, Warning } from '../icons.tsx'
 import { BluetoothInfo, HistoryProgress } from '../BluetoothBits.tsx'
@@ -10,9 +10,9 @@ import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 import type { QuestionView } from '../view.ts'
-import { attentionTitle, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, turnHead, turnLines, turnStartedAt, turnTexts, userMessageView } from '../view.ts'
+import { attentionTitle, chatRows, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, SHELL_COLLAPSE_LINES, shellCardView, turnHead, turnLines, turnStartedAt, turnTexts, userMessageView } from '../view.ts'
 
-// 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
+// 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages, 사이사이 데스크탑 `!` 카드 — 읽기 전용) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
 // 답은 글자 그대로 그린다 — 마크다운은 다음 라운드. 모드 칩·"작업 N" 은 모양만.
 // 명령(보내기·중지·되돌리기·답)은 전부 데스크탑으로 간다. 안 된 것은 입력창 위 안내 띠(notice)로 — 누르면 닫힌다.
 // 블루투스로 붙어 있으면(시안 mock-ble ②): 머리 아래 안내 한 줄(배지는 뺐다 — 사용자 2026-10-09), 대화를 받는 동안 받은 KB, 입력창 위 [Wi-Fi 로 바꾸기].
@@ -97,7 +97,10 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
       </View>
 
       <ScrollView ref={scroll} style={styles.body} contentContainerStyle={styles.bodyContent} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
-        {view?.messages.map((message, index) => (message.role === 'user' ? <UserMessage key={index} message={message} /> : <Answer key={index} message={message} />))}
+        {view &&
+          chatRows(view.messages, view.shells).map((row) =>
+            row.kind === 'shell' ? <ShellCardBox key={row.key} card={row.card} /> : row.message.role === 'user' ? <UserMessage key={row.key} message={row.message} /> : <Answer key={row.key} message={row.message} />,
+          )}
         {view?.running && (
           <Turn head={turnHead(S.running, startedAt === undefined ? undefined : now - startedAt, view.progress)} items={view.progress} initiallyOpen />
         )}
@@ -217,6 +220,32 @@ function Turn({ head, items, initiallyOpen = false, error }: { head: string; ite
   )
 }
 
+/** 데스크탑 `!명령` 결과 카드 (#265) — 읽기 전용: 실행·멈춤·"AI 에게 보내기" 는 데스크탑에만 있다. 모양은 view.ts shellCardView 가 정한다 */
+function ShellCardBox({ card }: { card: ShellCard }) {
+  const [expanded, setExpanded] = useState(false)
+  const shape = shellCardView(card)
+  return (
+    <View style={styles.shell}>
+      <View style={styles.shellHead}>
+        <Text style={styles.shellCommand} numberOfLines={2}>
+          $ {shape.command}
+        </Text>
+        <Text style={[styles.shellBadge, shape.tone === 'ok' ? styles.shellOk : shape.tone === 'failed' ? styles.shellFailed : undefined]}>{shape.badge}</Text>
+      </View>
+      <Text style={styles.shellOutput} numberOfLines={shape.long && !expanded ? SHELL_COLLAPSE_LINES : undefined} selectable>
+        {shape.output}
+      </Text>
+      {shape.long && (
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded }} style={styles.shellMore} onPress={() => setExpanded(!expanded)}>
+          <Text style={styles.shellMoreText}>{expanded ? S.shellCollapse : S.shellExpand}</Text>
+        </Pressable>
+      )}
+      {shape.truncated && <Text style={styles.shellNote}>{S.shellTruncated}</Text>}
+      {shape.shared && <Text style={styles.shellNote}>{S.shellShared}</Text>}
+    </View>
+  )
+}
+
 function AttentionCard({ request, onAnswer }: { request: Attention; onAnswer(answer: AttentionAnswer): void }) {
   return (
     <View style={styles.card}>
@@ -296,6 +325,16 @@ const styles = StyleSheet.create({
   lineMono: { fontFamily: MONO, fontSize: 12, color: C.text2 },
   answer: { fontSize: 15, lineHeight: 24, color: C.text },
   error: { fontSize: 13, color: C.red },
+  shell: { borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, gap: 8 },
+  shellHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  shellCommand: { flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 13, fontWeight: '600', color: C.text },
+  shellBadge: { fontSize: 12, color: C.sub },
+  shellOk: { color: C.green },
+  shellFailed: { color: C.red },
+  shellOutput: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: C.text2 },
+  shellMore: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' },
+  shellMoreText: { fontSize: 13, fontWeight: '500', color: C.link },
+  shellNote: { fontSize: 12, color: C.sub },
   card: { borderWidth: 1, borderColor: C.amberBorder, backgroundColor: C.amberBg, borderRadius: 16, padding: 14, gap: 12 },
   cardTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardTitleText: { fontSize: 15, fontWeight: '600', color: C.amberText },

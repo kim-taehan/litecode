@@ -125,6 +125,16 @@ export const S = {
   unanswered: '답 없음',
   delegatedFrom: (title: string) => `다른 대화에서 온 지시 · ${title}`,
   delegatedFromProject: (project: string, title: string) => `다른 프로젝트에서 온 지시 · ${project} · ${title}`,
+  // 데스크탑 `!명령` 결과 카드 (#265, 읽기 전용 — 데스크탑 shellCard.* 문구)
+  shellExit: (code: number) => `종료 코드 ${code}`,
+  shellStopped: '중단됨',
+  shellTimeout: '시간 초과로 중단됨',
+  shellError: (reason: string) => `실행하지 못함: ${reason}`,
+  shellNoOutput: '(출력 없음)',
+  shellTruncated: '출력이 길어 가운데를 생략했습니다 (앞과 끝만 남깁니다)',
+  shellExpand: '전체 보기',
+  shellCollapse: '접기',
+  shellShared: 'AI 에게 보냄',
 
   now: '지금',
   secondsAgo: (n: number) => `${n}초`,
