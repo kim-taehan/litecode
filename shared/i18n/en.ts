@@ -503,6 +503,7 @@ export const en = {
   'error.interrupted': 'Interrupted — the engine (opencode) restarted or stopped before the reply finished. Please send again',
   'error.streamBroken': 'Interrupted — the event stream was cut. Please send again',
   'error.stopped': 'Interrupted — you stopped the reply',
+  'error.modelStalled': 'The model has not responded for {seconds} seconds. Please check the model settings (address and key)',
   'error.sessionCreate': 'Could not create the session ({status})',
   'error.modelList': 'Could not read the model list ({status})',
   'error.agentList': 'Could not list agents ({status})',
