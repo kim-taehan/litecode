@@ -164,7 +164,7 @@ describe('EngineService — 뜨는 중에 온 설정 변경', () => {
     expect(conn.gated('bash')).toBe(true)
     expect(serves()).toBe(2)
     expect(await engine.connection()).toBe(conn)
-  })
+  }, 15_000) // 값 반영을 최대 5초 기다리므로 기본 5초 제한이면 느린 CI 에서 먼저 끊긴다
 
   it('다시 띄우는 중(앞 서버가 꺼지는 동안)에 값이 되돌아가도 새 서버는 지금 값으로 뜬다', async () => {
     const { engine } = await start(0)
