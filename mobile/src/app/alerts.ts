@@ -56,6 +56,9 @@ export function alertKey(cid: string): string {
   return `conversation:${cid}`
 }
 
+/** 다시 붙음 알림의 키 — 하나로 고정해 쌓이지 않고 바뀐다 (#276) */
+export const RECONNECTED_KEY = 'desktop:reconnected'
+
 /** 알림 채널 — 답 필요(중요도 높음)와 결과(기본) 둘 */
 export function alertChannel(kind: AlertKind): 'attention' | 'result' {
   return kind === 'attention' ? 'attention' : 'result'
@@ -120,7 +123,8 @@ export function alertText(alert: Alert, state: RemoteState): AlertText {
 
 /** OS 알림을 내는 쪽 (platform/notifications.ts — expo-notifications). 테스트는 기록하는 host */
 export interface AlertHost {
-  notify(key: string, channel: 'attention' | 'result', text: AlertText, cid: string): void
+  /** cid 가 없으면(다시 붙음 알림) 누르면 앱만 열린다 */
+  notify(key: string, channel: 'attention' | 'result', text: AlertText, cid?: string): void
   dismiss(key: string): void
 }
 
@@ -150,7 +154,7 @@ export class AlertCenter {
   /** 이 세션의 이벤트를 듣는다 (앞의 세션은 놓는다) */
   attach(session: AppSession): void {
     this.detach?.()
-    this.detach = session.onEvent((event) => {
+    const stopEvents = session.onEvent((event) => {
       const context: AlertContext = { enabled: this.deps.prefs().notifications, foreground: this.deps.foreground(), ...(this.viewing !== undefined && { viewing: this.viewing }) }
       for (const action of this.rules.decide(event, context)) {
         if (action.type === 'dismiss') this.clear(action.cid)
@@ -158,6 +162,27 @@ export class AlertCenter {
         else this.show({ ...alertText(action.alert, session.getState()), cid: action.alert.cid, kind: action.alert.kind })
       }
     })
+    // 다시 붙음 (#276): 붙었다가(connected) 끊긴 뒤 다시 connected 가 될 때만, 앱이 뒤에 있고 알림이 켜져 있으면 한 건.
+    // 이 세션의 첫 연결(앱을 열어 처음 붙음)과 앞에서 보고 있는 동안 붙는 것은 알리지 않는다 (사용자 결정 — 덜 시끄럽게)
+    let wasConnected = session.getStatus().kind === 'connected'
+    let dropped = false
+    const stopStatus = session.subscribe(() => {
+      const connected = session.getStatus().kind === 'connected'
+      if (!connected) {
+        if (wasConnected) dropped = true
+        return
+      }
+      const reconnected = wasConnected && dropped
+      wasConnected = true
+      dropped = false
+      if (reconnected && this.deps.prefs().notifications && !this.deps.foreground()) {
+        this.deps.host.notify(RECONNECTED_KEY, 'result', { title: S.reconnected(session.desktop.name), body: '' })
+      }
+    })
+    this.detach = () => {
+      stopEvents()
+      stopStatus()
+    }
   }
 
   /** 지금 보고 있는 대화 (없으면 undefined) — 열면 그 대화의 알림·띠를 지운다 */

@@ -3,6 +3,8 @@ import path from 'node:path'
 import type { Conversation } from './sessions.ts'
 import './llm.ts' // 'llm/turn-*'·'llm/attention*' 이벤트 선언
 import { tr } from '../i18n.ts'
+import type { RemoteDeviceInfo } from './remote.ts' // 'remote/changed' 이벤트 선언 — 값은 import 하지 않는다 (ctx.remote 는 알림을 모르고, 꺼져 있어도 된다)
+import { BLUETOOTH_CARRIER } from './remote/carrier.ts'
 import type { ConversationStatus, NoticeState } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
@@ -76,6 +78,9 @@ export function route({ foreground, viewing, conversationId }: { foreground: boo
   return viewing === conversationId ? 'none' : 'app'
 }
 
+/** 같은 기기의 "연결됨" 알림은 이 시간 안에 한 번만 — 블루투스가 몇 초 간격으로 끊겼다 붙었다 해도 쌓이지 않게 (#276) */
+export const DEVICE_NOTICE_COOLDOWN_MS = 60_000
+
 interface Entry {
   project: string
   running: boolean
@@ -93,6 +98,10 @@ export class NotificationsService extends Service {
   private pendingOpen?: OpenTarget
   /** 이벤트를 받은 순서대로 처리한다 — 대화를 찾는 비동기 조회 때문에 started·ended 가 뒤바뀌지 않게 */
   private queue: Promise<void> = Promise.resolve()
+  /** 폰 연결 알림 (#276) — 기기 id → 지난번에 본 연결 여부 · 마지막으로 알린 시각 · 떠 있는 PC 알림 */
+  private deviceConnected = new Map<string, boolean>()
+  private deviceNoticeAt = new Map<string, number>()
+  private deviceNotes = new Map<string, SystemNotification>()
 
   constructor(
     ctx: Context,
@@ -124,8 +133,10 @@ export class NotificationsService extends Service {
       for (const [id, entry] of this.entries) if (entry.project === dir) this.forget(id, true)
       this.publish()
     })
+    ctx.on('remote/changed', (status) => this.devicesChanged(status.devices))
     ctx.effect(() => () => {
       for (const id of [...this.shown.keys()]) this.close(id)
+      for (const note of this.deviceNotes.values()) note.close()
       this.host.setBadge(0) // 꺼진 알림의 배지가 dock 에 남지 않게 (설정 > 기능에서 알림을 끄면 이 서비스가 내려간다)
     })
   }
@@ -192,6 +203,22 @@ export class NotificationsService extends Service {
       () => this.open(target),
     )
     this.shown.set(conversation.id, { note, attention: kind === 'question' || kind === 'permission' })
+  }
+
+  /** 짝지은 폰이 끊겼다가 다시 붙었다 (connected false→true) — 창이 뒤면 PC 알림 하나. 이 실행에서 처음 본 기기가 이미 붙어 있으면 알리지 않는다 */
+  private devicesChanged(devices: RemoteDeviceInfo[]): void {
+    for (const device of devices) {
+      const before = this.deviceConnected.get(device.id)
+      this.deviceConnected.set(device.id, device.connected)
+      if (before !== false || !device.connected || this.host.isForeground()) continue
+      const now = Date.now()
+      const last = this.deviceNoticeAt.get(device.id)
+      if (last !== undefined && now - last < DEVICE_NOTICE_COOLDOWN_MS) continue
+      this.deviceNoticeAt.set(device.id, now)
+      this.deviceNotes.get(device.id)?.close()
+      const via = tr(device.via === BLUETOOTH_CARRIER ? 'remote.via.bluetooth' : 'remote.via.wifi')
+      this.deviceNotes.set(device.id, this.host.show({ title: tr('notify.deviceConnected', { name: device.name, via }), body: '' }, () => this.host.reveal()))
+    }
   }
 
   private open(target: OpenTarget): void {

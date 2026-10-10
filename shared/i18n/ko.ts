@@ -482,6 +482,7 @@ export const ko = {
   'notify.attention': '답 필요',
   'notify.toasts': '알림',
   'notify.conversationGone': '대화가 지워졌습니다',
+  'notify.deviceConnected': '{name} 연결됨 — {via}',
   // 설정 > 모델
   'models.title': '모델',
   'models.hint': '모델을 제공하는 게이트웨이(OpenAI 호환)를 설정합니다.',

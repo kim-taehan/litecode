@@ -461,6 +461,7 @@ export const en = {
   'notify.attention': 'Needs you',
   'notify.toasts': 'Notifications',
   'notify.conversationGone': 'This conversation was deleted',
+  'notify.deviceConnected': '{name} connected — {via}',
   'models.title': 'Models',
   'models.hint': 'Set up the gateways (OpenAI compatible) that provide models.',
   'models.keyStoreLocked': "Stored keys cannot be read because Keychain access was not allowed — reopen the app and click 'Always Allow' in the Keychain prompt (EKEYSTORE)",
