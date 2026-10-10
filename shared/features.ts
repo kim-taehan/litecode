@@ -9,7 +9,7 @@ import type { MessageKey } from './i18n/ko.ts'
 export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'hooks', 'voice', 'browser', 'updates'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
-/** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 카드가 없다.
+/** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 스위치가 없다(#277 부터 "항상 켜짐" 읽기 전용 줄).
  *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP */
 const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true } as const satisfies Partial<Record<FeatureId, boolean>>
 export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = FIXED
