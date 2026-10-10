@@ -1,9 +1,10 @@
 import { Context, Service } from 'cordis'
-import { describe, expect, it } from 'vitest'
-import { NotificationsService, route, type NotificationHost } from '../../src/services/notifications.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DEVICE_NOTICE_COOLDOWN_MS, NotificationsService, route, type NotificationHost } from '../../src/services/notifications.ts'
 import { SettingsService } from '../../src/services/settings.ts'
 import type { Conversation } from '../../src/services/sessions.ts'
 import type { Project } from '../../src/services/projects.ts'
+import type { RemoteDeviceInfo, RemoteStatus } from '../../src/services/remote.ts'
 
 // 알림 판정 (ctx.notifications) — 이벤트는 ctx.emit 으로 직접 쏜다 (ctx.llm 은 이벤트만 내고 알림을 모른다).
 // 사용자 결정 2026-10-02: 사건 순간 창이 없거나 포커스가 없으면 PC 알림, 앞이면 앱 알림(토스트), 보고 있는 그 대화면 아무것도 안 함.
@@ -270,5 +271,65 @@ describe('NotificationsService', () => {
     expect(host.badges.at(-1)).toBe(1)
     await fiber.dispose()
     expect(host.badges.at(-1)).toBe(0)
+  })
+})
+
+describe('폰 연결 알림 (#276) — remote/changed 의 기기 connected false→true', () => {
+  afterEach(() => vi.useRealTimers())
+  const phone = (connected: boolean, via?: string): RemoteDeviceInfo => ({ id: 'd1', name: 'Galaxy', platform: 'android', pairedAt: 1, connected, ...(via && { via }) })
+  const changed = (...devices: RemoteDeviceInfo[]): RemoteStatus => ({ port: 47600, addresses: [], requests: [], devices })
+
+  it('끊겼던 기기가 다시 붙으면 PC 알림 한 건 — 운반이 블루투스면 "블루투스", 그 밖은 "Wi-Fi". 누르면 창을 앞으로', async () => {
+    const { ctx, host } = await start()
+    ctx.emit('remote/changed', changed(phone(false)))
+    ctx.emit('remote/changed', changed(phone(true, 'bluetooth')))
+    ctx.emit('remote/changed', changed(phone(true, 'bluetooth'))) // 같은 상태가 또 와도 한 건
+    expect(host.shown.map((entry) => entry.title)).toEqual(['Galaxy 연결됨 — 블루투스'])
+    host.shown[0]!.click()
+    expect(host.reveals).toBe(1)
+  })
+
+  it('이 실행에서 처음 본 기기가 이미 붙어 있으면 알리지 않는다', async () => {
+    const { ctx, host } = await start()
+    ctx.emit('remote/changed', changed(phone(true, 'https')))
+    expect(host.shown).toEqual([])
+  })
+
+  it('창이 앞이면 알리지 않는다', async () => {
+    const { ctx, host } = await start()
+    host.foreground = true
+    ctx.emit('remote/changed', changed(phone(false)))
+    ctx.emit('remote/changed', changed(phone(true, 'https')))
+    expect(host.shown).toEqual([])
+  })
+
+  it('같은 기기가 60초 안에 다시 붙으면 한 건만 — 지나면 다시, 새 알림은 이전 것을 닫는다', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-10T09:00:00Z'))
+    const { ctx, host } = await start()
+    const flap = (via: string) => {
+      ctx.emit('remote/changed', changed(phone(false, via)))
+      ctx.emit('remote/changed', changed(phone(true, via)))
+    }
+    flap('bluetooth')
+    vi.advanceTimersByTime(5_000)
+    flap('bluetooth')
+    vi.advanceTimersByTime(DEVICE_NOTICE_COOLDOWN_MS - 5_001)
+    flap('bluetooth')
+    expect(host.shown).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    flap('https')
+    expect(host.shown.map((entry) => [entry.title, entry.closed])).toEqual([['Galaxy 연결됨 — 블루투스', true], ['Galaxy 연결됨 — Wi-Fi', false]])
+  })
+
+  it('기능이 꺼지면(서비스를 내리면) 알리지 않고, 떠 있던 연결 알림도 닫는다', async () => {
+    const { ctx, host, fiber } = await start()
+    ctx.emit('remote/changed', changed(phone(false)))
+    ctx.emit('remote/changed', changed(phone(true, 'https')))
+    await fiber.dispose()
+    expect(host.shown[0]!.closed).toBe(true)
+    ctx.emit('remote/changed', changed(phone(false)))
+    ctx.emit('remote/changed', changed(phone(true, 'https')))
+    expect(host.shown).toHaveLength(1)
   })
 })

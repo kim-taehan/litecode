@@ -7,6 +7,8 @@ import { requireOptionalNativeModule } from 'expo'
 interface KeepAliveNative {
   start(title: string, text: string, channel: string): void
   stop(): void
+  /** Settings.Secure.ANDROID_ID — 연결 유지와 상관없지만 새 모듈을 들이지 않으려고 여기에 둔다 (이슈 #275). 옛 빌드에는 없다 */
+  androidId?(): string
 }
 
 const native = requireOptionalNativeModule<KeepAliveNative>('LitecodeKeepAlive')
@@ -26,6 +28,15 @@ export function keepAliveTask(): Promise<void> {
 /** 올린다(이미 떠 있으면 상시 알림의 글만 바뀐다). 앱이 앞에 있을 때 불러야 한다. channel 은 알림 채널의 보이는 이름 */
 export function startKeepAlive(title: string, text: string, channel: string): void {
   native?.start(title, text, channel)
+}
+
+/** 이 폰의 Android ID (재설치에도 같다) — 없거나 못 읽으면 undefined. 그대로 보내지 않는다: src/app/deviceKey.ts 가 해시한다 */
+export function androidId(): string | undefined {
+  try {
+    return native?.androidId?.() || undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function stopKeepAlive(): void {

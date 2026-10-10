@@ -7,7 +7,7 @@ import { AlertCenter } from './src/app/alerts.ts'
 import { useConnectionStatus, useHasConnected, useLinkState, usePrefs } from './src/app/hooks.ts'
 import { DesktopLink, lanUnsupported } from './src/app/link.ts'
 import { alertHost, notificationPermission, onNotificationOpen, requestNotificationPermission, setUpNotificationChannels, type NotificationPermission } from './src/app/notifications.ts'
-import { apiLevel, bluetooth, defaultDeviceName, desktopStore, pinnedNet, platform, prefsStore, transport } from './src/app/platform.ts'
+import { apiLevel, bluetooth, defaultDeviceName, desktopStore, deviceKey, pinnedNet, platform, prefsStore, transport } from './src/app/platform.ts'
 import { Preferences } from './src/app/prefs.ts'
 import { CarrierScreen } from './src/app/screens/CarrierScreen.tsx'
 import { ChatScreen } from './src/app/screens/ChatScreen.tsx'
@@ -37,6 +37,7 @@ const link = new DesktopLink({
   platform,
   apiLevel,
   bluetooth,
+  deviceKey,
   carrier: { get: () => preferences.value.carrier, set: (carrier) => preferences.set({ carrier }) },
 })
 void preferences.restore().then(() => link.restore())
