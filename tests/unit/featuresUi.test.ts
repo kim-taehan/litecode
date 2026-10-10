@@ -5,9 +5,8 @@ import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import { ko } from '../../shared/i18n/ko.ts'
 import { en } from '../../shared/i18n/en.ts'
 import { CHOOSABLE_FEATURES, FEATURE_FIXED, FEATURE_GROUPS, FEATURE_REQUIRES, MOBILE_PATH_FEATURES, type FeatureId, type FeatureStatuses, type FeatureSwitches } from '../../shared/features.ts'
-import { MODES, modePermission, type Mode, type ModeRule } from '../../shared/modes.ts'
 import { FeaturesPage } from '../../renderer/FeaturesSettings.tsx'
-import { ALWAYS_ON_FEATURES, MODE_PERMISSION_ROWS } from '../../renderer/featuresView.ts'
+import { ALWAYS_ON_FEATURES } from '../../renderer/featuresView.ts'
 
 // 설정 > 기능 — 한 줄에 기능 하나, 줄을 누르면 아래로 자세한 설명 (시안 _workspace/mock-features Main·Detail).
 // 저장된 기능 값은 테스트마다 바꿔 끼운다 (settingsStore 목킹 — reportUi.test.ts 방식)
@@ -22,7 +21,7 @@ vi.mock('../../renderer/featuresStore.ts', () => ({
   useFeatureStatuses: () => store.statuses,
 }))
 
-function render(features: FeatureSwitches = {}, initialExpanded: FeatureId | Mode | undefined = undefined, statuses: FeatureStatuses = {}, initialQuery = ''): string {
+function render(features: FeatureSwitches = {}, initialExpanded: FeatureId | undefined = undefined, statuses: FeatureStatuses = {}, initialQuery = ''): string {
   store.features = features
   store.statuses = statuses
   return renderToStaticMarkup(createElement(FeaturesPage, { initialExpanded, initialQuery }))
@@ -33,7 +32,7 @@ const CARDS = CHOOSABLE_FEATURES.filter((feature) => !MOBILE_PATH_FEATURES.inclu
 
 const count = (html: string, needle: string): number => html.split(needle).length - 1
 
-/** 줄의 펼침 버튼 (큰 묶음·소묶음의 펼침 버튼은 세지 않는다) */
+/** 줄의 펼침 버튼 (항상 켜짐 소묶음의 펼침 버튼은 세지 않는다) */
 const ROW_CLOSED = 'class="feature-row__toggle" aria-expanded="false"'
 const ROW_OPEN = 'class="feature-row__toggle" aria-expanded="true"'
 
@@ -41,7 +40,7 @@ describe('FeaturesPage — 접힌 첫 그림', () => {
   it('고르는 기능마다 한 줄: 펼침 버튼(aria-expanded=false) + 이름 + 한 줄 요약 + 스위치', () => {
     const html = render()
     expect(count(html, 'role="switch"')).toBe(CARDS.length)
-    expect(count(html, ROW_CLOSED)).toBe(CARDS.length) // 항상 켜짐·모드 줄은 접힌 묶음 안이라 없다
+    expect(count(html, ROW_CLOSED)).toBe(CARDS.length) // 항상 켜짐 줄은 접힌 묶음 안이라 없다
     expect(html).not.toContain(ROW_OPEN)
     for (const feature of CARDS) {
       expect(html).toContain(`data-feature="${feature}"`)
@@ -171,40 +170,30 @@ describe('기능 문구', () => {
   })
 })
 
-// 이슈 #277 — 큰 묶음 둘(앱 전체 / 대화마다)·항상 켜짐 줄·모드 권한 표·찾기 (보고서 _workspace/report-plugins/builtin-plugins.html 4절)
-/** 큰 묶음 하나 (다음 큰 묶음 앞까지) */
-const scopeOf = (html: string, scope: 'global' | 'session'): string => {
-  const start = html.indexOf(`data-feature-scope="${scope}"`)
-  if (start < 0) return ''
-  const next = html.indexOf('data-feature-scope=', start + 1)
-  return html.slice(start, next < 0 ? undefined : next)
-}
-/** 큰 묶음·소묶음 머리의 펼침 버튼 */
+// 이슈 #277 — 항상 켜짐 줄·찾기 (보고서 _workspace/report-plugins/builtin-plugins.html 4절). 앱 전체/대화마다 큰 묶음·모드 표는 #281 에서 없앴다
+/** 항상 켜짐 소묶음 머리의 펼침 버튼 */
 const headToggle = (open: boolean, disabled = false): string =>
   `class="feature-scope__toggle" aria-expanded="${open}"${disabled ? ' disabled=""' : ''}>`
 
-describe('FeaturesPage — 큰 묶음 둘', () => {
-  it('앱 전체(Global)가 먼저 펼쳐져 있고, 대화마다(Session)는 접혀 있다 — 둘 다 제목과 한 줄 설명', () => {
+describe('FeaturesPage — 묶음 (#281 큰 묶음 없음)', () => {
+  it('앱 전체/대화마다 큰 묶음과 모드 줄이 없다', () => {
     const html = render()
-    const global = scopeOf(html, 'global')
-    const session = scopeOf(html, 'session')
-    expect(html.indexOf('data-feature-scope="global"')).toBeLessThan(html.indexOf('data-feature-scope="session"'))
-    expect(global).toContain(`${headToggle(true)}`)
-    expect(global).toContain('앱 전체 (Global)')
-    expect(global).toContain('모든 대화가 함께 쓰는 기능. 켜고 끄면 앱 전체에 적용됩니다')
-    expect(session).toContain(`${headToggle(false)}`)
-    expect(session).toContain('대화마다 (Session)')
-    expect(session).toContain('대화마다 고르는 설정. 입력창의 모드 칩에서 바꿉니다')
-    expect(session).not.toContain('data-mode=') // 접힌 묶음엔 줄이 없다
+    expect(html).not.toContain('data-feature-scope=')
+    expect(html).not.toContain('앱 전체 (Global)')
+    expect(html).not.toContain('대화마다 (Session)')
+    expect(html).not.toContain('data-mode=')
+    expect(html).not.toContain('<table')
   })
 
-  it('앱 전체 안에는 네 소묶음 + 맨 아래 접힌 "항상 켜짐" 소묶음 — 고르는 줄은 전부 앱 전체 안', () => {
-    const global = scopeOf(render(), 'global')
-    const order = [...FEATURE_GROUPS.map((group) => group.id), 'alwaysOn'].map((id) => global.indexOf(`data-feature-group="${id}"`))
+  it('네 소묶음이 평평하게 놓이고 맨 아래에 접힌 "항상 켜짐" 소묶음 — 고르는 줄은 전부 그 위', () => {
+    const html = render()
+    const order = [...FEATURE_GROUPS.map((group) => group.id), 'alwaysOn'].map((id) => html.indexOf(`data-feature-group="${id}"`))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
-    for (const feature of CARDS) expect(global).toContain(`data-feature="${feature}"`)
-    const alwaysOn = global.slice(global.indexOf('data-feature-group="alwaysOn"'))
+    const alwaysOnAt = html.indexOf('data-feature-group="alwaysOn"')
+    for (const feature of CARDS) expect(html.indexOf(`data-feature="${feature}"`)).toBeLessThan(alwaysOnAt)
+    const alwaysOn = html.slice(alwaysOnAt)
+    expect(count(html, 'class="feature-scope__toggle"')).toBe(1) // 접기 버튼은 항상 켜짐 하나뿐
     expect(alwaysOn).toContain(headToggle(false))
     expect(alwaysOn).toContain('>항상 켜짐<')
     expect(alwaysOn).not.toContain('data-always-on') // 접혀 있다
@@ -242,97 +231,37 @@ describe('FeaturesPage — 항상 켜짐 (필수 기능 읽기 전용)', () => {
   })
 })
 
-describe('FeaturesPage — 모드 줄과 권한 요약 표', () => {
-  const RULE_TEXT: Record<ModeRule, string> = { allow: '허용', ask: '묻기', deny: '막힘' }
-  const STRICT: Record<ModeRule, number> = { allow: 0, ask: 1, deny: 2 }
-
-  it('모드 줄을 펼치면 대화마다 묶음이 열리고 모드 4종 줄(이름·한 줄)이 보인다 — 스위치 없음', () => {
-    const session = scopeOf(render({}, 'plan'), 'session')
-    expect(session).toContain(headToggle(true))
-    for (const mode of MODES) {
-      expect(session).toContain(`data-mode="${mode}"`)
-      expect(session).toContain(`>${translate('ko', `mode.${mode}`)}<`)
-      expect(session).toContain(translate('ko', `mode.${mode}.description`))
-    }
-    expect(session).not.toContain('role="switch"')
-    expect(count(session, ROW_OPEN)).toBe(1)
-  })
-
-  it('표의 값은 모드×행 전부 modePermission 과 같다 (행의 권한이 여럿이면 가장 엄한 값)', () => {
-    for (const mode of MODES) {
-      const html = render({}, mode)
-      for (const row of MODE_PERMISSION_ROWS) {
-        const expected = row.probes
-          .map((probe) => modePermission(mode, probe.permission, { resources: 'resources' in probe ? probe.resources : undefined }))
-          .reduce((a, b) => (STRICT[b] > STRICT[a] ? b : a))
-        const label = translate('ko', `settings.features.mode.row.${row.id}` as MessageKey)
-        expect([mode, row.id, html.includes(`data-permission-row="${row.id}"><th scope="row">${label}</th><td data-rule="${expected}">${RULE_TEXT[expected]}</td>`)]).toEqual([
-          mode,
-          row.id,
-          true,
-        ])
-      }
-    }
-  })
-
-  it('표가 보고서의 권한 요약과 같다 (계획은 다른 프로젝트 도구를 막는다 — 엔진에서 도구가 빠진다)', () => {
-    const table = Object.fromEntries(
-      MODES.map((mode) => {
-        const html = render({}, mode)
-        return [mode, MODE_PERMISSION_ROWS.map((row) => html.match(new RegExp(`data-permission-row="${row.id}">.*?data-rule="(\\w+)"`))?.[1])]
-      }),
-    )
-    // 행: 파일 수정·명령 / 웹 / MCP / 다른 프로젝트 / 폴더 밖·.env
-    expect(table).toEqual({
-      plan: ['deny', 'deny', 'deny', 'deny', 'ask'],
-      build: ['allow', 'allow', 'allow', 'ask', 'ask'],
-      ask: ['ask', 'ask', 'ask', 'ask', 'ask'],
-      full: ['allow', 'allow', 'allow', 'ask', 'allow'],
-    })
-  })
-
-  it('펼친 줄 맨 아래에 전환 방법 한 줄 — ⇧Tab 순환은 계획 → 기본 → 매번 묻기', () => {
-    const html = render({}, 'full')
-    const detail = html.slice(html.indexOf('id="feature-detail-full"'))
-    expect(detail.indexOf('</table>')).toBeLessThan(detail.indexOf('⇧Tab'))
-    expect(detail).toContain('⇧Tab 으로 돌아가며 바꾸는 모드: 계획 → 기본 → 매번 묻기')
-  })
-})
-
 describe('FeaturesPage — 찾기', () => {
   it('찾기 칸은 맨 위, 기능 찾기 문구를 단다', () => {
     const html = render()
     expect(html).toContain('aria-label="기능 찾기"')
     expect(html).toContain('placeholder="기능 이름·설명 찾기"')
-    expect(html.indexOf('session-search__input')).toBeLessThan(html.indexOf('data-feature-scope="global"'))
+    expect(html.indexOf('session-search__input')).toBeLessThan(html.indexOf('data-feature-group='))
   })
 
-  it('찾는 동안은 묶음이 모두 펼쳐지고 일치하는 줄만 보인다 — 일치 없는 소묶음 제목은 숨긴다 (앞뒤 공백 무시)', () => {
+  it('찾는 동안은 접힌 "항상 켜짐" 도 펼쳐지고 일치하는 줄만 보인다 — 일치 없는 소묶음 제목은 숨긴다 (앞뒤 공백 무시)', () => {
     const html = render({}, undefined, {}, '  명령 ')
-    expect(scopeOf(html, 'global')).toContain(headToggle(true, true))
-    expect(scopeOf(html, 'session')).toContain(headToggle(true, true))
+    expect(html).toContain(headToggle(true, true))
     const shown = [...html.matchAll(/data-feature="(\w+)"/g)].map((match) => match[1]).sort()
     expect(shown).toEqual(['bang', 'hooks', 'shell', 'slash'])
-    const modes = [...html.matchAll(/data-mode="(\w+)"/g)].map((match) => match[1]).sort()
-    expect(modes).toEqual(['ask', 'build', 'plan'])
+    expect(html).not.toContain('data-mode=')
     expect(html).toContain('data-feature-group="automation"')
     expect(html).toContain('data-feature-group="alwaysOn"')
     for (const hidden of ['screen', 'ai', 'devices']) expect(html).not.toContain(`data-feature-group="${hidden}"`)
     expect(html).not.toContain('일치하는 기능이 없습니다.')
   })
 
-  it('대소문자를 가리지 않는다 — mcp 는 MCP 가 든 줄을 찾는다, 일치가 없는 큰 묶음은 숨긴다', () => {
+  it('대소문자를 가리지 않는다 — mcp 는 MCP 가 든 줄을 찾는다', () => {
     const html = render({}, undefined, {}, 'mcp')
     const shown = [...html.matchAll(/data-feature="(\w+)"/g)].map((match) => match[1]).sort()
     expect(shown).toEqual(['appMcp', 'browser', 'mcp'].filter((feature) => translate('ko', `feature.${feature}` as MessageKey).includes('MCP') || translate('ko', `feature.${feature}.description` as MessageKey).includes('MCP')).sort())
     expect(shown).toContain('mcp')
-    expect(html).not.toContain('data-feature-scope="session"')
   })
 
   it('하나도 없으면 "일치하는 기능이 없습니다." 한 줄만', () => {
     const html = render({}, undefined, {}, 'zzzz')
     expect(html).toContain('>일치하는 기능이 없습니다.<')
-    expect(html).not.toContain('data-feature-scope=')
+    expect(html).not.toContain('data-feature-group=')
     expect(html).not.toContain('data-feature=')
   })
 
@@ -352,13 +281,5 @@ describe('기능 화면 문구 (#277)', () => {
       }
       for (const dict of [ko, en] as Record<string, string>[]) expect(dict[`feature.${feature}.description`]).not.toContain('\n')
     }
-  })
-
-  it('표의 행 이름과 값 문구가 ko/en 둘 다 있다', () => {
-    const keys = [
-      ...MODE_PERMISSION_ROWS.map((row) => `settings.features.mode.row.${row.id}`),
-      ...(['allow', 'ask', 'deny'] as const).map((rule) => `settings.features.mode.${rule}`),
-    ]
-    for (const key of keys) expect([key, key in ko, key in en]).toEqual([key, true, true])
   })
 })
