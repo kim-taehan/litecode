@@ -1026,3 +1026,87 @@
   background: var(--warn-soft);
   color: var(--text);
 }
+
+/* 찾기 칸 + 큰 묶음 둘(앱 전체 / 대화마다) + 항상 켜짐 줄 + 모드 권한 표 (이슈 #277) — 기존 줄·칩·알약 모양을 그대로 쓰고 자리만 더한다 */
+.features-page__search .session-search {
+  margin: 0;
+}
+
+.features-page__empty {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-caption);
+}
+
+.feature-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.feature-scope__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.feature-scope__title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.feature-scope__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.feature-scope__toggle:disabled {
+  cursor: default;
+}
+
+.feature-scope__toggle[aria-expanded='true'] .feature-row__chevron {
+  transform: rotate(90deg);
+  color: var(--text-secondary);
+}
+
+.feature-row__status--fixed {
+  background: var(--fill-active);
+  color: var(--text-secondary);
+}
+
+.feature-mode-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.feature-mode-table th,
+.feature-mode-table td {
+  padding: 3px 24px 3px 0;
+  text-align: left;
+}
+
+.feature-mode-table thead th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.feature-mode-table tbody th {
+  font-weight: 400;
+}
+
+.feature-mode-table td {
+  color: var(--text);
+}
