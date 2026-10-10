@@ -204,5 +204,6 @@ export const S = {
   channelKeepAlive: '연결 유지',
   keepAliveTitle: 'litecode',
   keepAliveText: (desktop: string) => `데스크탑에 연결됨 · ${desktop}`,
+  reconnected: (desktop: string) => `데스크탑에 연결되었습니다 — ${desktop}`,
   about: (version: string) => `litecode 모바일 ${version} · 모델, 프로젝트, MCP 설정은 데스크탑에서 바꿉니다.`,
 } as const
