@@ -46,7 +46,14 @@ export interface PairRequest {
   code: string
   deviceName: string
   platform: 'android' | 'ios'
+  /** 이 폰의 고정 키 (hex 32자, 이슈 #275) — 같은 키로 다시 짝지으면(사용자가 [허용]을 누르는 순간) 데스크탑이 옛 짝을 교체한다(옛 토큰 무효·연결 끊음).
+   *  개인정보: 기기 고유값(Android ID — 재설치에도 같다)을 그대로 보내지 않고 sha256("litecode-device/1:" + 값) 의 앞 32자만 보낸다.
+   *  데스크탑은 이것을 로컬의 기기 목록 파일에만 둔다. 없으면(옛 폰·네이티브 없음) 교체하지 않는다 */
+  deviceKey?: string
 }
+
+/** PairRequest.deviceKey 의 모양 — 데스크탑은 모양만 본다(맞지 않으면 없는 것으로) */
+export const DEVICE_KEY_PATTERN = /^[0-9a-f]{32}$/
 /** POST /v1/pair 의 403 사유 — 폰은 글(error)이 아니라 이것으로 안내를 가른다.
  *  no-code: 진행 중인 짝짓기 코드가 없다(시작 안 함·2분 만료·이미 씀·5회 틀려 버림) · wrong-code: 코드가 틀렸다 · denied: 데스크탑에서 [거절] */
 export type PairRejectReason = 'no-code' | 'wrong-code' | 'denied'

@@ -341,6 +341,53 @@ describe('인증·경계', () => {
     expect(JSON.parse(await fs.readFile(path.join(root, 'remote-devices.json'), 'utf8')).devices).toHaveLength(1)
   })
 
+  it('같은 deviceKey 로 다시 짝지으면 [허용] 순간 옛 짝을 교체한다 — 옛 토큰 401·옛 스트림 끊김. 허용 전·거절이면 옛 짝 그대로 (#275)', async () => {
+    const { remote, api, events } = await start()
+    const key = 'a'.repeat(32)
+    const ask = async (deviceKey?: string) => {
+      const code = remote.startPairing().pairing!.code
+      const answer = api('POST', '/v1/pair', { body: { code, deviceName: 'Pixel 8', platform: 'android', ...(deviceKey && { deviceKey }) } })
+      await until(() => remote.status().requests.length === 1, '짝짓기 요청')
+      return { answer, id: remote.status().requests[0]!.id }
+    }
+    const pairWith = async (deviceKey?: string) => {
+      const { answer, id } = await ask(deviceKey)
+      remote.answerPair(id, true)
+      return (await answer).body as { deviceId: string; token: string }
+    }
+
+    const old = await pairWith(key)
+    const stream = await events(old.token)
+    await until(() => remote.status().devices[0]?.connected === true, '옛 기기 연결')
+
+    // 허용 전에는 옛 짝 그대로, 거절하면 그대로
+    const denied = await ask(key)
+    expect(remote.status().devices.map((device) => device.id)).toEqual([old.deviceId])
+    remote.answerPair(denied.id, false)
+    expect((await denied.answer).status).toBe(403)
+    expect((await api('GET', '/v1/hello', { token: old.token })).status).toBe(200)
+    expect(stream.ended()).toBe(false)
+
+    // 허용하면 교체
+    const fresh = await pairWith(key)
+    expect(remote.status().devices.map((device) => device.id)).toEqual([fresh.deviceId])
+    expect((await api('GET', '/v1/hello', { token: old.token })).status).toBe(401)
+    expect((await api('GET', '/v1/hello', { token: fresh.token })).status).toBe(200)
+    await until(() => stream.ended(), '옛 스트림 끊김')
+    expect(parseFrames(stream.raw()).at(-1)).toEqual({ event: 'device.revoked', data: {}, seq: undefined })
+    const stored = JSON.parse(await fs.readFile(path.join(root, 'remote-devices.json'), 'utf8')).devices
+    expect(stored).toMatchObject([{ id: fresh.deviceId, deviceKey: key }])
+
+    // 다른 키는 별개, 키가 없는 요청·모양이 틀린 키는 교체하지 않는다
+    const other = await pairWith('b'.repeat(32))
+    const keyless = await pairWith()
+    const malformed = await pairWith('A'.repeat(32))
+    expect(remote.status().devices.map((device) => device.id)).toEqual([fresh.deviceId, other.deviceId, keyless.deviceId, malformed.deviceId])
+    await pairWith()
+    expect(remote.status().devices).toHaveLength(5)
+    expect((await api('GET', '/v1/hello', { token: keyless.token })).status).toBe(200)
+  })
+
   it('접속하면 마지막 접속 시각이 적힌다', async () => {
     const { remote, api, pair } = await start()
     const { token } = await pair()

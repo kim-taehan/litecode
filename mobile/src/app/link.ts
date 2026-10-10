@@ -174,6 +174,8 @@ export class DesktopLink {
       now?: () => number
       bluetooth?: BleDriver
       carrier?: CarrierChoice
+      /** 이 폰의 고정 키 (deviceKey.ts) — 짝짓기 요청마다 싣는다(같은 키면 데스크탑이 옛 짝을 교체, 이슈 #275). 없으면 싣지 않는다 */
+      deviceKey?: string
     },
   ) {}
 
@@ -353,10 +355,10 @@ export class DesktopLink {
     /** 짝짓기에만 쓴 운반을 거둔다 — 저장 뒤·붙기 전(또는 실패 때) */
     release?(): void
   }): Promise<void> {
-    const { platform, store } = this.deps
+    const { platform, store, deviceKey } = this.deps
     const client = new RemoteClient({ transport: request.transport, baseUrl: request.baseUrl })
     try {
-      const paired = await client.pair({ code: request.code, deviceName: request.deviceName, platform })
+      const paired = await client.pair({ code: request.code, deviceName: request.deviceName, platform, ...(deviceKey && { deviceKey }) })
       const hello = await client.hello().catch(() => undefined)
       request.release?.()
       const saved: SavedDesktop = {
