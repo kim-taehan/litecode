@@ -515,7 +515,9 @@ describe('블루투스 단독 QR — 사내망이 꺼져 있어도 블루투스�
     const desktop = await start({ noiseKeyFile: noiseKeyFile(), tls: { addresses: () => ['127.0.0.1'], allowPeer: () => true } })
     await bluetooth(desktop, new FakeBleno())
     desktop.remote.startPairing()
-    await until(() => !!desktop.remote.status().pairing?.uri && parsePairUri(desktop.remote.status().pairing!.uri!)!.bluetoothKey !== undefined, 'QR 의 bk')
+    // 사내망 주소(TLS 리스너가 뜬 뒤)와 bk 가 둘 다 실린 QR 까지 기다린다 — CI 에서는 주소가 bk 보다 늦게 실려 한 번 비어 있었다
+    const qr = () => parsePairUri(desktop.remote.status().pairing?.uri ?? '')
+    await until(() => (qr()?.bluetoothKey ?? '') !== '' && (qr()?.addresses.length ?? 0) > 0, 'QR 의 주소와 bk')
     const link = parsePairUri(desktop.remote.status().pairing!.uri!)!
     expect(link.fingerprint).toBe(desktop.remote.status().fingerprint)
     expect(link.addresses.length).toBeGreaterThan(0)
