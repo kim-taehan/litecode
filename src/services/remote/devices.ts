@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { DEVICE_KEY_PATTERN } from '../../../shared/remote.ts'
 import { readJsonFile, unreadableFileError, writeJsonFile } from '../jsonFile.ts'
 
 // 짝지은 기기 (userData/remote-devices.json) — 토큰은 **해시(SHA-256)만** 둔다. 파일이 새도 토큰을 되살릴 수 없다.
@@ -16,6 +17,8 @@ export interface StoredDevice {
   tokenHash: string
   pairedAt: number
   lastSeenAt?: number
+  /** 폰의 고정 키 (shared/remote.ts PairRequest.deviceKey, 이슈 #275) — 같은 키로 다시 짝지으면 이 기록을 교체한다. 옛 기록·옛 폰에는 없다 */
+  deviceKey?: string
 }
 
 interface Stored {
@@ -71,10 +74,10 @@ export class DeviceStore {
   }
 
   /** 새 기기 — 256bit 토큰을 만들어 해시만 저장하고, 토큰은 이 한 번만 돌려준다 */
-  async add(name: string, platform: DevicePlatform): Promise<{ device: StoredDevice; token: string }> {
+  async add(name: string, platform: DevicePlatform, deviceKey?: string): Promise<{ device: StoredDevice; token: string }> {
     if (this.unreadable) throw this.unreadable
     const token = randomBytes(32).toString('base64url')
-    const device: StoredDevice = { id: `dev_${randomBytes(8).toString('hex')}`, name, platform, tokenHash: hashToken(token), pairedAt: this.now() }
+    const device: StoredDevice = { id: `dev_${randomBytes(8).toString('hex')}`, name, platform, tokenHash: hashToken(token), pairedAt: this.now(), ...(deviceKey && { deviceKey }) }
     this.stored = { ...this.stored, devices: [...this.stored.devices, device] }
     await this.write()
     return { device, token }
@@ -129,7 +132,8 @@ function isDevice(value: unknown): value is StoredDevice {
     typeof entry.tokenHash === 'string' &&
     /^[0-9a-f]{64}$/.test(entry.tokenHash) &&
     typeof entry.pairedAt === 'number' &&
-    (entry.lastSeenAt === undefined || typeof entry.lastSeenAt === 'number')
+    (entry.lastSeenAt === undefined || typeof entry.lastSeenAt === 'number') &&
+    (entry.deviceKey === undefined || (typeof entry.deviceKey === 'string' && DEVICE_KEY_PATTERN.test(entry.deviceKey)))
   )
 }
 

@@ -458,6 +458,7 @@ interface Turn {
 interface DesktopStatus {
   pairing?: { code: string; uri?: string }
   requests: { id: string; confirm: string; pinned?: true }[]
+  devices: { id: string }[]
 }
 interface Desktop {
   ctx: { chat: { send(cid: string, input: { text: string }): Promise<unknown> } }
@@ -586,10 +587,10 @@ describe('블루투스만으로 짝짓기 — 진짜 ctx.remote 의 블루투스
     )
     return { desktop, identity, desktopId, ble }
   }
-  function pairingLink(ble: FakeBle, carrier = choice('wifi')) {
+  function pairingLink(ble: FakeBle, carrier = choice('wifi'), deviceKey?: string) {
     const wifi = deadWifi()
     const store = memoryStore()
-    const link = new DesktopLink({ store, transport: wifi.transport, pinned: wifi.pinned, platform: 'android', bluetooth: ble.driver, carrier })
+    const link = new DesktopLink({ store, transport: wifi.transport, pinned: wifi.pinned, platform: 'android', bluetooth: ble.driver, carrier, deviceKey })
     links.push(link)
     return { link, wifi, store, carrier }
   }
@@ -623,6 +624,34 @@ describe('블루투스만으로 짝짓기 — 진짜 ctx.remote 의 블루투스
     expect(wifi.calls).toBe(0) // Wi-Fi 는 한 번도 시도하지 않았다
     expect(ble.connections).toBe(2) // 짝짓기 링크 하나(닫았다) + 세션 링크 하나
   }, 20_000)
+
+  it('블루투스 채널 안의 짝짓기에도 기기 키가 실린다 — 같은 키로 다시 짝지으면 데스크탑이 옛 짝을 교체하고, 붙어 있던 옛 앱은 해제된다 (이슈 #275)', async () => {
+    const { desktop, identity, desktopId, ble } = await bluetoothDesktop()
+    const key = 'cd'.repeat(16)
+    const pairOnce = async (radio: FakeBle) => {
+      const uri = desktop.remote.startPairing().pairing!.uri!
+      const { link } = pairingLink(radio, choice('wifi'), key)
+      await link.restore()
+      const pairing = link.pairQr(uri, 'Pixel 8')
+      await until(() => desktop.remote.status().requests.length === 1, '짝짓기 요청')
+      desktop.remote.answerPair(desktop.remote.status().requests[0]!.id, true)
+      await pairing
+      return link
+    }
+    const before = await pairOnce(ble)
+    await until(() => sessionOf(before).getStatus().kind === 'connected', '옛 앱이 붙음', 10_000)
+    const oldId = desktop.remote.status().devices[0]!.id
+
+    // 재설치한 같은 폰 — 새 앱(새 저장소), 같은 키. 가짜 라디오는 연결 하나만 흉내 내므로 새 앱은 자기 라디오로 같은 데스크탑에 붙는다
+    const again = fakeBle(bluetoothServiceUuid(desktopId), (desk) => {
+      void secureResponder(desk, identity, { prologue: bluetoothPrologue(desktopId) }).then((secure) => void desktop.attach(secure, 'bt-again', 'bluetooth'), () => undefined)
+    })
+    await pairOnce(again)
+    expect(desktop.remote.status().devices).toHaveLength(1)
+    expect(desktop.remote.status().devices[0]!.id).not.toBe(oldId)
+    await until(() => before.state.phase === 'unpaired', '옛 앱 해제', 10_000)
+    expect(before.state).toMatchObject({ phase: 'unpaired', revoked: true })
+  }, 30_000)
 
   it('데스크탑에서 [거절] 하면 denied — Wi-Fi 호출 없음', async () => {
     const { desktop, ble } = await bluetoothDesktop()

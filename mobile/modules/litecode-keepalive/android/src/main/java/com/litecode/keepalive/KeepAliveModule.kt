@@ -2,6 +2,7 @@ package com.litecode.keepalive
 
 import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -24,6 +25,12 @@ class KeepAliveModule : Module() {
     Function("stop") {
       val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
       context.stopService(Intent(context, KeepAliveService::class.java))
+    }
+
+    // 짝짓기의 기기 키 재료 (이슈 #275) — API 26+ 에서 앱 서명 키·사용자·기기별로 고정, 재설치에도 같다. JS 가 해시해서 보낸다
+    Function("androidId") {
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: ""
     }
   }
 }

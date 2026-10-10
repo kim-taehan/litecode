@@ -3,9 +3,11 @@
 import { fetch as expoFetch } from 'expo/fetch'
 import * as SecureStore from 'expo-secure-store'
 import { Platform } from 'react-native'
+import { androidId } from '../../modules/litecode-keepalive/index.ts'
 import { pinnedNet as nativePinnedNet } from '../../modules/litecode-pinned-net/index.ts'
 import { createFetchTransport, isFingerprint, type BleDriver, type FetchLike, type PinnedNet, type Transport } from '../core/index.ts'
 import { createBleManagerDriver } from './bleManagerDriver.ts'
+import { deviceKeyOf } from './deviceKey.ts'
 import type { DesktopStore, SavedDesktop } from './link.ts'
 import type { PrefsStore } from './prefs.ts'
 
@@ -52,3 +54,6 @@ export const apiLevel: number | undefined = Platform.OS === 'android' ? Number(P
 
 /** 블루투스 라디오 (react-native-ble-manager) — 블루투스를 골라 붙을 때만 권한을 묻고 켠다 */
 export const bluetooth: BleDriver = createBleManagerDriver(apiLevel)
+
+/** 짝짓기 요청의 기기 키 — 같은 폰이 다시 짝지으면 데스크탑이 옛 짝을 교체한다 (이슈 #275, deviceKey.ts). 네이티브가 없으면 없다 */
+export const deviceKey: string | undefined = Platform.OS === 'android' ? deviceKeyOf(androidId()) : undefined

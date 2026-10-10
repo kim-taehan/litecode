@@ -22,6 +22,7 @@ import type { ChatLive, ChatOrigin } from '../../shared/chat.ts'
 import type { AttentionAnswer, Conversation, History, NoticeState } from '../../shared/contract.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import {
+  DEVICE_KEY_PATTERN,
   REMOTE_API_VERSION,
   REMOTE_PING_INTERVAL_MS,
   pairUri,
@@ -535,7 +536,7 @@ export class RemoteService extends Service {
   /** POST /v1/pair — 코드가 맞으면 그 코드를 쓰고(1회용) 데스크탑 [허용] 을 기다린다. 응답은 사용자가 답하거나 시간이 다 됐을 때.
    *  gone: 폰이 기다리다 떠났다. fingerprint: 요청이 지문으로 고정되는 운반(TLS)으로 왔으면 그 지문 — 확인 코드가 지문 앞 8자가 된다 */
   private pair(body: unknown, gone: AbortSignal, fingerprint?: string): RemoteReply | Promise<RemoteReply> {
-    const input = body as { code?: unknown; deviceName?: unknown; platform?: unknown } | undefined
+    const input = body as { code?: unknown; deviceName?: unknown; platform?: unknown; deviceKey?: unknown } | undefined
     // 이름은 데스크탑 확인 창·기기 목록에 그대로 보인다 — 제어 문자는 빼고 길이를 자른다
     const deviceName = typeof input?.deviceName === 'string' ? input.deviceName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, DEVICE_NAME_MAX) : ''
     const platform = input?.platform
@@ -552,6 +553,8 @@ export class RemoteService extends Service {
       return { status: 403, body: { error: 'wrong pairing code', reason: 'wrong-code' } satisfies PairRejected }
     }
     this.code = undefined // 1회용
+    // 폰의 고정 키 (이슈 #275) — 모양이 다르면 없는 것으로(교체하지 않는다)
+    const deviceKey = typeof input.deviceKey === 'string' && DEVICE_KEY_PATTERN.test(input.deviceKey) ? input.deviceKey : undefined
 
     return new Promise<RemoteReply>((resolve) => {
       const id = randomBytes(8).toString('hex')
@@ -578,8 +581,12 @@ export class RemoteService extends Service {
             if (!this.disposed) this.changed()
             return
           }
-          void Promise.all([this.store.add(deviceName, platform), this.loadBluetoothKey()]).then(
-            ([{ device, token }, bluetoothKey]) => {
+          // 같은 키의 옛 짝 — [허용] 으로 새 짝이 확정되는 지금 교체한다 (거절·시간 초과·틀린 코드면 그대로). 키가 없으면 건드리지 않는다
+          const replaced = deviceKey ? this.store.list().filter((device) => device.deviceKey === deviceKey).map((device) => device.id) : []
+          void Promise.all([this.store.add(deviceName, platform, deviceKey), this.loadBluetoothKey()]).then(
+            async ([{ device, token }, bluetoothKey]) => {
+              // 해제와 같은 길 — 옛 토큰은 401, 옛 스트림은 device.revoked 뒤 끊김
+              for (const id of replaced) await this.revoke(id).catch((error: unknown) => console.warn('[remote] 옛 짝 교체 실패', (error as Error).message))
               resolve({ status: 200, body: { deviceId: device.id, token, ...(bluetoothKey && { bluetoothKey }) } satisfies PairResponse })
               this.changed()
             },

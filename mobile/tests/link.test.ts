@@ -139,6 +139,27 @@ describe('짝짓기', () => {
     expect(store.value).toMatchObject({ bluetoothKey: bk, desktopId: 'fake-desktop' })
   })
 
+  it('짝짓기 요청 본문에 기기 키가 실린다 — 키가 없으면(네이티브 없음) 필드도 없다 (이슈 #275)', async () => {
+    const inner = createFetchTransport()
+    const bodies: unknown[] = []
+    const capturing: Transport = {
+      stream: (request, handlers) => inner.stream(request, handlers),
+      request: (request) => (request.url.endsWith('/v1/pair') && bodies.push(JSON.parse(request.body ?? '{}')), inner.request(request)),
+    }
+    for (const deviceKey of ['ab'.repeat(16), undefined]) {
+      const link = new DesktopLink({ store: memoryStore(), transport: capturing, pinned: createNativePinnedNet(nodePinnedNative()), platform: 'android', deviceKey })
+      links.push(link)
+      await link.restore()
+      const pairing = link.pair(input())
+      await until(() => desktop.pendingPair() !== undefined, '짝짓기 요청')
+      desktop.answerPair(true)
+      await pairing
+      phase(link, 'linked')
+    }
+    expect(bodies[0]).toEqual({ code: FAKE_PAIR_CODE.replace(/-/g, ''), deviceName: 'Pixel 8', platform: 'android', deviceKey: 'ab'.repeat(16) })
+    expect(bodies[1]).not.toHaveProperty('deviceKey')
+  })
+
   it('틀린 코드는 wrong-code — 허용 대기까지 가지 않는다', async () => {
     const link = newLink()
     await link.restore()
