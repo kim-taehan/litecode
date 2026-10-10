@@ -286,7 +286,8 @@ export class SessionsService extends Service {
           continue
         }
         deleted = true
-        await this.update((stored) => ({ ...stored, orphans: stored.orphans.filter((entry) => entry !== engineSessionId) }))
+        // 목록을 못 쓰면 그 줄은 남겨 다음 청소 때 다시 지운다 — 여기서 던지면 void 로 부른 sweep 이 처리 안 된 거부가 되고 sweeping 줄이 영영 막힌다
+        await this.update((stored) => ({ ...stored, orphans: stored.orphans.filter((entry) => entry !== engineSessionId) })).catch(() => undefined)
       }
       // 지운 본문은 DB 파일(WAL·빈 페이지)에 남는다 — 걷어낸다 (01_probe)
       if (deleted) this.ctx.llm.purgeDeleted()
