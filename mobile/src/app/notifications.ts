@@ -36,7 +36,7 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 export const alertHost: AlertHost = {
   notify(key, channel, text, cid) {
     // identifier 가 같으면 앞의 알림을 바꾼다 — 대화마다 최신 하나
-    void Notifications.scheduleNotificationAsync({ identifier: key, content: { title: text.title, body: text.body, data: { cid } }, trigger: { channelId: channel } }).catch(() => undefined)
+    void Notifications.scheduleNotificationAsync({ identifier: key, content: { title: text.title, body: text.body, data: cid !== undefined ? { cid } : {} }, trigger: { channelId: channel } }).catch(() => undefined)
   },
   dismiss(key) {
     void Notifications.dismissNotificationAsync(key).catch(() => undefined)

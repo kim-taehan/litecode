@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Attention } from '../../shared/contract.ts'
 import type { RemoteEvent } from '../../shared/remote.ts'
-import { AlertCenter, alertChannel, alertKey, AlertRules, alertText, BANNER_MS, type AlertContext, type AlertHost } from '../src/app/alerts.ts'
+import { AlertCenter, alertChannel, alertKey, AlertRules, alertText, BANNER_MS, RECONNECTED_KEY, type AlertContext, type AlertHost } from '../src/app/alerts.ts'
 import { DEFAULT_PREFS, Preferences, type Prefs, type PrefsStore } from '../src/app/prefs.ts'
 import type { AppSession } from '../src/app/session.ts'
-import { initialState, reduce } from '../src/core/index.ts'
+import { initialState, reduce, type ConnectionStatus } from '../src/core/index.ts'
 import { createDemoSession, DEMO_CHAT, DEMO_STEP_MS } from './demoSession.ts'
 
 // 알림 규칙(alerts.ts) — "이 이벤트가 알림이 되나", 글, 대체 키. 화면·OS 알림 없이 순수 로직만 본다.
@@ -202,6 +202,84 @@ describe('AlertCenter — 세션의 이벤트를 띠와 시스템 알림으로',
     session.send('c_tests', '안녕')
     await steps(5)
     expect(calls).toEqual([])
+  })
+})
+
+describe('AlertCenter — 데스크탑에 다시 붙음 (#276)', () => {
+  let status: ConnectionStatus
+  let listeners: Set<() => void>
+  let calls: string[]
+  let foreground: boolean
+  let prefs: Prefs
+  let center: AlertCenter
+  const host: AlertHost = {
+    notify: (key, channel, text, cid) => void calls.push(`notify ${key} ${channel} ${text.title}${cid === undefined ? '' : ` ${cid}`}`),
+    dismiss: (key) => void calls.push(`dismiss ${key}`),
+  }
+  const go = (kind: ConnectionStatus['kind']): void => {
+    status = kind === 'reconnecting' || kind === 'unresponsive' ? { kind, attempt: 1, retryAt: 0 } : ({ kind } as ConnectionStatus)
+    for (const listener of listeners) listener()
+  }
+  const notified = () => calls.filter((call) => call.startsWith('notify'))
+
+  beforeEach(() => {
+    status = { kind: 'idle' }
+    listeners = new Set()
+    calls = []
+    foreground = false
+    prefs = { ...DEFAULT_PREFS, notifications: true }
+    const session = {
+      getStatus: () => status,
+      subscribe: (listener: () => void) => (listeners.add(listener), () => void listeners.delete(listener)),
+      onEvent: () => () => undefined,
+      getState: () => initialState,
+      desktop: { name: 'MacBook', address: '127.0.0.1:47600' },
+    } as unknown as AppSession
+    center = new AlertCenter({ host, prefs: () => prefs, foreground: () => foreground })
+    center.attach(session)
+  })
+  afterEach(() => center.dispose())
+
+  it('처음 붙는 것은 알리지 않는다 (뒤에 있어도)', () => {
+    go('connecting')
+    go('connected')
+    expect(notified()).toEqual([])
+  })
+
+  it('끊겼다가 다시 붙고 앱이 뒤에 있으면 한 건 — 고정 키, 대화 없음(누르면 앱만 열린다)', () => {
+    go('connected')
+    go('reconnecting')
+    go('connecting')
+    go('connected')
+    go('connected') // 같은 상태가 다시 와도(목록 갱신 등) 또 울리지 않는다
+    expect(notified()).toEqual([`notify ${RECONNECTED_KEY} result 데스크탑에 연결되었습니다 — MacBook`])
+    go('needs-action')
+    go('connected')
+    expect(notified()).toHaveLength(2) // 다음 끊김 뒤에는 다시 — 같은 키라 OS 에서는 바뀐다
+  })
+
+  it('앱이 앞에 있으면 알리지 않는다', () => {
+    foreground = true
+    go('connected')
+    go('reconnecting')
+    go('connected')
+    expect(notified()).toEqual([])
+  })
+
+  it('알림 설정이 꺼져 있으면 알리지 않는다', () => {
+    prefs = { ...prefs, notifications: false }
+    go('connected')
+    go('reconnecting')
+    go('connected')
+    expect(notified()).toEqual([])
+  })
+
+  it('세션에서 떼면 더 듣지 않는다', () => {
+    go('connected')
+    go('reconnecting')
+    center.dispose()
+    go('connected')
+    expect(notified()).toEqual([])
   })
 })
 
