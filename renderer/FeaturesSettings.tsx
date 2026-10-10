@@ -1,9 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { FEATURE_GROUPS, FEATURE_REQUIRES, featureDefault, featureOn, type FeatureId, type FeatureReason } from '../shared/features.ts'
 import type { MessageKey } from '../shared/i18n/index.ts'
-import { CYCLE_MODES, MODES, type Mode } from '../shared/modes.ts'
 import { useFeatureStatuses } from './featuresStore.ts'
-import { ALWAYS_ON_FEATURES, filterByQuery, MODE_PERMISSION_ROWS, modePermissionRow } from './featuresView.ts'
+import { ALWAYS_ON_FEATURES, filterByQuery } from './featuresView.ts'
 import { SessionSearch, type SearchLabels } from './SessionListTools.tsx'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 
@@ -17,15 +16,15 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 // 기능 상태 (이슈 #224, 시안 _workspace/mock-features/Detail 의 블루투스 줄) — 켰는데 못 뜬 기능(ctx.features 의 failed)은 스위치 앞에 빨간 알약
 // "켜지 못함", 펼치면 설명 맨 위에 빨간 상자 "켜지 못한 이유 — 사유". 정상 상태(올리는 중·켜짐)엔 아무것도 달지 않는다(태그 소음 금지).
 // 켜 두었는데 필요한 기능이 꺼져 못 뜬 기능은 그 필요 칩만 강조한다 — 사내망 연결(기본 켜짐)은 모바일 연결을 켜기 전까지 늘 이 상태라 줄 머리 태그는 소음이다.
-// 큰 묶음 둘과 찾기 (이슈 #277, 보고서 _workspace/report-plugins/builtin-plugins.html 4절 — dsh ui-settings-plugin-inventory 의 Global/Session·찾기 참조):
-// "앱 전체 (Global)" = 위 네 소묶음 + 맨 아래 접힌 "항상 켜짐"(고정된 필수 기능 FEATURE_FIXED — 스위치 없이 "항상 켜짐" 알약, 2026-10-03 에 숨겼던 것을 읽기 전용으로),
-// "대화마다 (Session)" = 모드 4종 읽기 전용 줄(펼치면 shared/modes.ts modePermission 에서 계산한 권한 요약 표). 기본 접힘: Global 펼침, Session·항상 켜짐 접힘.
-// 맨 위 찾기 칸(사이드바 SessionSearch 를 문구만 바꿔 쓴다)은 이름·한 줄 요약을 대소문자 무시 부분일치로 거른다 — 찾는 동안은 모든 묶음을 펼치고
+// 항상 켜짐과 찾기 (이슈 #277, 보고서 _workspace/report-plugins/builtin-plugins.html 4절 — dsh ui-settings-plugin-inventory 의 찾기 참조):
+// 네 소묶음 맨 아래에 접힌 "항상 켜짐"(고정된 필수 기능 FEATURE_FIXED — 스위치 없이 "항상 켜짐" 알약, 2026-10-03 에 숨겼던 것을 읽기 전용으로).
+// 앱 전체(Global)/대화마다(Session) 큰 묶음과 모드 권한 표는 없앴다 (#281, 사용자 "별로다, 구분 없애자").
+// 맨 위 찾기 칸(사이드바 SessionSearch 를 문구만 바꿔 쓴다)은 이름·한 줄 요약을 대소문자 무시 부분일치로 거른다 — 찾는 동안은 "항상 켜짐" 도 펼치고
 // 일치하는 줄이 없는 묶음 제목은 숨긴다. 하나도 없으면 "일치하는 기능이 없습니다."
 
 const SEARCH_LABELS: SearchLabels = { label: 'settings.features.search', placeholder: 'settings.features.searchPlaceholder', clear: 'settings.features.searchClear' }
 
-/** 펼침 버튼 — ▸ + 이름 + 한 줄 요약. 기능 줄·항상 켜짐 줄·모드 줄이 같이 쓴다 */
+/** 펼침 버튼 — ▸ + 이름 + 한 줄 요약. 기능 줄·항상 켜짐 줄이 같이 쓴다 */
 function RowToggle({ id, open, title, summary, onToggle }: { id: string; open: boolean; title: string; summary: string; onToggle(): void }) {
   return (
     <button type="button" className="feature-row__toggle" aria-expanded={open} aria-controls={`feature-detail-${id}`} onClick={onToggle}>
@@ -46,16 +45,14 @@ function Chevron({ className }: { className: string }) {
   )
 }
 
-export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }: { initialExpanded?: FeatureId | Mode; initialQuery?: string }) {
+export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }: { initialExpanded?: FeatureId; initialQuery?: string }) {
   const t = useT()
   const settings = useSettings()
   const statuses = useFeatureStatuses()
   const [error, setError] = useState<string>()
-  const [expanded, setExpanded] = useState<FeatureId | Mode | undefined>(initialExpanded)
+  const [expanded, setExpanded] = useState<FeatureId | undefined>(initialExpanded)
   const [query, setQuery] = useState(initialQuery)
-  const [globalOpen, setGlobalOpen] = useState(true)
-  const [sessionOpen, setSessionOpen] = useState(() => (MODES as readonly unknown[]).includes(initialExpanded))
-  const [alwaysOnOpen, setAlwaysOnOpen] = useState(() => (ALWAYS_ON_FEATURES as readonly unknown[]).includes(initialExpanded))
+  const [alwaysOnOpen, setAlwaysOnOpen] = useState(() => initialExpanded !== undefined && ALWAYS_ON_FEATURES.includes(initialExpanded))
   const stored = settings.features ?? {}
   const searching = query.trim() !== ''
 
@@ -74,7 +71,7 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
     return typeof reason === 'string' ? reason : t(reason.key, reason.vars)
   }
 
-  function toggleExpanded(row: FeatureId | Mode): void {
+  function toggleExpanded(row: FeatureId): void {
     // 한 번에 하나 — 열려 있던 줄은 자동으로 접히고, 이미 열린 줄을 누르면 접힌다 (#251)
     setExpanded((current) => (current === row ? undefined : row))
   }
@@ -84,8 +81,6 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
     (group) => group.features.length > 0,
   )
   const alwaysOn = filterByQuery(ALWAYS_ON_FEATURES, query, featureTexts)
-  const modes = filterByQuery(MODES, query, (mode) => [t(`mode.${mode}`), t(`mode.${mode}.description`)])
-  const globalMatches = groups.length > 0 || alwaysOn.length > 0
 
   /** 펼친 아래의 자세한 설명 + 칩 — 고르는 기능은 기본값 칩도 단다 */
   function featureDetail(feature: FeatureId, extra: { failure?: FeatureReason; wanted?: boolean; showDefault: boolean }): ReactNode {
@@ -160,56 +155,6 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
     )
   }
 
-  /** 모드 — 읽기 전용, 펼치면 권한 요약 표 (값은 modePermission 에서 계산) */
-  function modeRow(mode: Mode): ReactNode {
-    const open = expanded === mode
-    return (
-      <li key={mode} className="feature-row" data-mode={mode} data-expanded={open || undefined}>
-        <div className="feature-row__head">
-          <RowToggle id={mode} open={open} title={t(`mode.${mode}`)} summary={t(`mode.${mode}.description`)} onToggle={() => toggleExpanded(mode)} />
-        </div>
-        {open && (
-          <div className="feature-row__detail" id={`feature-detail-${mode}`}>
-            <table className="feature-mode-table">
-              <thead>
-                <tr>
-                  <th scope="col">{t('settings.features.mode.permission')}</th>
-                  <th scope="col">{t('settings.features.mode.rule')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MODE_PERMISSION_ROWS.map((row) => {
-                  const rule = modePermissionRow(mode, row.id)
-                  return (
-                    <tr key={row.id} data-permission-row={row.id}>
-                      <th scope="row">{t(`settings.features.mode.row.${row.id}`)}</th>
-                      <td data-rule={rule}>{t(`settings.features.mode.${rule}`)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-            <p className="feature-row__paragraph">{t('settings.features.mode.switch', { cycle: CYCLE_MODES.map((cycled) => t(`mode.${cycled}`)).join(' → ') })}</p>
-          </div>
-        )}
-      </li>
-    )
-  }
-
-  function scopeHead(scope: 'global' | 'session', open: boolean, onToggle: () => void): ReactNode {
-    return (
-      <div className="feature-scope__head">
-        <h2 className="feature-scope__title">
-          <button type="button" className="feature-scope__toggle" aria-expanded={open} disabled={searching} onClick={onToggle}>
-            <Chevron className="feature-row__chevron" />
-            {t(`settings.features.${scope}`)}
-          </button>
-        </h2>
-        <span className="feature-group__hint">{t(`settings.features.${scope}.hint`)}</span>
-      </div>
-    )
-  }
-
   return (
     <div className="features-page">
       {error && (
@@ -221,51 +166,36 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
       <div className="features-page__search">
         <SessionSearch value={query} onChange={setQuery} labels={SEARCH_LABELS} />
       </div>
-      {!globalMatches && modes.length === 0 && <p className="features-page__empty">{t('settings.features.noMatch')}</p>}
-      {globalMatches && (
-        <section className="feature-scope" data-feature-scope="global">
-          {scopeHead('global', globalOpen || searching, () => setGlobalOpen((open) => !open))}
-          {(globalOpen || searching) && (
-            <>
-              {groups.map((group) => (
-                <section key={group.id} className="feature-group" data-feature-group={group.id} aria-labelledby={`feature-group-${group.id}`}>
-                  <div className="feature-group__head">
-                    <h3 className="feature-group__title" id={`feature-group-${group.id}`}>
-                      {t(`settings.features.group.${group.id}`)}
-                    </h3>
-                    <span className="feature-group__hint">{t(`settings.features.group.${group.id}.hint`)}</span>
-                  </div>
-                  <ul className="feature-rows">{group.features.map(choosableRow)}</ul>
-                </section>
-              ))}
-              {alwaysOn.length > 0 && (
-                <section className="feature-group" data-feature-group="alwaysOn" aria-labelledby="feature-group-alwaysOn">
-                  <div className="feature-group__head">
-                    <h3 className="feature-group__title" id="feature-group-alwaysOn">
-                      <button
-                        type="button"
-                        className="feature-scope__toggle"
-                        aria-expanded={alwaysOnOpen || searching}
-                        disabled={searching}
-                        onClick={() => setAlwaysOnOpen((open) => !open)}
-                      >
-                        <Chevron className="feature-row__chevron" />
-                        {t('settings.features.group.alwaysOn')}
-                      </button>
-                    </h3>
-                    <span className="feature-group__hint">{t('settings.features.group.alwaysOn.hint')}</span>
-                  </div>
-                  {(alwaysOnOpen || searching) && <ul className="feature-rows">{alwaysOn.map(alwaysOnRow)}</ul>}
-                </section>
-              )}
-            </>
-          )}
+      {groups.length === 0 && alwaysOn.length === 0 && <p className="features-page__empty">{t('settings.features.noMatch')}</p>}
+      {groups.map((group) => (
+        <section key={group.id} className="feature-group" data-feature-group={group.id} aria-labelledby={`feature-group-${group.id}`}>
+          <div className="feature-group__head">
+            <h3 className="feature-group__title" id={`feature-group-${group.id}`}>
+              {t(`settings.features.group.${group.id}`)}
+            </h3>
+            <span className="feature-group__hint">{t(`settings.features.group.${group.id}.hint`)}</span>
+          </div>
+          <ul className="feature-rows">{group.features.map(choosableRow)}</ul>
         </section>
-      )}
-      {modes.length > 0 && (
-        <section className="feature-scope" data-feature-scope="session">
-          {scopeHead('session', sessionOpen || searching, () => setSessionOpen((open) => !open))}
-          {(sessionOpen || searching) && <ul className="feature-rows">{modes.map(modeRow)}</ul>}
+      ))}
+      {alwaysOn.length > 0 && (
+        <section className="feature-group" data-feature-group="alwaysOn" aria-labelledby="feature-group-alwaysOn">
+          <div className="feature-group__head">
+            <h3 className="feature-group__title" id="feature-group-alwaysOn">
+              <button
+                type="button"
+                className="feature-scope__toggle"
+                aria-expanded={alwaysOnOpen || searching}
+                disabled={searching}
+                onClick={() => setAlwaysOnOpen((open) => !open)}
+              >
+                <Chevron className="feature-row__chevron" />
+                {t('settings.features.group.alwaysOn')}
+              </button>
+            </h3>
+            <span className="feature-group__hint">{t('settings.features.group.alwaysOn.hint')}</span>
+          </div>
+          {(alwaysOnOpen || searching) && <ul className="feature-rows">{alwaysOn.map(alwaysOnRow)}</ul>}
         </section>
       )}
     </div>
