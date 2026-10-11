@@ -71,6 +71,9 @@ declare module 'cordis' {
     'llm/before-turn'(directory: string): Promise<void> | void
     /** 도는 턴의 도구 호출 하나가 끝났다 (성공·실패, 호출마다 한 번) — 하위 작업이 부른 도구도 온다 (이슈 #102, 듣는 쪽은 ctx.hooks) */
     'llm/tool-done'(info: ToolDone): void
+    /** 도는 턴의 도구 호출 하나가 실행에 들어갔다 (running — 입력이 정해졌다, callID 마다 한 번). 입력을 만드는 중(pending)에는 안 나간다.
+     *  엔진은 도구가 끝나면 곧바로 다음 요청을 만들어서, 그 요청에 실을 끼워 넣기는 이때 해야 한다 (이슈 #284 실측, 듣는 쪽은 ctx.repeatGuard) */
+    'llm/tool-started'(info: ToolStarted): void
     /** 도는 턴의 도구 호출 하나가 실행되기 직전 — 엔진이 그 호출의 승인을 물었을 때만 온다 (모드가 원래 묻는 도구 + gateTools 로 정한 도구,
      *  이슈 #102 2단계). ctx.serial 로 차례로 묻고 처음 나온 판정을 쓴다: 'allow'(통과) · { deny, reason }(막는다 — 사유가 모델에 가고 턴은 이어진다) ·
      *  'ask'(사용자에게 묻는다 — 승인 카드). 답이 없으면(undefined) 판정한 쪽이 없는 것이다. 통과·무응답이어도 **모드가 원래 묻는 호출은 승인 카드가 뜬다** */
@@ -120,6 +123,18 @@ export interface ToolDone {
   child: boolean
 }
 
+/** 실행에 들어간 도구 호출 하나 (중립 모양 — ToolDone 과 같은 자리) */
+export interface ToolStarted {
+  sessionId: string
+  /** 작업 폴더 (realpath) */
+  directory: string
+  tool: string
+  input: unknown
+  callID: string
+  /** 하위 작업이 불렀다 */
+  child: boolean
+}
+
 /** opencode 의 MCP 서버 상태 (레거시 GET /mcp — connected·disabled·failed·needs_auth·needs_client_registration) */
 export interface McpStatus {
   status: string
@@ -150,7 +165,7 @@ export interface ChatResult {
 export interface Interjection {
   /** 끼워 넣을 말을 보낸다 — 모델·모드·지시문·도구는 도는 턴 것 그대로, context 는 이 말에 더할 맥락 (지시문 뒤에 붙는다).
    *  턴이 이미 끝났거나(멈춤 등) 엔진이 거절하면 보내지 못하고 false — 그 말은 답 없음(unanswered)으로 남는다 */
-  send(input: { prompt: string; images?: readonly ChatImage[]; context?: string }): Promise<boolean>
+  send(input: { prompt: string; images?: readonly ChatImage[]; context?: string; synthetic?: boolean }): Promise<boolean>
   /** 보내지 않기로 했다 — 턴이 이 말을 더 기다리지 않는다 (답 없음으로 남는다) */
   cancel(): void
 }
@@ -215,6 +230,8 @@ interface RunningTurn {
   calls: ToolCalls
   turnMessageId: string
   reserve?: (messageId: string) => Interjection | undefined
+  /** remind 로 끼워 넣은 알림의 메시지 id — 사람의 말이 아니라 답 없음(unanswered)에 안 싣는다 */
+  reminders: Set<string>
 }
 
 interface TurnOutcome {
@@ -435,6 +452,21 @@ export class LlmService extends Service {
     return undefined
   }
 
+  /** 그 엔진 세션의 도는 턴에 모델만 볼 알림 한 줄을 끼워 넣는다 (이슈 #284, ctx.repeatGuard) — 끼워 넣기(reserve)와 같은 길이지만 글을 synthetic 으로
+   *  싣는다: 엔진은 다음 모델 호출에 user 맥락으로 싣고(migrate.ts 의 합성 글과 같은 필드, 01w 1/1), 진행 줄·다시 연 기록(historyMessages)·
+   *  추론 과정은 합성 글뿐인 user 를 건너뛴다 — 사람이 친 말로 남지 않는다. 도는 턴이 없거나 끼울 수 없으면(엔진이 아직 안 받음·끝남) false */
+  async remind(sessionId: string, text: string): Promise<boolean> {
+    for (const live of this.running) {
+      if (live.sessionId !== sessionId) continue
+      const messageId = this.newMessageId()
+      const slot = live.reserve?.(messageId)
+      if (!slot) return false
+      live.reminders.add(messageId)
+      return slot.send({ prompt: text, synthetic: true })
+    }
+    return false
+  }
+
   /** 실행 전에 판정('llm/pre-tool')을 받을 도구를 정한다 (이슈 #102 2단계). matchers 는 도구 이름의 `|` 나열·정규식(shared/hooks.ts matchesTool),
    *  빈 글자는 모든 도구, 빈 배열은 "없음". 엔진은 그 도구들의 실행 전에 승인을 묻게 되고(ctx.engine.setGate), 묻는 호출마다 'llm/pre-tool' 이 나간다.
    *  대상이 실제로 달라지면 엔진을 다시 띄워야 한다 — **도는 턴이 있으면 다 끝난 뒤로 미룬다**(재시작은 도는 턴을 끊는다). 그 사이의 턴은 옛 대상으로 돈다 */
@@ -572,7 +604,7 @@ export class LlmService extends Service {
       const scope = new TurnScope(id, userMessageId)
       const tracker = new TurnTracker(workdir, this.mcpTool(workdir))
       const calls = new ToolCalls()
-      const live: RunningTurn = { tracker, workdir, sessionId: id, calls, turnMessageId: userMessageId }
+      const live: RunningTurn = { tracker, workdir, sessionId: id, calls, turnMessageId: userMessageId, reminders: new Set() }
       this.running.add(live)
       this.declined.set(id, declined) // 아래 try 의 finally 가 거둔다 — 그 앞(지시문 읽기·옛 글 넣기)이 던져도 남지 않게 여기서 적는다
       const attention = this.watchAttention(conn, id, workdir, directory, scope, tracker, onAttention, calls, mode)
@@ -617,7 +649,7 @@ export class LlmService extends Service {
           events.expect(messageId)
           let settled = false
           return {
-            send: async ({ prompt: text, images: attached = [], context: extra }) => {
+            send: async ({ prompt: text, images: attached = [], context: extra, synthetic }) => {
               if (settled) return false
               settled = true
               const res = events.over()
@@ -625,7 +657,7 @@ export class LlmService extends Service {
                 : await fetch(`${engine.url}/session/${turnSession}/prompt_async?${at(workdir)}`, {
                     method: 'POST',
                     headers: { ...engine.headers, 'content-type': 'application/json' },
-                    body: JSON.stringify({ ...turnFields(messageId, extra), parts: promptParts(text, attached) }),
+                    body: JSON.stringify({ ...turnFields(messageId, extra), parts: synthetic ? [{ type: 'text', text, synthetic: true }] : promptParts(text, attached) }),
                   }).catch(() => undefined)
               if (!res?.ok) {
                 events.forget(messageId)
@@ -645,7 +677,7 @@ export class LlmService extends Service {
 
         const result = await events.result
         const usage = result.usage && { ...result.usage, messageTokens: await this.messageTokens(conn, id, workdir) }
-        const unanswered = scope.unanswered()
+        const unanswered = scope.unanswered().filter((messageId) => !live.reminders.has(messageId))
         return {
           ok: result.ok,
           sessionId: id,
@@ -1136,6 +1168,13 @@ export class LlmService extends Service {
     const outcome = (base: Omit<TurnOutcome, 'text' | 'usage'>): TurnOutcome => ({ text: tracker.text(), usage: meter.usage(), ...base })
     /** 끝난 도구 호출을 호출마다 한 번 알린다 ('llm/tool-done') — 끝난 파트가 다시 와도(메타데이터 갱신) 한 번 */
     const toolsDone = new Set<string>()
+    /** 실행에 들어간 도구 호출을 호출마다 한 번 알린다 ('llm/tool-started') — running 파트가 갱신으로 다시 와도 한 번 */
+    const toolsStarted = new Set<string>()
+    const toolStarted = (part: EnginePart | undefined, child: boolean): void => {
+      if (part?.type !== 'tool' || !part.tool || !part.callID || part.state?.status !== 'running' || toolsStarted.has(part.callID)) return
+      toolsStarted.add(part.callID)
+      this.ctx.emit('llm/tool-started', { sessionId, directory: workdir, tool: part.tool, input: part.state.input, callID: part.callID, child })
+    }
     const toolDone = (part: EnginePart | undefined, child: boolean): void => {
       const done = finishedTool(part, workdir)
       const key = part?.callID ?? part?.id
@@ -1214,6 +1253,7 @@ export class LlmService extends Service {
             if (item) onProgress?.(item)
             const part = props['part'] as EnginePart | undefined
             calls?.observe(part, false)
+            toolStarted(part, false)
             toolDone(part, false)
             if (part?.type === 'tool' && part.state?.status === 'error' && part.callID && declined.has(part.callID)) declinedEnd = true
           }
@@ -1227,6 +1267,7 @@ export class LlmService extends Service {
         if (event.type.startsWith('permission.') || event.type.startsWith('question.')) return onAttentionSignal(event.type, props)
         if (event.type === 'message.part.updated') {
           calls?.observe(props['part'] as EnginePart | undefined, true) // 하위 작업이 부른 도구
+          toolStarted(props['part'] as EnginePart | undefined, true)
           toolDone(props['part'] as EnginePart | undefined, true)
         }
         const item = tracker.child(event.type, props)
