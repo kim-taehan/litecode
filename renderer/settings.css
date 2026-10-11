@@ -974,23 +974,26 @@
   padding: 0 10px;
   display: flex;
   align-items: center;
+  gap: 6px;
   border: 1px solid var(--border-ring);
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
-.mobile-device__via--wifi {
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  background: var(--accent-soft);
-  color: var(--accent);
+.mobile-device__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
-.mobile-device__via--bluetooth {
-  border-color: var(--warn-border);
-  background: var(--warn-soft);
-  color: var(--text);
+/* 연결됨(초록 점·초록 알약)과 끊김(회색 점·옅은 알약)이 한눈에 갈리게 — 연결 방법은 글로만 덧붙인다 */
+.mobile-device__via--on {
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
 }
 
 /* 기능 상태 (이슈 #224, 시안 _workspace/mock-features/Detail 의 블루투스 줄) — 켜지 못한 기능: 스위치 앞 빨간 알약 + 펼친 아래 맨 위 빨간 상자.

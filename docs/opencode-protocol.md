@@ -136,6 +136,7 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     자기 idle 을 받는다(8/8) → 끝 판정은 "끼워 넣은 user 를 모두 본 뒤의 idle". 동기 `/message` 는 루프 끝까지 블록(1/1). 승인 대기 중에 넣어도 승인은
     그대로 남고 승인하면 이어서 반영(1/1). 앱: `ctx.llm.reserve`(보내기 전에 `TurnScope.adopt`) → `Interjection.send`/`cancel`, 답 못 받은 말은 `ChatResult.unanswered`.
     미측정: 진짜 모델이 끼워 넣은 말 뒤 앞 일을 이어 가는지, task·자동 요약 중 끼워 넣기, 연달아 두 번, 이미지 첨부
+  - **합성 알림 끼워 넣기** (#284, 실측 2026-10-11 가짜 LLM): 끼워 넣는 파트의 synthetic:true 는 LLM 요청에서 빠지지 않는다(빠지는 것은 ignored:true) — 마지막 tool 결과 뒤에 일반 글과 똑같은 role:user 문자열로 실린다. 엔진은 도구가 끝나면 곧바로 다음 요청을 만들므로 completed 이벤트에서 넣으면 한 스텝 늦고(5/5) 다음 스텝이 마지막 답이면 알림에 답하는 스텝이 하나 더 생긴다. 도구 running 시점에 넣으면 그 도구 직후 요청에 실린다(10/10, bash).
   - **설정** (#12·#19): 레거시는 앱 CONFIG_DIR 외에 `~/.config/opencode`·`~/.opencode`·프로젝트 opencode.json·`.opencode/` 를 읽고 그 MCP 를 띄운다 →
     `OPENCODE_DISABLE_PROJECT_CONFIG=1`(**레거시가** 프로젝트 설정을 안 읽게 — 신규 세대 런타임은 이 플래그를 안 본다, "opencode 에 설정 넘기기" 의 ⚠️ #101. AGENTS.md(없으면 CLAUDE.md)는 `ctx.llm` 이 매 턴 `system` 으로 — `instructions.ts`). 개인 설정은 읽되(사용자 결정)
     앱 CONFIG_DIR 값이 이긴다 — `model`·`enabled_providers`(개인 설정이 앱 provider 를 꺼 **모든 턴이 Model not found** 였다)·`share:"disabled"`·`autoupdate`·`lsp`·`formatter` false.

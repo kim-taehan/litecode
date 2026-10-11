@@ -41,6 +41,7 @@ import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
 import { UpdatesService } from '../src/services/updates.ts'
+import { RepeatGuardService } from '../src/services/repeatGuard.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
 import { HooksService } from '../src/services/hooks.ts'
 import { hooksBridge } from '../src/services/hooks/bridge.ts'
@@ -746,6 +747,8 @@ const features: FeatureDefinition[] = [
       ctx.plugin(updatesBridge)
     },
   },
+  // 같은 도구 반복 알림 (이슈 #284) — 기본 켜짐. 'llm/tool-done' 을 듣고 연속 3·5·8번째에 ctx.llm.remind 로 모델에게만 한 줄. 끄면 알림만 사라진다
+  { id: 'repeatGuard', service: 'repeatGuard', plugin: (ctx) => void ctx.plugin(RepeatGuardService) },
 ]
 // 종료 때 바탕보다 먼저 내려간다(거꾸로 내리므로) — 터미널·셸·알림이 엔진보다 먼저 정리된다
 mounted.push(ctx.plugin(FeaturesService, features))

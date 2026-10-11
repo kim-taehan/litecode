@@ -6,7 +6,7 @@
 import type { MessageKey } from './i18n/ko.ts'
 
 // skills(이슈 #7)는 묶음(ctx.skills — `+` 메뉴의 스킬 팝업 목록(#43)·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
-export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates'] as const
+export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates', 'repeatGuard'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 스위치가 없다(#277 부터 "항상 켜짐" 읽기 전용 줄).
@@ -26,7 +26,7 @@ export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
 export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
-  { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser'] },
+  { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser', 'repeatGuard'] },
   { id: 'automation', features: ['hooks'] },
   { id: 'devices', features: ['voice', 'remote', 'notifications', 'updates'] },
 ]
