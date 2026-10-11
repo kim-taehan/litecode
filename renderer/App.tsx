@@ -1,151 +1,48 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Attention, AttentionAnswer, AttentionTarget, AttachmentKind, ChatEvent, Conversation, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend, TurnItem } from '../shared/ipc.ts'
-import { titleFrom, TITLE_MAX } from '../shared/chat.ts'
-import { applyChat, applyHistory, applyLive, planEnded, switchedMode, withStoredTitles, type ChatFields } from './chatState.ts'
-import { ago } from './ago.ts'
-import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
-import { Minimap, useFollowBottom } from './Minimap.tsx'
-import { minimapTurns } from './turnView.ts'
-import { ScrollToBottom } from './ScrollToBottom.tsx'
-import { findModel, initialModel, parseModelRef, type ModelRef } from './modelChoice.ts'
-import { ModelSelect } from './ModelSelect.tsx'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { AttachmentKind, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
+import { titleFrom } from '../shared/chat.ts'
+import { applyHistory, applyLive } from './chatState.ts'
+import { useFollowBottom } from './Minimap.tsx'
+import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
 import { RemotePairPrompt } from './MobileSettings.tsx'
-import { StatsBar } from './StatsBar.tsx'
-import { Trajectory } from './Trajectory.tsx'
-import { chatStats, type ChatUsage } from './stats.ts'
 import { useTriggers } from './useTriggers.ts'
-import { TriggerPopup } from './TriggerPopup.tsx'
 import { ShellDrawer } from './ShellDrawer.tsx'
 import { useAppMcp } from './useAppMcp.ts'
-import { ShellCard, type ShellCardView } from './ShellCard.tsx'
+import type { ShellCardView } from './ShellCard.tsx'
 import { useSettings, useT } from './settingsStore.ts'
 import { useFeatures } from './featuresStore.ts'
-import { StatusDot, Toasts, useNotices } from './Notices.tsx'
+import { Toasts, useNotices } from './Notices.tsx'
 import { otherProjectsStatus, projectStatus } from './noticeView.ts'
-import { ModeChip, nextMode } from './ModeChip.tsx'
-import { PlusMenu } from './PlusMenu.tsx'
-import { useVoiceInput, VoiceButton, VoiceStrip } from './VoiceInput.tsx'
+import { useVoiceInput } from './VoiceInput.tsx'
 import { voiceChatBlock } from './voiceView.ts'
-import { AttachmentChips } from './Attachments.tsx'
-import { pasteIntent, useFileDrop } from './dropPaste.ts'
+import { useFileDrop } from './dropPaste.ts'
 import { DropVeil } from './DropVeil.tsx'
 import { countOf } from './attachmentsView.ts'
-import { OpenInButton } from './OpenInButton.tsx'
-import { ConversationMenu } from './Report.tsx'
-import { JobsButton } from './Jobs.tsx'
-import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
-import { QueueDock } from './QueueDock.tsx'
-import { TodoDock } from './Todo.tsx'
-import { GoalDock, useGoal } from './Goal.tsx'
-import { DelegationContext, FromIcon } from './Delegation.tsx'
-import { peerOf, projectTargets, sidebarMark } from './delegationView.ts'
-import { RunningCount, RunningFilter } from './Background.tsx'
-import { runningIn, runningOutside } from './backgroundView.ts'
-import { StopIcon, useEscapeTwice, useStopTurn } from './stopTurn.tsx'
+import { FilePreviewPanel } from './FilePreview.tsx'
+import { useGoal } from './Goal.tsx'
+import { DelegationContext } from './Delegation.tsx'
+import { peerOf, projectTargets } from './delegationView.ts'
+import { runningIn } from './backgroundView.ts'
+import { useEscapeTwice, useStopTurn } from './stopTurn.tsx'
 import { changeDraft, draftOf, restoreInto, withoutDrafts, type Draft, type Drafts } from './drafts.ts'
-import { browseHistory, sentTexts } from './inputHistory.ts'
 import { questionDrafts } from './Attention.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
-import { ChatFind, FindingProvider } from './ChatFind.tsx'
-import { PinButton, PinnedMark, SessionSearch } from './SessionListTools.tsx'
 import { matchesTitle, pinnedFirst } from './sessionListView.ts'
-import { Badge, GearIcon, LogoMark, PencilIcon, SidebarIcon, TrashIcon } from './SidebarIcons.tsx'
-import { HoverCard, startMarquee, stopMarquee, useHoverCard } from './hoverCard.tsx'
+import { useHoverCard } from './hoverCard.tsx'
 import { Rail } from './Rail.tsx'
 import { MissingConversations } from './MissingConversations.tsx'
 import { ProjectPopover } from './ProjectPopover.tsx'
-import { UpdateNotice } from './UpdateNotice.tsx'
+import { canWrite, fromConversation, isBlank, newSession, toConversation, withBlankFor, withSessionFor, type Session } from './session.ts'
+import { useSidebarLayout } from './useSidebarLayout.ts'
+import { useLastModel } from './useLastModel.ts'
+import { useChatEvents } from './useChatEvents.ts'
+import { useShellDrawerKeys } from './useShellDrawerKeys.ts'
+import { Sidebar } from './Sidebar.tsx'
+import { ConversationView } from './ConversationView.tsx'
+import { Composer } from './Composer.tsx'
 
-/** 말풍선·도는 턴(pending·progress·sentAt·attention)·대기열·제목·시각·통계는 메인(ctx.chat)이 정한다 — 이벤트로 받아 입힌다 (chatState.ts).
- *  답이 실패·중단이면 message.error 에 사유 (`⚠️ 사유` 로 그린다) */
-export interface Session extends ChatFields {
-  id: string
-  /** 이 대화가 속한 프로젝트(작업 디렉터리) — 사이드바는 현재 프로젝트의 대화만 보여준다 */
-  project: string
-  /** 엔진 쪽 세션 id — 첫 메시지를 보낼 때 생기고, 그 뒤로는 계속 재사용한다 */
-  engineSessionId?: string
-  /** 입력창 드롭다운에서 고른 이 대화의 모델. 없으면(아직 안 고르고 안 보낸 새 대화) 마지막으로 고른 모델을 따른다.
-   *  대화 중에 바꾸면 다음 턴부터 그 모델로 간다 (엔진 세션의 모델은 ctx.llm 이 바꾼다) */
-  model?: ModelRef
-  /** 입력창 칩의 모드. 없으면 설정의 "새 대화 기본 모드". 바꾸면 다음 턴을 보낼 때 엔진 세션이 그 모드가 된다 (ctx.llm) */
-  mode?: Mode
-  /** `!명령` 결과 카드 — 저장된 것은 메인(ctx.sessions)이 정본이고, 여기는 화면 사본 + 돌고 있는 카드 */
-  shells?: ShellCardView[]
-  /** 마지막 활동 시각(ms) — 목록에 `38min`·`1d` 로 보이고, 보관 개수 제한의 기준이 된다 */
-  updatedAt: number
-  /** 고정한 대화 (이슈 #79) — 목록 맨 위 묶음. 정본은 메인(ctx.sessions) */
-  pinned?: boolean
-  /** 입력창 아래 통계 줄의 값 — 턴마다 엔진이 주는 사용량·시간을 메인이 이 대화에 더한다. 없으면 "—" */
-  usage?: ChatUsage
-  /** 지난 실행에서 저장된 대화의 내용 상태 — 목록 정보만 저장되고 내용은 열 때 엔진에서 부른다(ctx.sessions). 이번 실행에 만든 대화는 없다 */
-  history?: 'unloaded' | 'loading' | 'loaded' | 'missing'
-}
-
-function newSession(project: string): Session {
-  return { id: crypto.randomUUID(), project, title: '', messages: [], updatedAt: Date.now() }
-}
-
-/** 아직 아무것도 안 보낸 새 대화 — 저장하지 않고, 지울 것도 없다 */
-function isBlank(session: Session): boolean {
-  return session.messages.length === 0 && !session.history && !session.shells?.length
-}
-
-/** 저장할 목록 정보 (말풍선·대기 상태·카드는 빼고 — 카드는 메인이 저장한다) */
-function toConversation({ id, project, engineSessionId, title, updatedAt, model, mode, usage }: Session): Conversation {
-  return { id, project, engineSessionId, title, updatedAt, model, mode, usage }
-}
-
-function fromConversation(conversation: Conversation): Session {
-  return { ...conversation, usage: conversation.usage as ChatUsage | undefined, messages: [], history: 'unloaded', shells: conversation.shells }
-}
-
-/** 그 프로젝트에 대화가 하나도 없으면 새 대화를 하나 더한다 — 같은 값을 두 번 넣어도 한 번만 더해진다 */
-function withSessionFor(project: string) {
-  return (current: Session[]) => (current.some((session) => session.project === project) ? current : [newSession(project), ...current])
-}
-
-/** 그 프로젝트에 빈 새 대화가 없으면 맨 앞에 더한다 — 앱을 켜면 저장된 대화 위에 새 대화로 시작한다 */
-function withBlankFor(project: string) {
-  return (current: Session[]) =>
-    current.some((session) => session.project === project && isBlank(session)) ? current : [newSession(project), ...current]
-}
-
-// 답·내 말(ChatTurn.tsx)은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도 props 가 같으면 턴을 다시 그리지 않는다.
-// 그래서 턴에 넘기는 "없음" 배열과 답 보내기 함수는 매번 새로 만들지 않는다
-const NO_ITEMS: readonly TurnItem[] = []
-const answerAttention = (request: Attention, answer: AttentionAnswer, target?: AttentionTarget) =>
-  window.litecode.replyAttention(request.sessionId, request.id, answer, target)
-
-// 사이드바 폭·숨김 — dsh ui-layout 의 범위(264~420px)를 따른다. 기본값은 승인 시안의 272px.
-// 창마다의 편의 설정이라 localStorage 에 둔다(못 읽으면 기본값 — 사생활 모드·접근 막힘에도 화면은 뜬다)
-const SIDEBAR_MIN = 264
-const SIDEBAR_MAX = 420
-const SIDEBAR_DEFAULT = 272
-const LAYOUT_KEY = 'litecode.sidebar'
-/** 마지막으로 고른 모델 — 새 대화가 이것으로 시작한다(재시작해도). 같은 편의 설정이라 localStorage 에 둔다 */
-const LAST_MODEL_KEY = 'litecode.model'
-
-function readLastModel(): ModelRef | undefined {
-  try {
-    return parseModelRef(localStorage.getItem(LAST_MODEL_KEY))
-  } catch {
-    return undefined
-  }
-}
-
-function clampSidebar(px: number): number {
-  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)))
-}
-
-function readLayout(): { width: number; hidden: boolean } {
-  try {
-    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') as { width?: unknown; hidden?: unknown }
-    return { width: typeof saved.width === 'number' ? clampSidebar(saved.width) : SIDEBAR_DEFAULT, hidden: saved.hidden === true }
-  } catch {
-    return { width: SIDEBAR_DEFAULT, hidden: false }
-  }
-}
+export type { Session } from './session.ts'
 
 export function App() {
   const t = useT()
@@ -190,24 +87,8 @@ export function App() {
     const tick = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(tick)
   }, [])
-  const [layout, setLayout] = useState(readLayout)
-  const drag = useRef<{ x: number; width: number }>(undefined)
-  useEffect(() => {
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout))
-    } catch {
-      // 못 쓰면 이번 실행 동안만 기억한다
-    }
-  }, [layout])
-  const [lastModel, setLastModel] = useState(readLastModel)
-  useEffect(() => {
-    if (!lastModel) return
-    try {
-      localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(lastModel))
-    } catch {
-      // 못 쓰면 이번 실행 동안만 기억한다
-    }
-  }, [lastModel])
+  const { layout, setLayout, drag } = useSidebarLayout()
+  const [lastModel, setLastModel] = useLastModel()
   const listRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLButtonElement>(null)
@@ -260,50 +141,16 @@ export function App() {
     setDrafts((now) => withoutDrafts(now, ids))
   }
 
-  // 대화의 턴·대기열은 메인(ctx.chat)이 쥔다 — 내 말·진행 줄·승인 카드·답·대기열을 이벤트로 받아 그 대화에 입힌다 (대화 id 로 온다).
-  // 제목·시각·통계도 메인이 저장한 것이 실려 온다. 턴이 시작되면 맨 아래를 따라간다
-  useEffect(() => {
-    const apply = (event: ChatEvent & { data: { cid: string } }) => updateSession(event.data.cid, (session) => applyChat(session, event))
-    const offs = [
-      window.litecode.onTurnStarted((data) => {
-        // 보는 대화의 턴일 때만 — 다른 대화의 턴이 지금 읽던 자리를 맨 아래로 끌고 가지 않게
-        if (data.cid === activeIdRef.current) following.current = true
-        // 화면이 모르는 대화의 턴 — 화면 밖(짝지은 폰)에서 새로 만든 대화다. 메인이 저장한 목록 정보로 목록에 넣는다.
-        // 내용은 이 턴이 전부라 엔진에서 다시 부르지 않는다 (history 없음 = 이번 실행에 만든 대화)
-        if (!sessionsRef.current.some((session) => session.id === data.cid)) {
-          const created: Session = { ...fromConversation(data.conversation), history: undefined }
-          setSessions((sessionsNow) => (sessionsNow.some((session) => session.id === data.cid) ? sessionsNow : [created, ...sessionsNow]))
-          if (data.origin !== 'user') setFresh((now) => new Set(now).add(data.cid))
-        }
-        apply({ event: 'turn.started', data })
-      }),
-      window.litecode.onTurnProgress((cid, item) => apply({ event: 'turn.progress', data: { cid, item } })),
-      window.litecode.onTurnAttention((cid, requests) => apply({ event: 'turn.attention', data: { cid, requests } })),
-      window.litecode.onTurnEnded((data) => apply({ event: 'turn.ended', data })),
-      window.litecode.onTurnInterjected((data) => apply({ event: 'turn.interjected', data })),
-      window.litecode.onQueueChanged((data) => apply({ event: 'queue.changed', data })),
-      window.litecode.onConversationsChanged((data) => {
-        forgetPruned(data.removed)
-        // 메인이 바꾼 제목(자동 대화 제목 #215 등)은 턴 이벤트에 안 실린다 — 목록을 다시 읽어 입힌다
-        void window.litecode.listConversations().then((stored) => setSessions((sessionsNow) => withStoredTitles(sessionsNow, stored)), () => {})
-      }),
-    ]
-    return () => offs.forEach((off) => off())
-  }, [])
-  // 돌고 있는 `!명령` 카드의 출력 조각 — 카드 id 로 찾는다
-  useEffect(
-    () =>
-      window.litecode.onShellData((runId, chunk) =>
-        setSessions((sessionsNow) =>
-          sessionsNow.map((session) =>
-            session.shells?.some((shell) => shell.id === runId && shell.running)
-              ? { ...session, shells: session.shells.map((shell) => (shell.id === runId ? { ...shell, output: shell.output + chunk } : shell)) }
-              : session,
-          ),
-        ),
-      ),
-    [],
-  )
+  useChatEvents({
+    setSessions,
+    setFresh,
+    sessionsRef,
+    updateSession,
+    forgetPruned,
+    follow: (cid) => {
+      if (cid === activeIdRef.current) following.current = true
+    },
+  })
 
   const project = projects?.find((candidate) => candidate.path === current)
   const visible = sessions.filter((session) => session.project === project?.path)
@@ -472,31 +319,10 @@ export function App() {
       if (!handled) send()
     })
 
-  // 터미널 칸 — ⌘↓ 로 펴고 키를 칸으로 내리고, ⌘↑ 로 접고 입력창으로 올라온다 (closed-code useShellDrawer. Windows·Linux 는 Ctrl).
-  // `!` 로는 안 열린다(`!명령` 은 대화 카드). ⌘⇧↑ 은 글 선택 확장이라 건드리지 않는다. 칸이 접혀 있으면 ⌘↑ 은 입력창의 것이다
+  // 터미널 칸의 ⌘↓/⌘↑ (useShellDrawerKeys.ts)
   const drawerProject = active?.project
   const drawerOpen = !!drawerProject && !!shellOpen[drawerProject]
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent): void {
-      const command = navigator.platform.startsWith('Mac') ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
-      if (!command || event.shiftKey || event.altKey || !drawerProject || !terminalOn) return
-      // 판(aria-modal)이 떠 있으면 물러난다 (⌘F 와 같다 — ChatFind.tsx). 입력창·터미널 칸이 아닌 글 칸에서는 ⌘↓/⌘↑ 이 그 칸의 커서 이동이다
-      if (document.querySelector('[aria-modal="true"]')) return
-      const target = event.target instanceof HTMLElement ? event.target : undefined
-      if (target?.matches('input, textarea, [contenteditable]') && !target.closest('.composer__input, .shell-drawer')) return
-      if (event.key === 'ArrowDown') {
-        setShellOpen((open) => ({ ...open, [drawerProject]: true }))
-        setShellFocus((count) => count + 1)
-      } else if (event.key === 'ArrowUp' && drawerOpen) {
-        setShellOpen((open) => ({ ...open, [drawerProject]: false }))
-        trigger.inputRef.current?.focus()
-      } else return
-      event.preventDefault()
-      event.stopPropagation()
-    }
-    window.addEventListener('keydown', onKeyDown, true) // 칸(xterm)이 키를 먹기 전에
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [drawerProject, drawerOpen, terminalOn])
+  useShellDrawerKeys({ drawerProject, drawerOpen, terminalOn, setShellOpen, setShellFocus, inputRef: trigger.inputRef })
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
   useEffect(() => {
@@ -726,27 +552,6 @@ export function App() {
     return undefined
   }
 
-  /** 그 자리의 `!` 카드들 (실행한 순서) */
-  function shellCards(session: Session, at: (position: number) => boolean) {
-    if (session.history === 'unloaded' || session.history === 'loading') return [] // 자리를 셀 말풍선이 아직 없다
-    if (!features.has('shell')) return [] // 설정 > 기능에서 `!명령` 을 껐다 — 카드는 sessions.json 에 남고 다시 켜면 보인다
-    return (session.shells ?? [])
-      .filter((card) => at(card.position))
-      .map((card) => (
-        <ShellCard
-          key={card.id}
-          card={card}
-          shareBlocked={session.pending ? t('shellCard.shareBusy') : !chosen ? t('shellCard.shareNoModel') : undefined}
-          onStop={() => void window.litecode.stopShell(card.id)}
-          onShare={() => shareShell(session, card.id)}
-        />
-      ))
-  }
-
-  /** 내용을 다 불러온 대화에만 보낸다 — 폴더가 없는 대화는 지우기만 된다 */
-  function canWrite(session: Session): boolean {
-    return !session.history || session.history === 'loaded'
-  }
 
   // 프로젝트 전환 팝오버 — 펼친 사이드바에선 전환 카드 아래, 접힌 줄에선 배지 옆에 뜬다 (한 번에 한 곳)
   const popover = switching && (
@@ -790,223 +595,43 @@ export function App() {
           {popover}
         </Rail>
       )}
-      <aside className="sidebar" style={{ width: layout.width, display: layout.hidden ? 'none' : undefined }}>
-        <div
-          className="sidebar__resize"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={t('sidebar.resize')}
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId)
-            drag.current = { x: event.clientX, width: layout.width }
-          }}
-          onPointerMove={(event) => {
-            const start = drag.current
-            if (start) setLayout((now) => ({ ...now, width: clampSidebar(start.width + event.clientX - start.x) }))
-          }}
-          onPointerUp={() => (drag.current = undefined)}
-          onPointerCancel={() => (drag.current = undefined)}
-        />
-        {/* dsh ui-sidebar 로고 줄: 왼쪽 아이콘·이름, 오른쪽 끝 접기 */}
-        <div className="sidebar__logo">
-          <span className="sidebar__identity">
-            <LogoMark />
-            <span className="sidebar__brand">LiteCode</span>
-          </span>
-          <button
-            type="button"
-            className="sidebar-toggle"
-            aria-label={t('sidebar.hide')}
-            title={t('sidebar.hide')}
-            onClick={() => setLayout((now) => ({ ...now, hidden: true }))}
-          >
-            <SidebarIcon />
-          </button>
-        </div>
-        <div className="sidebar__project">
-          <button
-            type="button"
-            className="project-switch"
-            ref={layout.hidden ? undefined : switchRef}
-            disabled={picking}
-            onClick={toggleSwitcher}
-          >
-            {project && <Badge project={project} />}
-            <span className="project-switch__text" onMouseEnter={(event) => startMarquee(event.currentTarget)} onMouseLeave={(event) => stopMarquee(event.currentTarget)}>
-              <span className="project-switch__name">{project?.name ?? t('sidebar.noProject')}</span>
-              {project && <span className="project-switch__path marquee">{project.displayPath}</span>}
-            </span>
-            {otherProjectsStatus(notices.state, project?.path) && (
-              <StatusDot status={otherProjectsStatus(notices.state, project?.path)!} className="project-switch__notice" />
-            )}
-            <RunningCount
-              count={runningOutside(sessions, project?.path)}
-              label={t('sidebar.runningElsewhere', { count: runningOutside(sessions, project?.path) })}
-              className="project-switch__running"
-            />
-            <span className="project-switch__caret">▾</span>
-          </button>
-          {!layout.hidden && popover}
-        </div>
-
-        <div className="sidebar__new">
-          <button
-            type="button"
-            className="new-chat"
-            disabled={!project}
-            onClick={startNewChat}
-          >
-            {t('sidebar.newChat')}
-          </button>
-        </div>
-
-        <div className="sidebar__label">
-          {t('sidebar.conversations')}
-          <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
-        </div>
-        <SessionSearch value={titleQuery} onChange={setTitleQuery} />
-
-        <div className="sidebar__sessions">
-          {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
-              바뀌고 한 번 더 눌러야 지운다(설정 화면 provider 삭제와 같은 방식). 포커스를 잃거나 Esc 면 되돌린다 */}
-          {listed.length === 0 && titleQuery.trim() && <div className="session-list__empty">{t('sidebar.noMatch')}</div>}
-          {listed.map((session, at) => (
-            <Fragment key={session.id}>
-            {/* 고정 묶음과 나머지 사이의 선 */}
-            {at > 0 && !session.pinned && listed[at - 1]!.pinned && <div className="session-list__divider" role="separator" />}
-            <div
-              data-hover-row
-              className={`session-item${session.id === active?.id ? ' session-item--active' : ''}${confirming === session.id ? ' session-item--confirming' : ''}`}
-            >
-              {renaming === session.id ? (
-                <input
-                  className="session-item__rename"
-                  aria-label={t('sidebar.chatNameLabel')}
-                  defaultValue={session.title}
-                  maxLength={TITLE_MAX}
-                  autoFocus
-                  onFocus={(event) => event.currentTarget.select()}
-                  onKeyDown={(event) => {
-                    if (event.nativeEvent.isComposing || event.keyCode === 229) return // 한글 조합 확정 Enter
-                    if (event.key === 'Enter') event.currentTarget.blur()
-                    if (event.key === 'Escape') {
-                      event.preventDefault() // 이 Esc 는 여기서 썼다 — 녹음(VoiceInput)까지 취소하지 않게
-                      renameCancelled.current = true
-                      setRenaming(undefined)
-                    }
-                  }}
-                  onBlur={(event) => {
-                    setRenaming(undefined)
-                    if (!renameCancelled.current) void renameConversation(session, event.currentTarget.value)
-                  }}
-                />
-              ) : (
-              <button
-                type="button"
-                className="session-item__main"
-                onClick={() => setActiveIds((current) => ({ ...current, [session.project]: session.id }))}
-                onMouseEnter={(event) =>
-                  sessionHover.enter(event.currentTarget, {
-                    title: titleOf(session),
-                    detail: session.pending
-                      ? t('sidebar.waiting')
-                      : session.history === 'unloaded' || session.history === 'loading'
-                        ? undefined
-                        : t('sidebar.messageCount', { count: session.messages.length }),
-                  }, true)
-                }
-                onMouseLeave={(event) => sessionHover.leave(event.currentTarget)}
-              >
-                {/* 상태 점 자리는 늘 있다 — 점이 생기고 사라져도 제목이 안 움직인다 (dsh 세션 행) */}
-                <span className="session-item__slot">
-                  {notices.state[session.id] && <StatusDot status={notices.state[session.id]!.status} className="session-item__notice" />}
-                </span>
-                <span className="session-item__title marquee">{titleOf(session)}</span>
-                {session.pinned && <PinnedMark />}
-                {/* 시각 자리 — 지시로 새로 생긴 대화는 "새로 생김", 다른 대화가 시킨 일을 하는 중이면 그 아이콘 (이슈 #55 시안) */}
-                {sidebarMark(session, fresh) === 'fresh' ? (
-                  <span className="session-item__fresh">{t('delegate.sidebar.fresh')}</span>
-                ) : sidebarMark(session, fresh) === 'delegated' ? (
-                  <span className="session-item__mark">
-                    <FromIcon size={14} label={t('delegate.sidebar.running')} />
-                  </span>
-                ) : (
-                  !isBlank(session) && <span className="session-item__time">{ago(session.updatedAt, now)}</span>
-                )}
-              </button>
-              )}
-              {/* 연필 — 이름 바꾸기 (저장된 대화만, 도는 중에도). 도는 대화는 휴지통 자리에 ■ — 답변 중지 (01l A4) */}
-              {renaming !== session.id && (session.pending || !isBlank(session)) && (
-                <span className="session-item__actions">
-                  {!isBlank(session) && confirming !== session.id && (
-                    <button
-                      type="button"
-                      className="session-item__action"
-                      aria-label={t('sidebar.renameChat')}
-                      title={t('sidebar.renameChat')}
-                      onClick={() => {
-                        renameCancelled.current = false
-                        setRenaming(session.id)
-                      }}
-                    >
-                      <PencilIcon />
-                    </button>
-                  )}
-                  {!isBlank(session) && confirming !== session.id && <PinButton pinned={!!session.pinned} onToggle={() => void pinConversation(session)} />}
-                  {session.pending ? (
-                    <button
-                      type="button"
-                      className="session-item__action session-item__stop"
-                      aria-label={t('sidebar.stopChat')}
-                      title={t('sidebar.stopChat')}
-                      onClick={() => stopTurn(session.id)}
-                    >
-                      <StopIcon size={14} />
-                    </button>
-                  ) : confirming === session.id ? (
-                    <button
-                      type="button"
-                      className="session-item__confirm"
-                      autoFocus
-                      onClick={() => void removeConversation(session)}
-                      onBlur={() => setConfirming(undefined)}
-                      onKeyDown={(event) => event.key === 'Escape' && setConfirming(undefined)}
-                    >
-                      {t('sidebar.confirmDelete')}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="session-item__action"
-                      aria-label={t('sidebar.deleteChat')}
-                      title={t('sidebar.deleteChat')}
-                      onClick={() => setConfirming(session.id)}
-                    >
-                      <TrashIcon />
-                    </button>
-                  )}
-                </span>
-              )}
-            </div>
-            </Fragment>
-          ))}
-        </div>
-        <div className="sidebar__fade" aria-hidden="true" />
-        <HoverCard card={sessionHover.card} />
-
-        <div className="sidebar__foot">
-          <UpdateNotice />
-          <button
-            type="button"
-            className="settings-trigger"
-            ref={layout.hidden ? undefined : settingsRef}
-            onClick={() => setSettingsOpen(true)}
-          >
-            <GearIcon />
-            {t('sidebar.settings')}
-          </button>
-        </div>
-      </aside>
+      <Sidebar
+        t={t}
+        layout={layout}
+        setLayout={setLayout}
+        drag={drag}
+        project={project}
+        picking={picking}
+        switchRef={switchRef}
+        settingsRef={settingsRef}
+        popover={popover}
+        notices={notices}
+        sessions={sessions}
+        running={running}
+        runningOnly={runningOnly}
+        setRunningOnly={setRunningOnly}
+        titleQuery={titleQuery}
+        setTitleQuery={setTitleQuery}
+        listed={listed}
+        active={active}
+        setActiveIds={setActiveIds}
+        confirming={confirming}
+        setConfirming={setConfirming}
+        renaming={renaming}
+        setRenaming={setRenaming}
+        renameCancelled={renameCancelled}
+        fresh={fresh}
+        now={now}
+        sessionHover={sessionHover}
+        titleOf={titleOf}
+        toggleSwitcher={toggleSwitcher}
+        startNewChat={startNewChat}
+        stopTurn={stopTurn}
+        removeConversation={removeConversation}
+        renameConversation={renameConversation}
+        pinConversation={pinConversation}
+        setSettingsOpen={setSettingsOpen}
+      />
 
       <main className={`main${layout.hidden ? ' main--railed' : ''}`}>
         {projects && !project && (
@@ -1030,234 +655,48 @@ export function App() {
         )}
         {active && (
           <DelegationContext.Provider value={delegation}>
-            <div className="main__header">
-              {titleOf(active)}
-              {/* 도는 작업 목록 (#32) — 하위 작업이 있는 턴이 도는 동안만, 열기 버튼 왼쪽 */}
-              {active.pending && <JobsButton key={active.id} items={active.progress ?? []} startedAt={active.sentAt} />}
-              {features.has('openIn') && <OpenInButton directory={active.project} />}
-              <RightPanelButton directory={active.project} />
-              {/* 더 보기 ⋯ — 대화 내보내기 (이슈 #177) */}
-              <ConversationMenu key={active.id} conversationId={active.id} />
-            </div>
-            {/* 설정 > 기능의 추론 과정을 끄면 탭 줄째 숨기고 대화만 (dsh Coding Tools) */}
-            {trajectoryOn && (
-              <div className="main__tabs" role="tablist" aria-label={t('main.views')}>
-                {(['chat', 'trajectory'] as const).map((tab) => (
-                  <button key={tab} type="button" role="tab" className="main__tab" aria-selected={view === tab} onClick={() => setView(tab)}>
-                    {tab === 'chat' ? t('main.tabChat') : t('main.tabTrajectory')}
-                  </button>
-                ))}
-              </div>
-            )}
+            <ConversationView
+              t={t}
+              active={active}
+              titleOf={titleOf}
+              features={features}
+              trajectoryOn={trajectoryOn}
+              view={view}
+              setView={setView}
+              listRef={listRef}
+              setFinding={setFinding}
+              finding={finding}
+              following={following}
+              chosen={chosen}
+              send={send}
+              shareShell={shareShell}
+            />
 
-            {/* 대화 본문의 그리기 오류가 사이드바·입력창까지 내리지 않게 — 다른 대화·탭으로 가면 풀린다 (ErrorBoundary.tsx) */}
-            <ErrorBoundary scope="section" className="crash--fill" resetKey={`${active.id}:${view}`}>
-            {trajectoryOn && view === 'trajectory' ? (
-              <Trajectory key={active.id} directory={active.project} sessionId={active.engineSessionId} pending={!!active.pending} />
-            ) : (
-            <div className="chat-pane">
-            {/* 대화 안 찾기 (이슈 #79) — ⌘F. 대화를 바꾸면 닫힌다 (key) */}
-            <ChatFind key={active.id} scroller={listRef} onFinding={setFinding} />
-            <FindingProvider value={finding}>
-            <div className="main__messages" ref={listRef}>
-              <div className="chat-column">
-              {active.history === 'missing' ? (
-                <div className="empty" role="alert">
-                  {t('chat.missingFolder', { dir: active.project })}
-                </div>
-              ) : active.history === 'unloaded' || active.history === 'loading' ? (
-                <div className="empty">{t('chat.loading')}</div>
-              ) : (
-                active.messages.length === 0 && <div className="empty">{t('chat.empty')}</div>
-              )}
-              {/* 내 말은 말풍선, 답은 본문 폭 전체의 글 + 턴 머리 (ChatTurn.tsx) */}
-              {active.messages.map((message, index) => (
-                <Fragment key={index}>
-                  {shellCards(active, (position) => position === index)}
-                  {message.role === 'user' && switchedMode(active.messages, index) && (
-                    <div className="mode-divider" data-mode={message.mode} role="separator">
-                      {t('mode.switched', { name: t(`mode.${message.mode!}`) })}
-                    </div>
-                  )}
-                  {message.role === 'user' ? (
-                    <UserMessage text={message.text} at={message.at} attachments={message.attachments} origin={message.origin} unanswered={message.unanswered} />
-                  ) : (
-                    <AssistantTurn
-                      items={message.items ?? NO_ITEMS}
-                      text={message.error ? `⚠️ ${message.error}` : message.text}
-                      failed={!!message.error}
-                      interrupted={message.interrupted}
-                      declined={message.declined}
-                      duration={message.duration}
-                      directory={active.project}
-                    />
-                  )}
-                </Fragment>
-              ))}
-              {/* 계획 모드로 끝난 마지막 턴 — 누르면 기본 모드로 바꾸고 이어 실행. 신규 세대 opencode 는 "이제 실행해도 된다" 를
-                  안 붙이므로 보내는 문장이 그 역할을 한다 (01k §5) */}
-              {!active.pending && planEnded(active.messages) && (
-                <button
-                  type="button"
-                  className="run-plan"
-                  disabled={!chosen}
-                  onClick={() => {
-                    const text = t('mode.runPlanPrompt')
-                    send({ text, display: text, attachments: [] }, { mode: 'build' }) // 입력 카드의 칩은 그대로 둔다
-                  }}
-                >
-                  {t('mode.runPlan')}
-                </button>
-              )}
-              {shellCards(active, (position) => position === active.messages.length)}
-              {active.pending && (
-                <AssistantTurn
-                  key="running"
-                  running
-                  items={active.progress ?? NO_ITEMS}
-                  text=""
-                  startedAt={active.sentAt}
-                  directory={active.project}
-                  attention={active.attention}
-                  onAnswer={answerAttention}
-                />
-              )}
-              {shellCards(active, (position) => position > active.messages.length)}
-              </div>
-            </div>
-            </FindingProvider>
-            <Minimap scroller={listRef} turns={minimapTurns(active.messages)} />
-            <ScrollToBottom scroller={listRef} following={following} />
-            </div>
-            )}
-            </ErrorBoundary>
-
-            <div className="composer">
-              {/* 이 대화의 목표 (이슈 #285) — 판이 여럿이면 맨 위 */}
-              {goal && <GoalDock goal={goal} onCommand={(action) => goalAction(active.id, action)} />}
-              {/* AI 의 지금 할 일 목록 (이슈 #83) — 남은 일이 있을 때만. 대화를 바꾸면 접힌다 (key) */}
-              <TodoDock key={active.id} messages={active.messages} progress={active.progress} running={!!active.pending} />
-              <QueueDock
-                items={active.queue ?? []}
-                sources={active.queueSources}
-                onDrop={(index) => void window.litecode.dropQueued(active.id, index)}
-                onRestore={() => {
-                  void window.litecode.takeQueue(active.id).then((taken) => taken && restoreQueued(active.id, taken))
-                  trigger.inputRef.current?.focus()
-                }}
-              />
-              {/* dsh InputBar: 둥근 카드 하나에 입력칸과 아래 줄(왼쪽 +, 오른쪽 모델 선택·둥근 보내기)을 담고, 카드 밑에 통계 줄 */}
-              <div className={`composer__box${trigger.query?.tone ? ` composer__box--${trigger.query.tone}` : ''}`}>
-                <TriggerPopup trigger={trigger} />
-                {/* 붙인 파일·이미지 칩 — 글 입력칸 위 (이슈 #44 시안). × 로 뺀다 */}
-                {attached.length > 0 && (
-                  <div className="composer__attachments">
-                    <AttachmentChips
-                      items={attached}
-                      onRemove={(index) => {
-                        void window.litecode.discardAttachments([attached[index]!.path]) // 붙여넣은 이미지면 임시 파일을 지운다 (이슈 #80)
-                        setAttached((now) => now.filter((_, at) => at !== index))
-                      }}
-                    />
-                  </div>
-                )}
-                <textarea
-                  ref={trigger.inputRef}
-                  {...trigger.inputProps}
-                  className="composer__input"
-                  placeholder={mode === 'plan' ? t('composer.planPlaceholder') : t('composer.placeholder')}
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onPaste={(event) => {
-                    // 클립보드의 파일·이미지는 칩으로 (이슈 #80) — 글만 있으면 손대지 않는다 (dropPaste.ts)
-                    const files = [...event.clipboardData.files]
-                    if (pasteIntent(event.clipboardData.types, files.length) !== 'attach') return
-                    if (!canWrite(active)) return
-                    event.preventDefault()
-                    void attachFiles(files)
-                  }}
-                  onKeyDown={(event) => {
-                    // 한글 등 입력기가 조합 중인 Enter 는 조합을 확정하는 키다 — 여기서 보내면 "안녕" 이 "아ㄴ녕" 으로 가고
-                    // 마지막 글자가 입력창에 남는다. keyCode 229 는 isComposing 을 안 채우는 환경용
-                    if (event.nativeEvent.isComposing || event.keyCode === 229) return
-                    if (trigger.onKeyDown(event)) return
-                    // Shift+Tab — 모드 순환 (opencode TUI·Claude Code 와 같은 키). 입력창에서만 브라우저 기본(뒤로 포커스)을 막는다
-                    if (event.key === 'Tab' && event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
-                      event.preventDefault()
-                      if (!active.pending) chooseMode(nextMode(mode))
-                      return
-                    }
-                    // ↑/↓ — 빈 입력창에서 이 대화에 보낸 이전 글을 불러온다 (셸의 기록처럼). 쓰던 글·여러 줄 안의 커서 이동은 그대로 (inputHistory.ts).
-                    // 후보 팝업이 떠 있으면 위에서 이미 팝업이 썼다
-                    if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
-                      const recalled = browseHistory(
-                        sentTexts(active.messages),
-                        browsing.current?.id === active.id ? browsing.current.index : undefined,
-                        event.key === 'ArrowUp' ? 'up' : 'down',
-                        { text: draft, start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd },
-                      )
-                      if (recalled) {
-                        event.preventDefault()
-                        browsing.current = recalled.index === undefined ? undefined : { id: active.id, index: recalled.index }
-                        setDraft(recalled.text)
-                        return
-                      }
-                    }
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault()
-                      // 누르고 있는 Enter 는 한 번만 — 초안은 보낸 뒤에 비워져서, 반복 키가 같은 글을 또 보낸다
-                      if (event.repeat) return
-                      submit()
-                    }
-                  }}
-                />
-                <VoiceStrip voice={voice} />
-                <div className="composer__row">
-                  {/* `+` 메뉴 — 파일·이미지 추가(이슈 #44)와 지금 프로젝트의 스킬·MCP 서버 팝업(이슈 #43). 이미지는 고른 모델이 받을 때만 */}
-                  <PlusMenu
-                    project={projects?.find((candidate) => candidate.path === active.project)}
-                    imageInput={!!chosen?.model.imageInput}
-                    onAttach={(kind) => void addAttachments(kind)}
-                  />
-                  <ModeChip value={mode} locked={!!active.pending} onChange={chooseMode} />
-                  <div className="composer__trailing">
-                    <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
-                    <VoiceButton voice={voice} />
-                    {/* dsh InputBar: 턴이 도는 동안 입력이 비면 보내기 자리가 ■, 글을 쓰면 다시 보내기(=큐) */}
-                    {active.pending && !draft.trim() && attached.length === 0 ? (
-                      <button
-                        type="button"
-                        className="composer__send composer__stop"
-                        aria-label={t('composer.stop')}
-                        title={t('composer.stopTitle')}
-                        onClick={() => stopTurn(active.id)}
-                      >
-                        <StopIcon />
-                      </button>
-                    ) : (
-                    <button
-                      type="button"
-                      className="composer__send"
-                      aria-label={t('composer.send')}
-                      title={t('composer.sendTitle')}
-                      onClick={submit}
-                      disabled={!chosen || (!draft.trim() && attached.length === 0) || !canWrite(active)}
-                    >
-                      {/* dsh 보내기 화살표 (16 격자) */}
-                      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                        <path
-                          d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z"
-                          fill="currentColor"
-                        />
-                      </svg>
-                    </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {/* 컨텍스트 % 의 한도는 지금 고른 모델의 설정값 (설정 > 모델의 "컨텍스트 길이") */}
-              <StatsBar stats={chatStats(active.usage, chosen?.model.contextLength, chosen?.model.maxOutput)} />
-            </div>
+            <Composer
+              t={t}
+              active={active}
+              goal={goal}
+              goalAction={goalAction}
+              restoreQueued={restoreQueued}
+              trigger={trigger}
+              draft={draft}
+              setDraft={setDraft}
+              attached={attached}
+              setAttached={setAttached}
+              browsing={browsing}
+              mode={mode}
+              chooseMode={chooseMode}
+              providers={providers}
+              projects={projects}
+              selected={selected}
+              chosen={chosen}
+              chooseModel={chooseModel}
+              voice={voice}
+              submit={submit}
+              stopTurn={stopTurn}
+              attachFiles={attachFiles}
+              addAttachments={addAttachments}
+            />
             {terminalOn && shellOpen[active.project] && (
               <ShellDrawer
                 key={active.project}
