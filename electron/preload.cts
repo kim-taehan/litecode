@@ -119,6 +119,9 @@ const Channel = {
   UPDATES_CHECK: 'updates:check',
   UPDATES_OPEN: 'updates:open',
   UPDATES_CHANGED: 'updates:changed',
+  GOAL_COMMAND: 'goal:command',
+  GOAL_GET: 'goal:get',
+  GOAL_CHANGED: 'goal:changed',
 } as const
 
 /** 경로 없는 이미지(붙여넣은 스크린숏)를 읽어 메인에 넘길 상한 — shared/attachments.ts 의 imageBytes 와 같아야 한다 (메인이 다시 본다) */
@@ -279,6 +282,9 @@ const bridge: LitecodeBridge = {
   checkForUpdate: () => ipcRenderer.invoke(Channel.UPDATES_CHECK),
   openUpdate: (url) => ipcRenderer.invoke(Channel.UPDATES_OPEN, url),
   onUpdateChanged: (listener) => listen(Channel.UPDATES_CHANGED, listener),
+  goalCommand: (conversationId, args) => ipcRenderer.invoke(Channel.GOAL_COMMAND, conversationId, args),
+  goal: (conversationId) => ipcRenderer.invoke(Channel.GOAL_GET, conversationId),
+  onGoalChanged: (listener) => listen(Channel.GOAL_CHANGED, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

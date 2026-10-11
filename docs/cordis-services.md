@@ -50,6 +50,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `trajectory` | `trajectory` | `trajectory.ts` | 추론 과정 보기 | `llm` | 켜짐 |
 | `openIn` | `openIn` | `openIn.ts` | 다른 앱에서 열기 | `projects` | 켜짐 |
 | `appMcp` | `appMcp` | `appMcp.ts` + `appMcp/tools/*` | 앱 내장 MCP 서버(`litecode_*` 도구 6개) | `mcp` | 켜짐 |
+| `goal` | `goal` | `goal.ts` + `appMcp/tools/goal.ts` (+ 순수 `shared/goal.ts`) | 대화마다 목표 하나(`/goal`)·끝날 때까지 자동 이어가기(연속 8번 상한, 중지·오류·카드·재시작이면 일시 정지)·모델 도구 `litecode_goal_get`·`goal_update`(#285) | `chat`, `sessions` (+도구는 `appMcp` `llm`) | 켜짐 |
 | `notifications` | `notifications` | `notifications.ts` | 턴 끝·승인 대기 알림·토스트 | `settings`, `sessions`, `projects` | **꺼짐** |
 | `remote` | `remote` | `remote.ts` + `remote/*` | 모바일 연결 — 계약·인증·기기·짝짓기·이벤트 링 (+평문 루프백 HTTP 운반) | `chat`, `sessions`, `projects`, `providers`, `settings` | **꺼짐** |
 | `lan` | — | `remote/https.ts` | 사내망 연결 — TLS 운반(설정 > 모바일의 토글, #210) | `remote` | 켜짐 (`remote` 를 켜면) |
@@ -60,7 +61,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `browser` | `browser` | `browser.ts` + `browser/*` | Chrome 조종(Playwright MCP 를 MCP 서버로 등록) | `mcp` | **꺼짐** |
 | `updates` | `updates` | `updates.ts` (+ 순수 `shared/updates.ts`) | 새 버전 알림 — GitHub 릴리즈(또는 설정 `updateUrl`)에 묻기만, 설치본에서만(#273) | `settings` | **꺼짐** |
 
-- `FEATURE_REQUIRES`: `bang → shell`, `appMcp → mcp`, `browser → mcp`, `lan → remote`, `bluetooth → remote` (필요한 기능이 꺼지면 같이 못 뜬다).
+- `FEATURE_REQUIRES`: `bang → shell`, `appMcp → mcp`, `goal → appMcp`, `browser → mcp`, `lan → remote`, `bluetooth → remote` (필요한 기능이 꺼지면 같이 못 뜬다).
 - `skills`·`web`·`appMcp`·`browser` 는 **엔진 설정에도 영향**이 있다 — `features/changed` 를 `ctx.engine` 이 듣고 설정을 다시 쓰고 엔진을 재시작한다(도는 턴은 끊긴다).
 
 ### 2-3. 하위 플러그인 — 자기 `ctx` 키가 없다

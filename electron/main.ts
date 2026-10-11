@@ -57,6 +57,8 @@ import { RemoteHttps } from '../src/services/remote/https.ts'
 import { RemoteBluetooth, bluetoothProblem, type BlenoLike } from '../src/services/remote/bluetooth.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
+import { GoalService } from '../src/services/goal.ts'
+import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
@@ -541,6 +543,14 @@ function updatesBridge(ctx: Context): void {
 }
 updatesBridge.inject = ['updates']
 
+// 목표 (ctx.goal, 이슈 #285) — `/goal`·입력 카드 위 줄의 버튼과, 바뀐 목표를 모든 창에
+function goalBridge(ctx: Context): void {
+  handle(ctx, Channel.GOAL_COMMAND, async (_event, conversationId: string, args: string) => ctx.goal.command(String(conversationId), String(args ?? '')))
+  handle(ctx, Channel.GOAL_GET, async (_event, conversationId: string) => (await ctx.goal.get(String(conversationId))) ?? null)
+  ctx.on('goal/changed', (conversationId, goal) => broadcast(Channel.GOAL_CHANGED, conversationId, goal ?? null))
+}
+goalBridge.inject = ['goal']
+
 /** 블루투스 라디오의 문제(꺼짐·권한 없음·미지원·실패)를 설정 > 기능의 블루투스 연결 줄에도 알린다 (이슈 #224). 광고·켜는 중은 문제가 아니다.
  *  묶음이 내려가면 ctx.features 가 문제를 지운다 */
 function bluetoothProblems(ctx: Context): void {
@@ -675,6 +685,17 @@ const features: FeatureDefinition[] = [
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
       ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
       ctx.plugin(appMcpBridge)
+    },
+  },
+  {
+    // 목표 (이슈 #285) — 기본 켜짐, 데스크탑 MCP 가 켜져 있어야 한다(모델이 끝을 알리는 litecode_goal_* 가 거기 붙는다). 끄면 `/goal`(ctx.get 으로 본다)·
+    // 도구·자동 이어가기·IPC 가 함께 내려간다. 다시 켜면 진행 중이던 목표는 일시 정지로 돌아온다
+    id: 'goal',
+    service: 'goal',
+    plugin: (ctx) => {
+      ctx.plugin(GoalService)
+      ctx.plugin(GoalTools)
+      ctx.plugin(goalBridge)
     },
   },
   {

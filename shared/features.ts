@@ -6,7 +6,7 @@
 import type { MessageKey } from './i18n/ko.ts'
 
 // skills(이슈 #7)는 묶음(ctx.skills — `+` 메뉴의 스킬 팝업 목록(#43)·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
-export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'hooks', 'voice', 'browser', 'updates'] as const
+export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 스위치가 없다(#277 부터 "항상 켜짐" 읽기 전용 줄).
@@ -26,7 +26,7 @@ export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
 export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
-  { id: 'ai', features: ['appMcp', 'web', 'browser'] },
+  { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser'] },
   { id: 'automation', features: ['hooks'] },
   { id: 'devices', features: ['voice', 'remote', 'notifications', 'updates'] },
 ]
@@ -35,6 +35,7 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
  *  웹 가져오기(web — opencode 내장 webfetch, 이슈 #14·#103: 2026-10-03 에 늘 꺼짐으로 고정했다가 2026-10-05 사용자 결정으로 다시 고르게.
  *  폐쇄망에선 바깥 주소에 멈추므로 사내 주소용이다. 레거시 경로엔 websearch 가 없다).
  *  나머지(터미널 칸·추론 과정·다른 앱에서 열기·데스크탑 MCP)는 기본 켜짐.
+ *  목표(goal — ctx.goal, 이슈 #285)는 기본 켜짐 — `/goal` 로 목표를 정했을 때만 움직인다. 모델이 끝을 알리는 도구가 데스크탑 MCP 에 있어 그것이 켜져 있어야 한다.
  *  데스크탑 MCP(appMcp, 이슈 #99)는 앱 내장 MCP 서버(ctx.appMcp)와 그 도구 — 끄면 서버가 내려가고 다음 턴부터 엔진에서 `litecode_*` 도구가 빠진다.
  *  훅(hooks, 이슈 #102)은 기본 꺼짐 — 사용자 셸 명령을 AI 의 행동에 걸어 돌리는 기능이라 사용자가 켠다.
  *  음성 입력(voice — ctx.speech)도 기본 꺼짐 — 마이크 권한을 묻고 쓰는 동안 메모리 ~1GB 인 기능이라 사용자가 켠다. 꺼져 있으면 마이크 권한도 거절한다.
@@ -51,7 +52,7 @@ export function featureDefault(feature: FeatureId): boolean {
 }
 
 /** 그 기능이 쓰려면 같이 켜져 있어야 하는 기능 — `!` 입력은 `!명령` 실행(ctx.shell)이 돌린다 */
-export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'], browser: ['mcp'], lan: ['remote'], bluetooth: ['remote'] }
+export const FEATURE_REQUIRES: Partial<Record<FeatureId, readonly FeatureId[]>> = { bang: ['shell'], appMcp: ['mcp'], goal: ['appMcp'], browser: ['mcp'], lan: ['remote'], bluetooth: ['remote'] }
 
 /** 켜지 못한 사유 (이슈 #224) — 글(묶음이 던진 오류 메시지를 한 줄로 정리한 것) 또는 화면 언어로 번역할 문구 키 */
 export type FeatureReason = string | { key: MessageKey; vars?: Record<string, string | number> }

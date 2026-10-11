@@ -9,8 +9,9 @@ import type { Mode } from './modes.ts'
 
 /** 누가 보냈나 — 사람('user'), 다른 대화가 보낸 지시 `session:<보낸 대화 id>` (이슈 #55),
  *  짝지은 폰이 보낸 것 `device:<기기 id>` (ctx.remote, 이슈 #56),
- *  앱이 턴 끝에 이어 보낸 것 'hook' ('chat/after-turn' 의 followUp — 턴 끝 훅이 막았다, 이슈 #102) */
-export type ChatOrigin = 'user' | 'hook' | `session:${string}` | `device:${string}`
+ *  앱이 턴 끝에 이어 보낸 것 'hook' ('chat/after-turn' 의 followUp — 턴 끝 훅이 막았다, 이슈 #102),
+ *  목표를 이어 가려고 앱이 자동으로 보낸 라운드 'goal' (ctx.goal, 이슈 #285) */
+export type ChatOrigin = 'user' | 'hook' | 'goal' | `session:${string}` | `device:${string}`
 
 /** 사람이 친 글인가 — 데스크탑 화면('user')과 짝지은 폰(`device:…`)만. 다른 대화의 지시·앱이 이어 보낸 것은 아니다 */
 export function fromPerson(origin: ChatOrigin | undefined): boolean {
