@@ -220,8 +220,9 @@ export function MobilePage() {
               <div className="settings-row__title">{device.name}</div>
               <div className="settings-row__description">{detail(device)}</div>
             </div>
-            <span className={`mobile-device__via mobile-device__via--${via(device)}`} data-via={via(device)}>
-              {t(`remote.via.${via(device)}`)}
+            <span className={`mobile-device__via mobile-device__via--${via(device) === 'none' ? 'off' : 'on'}`} data-via={via(device)}>
+              <span className="mobile-device__dot" aria-hidden="true" />
+              {via(device) === 'none' ? t('remote.via.none') : `${t('remote.device.connected')} · ${t(`remote.via.${via(device)}`)}`}
             </span>
             {confirmingRevoke === device.id ? (
               <>
