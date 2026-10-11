@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import { LlmService, type Attention, type ChatResult } from '../../src/services/llm.ts'
+import { LlmService, type Attention, type ChatResult, type ToolStarted } from '../../src/services/llm.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage } from '../../src/i18n.ts'
 
@@ -91,7 +91,7 @@ async function fakeOpencode(): Promise<string> {
   return `http://127.0.0.1:${(server!.address() as AddressInfo).port}`
 }
 
-async function start(): Promise<{ llm: LlmService; started: () => boolean }> {
+async function start(): Promise<{ llm: LlmService; started: () => boolean; ctx: Context }> {
   setMainLanguage('ko')
   const url = await fakeOpencode()
   closer = new AbortController()
@@ -123,7 +123,7 @@ async function start(): Promise<{ llm: LlmService; started: () => boolean }> {
   ctx.plugin(FakeEngine)
   ctx.plugin(LlmService)
   const llm = await new Promise<LlmService>((resolve) => ctx.inject(['llm'], (ready) => resolve(ready.llm)))
-  return { llm, started: () => admitted }
+  return { llm, started: () => admitted, ctx }
 }
 
 async function until(done: () => boolean, what = '조건'): Promise<void> {
@@ -267,5 +267,69 @@ describe('ctx.llm — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
     } finally {
       firstPromptDelay = 0
     }
+  })
+})
+
+describe('ctx.llm.remind — 모델만 볼 알림 끼워 넣기 (이슈 #284)', () => {
+  it('끼워 넣기와 같은 길(같은 model·agent·system·tools)로 가되 글은 synthetic — 진행 줄에 안 나오고 답을 못 받아도 unanswered 에 없다', async () => {
+    const { llm, started } = await start()
+    const a = await turnA(llm, started, { mode: 'plan', context: 'A 맥락' })
+    expect(await llm.remind('ses_1', '알림 한 줄')).toBe(true)
+    expect(prompts).toHaveLength(2)
+    const [first, second] = prompts as [Record<string, unknown>, Record<string, unknown>]
+    expect(second).toMatchObject({ model: first.model, agent: 'plan', system: first.system, tools: first.tools })
+    expect(second.parts).toEqual([{ type: 'text', text: '알림 한 줄', synthetic: true }])
+    const reminder = second.messageID as string
+    expect(reminder).not.toBe(A)
+    user(reminder)
+    part(reminder, { type: 'text', id: 'prt_r', text: '알림 한 줄', synthetic: true })
+    part('msg_a1', { type: 'tool', id: 'prt_tool', tool: 'bash', callID: 'call_1', state: { status: 'error', input: { command: 'sleep 3' }, error: 'rejected', time: { start: 1, end: 2 } } })
+    idle()
+    await until(() => a.result() !== undefined, '턴 끝')
+    expect(a.result()!.unanswered).toBeUndefined()
+    expect(a.items.some((item) => item.id.startsWith(reminder))).toBe(false)
+  })
+
+  it('알림을 본 뒤의 idle 에서 끝난다 — 그 뒤 답이 이 턴의 답이다', async () => {
+    const { llm, started } = await start()
+    const a = await turnA(llm, started)
+    expect(await llm.remind('ses_1', '알림')).toBe(true)
+    const reminder = prompts[1]!.messageID as string
+    idle() // 알림이 엔진에 닿기 전의 idle 은 앞 루프의 것
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(a.result()).toBeUndefined()
+    user(reminder)
+    assistant('msg_r1', reminder)
+    part('msg_r1', { type: 'text', id: 'prt_done', text: '방법을 바꿨다', time: { start: 1, end: 2 } })
+    idle()
+    await until(() => a.result() !== undefined, '턴 끝')
+    expect(a.result()).toMatchObject({ ok: true, text: '방법을 바꿨다' })
+  })
+
+  it("'llm/tool-started' 는 도구가 running(입력 확정)이 된 순간 callID 마다 한 번 — pending 에는 없고, 같은 파트가 다시 와도 한 번", async () => {
+    const { llm, started, ctx } = await start()
+    const seen: ToolStarted[] = []
+    ctx.on('llm/tool-started', (info) => void seen.push(info))
+    const a = await turnA(llm, started)
+    expect(seen).toEqual([{ sessionId: 'ses_1', directory, tool: 'bash', input: { command: 'sleep 3' }, callID: 'call_1', child: false }])
+    part('msg_a1', { type: 'tool', id: 'prt_tool', tool: 'bash', callID: 'call_1', state: { status: 'running', input: { command: 'sleep 3' }, metadata: { output: '...' } } })
+    part('msg_a1', { type: 'tool', id: 'prt_two', tool: 'read', callID: 'call_2', state: { status: 'pending', input: {} } })
+    part('msg_a1', { type: 'tool', id: 'prt_tool', tool: 'bash', callID: 'call_1', state: { status: 'completed', input: { command: 'sleep 3' }, output: 'ok', time: { start: 1, end: 2 } } })
+    part('msg_a1', { type: 'tool', id: 'prt_two', tool: 'read', callID: 'call_2', state: { status: 'running', input: { filePath: 'a.ts' } } })
+    await until(() => seen.length === 2, 'call_2 의 running')
+    expect(seen[1]).toMatchObject({ tool: 'read', input: { filePath: 'a.ts' }, callID: 'call_2' })
+    part('msg_a1', { type: 'text', id: 'prt_t', text: '끝', time: { start: 1, end: 2 } })
+    idle()
+    await until(() => a.result() !== undefined, '턴 끝')
+    expect(seen).toHaveLength(2)
+  })
+
+  it('그 세션에 도는 턴이 없으면 false — 엔진에 아무것도 안 보낸다', async () => {
+    const { llm, started } = await start()
+    expect(await llm.remind('ses_1', '알림')).toBe(false)
+    await turnA(llm, started)
+    expect(await llm.remind('ses_other', '알림')).toBe(false)
+    expect(prompts).toHaveLength(1)
+    idle()
   })
 })

@@ -41,6 +41,7 @@ import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
 import { UpdatesService } from '../src/services/updates.ts'
+import { RepeatGuardService } from '../src/services/repeatGuard.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
 import { HooksService } from '../src/services/hooks.ts'
 import { hooksBridge } from '../src/services/hooks/bridge.ts'
@@ -57,6 +58,8 @@ import { RemoteHttps } from '../src/services/remote/https.ts'
 import { RemoteBluetooth, bluetoothProblem, type BlenoLike } from '../src/services/remote/bluetooth.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
+import { GoalService } from '../src/services/goal.ts'
+import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
@@ -541,6 +544,14 @@ function updatesBridge(ctx: Context): void {
 }
 updatesBridge.inject = ['updates']
 
+// 목표 (ctx.goal, 이슈 #285) — `/goal`·입력 카드 위 줄의 버튼과, 바뀐 목표를 모든 창에
+function goalBridge(ctx: Context): void {
+  handle(ctx, Channel.GOAL_COMMAND, async (_event, conversationId: string, args: string) => ctx.goal.command(String(conversationId), String(args ?? '')))
+  handle(ctx, Channel.GOAL_GET, async (_event, conversationId: string) => (await ctx.goal.get(String(conversationId))) ?? null)
+  ctx.on('goal/changed', (conversationId, goal) => broadcast(Channel.GOAL_CHANGED, conversationId, goal ?? null))
+}
+goalBridge.inject = ['goal']
+
 /** 블루투스 라디오의 문제(꺼짐·권한 없음·미지원·실패)를 설정 > 기능의 블루투스 연결 줄에도 알린다 (이슈 #224). 광고·켜는 중은 문제가 아니다.
  *  묶음이 내려가면 ctx.features 가 문제를 지운다 */
 function bluetoothProblems(ctx: Context): void {
@@ -678,6 +689,17 @@ const features: FeatureDefinition[] = [
     },
   },
   {
+    // 목표 (이슈 #285) — 기본 켜짐, 데스크탑 MCP 가 켜져 있어야 한다(모델이 끝을 알리는 litecode_goal_* 가 거기 붙는다). 끄면 `/goal`(ctx.get 으로 본다)·
+    // 도구·자동 이어가기·IPC 가 함께 내려간다. 다시 켜면 진행 중이던 목표는 일시 정지로 돌아온다
+    id: 'goal',
+    service: 'goal',
+    plugin: (ctx) => {
+      ctx.plugin(GoalService)
+      ctx.plugin(GoalTools)
+      ctx.plugin(goalBridge)
+    },
+  },
+  {
     // 훅 (이슈 #102) — 기본 꺼짐. 사용자가 이벤트에 건 셸 명령을 메인이 프로젝트 폴더에서 돌린다 (엔진 플러그인 아님). 화면은 입력창 `+` 메뉴의
     // 훅 팝업 — 다리는 hooks/bridge.ts (userData 의 두 파일을 직접 고쳐도 된다)
     id: 'hooks',
@@ -725,6 +747,8 @@ const features: FeatureDefinition[] = [
       ctx.plugin(updatesBridge)
     },
   },
+  // 같은 도구 반복 알림 (이슈 #284) — 기본 켜짐. 'llm/tool-done' 을 듣고 연속 3·5·8번째에 ctx.llm.remind 로 모델에게만 한 줄. 끄면 알림만 사라진다
+  { id: 'repeatGuard', service: 'repeatGuard', plugin: (ctx) => void ctx.plugin(RepeatGuardService) },
 ]
 // 종료 때 바탕보다 먼저 내려간다(거꾸로 내리므로) — 터미널·셸·알림이 엔진보다 먼저 정리된다
 mounted.push(ctx.plugin(FeaturesService, features))

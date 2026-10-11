@@ -99,7 +99,7 @@ async function start(bundles: FeatureDefinition[] = definitions()): Promise<{ ct
 /** 걸린 채널 (정렬) */
 const channels = () => [...ipc.handlers.keys()].sort()
 /** 기본으로 걸리는 채널 — 알림은 기본 꺼짐 */
-const ALL = ['appMcp:x', 'at:x', 'bang:x', 'mcp:x', 'openIn:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
+const ALL = ['appMcp:x', 'at:x', 'bang:x', 'goal:x', 'mcp:x', 'openIn:x', 'repeatGuard:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
 
 beforeEach(async () => {
   ipc = new FakeIpc()
@@ -407,7 +407,7 @@ describe('featureOn', () => {
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'hooks', 'voice', 'browser', 'updates'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates', 'repeatGuard'])
     expect(featureOn(undefined, 'updates')).toBe(false) // 새 버전 알림은 기본 꺼짐 — 켜기 전엔 바깥 요청 0 (이슈 #273)
     expect(featureOn({ updates: true }, 'updates')).toBe(true)
     expect(featureOn(undefined, 'voice')).toBe(false) // 음성 입력은 기본 꺼짐 — 마이크 권한을 묻는 기능
