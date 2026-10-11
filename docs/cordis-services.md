@@ -59,6 +59,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `voice` | `speech` | `speech.ts` | 음성 입력(내장 인식 엔진) | `settings` | **꺼짐** |
 | `browser` | `browser` | `browser.ts` + `browser/*` | Chrome 조종(Playwright MCP 를 MCP 서버로 등록) | `mcp` | **꺼짐** |
 | `updates` | `updates` | `updates.ts` (+ 순수 `shared/updates.ts`) | 새 버전 알림 — GitHub 릴리즈(또는 설정 `updateUrl`)에 묻기만, 설치본에서만(#273) | `settings` | **꺼짐** |
+| `repeatGuard` | `repeatGuard` | `repeatGuard.ts` (+ 순수 `repeatCounter.ts`) | 같은 도구·같은 인자 연속 3·5·8번째로 실행에 들어갈 때(`llm/tool-started`) 모델에게만 한 줄(`ctx.llm.remind`, 합성 글) — 막지 않는다(#284) | `llm` | 켜짐 |
 
 - `FEATURE_REQUIRES`: `bang → shell`, `appMcp → mcp`, `browser → mcp`, `lan → remote`, `bluetooth → remote` (필요한 기능이 꺼지면 같이 못 뜬다).
 - `skills`·`web`·`appMcp`·`browser` 는 **엔진 설정에도 영향**이 있다 — `features/changed` 를 `ctx.engine` 이 듣고 설정을 다시 쓰고 엔진을 재시작한다(도는 턴은 끊긴다).
@@ -126,7 +127,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 |---|---|---|
 | `llm` | `llm/turn-started` · `llm/turn-ended`(done/failed/interrupted) | 엔진이 받아들인 턴이 시작·끝 (정확히 한 번) |
 | | `llm/attention` · `llm/attention-resolved` | 승인·질문 카드가 생김·풀림 |
-| | `llm/before-turn` · `llm/pre-tool` · `llm/tool-done` · `llm/attention-input` | **훅 자리** — 턴 전 · 도구 실행 전(결정 반환 가능) · 도구 끝 · 승인 입력 보정 |
+| | `llm/before-turn` · `llm/pre-tool` · `llm/tool-started` · `llm/tool-done` · `llm/attention-input` | **훅 자리** — 턴 전 · 도구 실행 전(결정 반환 가능) · 도구 실행 시작(running, #284) · 도구 끝 · 승인 입력 보정 |
 | `chat` | `chat/turn-started` `turn-progress` `turn-attention` `turn-ended` `queue-changed` `conversations-changed` | 화면·모바일이 받는 대화 이벤트 (`shared/chat.ts` `ChatEventMap` 과 같은 모양) |
 | | `chat/before-send` · `chat/after-turn` · `chat/attachments-read` | 보내기 전 · 턴 뒤 처리(훅이 듣는다) · 첨부 읽음 |
 | `sessions` | `sessions/removed` | 대화 삭제 |
