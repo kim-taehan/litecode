@@ -9,8 +9,29 @@ export const TASK_START_TOOL = 'task_start'
 export const TASK_AGENTS = ['explore', 'general'] as const
 export type TaskAgent = (typeof TASK_AGENTS)[number]
 
-/** 대화 하나에서 동시에 도는 작업 상한 */
-export const TASKS_RUNNING_MAX = 4
+/** 대화 하나에서 **동시에 실행**되는 작업 수 — 나머지는 대기(queued)로 줄 서고 앞이 끝나면 시작한다 (#321). 단일 게이트웨이가 동시 요청을 줄 세워
+ *  뒤 요청이 첫 응답을 120초(MODEL_STALL_TIMEOUT_MS) 안에 못 받아 4개가 모두 실패했다 (실사용 2026-10-12, Qwen 27B) */
+export const MAX_RUNNING_TASKS = 2
+/** 설정 > 일반 "동시에 실행할 하위 작업"(settings.json `maxRunningTasks`)이 고를 수 있는 범위 — 기본은 MAX_RUNNING_TASKS */
+export const RUNNING_TASKS_MIN = 1
+export const RUNNING_TASKS_MAX = 8
+/** 대화 하나에 실행 + 대기 작업 합계 상한 — 동시 실행 수를 이보다 크게 고르면 그 수 (taskCap) */
+export const MAX_TASKS = 4
+
+export function isRunningTaskLimit(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= RUNNING_TASKS_MIN && (value as number) <= RUNNING_TASKS_MAX
+}
+
+/** 설정 값 → 동시 실행 수. 없거나 숫자가 아니면 기본값, 범위 밖이면 가까운 끝으로, 소수는 내린다 */
+export function runningTaskLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return MAX_RUNNING_TASKS
+  return Math.min(RUNNING_TASKS_MAX, Math.max(RUNNING_TASKS_MIN, Math.floor(value)))
+}
+
+/** 실행 + 대기 합계 상한 — 동시 실행 수보다 작지 않다 */
+export function taskCap(limit: number): number {
+  return Math.max(MAX_TASKS, limit)
+}
 export const TASK_DESCRIPTION_MAX = 120
 export const TASK_PROMPT_MAX = 20_000
 /** 결과 글을 메인 대화에 넣을 때 이 길이까지만 */
@@ -28,6 +49,8 @@ export function taskPrompt(description: string, prompt: string): string {
   return [
     'You are running a background sub-task for another conversation. Work on your own: nobody can answer questions or approve actions here,',
     'so anything that needs approval is refused. Finish with a concise final report — it is passed back to the conversation that started you.',
+    // 도구 인자를 만드는 동안 엔진은 아무 이벤트도 안 낸다 — 아주 긴 인자는 무응답 한도에 걸릴 수 있다 (#321, limits.ts TOOL_INPUT_STALL_TIMEOUT_MS)
+    'Write long files in several smaller steps (create the file, then append or edit section by section) rather than one huge write.',
     '',
     `Task: ${description}`,
     '',

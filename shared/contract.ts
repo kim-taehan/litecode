@@ -54,8 +54,8 @@ export interface Subtask {
   agent: string
   /** AI 가 붙인 짧은 설명 */
   description: string
-  /** stopped: 부모 턴을 멈춰 엔진이 취소했다 (실패가 아니다) */
-  status: 'preparing' | 'running' | 'done' | 'error' | 'stopped'
+  /** stopped: 부모 턴을 멈춰 엔진이 취소했다 (실패가 아니다). queued: 백그라운드 작업이 차례를 기다린다 (#321 — 엔진에 아직 안 보냈다) */
+  status: 'queued' | 'preparing' | 'running' | 'done' | 'error' | 'stopped'
   startedAt?: number
   endedAt?: number
   error?: string

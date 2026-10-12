@@ -9,6 +9,7 @@ import { ko } from '../../shared/i18n/ko.ts'
 import { en } from '../../shared/i18n/en.ts'
 import { translate } from '../../shared/i18n/index.ts'
 import { chatFontVars } from '../../shared/fontSize.ts'
+import { MAX_RUNNING_TASKS, MAX_TASKS, runningTaskLimit, taskCap } from '../../shared/tasks.ts'
 
 async function service(options: SettingsOptions): Promise<{ ctx: Context; settings: SettingsService }> {
   const ctx = new Context()
@@ -146,5 +147,28 @@ describe('다른 앱에서 열기 기본 앱 (settings.openInApp)', () => {
     expect(JSON.parse(await fs.readFile(file, 'utf8')).openInApp).toBe('iterm')
     expect((await service({ file })).settings.get().openInApp).toBe('iterm')
     expect(() => settings.set({ openInApp: 3 as unknown as string })).toThrow()
+  })
+})
+
+describe('동시에 실행할 하위 작업 (settings.maxRunningTasks, 이슈 #321)', () => {
+  it('1~8 정수만 저장한다 — 범위 밖·소수·글자는 거절, 없으면 기본 2', async () => {
+    const { settings } = await service({ file })
+    expect(settings.get().maxRunningTasks).toBeUndefined()
+    expect(runningTaskLimit(settings.get().maxRunningTasks)).toBe(MAX_RUNNING_TASKS)
+    for (const bad of [0, 9, 2.5, '3']) expect(() => settings.set({ maxRunningTasks: bad as number }), String(bad)).toThrow()
+    expect(settings.set({ maxRunningTasks: 5 }).maxRunningTasks).toBe(5)
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).maxRunningTasks).toBe(5)
+  })
+
+  it('파일을 손으로 고쳐 범위 밖이면 그 값만 기본값으로 돌린다', async () => {
+    await fs.writeFile(file, JSON.stringify({ language: 'ko', maxRunningTasks: 50 }))
+    const { settings } = await service({ file })
+    expect(settings.get()).toMatchObject({ language: 'ko' })
+    expect(runningTaskLimit(settings.get().maxRunningTasks)).toBe(MAX_RUNNING_TASKS)
+  })
+
+  it('쓰는 쪽은 한 번 더 보정한다 — 범위 끝으로, 소수는 내림, 숫자가 아니면 기본값. 합계 상한은 동시 실행 수보다 작지 않다', () => {
+    expect([runningTaskLimit(0), runningTaskLimit(-3), runningTaskLimit(20), runningTaskLimit(3.9), runningTaskLimit(Number.NaN), runningTaskLimit('4')]).toEqual([1, 1, 8, 3, MAX_RUNNING_TASKS, MAX_RUNNING_TASKS])
+    expect([taskCap(1), taskCap(2), taskCap(6)]).toEqual([MAX_TASKS, MAX_TASKS, 6])
   })
 })

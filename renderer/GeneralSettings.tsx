@@ -8,6 +8,7 @@ import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../shared/fontSize.ts'
 import { useFeatures } from './featuresStore.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 import { DEFAULT_UPDATE_URL } from '../shared/updates.ts'
+import { RUNNING_TASKS_MAX, RUNNING_TASKS_MIN, runningTaskLimit } from '../shared/tasks.ts'
 import { updateResult, useUpdateStatus } from './updates.ts'
 
 // 설정 > 일반 — dsh ui-settings-general GeneralSection 의 행 모양(이름 + 회색 설명, 오른쪽 컨트롤, 행 사이 0.5px 선)과
@@ -70,6 +71,7 @@ export function GeneralPage() {
   const features = useFeatures()
   const voiceOn = features.has('voice')
   const updatesOn = features.has('updates')
+  const tasksOn = features.has('appMcp') // 하위 작업 도구(litecode_task_start)는 데스크탑 MCP 에 붙는다
   useEffect(() => void window.litecode.getAppVersion().then(setVersion, () => {}), [])
   const save = (patch: Partial<Settings>): void =>
     void updateSettings(patch).then(
@@ -199,6 +201,24 @@ export function GeneralPage() {
           <span className="settings-switch__thumb" />
         </button>
       </div>
+
+      {/* 동시에 실행할 하위 작업 (이슈 #321) — 대화마다. 나머지는 대기로 줄 선다. 바꾸면 다음에 시작하는 작업부터(대기 중인 것은 새 수로 시작) */}
+      {tasksOn && (
+        <div className="settings-row" data-setting="maxRunningTasks">
+          <div className="settings-row__text">
+            <div className="settings-row__title">{t('settings.maxRunningTasks')}</div>
+            <div className="settings-row__description">{t('settings.maxRunningTasks.description')}</div>
+          </div>
+          <OptionSelect<string>
+            value={String(runningTaskLimit(settings.maxRunningTasks))}
+            options={Array.from({ length: RUNNING_TASKS_MAX - RUNNING_TASKS_MIN + 1 }, (_, index) => {
+              const count = String(RUNNING_TASKS_MIN + index)
+              return { id: count, label: count }
+            })}
+            onChange={(next) => save({ maxRunningTasks: Number(next) })}
+          />
+        </div>
+      )}
 
       {/* 창 닫기 = 숨기기 (ctx.quit, 이슈 #92) — Windows·Linux 만. macOS 는 창을 닫아도 원래 앱이 남는다 (플랫폼 표시는 preload 가 html 에 적는다) */}
       {document.documentElement.dataset.platform !== 'darwin' && (

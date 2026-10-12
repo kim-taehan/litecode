@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LlmService, MODEL_STALL_TIMEOUT_MS, type ChatResult } from '../../src/services/llm.ts'
+import { LlmService, MODEL_STALL_TIMEOUT_MS, TOOL_INPUT_STALL_TIMEOUT_MS, type ChatResult } from '../../src/services/llm.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 
@@ -182,6 +182,33 @@ describe(`ctx.llm — 모델 무응답 ${MODEL_STALL_TIMEOUT_MS / 1000}초 (이�
     await reached('prt_tool', 'done')
     await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS)
     await until(() => result() !== undefined, '도구 뒤 무응답 끝')
+    expect(result()).toMatchObject({ ok: false, error: STALLED })
+  })
+
+  // 실측 2026-10-12 (opencode 1.18.18 + 가짜 LLM, 일회용 probe-toolargs.mts): 모델이 도구 인자(write 의 content)를 스트리밍하는 동안 /event 에는 시작 때
+  // `tool pending`(input 비어 있음) 한 번뿐이고 다 받을 때까지 아무것도 없다(10초 스트리밍 1/1). 큰 문서를 쓰는 작업이 120초에 잘렸다 (#321 실사용)
+  it(`도구 인자를 만드는 중(pending)엔 ${TOOL_INPUT_STALL_TIMEOUT_MS / 1000}초까지 기다린다 — 그 한도를 넘으면 끊고, 인자가 다 오면(running) 평소대로`, async () => {
+    const result = await turn(await start())
+    part('msg_a1', { type: 'tool', id: 'prt_w', tool: 'write', callID: 'call_w', state: { status: 'pending', input: {}, raw: '' } })
+    await reached('prt_w', 'preparing')
+    await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS * 2)
+    expect(result()).toBeUndefined()
+    expect(aborts).toBe(0)
+    await vi.advanceTimersByTimeAsync(TOOL_INPUT_STALL_TIMEOUT_MS - MODEL_STALL_TIMEOUT_MS * 2)
+    await until(() => result() !== undefined, '도구 인자 무응답 끝')
+    expect(result()).toMatchObject({ ok: false, error: tr('error.modelStalled', { seconds: TOOL_INPUT_STALL_TIMEOUT_MS / 1000 }) })
+    await until(() => aborts === 1, 'abort')
+  })
+
+  it('pending 이 끝나면(인자를 다 받아 실행) 다시 평소 한도 — 게이트웨이 무응답(#264)은 그대로 잡는다', async () => {
+    const result = await turn(await start())
+    part('msg_a1', { type: 'tool', id: 'prt_w', tool: 'write', callID: 'call_w', state: { status: 'pending', input: {}, raw: '' } })
+    await reached('prt_w', 'preparing')
+    await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS * 2)
+    part('msg_a1', { type: 'tool', id: 'prt_w', tool: 'write', callID: 'call_w', state: { status: 'completed', input: { filePath: 'a', content: 'b' }, output: 'ok', time: { start: 1, end: 2 } } })
+    await reached('prt_w', 'done')
+    await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS)
+    await until(() => result() !== undefined, '평소 한도 무응답 끝')
     expect(result()).toMatchObject({ ok: false, error: STALLED })
   })
 

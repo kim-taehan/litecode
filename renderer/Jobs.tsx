@@ -209,7 +209,9 @@ function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; ope
           ? t('chat.subtaskStopped')
           : item.status === 'preparing'
             ? t('chat.toolPreparing')
-            : undefined
+            : item.status === 'queued'
+              ? t('jobs.queued') // 백그라운드 작업이 차례를 기다린다 (#321)
+              : undefined
   const lines = recentLines(item.items)
   const meta = [time, item.tokens !== undefined ? compactTokens(item.tokens) : undefined].filter(Boolean).join(' · ')
   return (
@@ -225,7 +227,7 @@ function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; ope
           </span>
         </button>
         <span className="jobs__actions">
-          {item.status === 'running' && (
+          {(item.status === 'running' || item.status === 'queued') && (
             <button
               type="button"
               className="jobs__stop"
