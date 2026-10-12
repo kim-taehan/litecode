@@ -208,8 +208,8 @@ export function watchAttention(
  *  허용(once)한 도구 호출은 그 턴의 장부에 적는다 — 앱 MCP 서버가 "사용자가 앱에서 누른 허용" 만 받게 (callerOf 의 approved, 01z 1-4).
  *  target 은 허용하며 사용자가 고른 받을 대화 (이슈 #67) — 장부에만 적는다. **엔진에는 보내지 않는다**(엔진에 가는 답은 once 그대로).
  *  always(항상 허용)는 폴더 밖 접근(external_directory, 이슈 #242)·git 쓰기 도구(2026-10-12)에만 — 엔진에는 once 로 보내고, 성공하면
- *  그 대화(request.turn) + 그 권한 + 그 패턴을 기억해 다음 요청은 카드 없이 once 로 답하고(watchAttention 의 judge),
- *  이미 떠 있는 같은 권한·패턴의 카드도 once 로 함께 푼다 */
+ *  그 대화(request.turn) + 기억 열쇠(같은 패턴의 폴더 밖 / git 쓰기 전체)를 기억해 다음 요청은 카드 없이 once 로 답하고
+ *  (watchAttention 의 judge), 이미 떠 있는 같은 기억 열쇠의 카드도 once 로 함께 푼다 */
 export async function replyAttention(host: AttentionHost, sessionId: string, requestId: string, answer: AttentionAnswer, target?: AttentionTarget): Promise<void> {
   const request = host.requests.get(requestId)
   if (!request || request.sessionId !== sessionId) throw new Error(tr('error.attentionGone'))
@@ -247,9 +247,9 @@ export async function replyAttention(host: AttentionHost, sessionId: string, req
   const remembered = host.allowed.get(request.turn) ?? new Set<string>()
   remembered.add(key)
   host.allowed.set(request.turn, remembered)
-  // 이미 떠 있는 같은 대화·같은 권한·같은 패턴의 카드 — 하나가 실패해도 그 카드만 남는다(다시 누를 수 있다)
+  // 이미 떠 있는 같은 대화·같은 기억 열쇠의 카드(= 같은 패턴의 폴더 밖, 또는 git 쓰기 전부) — 하나가 실패해도 그 카드만 남는다(다시 누를 수 있다)
   const same = [...host.requests].filter(
-    ([, other]) => other.turn === request.turn && other.kind === 'permission' && other.action === request.action && rememberKey(other.action ?? '', other.resources ?? []) === key,
+    ([, other]) => other.turn === request.turn && other.kind === 'permission' && canAlways(other.action) && rememberKey(other.action ?? '', other.resources ?? []) === key,
   )
   await Promise.all(same.map(([id, other]) => replyAttention(host, other.sessionId, id, 'once').catch(() => {})))
 }
@@ -263,15 +263,20 @@ function allowedAlready(host: AttentionHost, turn: string, permission: string, p
  *  다른 권한·보내기·만들기·질문은 늘 묻는다 */
 const ALLOW_ALWAYS_ACTIONS: readonly string[] = ['external_directory', ...GIT_WRITE_TOOLS.map((tool) => `litecode_${tool}`)]
 const canAlways = (action: string | undefined): boolean => action !== undefined && ALLOW_ALWAYS_ACTIONS.includes(action)
+const isGitWrite = (action: string): boolean => GIT_WRITE_TOOLS.some((tool) => action === `litecode_${tool}`)
+/** git 쓰기의 기억 열쇠는 도구 상관없이 하나 — [항상 허용] 한 번에 그 대화의 git 쓰기 전부 허용 (2026-10-12 "왜 4번이냐") */
+const GIT_WRITE_ALLOW_KEY = 'litecode_git_write'
 
 /** 요청 패턴의 비교 열쇠 — 패턴 목록이 같아야 같은 요청이다 */
 function allowKey(patterns: readonly string[]): string {
   return JSON.stringify([...patterns].sort())
 }
 
-/** [항상 허용] 기억 열쇠 — 같은 권한 + 같은 패턴 (2026-10-12). 권한 이름까지 넣는다 — 폴더 밖 패턴과 git 쓰기가 서로 섞이지 않게 */
+/** [항상 허용] 기억 열쇠 — 같은 권한 + 같은 패턴 (2026-10-12). 권한 이름까지 넣는다 — 폴더 밖 패턴과 git 쓰기가 서로 섞이지 않게.
+ *  git 쓰기만 도구 상관없이 한 열쇠(그 대화의 git 쓰기 전체를 한 번에 허용) */
 function rememberKey(action: string, patterns: readonly string[]): string {
-  return `${action}\u0000${allowKey(patterns)}`
+  const name = isGitWrite(action) ? GIT_WRITE_ALLOW_KEY : action
+  return `${name}\u0000${allowKey(patterns)}`
 }
 
 /** 파일 하나를 다루는 도구의 인자면 그 파일 (절대 경로) — read·write·edit 의 `filePath` */

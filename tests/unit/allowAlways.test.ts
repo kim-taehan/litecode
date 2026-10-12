@@ -225,22 +225,22 @@ describe('항상 허용 — 폴더 밖 접근 (이슈 #242)', () => {
     expect(replies).toEqual(['per_a {"reply":"once"}', 'per_b {"reply":"once"}', 'per_x {"reply":"once"}'])
   })
 
-  it('git 쓰기 카드에 [항상 허용] — 같은 대화의 그 다음 git 쓰기는 카드 없이 once, 다른 대화는 카드 (2026-10-12)', async () => {
+  it('git 쓰기 카드에 [항상 허용] — 그 대화의 그 다음 git 쓰기(다른 도구 포함)는 카드 없이 once, 다른 대화는 카드 (2026-10-12)', async () => {
     const llm = await start(await fakeOpencode())
-    const git = (id: string): Ask => ({ id, permission: 'litecode_git_commit', patterns: ['*'] })
+    const git = (id: string, tool = 'git_commit'): Ask => ({ id, permission: `litecode_${tool}`, patterns: ['*'] })
     const first = await runTurn(llm, [[git('per_g1')]], (cards) => {
       if (cards[0]) void llm.reply(cards[0].sessionId, cards[0].id, 'always')
     })
     expect(first).toMatchObject({ ok: true, sessionId: 'ses_1' })
     expect([...first.shown]).toEqual(['per_g1'])
-    // 같은 대화의 다음 턴 — 카드 없이
-    const again = await runTurn(llm, [[git('per_g2')]], () => {}, 'ses_1')
+    // 같은 대화의 다음 턴 — 커밋으로 [항상 허용] 했는데 스테이지·푸시는 카드 없이
+    const again = await runTurn(llm, [[git('per_g2', 'git_stage'), git('per_g3', 'git_push')]], () => {}, 'ses_1')
     expect(again.ok).toBe(true)
     expect(again.shown.size).toBe(0)
     // 다른 대화 — 카드
-    const other = await runTurn(llm, [[git('per_g3')]], allowOnce(llm))
-    expect([...other.shown]).toEqual(['per_g3'])
-    expect(replies).toEqual(['per_g1 {"reply":"once"}', 'per_g2 {"reply":"once"}', 'per_g3 {"reply":"once"}'])
+    const other = await runTurn(llm, [[git('per_g4')]], allowOnce(llm))
+    expect([...other.shown]).toEqual(['per_g4'])
+    expect(replies).toEqual(['per_g1 {"reply":"once"}', 'per_g2 {"reply":"once"}', 'per_g3 {"reply":"once"}', 'per_g4 {"reply":"once"}'])
   })
 
   it('항상 허용은 external_directory·git 쓰기에만 — bash 같은 다른 권한에 보내면 답이 틀렸다고 던지고 엔진에 아무것도 안 간다', async () => {
