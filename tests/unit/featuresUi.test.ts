@@ -56,7 +56,7 @@ describe('FeaturesPage — 접힌 첫 그림', () => {
     const row = html.slice(html.indexOf('data-feature="terminal"'))
     const toggle = row.slice(0, row.indexOf('role="switch"'))
     expect(count(toggle, '</button>')).toBe(1) // 스위치 앞에서 펼침 버튼이 닫혔다 — 버튼 안에 버튼이 없다
-    expect(html).toContain('aria-label="터미널 칸"')
+    expect(html).toContain('aria-label="터미널 탭"')
   })
 
   it('모바일 연결의 길(사내망·블루투스)은 이 화면에 줄이 없다 — 설정 > 모바일 에서만 켜고 끈다', () => {
