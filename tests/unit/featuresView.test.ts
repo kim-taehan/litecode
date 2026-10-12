@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { filterByQuery } from '../../renderer/featuresView.ts'
+import { FEATURE_FIXED, FEATURE_GROUPS } from '../../shared/features.ts'
+import { FEATURE_ROWS, filterByQuery } from '../../renderer/featuresView.ts'
 
 // 설정 > 기능 찾기 거르기 (이슈 #277) — 대소문자 무시 부분일치, trim, 빈 말은 전부
 const items = [
@@ -32,5 +33,17 @@ describe('filterByQuery', () => {
 
   it('일치가 없으면 빈 목록', () => {
     expect(ids('zzzz')).toEqual([])
+  })
+})
+
+// 이슈 #302 — 설정 > 기능은 묶음 구역 없이 한 목록, 묶음은 줄마다 뱃지
+describe('FEATURE_ROWS', () => {
+  it('묶음 순서대로 이어 붙이고 줄마다 묶음 id 를 단다', () => {
+    expect(FEATURE_ROWS).toEqual(FEATURE_GROUPS.flatMap((group) => group.features.map((feature) => ({ feature, group: group.id }))))
+  })
+
+  it('고정된 필수 기능(훅 포함)은 없다', () => {
+    for (const { feature } of FEATURE_ROWS) expect(FEATURE_FIXED[feature]).toBeUndefined()
+    expect(FEATURE_ROWS.map((row) => row.feature)).not.toContain('hooks')
   })
 })
