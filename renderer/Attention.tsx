@@ -75,8 +75,8 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   const browser = request.mcp?.server === BROWSER_MCP_NAME ? browserApprovalDetail(request.mcp.tool, request.input) : undefined
   // git 쓰기 도구 (이슈 #290) — 무엇을 하는지 제목으로, 커밋 메시지·브랜치 이름·파일을 줄이지 않고 보인다
   const git = isGitWriteTool(request.mcp) ? { tool: request.mcp.tool, text: gitApprovalText(request.mcp.tool, request.input) } : undefined
-  /** [항상 허용] — 폴더 밖 접근만 (이슈 #242) */
-  const always = request.action === 'external_directory' && !request.mcp
+  /** [항상 허용] — 폴더 밖 접근(이슈 #242)·git 쓰기 도구(2026-10-12)만 */
+  const always = (request.action === 'external_directory' && !request.mcp) || isGitWriteTool(request.mcp)
   const allow = (): void => {
     if (make) return answer('once', { kind: 'scope', scope: scope ?? make.scope })
     if (!delegation) return answer('once')

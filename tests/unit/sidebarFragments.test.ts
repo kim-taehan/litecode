@@ -7,7 +7,7 @@ import { Badge, CheckIcon, GearIcon, LogoMark, PencilIcon, SidebarIcon, TrashIco
 import { HoverCard } from '../../renderer/hoverCard.tsx'
 import { Rail } from '../../renderer/Rail.tsx'
 import { MissingConversations } from '../../renderer/MissingConversations.tsx'
-import { ProjectPopover } from '../../renderer/ProjectPopover.tsx'
+import { ProjectQuickOpen } from '../../renderer/ProjectQuickOpen.tsx'
 
 // App.tsx 에서 닫힌 조각을 파일로 옮길 때(이슈 #198, 동작 변화 0) 첫 모양이 그대로인지 지킨다.
 // 스냅숏은 옮기기 **전** 코드로 만들었다 — 이 파일은 import 경로만 바뀐다
@@ -47,8 +47,8 @@ describe('HoverCard', () => {
 
 describe('Rail — 접힌 사이드바', () => {
   const base = { switchRef: createRef<HTMLButtonElement>(), settingsRef: createRef<HTMLButtonElement>(), onExpand: noop, onNewChat: noop, onSwitch: noop, onRunning: noop, onSettings: noop }
-  it('프로젝트·알림 점·진행 중 수·팝오버 자리', () => {
-    const html = renderToStaticMarkup(createElement(Rail, { ...base, project: projects[0], picking: false, notice: 'attention', running: 2 }, createElement('div', { className: 'slot' })))
+  it('프로젝트·알림 점·진행 중 수', () => {
+    const html = renderToStaticMarkup(createElement(Rail, { ...base, project: projects[0], picking: false, notice: 'attention', running: 2 }))
     expect(html).toMatchSnapshot()
   })
   it('프로젝트 없음·고르는 중·도는 대화 없음', () => {
@@ -70,11 +70,11 @@ describe('MissingConversations — 못 연 프로젝트의 대화', () => {
   })
 })
 
-describe('ProjectPopover — 프로젝트 전환 팝오버', () => {
+describe('ProjectQuickOpen — 프로젝트 빠른 열기 (이슈 #305)', () => {
   const base = { projects, onPick: noop, onOpenFolder: noop, onToggleFavorite: noop, onRemove: later, onRename: later, onClose: noop }
-  it('즐겨찾기·최근 묶음, 지금 프로젝트 ✓, 상태 점·도는 수, 오류', () => {
+  it('즐겨찾기 먼저(그룹 라벨 없음), 지금 프로젝트 ✓, 상태 점·도는 수, 폴더 열기 행, 오류', () => {
     const html = renderToStaticMarkup(
-      createElement(ProjectPopover, {
+      createElement(ProjectQuickOpen, {
         ...base,
         current: '/work/beta',
         statusOf: (path: string) => (path === '/work/alpha' ? 'attention' : path === '/work/beta' ? 'running' : undefined),
@@ -86,7 +86,7 @@ describe('ProjectPopover — 프로젝트 전환 팝오버', () => {
     expect(html).toMatchSnapshot()
   })
   it('여는 중 — 행과 폴더 열기가 막힌다', () => {
-    const html = renderToStaticMarkup(createElement(ProjectPopover, { ...base, statusOf: () => undefined, runningOf: () => 0, busy: true }))
+    const html = renderToStaticMarkup(createElement(ProjectQuickOpen, { ...base, statusOf: () => undefined, runningOf: () => 0, busy: true }))
     expect(html).toMatchSnapshot()
   })
 })

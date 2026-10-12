@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { filterByQuery } from '../../renderer/featuresView.ts'
+import { FEATURE_FIXED, FEATURE_GROUPS } from '../../shared/features.ts'
+import { FEATURE_ROWS, filterByQuery } from '../../renderer/featuresView.ts'
 
 // 설정 > 기능 찾기 거르기 (이슈 #277) — 대소문자 무시 부분일치, trim, 빈 말은 전부
 const items = [
-  { id: 'terminal', texts: ['터미널 칸', '⌘↓ 로 프로젝트 폴더의 터미널을 엽니다'] },
+  { id: 'terminal', texts: ['터미널 탭', '오른쪽 패널 탭으로 프로젝트 폴더의 터미널을 여는 칸 — ⌘↓ 로 엽니다'] },
   { id: 'mcp', texts: ['MCP', '추가한 MCP 서버의 도구를 AI 가 씁니다'] },
   { id: 'web', texts: ['웹 가져오기', 'AI 가 주소의 웹 페이지를 읽습니다'] },
 ]
@@ -32,5 +33,17 @@ describe('filterByQuery', () => {
 
   it('일치가 없으면 빈 목록', () => {
     expect(ids('zzzz')).toEqual([])
+  })
+})
+
+// 이슈 #302 — 설정 > 기능은 묶음 구역 없이 한 목록, 묶음은 줄마다 뱃지
+describe('FEATURE_ROWS', () => {
+  it('묶음 순서대로 이어 붙이고 줄마다 묶음 id 를 단다', () => {
+    expect(FEATURE_ROWS).toEqual(FEATURE_GROUPS.flatMap((group) => group.features.map((feature) => ({ feature, group: group.id }))))
+  })
+
+  it('고정된 필수 기능(훅 포함)은 없다', () => {
+    for (const { feature } of FEATURE_ROWS) expect(FEATURE_FIXED[feature]).toBeUndefined()
+    expect(FEATURE_ROWS.map((row) => row.feature)).not.toContain('hooks')
   })
 })

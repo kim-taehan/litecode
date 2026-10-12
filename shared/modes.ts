@@ -62,9 +62,10 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
       if (mode === 'plan') return browser === 'read' ? 'allow' : 'deny'
       return asking || browser === 'ask' ? 'ask' : 'allow'
     }
-    // git 도구 (이슈 #290) — 읽기는 네 모드 모두 묻지 않고, 쓰기는 계획 밖 모두 묻는다. 하위 작업은 못 쓴다 (engineConfig.ts 와 같은 표)
+    // git 도구 (이슈 #290) — 읽기는 네 모드 모두 묻지 않고, 쓰기는 전체 권한을 빼고 계획 밖 모두 묻는다 (전체 권한 자동허용 2026-10-12).
+    // 하위 작업은 못 쓴다 (engineConfig.ts 와 같은 표)
     if (GIT_READ_PERMISSIONS.includes(permission)) return child ? 'deny' : 'allow'
-    if (GIT_WRITE_PERMISSIONS.includes(permission)) return child || mode === 'plan' ? 'deny' : 'ask'
+    if (GIT_WRITE_PERMISSIONS.includes(permission)) return child || mode === 'plan' ? 'deny' : mode === 'full' ? 'allow' : 'ask'
     if (permission === APP_SEND_TOOL || permission === APP_MAKE_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
     if (permission === APP_READ_TOOL) return child ? 'deny' : asking ? 'ask' : 'allow'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'

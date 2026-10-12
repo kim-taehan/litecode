@@ -92,12 +92,17 @@ export const Channel = {
   QUERY_TRIGGER: 'triggers:query',
   PICK_TRIGGER: 'triggers:pick',
   SUBMIT_TRIGGER: 'triggers:submit',
+  /** 그 폴더의 새 터미널 — id(폴더에서 1부터)·지금까지의 출력·끝 위치. end 이하의 onTerminalData 조각은 이미 들어 있다 */
   OPEN_TERMINAL: 'terminal:open',
+  /** 그 폴더의 그 터미널 — 끝났거나 없으면 undefined (exit·엔진 재시작) */
+  ATTACH_TERMINAL: 'terminal:attach',
   WRITE_TERMINAL: 'terminal:write',
   RESIZE_TERMINAL: 'terminal:resize',
-  /** 메인 → 화면 (directory, chunk, end) */
+  /** 탭 닫기 — 셸도 끝낸다 */
+  CLOSE_TERMINAL: 'terminal:close',
+  /** 메인 → 화면 (directory, id, chunk, end) */
   TERMINAL_DATA: 'terminal:data',
-  /** 메인 → 화면 (directory) */
+  /** 메인 → 화면 (directory, id) */
   TERMINAL_EXIT: 'terminal:exit',
   OPEN_EXTERNAL: 'shell:open-external',
   LOAD_TRAJECTORY: 'trajectory:load',
@@ -171,7 +176,7 @@ export const Channel = {
   APP_MCP_VIEW: 'appMcp:view',
   /** 메인 → 화면 (directory, path, line?) — AI 가 open(파일) 을 불렀다 */
   APP_MCP_OPEN_FILE: 'appMcp:open-file',
-  /** 메인 → 화면 (directory) — AI 가 open(터미널) 을 불렀다 (명령은 메인이 이미 채웠다) */
+  /** 메인 → 화면 (directory, id) — AI 가 open(터미널) 을 불렀다 (명령은 메인이 이미 채웠다) */
   APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
   REMOTE_STATUS: 'remote:status',
   REMOTE_START_PAIRING: 'remote:start-pairing',
@@ -302,13 +307,18 @@ export interface LitecodeBridge {
   pickTrigger(scope: TriggerScope, char: string, id: string, action: 'pick' | 'drill'): Promise<TriggerResult>
   /** 입력 전체를 Enter 로 낸다 — null 이면 평범한 프롬프트로 보낸다 */
   submitTrigger(scope: TriggerScope, draft: string): Promise<TriggerResult | null>
-  /** 그 폴더의 터미널 (없으면 띄운다) — 지금까지의 출력과 끝 위치. end 이하의 onTerminalData 조각은 이미 들어 있다 */
-  openTerminal(directory: string): Promise<{ output: string; end: number }>
-  writeTerminal(directory: string, data: string): Promise<void>
-  resizeTerminal(directory: string, rows: number, cols: number): Promise<void>
+  /** 그 폴더의 새 터미널 — id(폴더에서 1부터, 탭 이름에 씀)·지금까지의 출력·끝 위치. end 이하의 onTerminalData 조각은 이미 들어 있다 */
+  openTerminal(directory: string): Promise<{ id: number; output: string; end: number }>
+  /** 그 폴더의 그 터미널 — 지금까지의 출력과 끝 위치. 끝났거나 없으면 undefined (exit·엔진 재시작) */
+  attachTerminal(directory: string, id: number): Promise<{ output: string; end: number } | undefined>
+  /** 키 입력 그대로 — 끝난 터미널이면 하지 않는다 */
+  writeTerminal(directory: string, id: number, data: string): Promise<void>
+  resizeTerminal(directory: string, id: number, rows: number, cols: number): Promise<void>
+  /** 탭 닫기 — 셸도 끝낸다 */
+  closeTerminal(directory: string, id: number): Promise<void>
   /** 해제 함수를 준다 */
-  onTerminalData(listener: (directory: string, chunk: string, end: number) => void): () => void
-  onTerminalExit(listener: (directory: string) => void): () => void
+  onTerminalData(listener: (directory: string, id: number, chunk: string, end: number) => void): () => void
+  onTerminalExit(listener: (directory: string, id: number) => void): () => void
   /** 답의 링크를 OS 기본 브라우저로 연다 — 메인이 절대 http(s) 만 연다(그 밖은 false) */
   openExternal(url: string): Promise<boolean>
   /** 대화 하나의 스텝·도구 기록 (Trajectory 탭). directory 는 그 대화의 작업 폴더 — 없으면 엔진에 묻지 않고 missingFolder */
@@ -418,8 +428,8 @@ export interface LitecodeBridge {
   viewProject(directory?: string): Promise<void>
   /** AI 가 그 프로젝트의 파일을 열라고 했다 — path 는 프로젝트 기준 상대 경로(메인이 프로젝트 안의 파일임을 확인했다), line 은 1부터 */
   onAppMcpOpenFile(listener: (directory: string, path: string, line?: number) => void): () => void
-  /** AI 가 그 프로젝트의 터미널 칸을 열라고 했다 — 명령은 메인이 이미 채웠다(실행하지 않았다) */
-  onAppMcpOpenTerminal(listener: (directory: string) => void): () => void
+  /** AI 가 그 프로젝트의 터미널 탭을 열라고 했다 — 명령은 메인이 이미 채웠다(실행하지 않았다). id 는 채운 탭의 것 */
+  onAppMcpOpenTerminal(listener: (directory: string, id: number) => void): () => void
   /** 모바일 연결(ctx.remote, 이슈 #56)의 지금 상태 — 듣는 주소(또는 못 뜬 사유)·짝짓기 코드·[허용] 을 기다리는 요청·짝지은 기기.
    *  기능 `remote` 가 켜졌을 때만 있다 (꺼져 있으면 이 채널들은 거절된다) */
   remoteStatus(): Promise<RemoteStatus>

@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react'
+import type { MouseEvent as ReactMouseEvent, RefObject } from 'react'
 import type { ConversationStatus, Project } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
 import { StatusDot } from './Notices.tsx'
@@ -21,14 +21,12 @@ interface RailProps {
   /** 사이드바를 펼치고 "진행 중" 만 보이게 */
   onRunning(): void
   onSettings(): void
-  /** 프로젝트 전환 팝오버 — 배지 옆에 뜬다 */
-  children?: ReactNode
 }
 
 /** 접힌 사이드바 — 56px 아이콘 줄 (이슈 #60 시안, dsh ui-sidebar 의 collapsed rail). 위에서부터 펼치기 · 새 대화 · 프로젝트 배지 ·
  *  진행 중인 대화 수, 맨 아래 설정. 글자가 없으므로 아이콘마다 aria-label 과 옆 카드(HoverCard)로 이름을 보인다.
  *  macOS 는 맨 위 52px 가 창 버튼 자리다 — 빈 끌기 줄(.rail__top)이 차지하고 아이콘은 그 아래부터 */
-export function Rail({ project, picking, notice, running, switchRef, settingsRef, onExpand, onNewChat, onSwitch, onRunning, onSettings, children }: RailProps) {
+export function Rail({ project, picking, notice, running, switchRef, settingsRef, onExpand, onNewChat, onSwitch, onRunning, onSettings }: RailProps) {
   const t = useT()
   const hover = useHoverCard()
   /** 이름 카드 — 누르면 바로 거둔다 (열린 팝오버·모달 위에 뜨지 않게) */
@@ -62,7 +60,6 @@ export function Rail({ project, picking, notice, running, switchRef, settingsRef
           {project ? <Badge project={project} /> : <span className="project-switch__badge" />}
           {notice && <StatusDot status={notice} className="rail__notice" />}
         </button>
-        {children}
       </div>
       {running > 0 && (
         <button type="button" className="rail__button" {...tip(t('rail.running', { count: running }))} onClick={onRunning}>

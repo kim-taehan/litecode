@@ -2,12 +2,18 @@ import { describe, expect, it } from 'vitest'
 import {
   closeFilePreview,
   closeTab,
+  cycleTerminalTab,
+  focusLastTerminalTab,
+  isTerminalTab,
   openFilePreview,
   openFilesTab,
+  openTerminalTab,
   panelTakesFocus,
   revealPanel,
   selectTab,
   tabKey,
+  terminalIdOf,
+  terminalTabKey,
   toggleFullscreen,
   getPanelState,
 } from '../../renderer/filePreviewStore.ts'
@@ -162,5 +168,77 @@ describe('경로 줄 종류', () => {
     expect(kindOf('notes.txt', '텍스트')).toBe('텍스트')
     expect(kindOf('Makefile', '텍스트')).toBe('텍스트')
     expect(kindOf('x.rs', 'Text')).toBe('RS')
+  })
+})
+
+// 이슈 #303 — 터미널이 오른쪽 패널의 탭: 파일 탭과 같은 탭 줄(열쇠 `\0term/<id>`), ⌘↓·⌘[·⌘] 의 저장소 쪽 규칙
+describe('터미널 탭', () => {
+  const term = (id: number) => terminalTabKey(id)
+
+  it('열쇠는 파일 탭(경로)과 겹치지 않고, 같은 번호는 한 탭 — 닫으면 이웃(오른쪽 → 왼쪽 → 파일 탭)', () => {
+    expect(isTerminalTab(term(1))).toBe(true)
+    expect(isTerminalTab('a.ts')).toBe(false)
+    expect(terminalIdOf(term(2))).toBe(2)
+    expect(terminalIdOf('a.ts')).toBeUndefined()
+    openFilePreview('/term', 'a.ts')
+    openTerminalTab('/term', 1)
+    openTerminalTab('/term', 2)
+    openTerminalTab('/term', 2)
+    expect(read()).toMatchObject({ directory: '/term', open: true, tabs: ['a.ts', term(1), term(2)], active: term(2) })
+    closeTab(term(2))
+    expect(read()).toMatchObject({ tabs: ['a.ts', term(1)], active: term(1) })
+    closeTab(term(1))
+    expect(read()).toMatchObject({ tabs: ['a.ts'], active: 'a.ts' })
+  })
+
+  it('다른 프로젝트면 새로 — 다른 프로젝트의 탭은 건너가지 않는다 (떠나는 프로젝트의 셸 끝내는 것은 앱이 한다 — App.tsx)', () => {
+    openTerminalTab('/term-a', 1)
+    openTerminalTab('/term-b', 1)
+    expect(read()).toMatchObject({ directory: '/term-b', tabs: [term(1)], active: term(1) })
+    openFilePreview('/term-a', 'a.ts')
+    expect(read()).toMatchObject({ directory: '/term-a', tabs: ['a.ts'] })
+  })
+
+  it('quiet 로 열면(AI open(터미널)) focus 를 올리지 않는다 — 탭을 직접 고르면 풀린다', () => {
+    openTerminalTab('/term-q', 1)
+    const before = read()!.focus
+    openTerminalTab('/term-q', 2, { quiet: true })
+    expect(read()).toMatchObject({ active: term(2), quiet: true })
+    expect(read()!.focus).toBe(before)
+    expect(panelTakesFocus(read()!)).toBe(false)
+    selectTab(term(1))
+    expect(read()!.quiet).toBe(false)
+    expect(read()!.active).toBe(term(1))
+    expect(panelTakesFocus(read()!)).toBe(true)
+  })
+
+  it('focusLastTerminalTab — 마지막으로 연 탭을 그 자리에서 고른다(패널을 열고 focus 올림). 없으면 false', () => {
+    openFilePreview('/term-f', 'a.ts')
+    expect(focusLastTerminalTab('/term-f')).toBe(false)
+    openTerminalTab('/term-f', 1)
+    openTerminalTab('/term-f', 2)
+    selectTab(undefined) // 파일 탭
+    const focus = read()!.focus
+    expect(focusLastTerminalTab('/term-f')).toBe(true)
+    expect(read()).toMatchObject({ open: true, active: term(2), quiet: false })
+    expect(read()!.focus).toBe(focus + 1)
+  })
+
+  it('cycleTerminalTab — ⌘[·⌘] 의 이전·다음(순환). 고른 것이 없으면 마지막, 하나 없으면 false', () => {
+    openFilePreview('/term-c', 'a.ts')
+    expect(cycleTerminalTab('/term-c', 1)).toBe(false)
+    openTerminalTab('/term-c', 1)
+    openTerminalTab('/term-c', 2)
+    openTerminalTab('/term-c', 3)
+    selectTab(undefined)
+    expect(cycleTerminalTab('/term-c', 1)).toBe(true)
+    expect(read()!.active).toBe(term(3)) // 고른 터미널이 없으면 마지막 연 것
+    expect(cycleTerminalTab('/term-c', 1)).toBe(true)
+    expect(read()!.active).toBe(term(1)) // 다음(순환)
+    expect(cycleTerminalTab('/term-c', -1)).toBe(true)
+    expect(read()!.active).toBe(term(3)) // 이전
+    expect(cycleTerminalTab('/term-c', -1)).toBe(true)
+    expect(read()!.active).toBe(term(2))
+    closeFilePreview()
   })
 })

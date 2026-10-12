@@ -41,8 +41,10 @@ const Channel = {
   PICK_TRIGGER: 'triggers:pick',
   SUBMIT_TRIGGER: 'triggers:submit',
   OPEN_TERMINAL: 'terminal:open',
+  ATTACH_TERMINAL: 'terminal:attach',
   WRITE_TERMINAL: 'terminal:write',
   RESIZE_TERMINAL: 'terminal:resize',
+  CLOSE_TERMINAL: 'terminal:close',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
   OPEN_EXTERNAL: 'shell:open-external',
@@ -195,15 +197,17 @@ const bridge: LitecodeBridge = {
   pickTrigger: (scope, char, id, action) => ipcRenderer.invoke(Channel.PICK_TRIGGER, scope, char, id, action),
   submitTrigger: (scope, draft) => ipcRenderer.invoke(Channel.SUBMIT_TRIGGER, scope, draft),
   openTerminal: (directory) => ipcRenderer.invoke(Channel.OPEN_TERMINAL, directory),
-  writeTerminal: (directory, data) => ipcRenderer.invoke(Channel.WRITE_TERMINAL, directory, data),
-  resizeTerminal: (directory, rows, cols) => ipcRenderer.invoke(Channel.RESIZE_TERMINAL, directory, rows, cols),
+  attachTerminal: (directory, id) => ipcRenderer.invoke(Channel.ATTACH_TERMINAL, directory, id),
+  writeTerminal: (directory, id, data) => ipcRenderer.invoke(Channel.WRITE_TERMINAL, directory, id, data),
+  resizeTerminal: (directory, id, rows, cols) => ipcRenderer.invoke(Channel.RESIZE_TERMINAL, directory, id, rows, cols),
+  closeTerminal: (directory, id) => ipcRenderer.invoke(Channel.CLOSE_TERMINAL, directory, id),
   onTerminalData: (listener) => {
-    const handler = (_event: unknown, directory: string, chunk: string, end: number) => listener(directory, chunk, end)
+    const handler = (_event: unknown, directory: string, id: number, chunk: string, end: number) => listener(directory, id, chunk, end)
     ipcRenderer.on(Channel.TERMINAL_DATA, handler)
     return () => void ipcRenderer.removeListener(Channel.TERMINAL_DATA, handler)
   },
   onTerminalExit: (listener) => {
-    const handler = (_event: unknown, directory: string) => listener(directory)
+    const handler = (_event: unknown, directory: string, id: number) => listener(directory, id)
     ipcRenderer.on(Channel.TERMINAL_EXIT, handler)
     return () => void ipcRenderer.removeListener(Channel.TERMINAL_EXIT, handler)
   },

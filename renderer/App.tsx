@@ -7,7 +7,7 @@ import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
 import { RemotePairPrompt } from './MobileSettings.tsx'
 import { useTriggers } from './useTriggers.ts'
-import { ShellDrawer } from './ShellDrawer.tsx'
+import { getPanelState, openTerminalTab, terminalIdOf } from './filePreviewStore.ts'
 import { useAppMcp } from './useAppMcp.ts'
 import { useGitWatch } from './gitStore.ts'
 import type { ShellCardView } from './ShellCard.tsx'
@@ -33,12 +33,12 @@ import { matchesTitle, pinnedFirst } from './sessionListView.ts'
 import { useHoverCard } from './hoverCard.tsx'
 import { Rail } from './Rail.tsx'
 import { MissingConversations } from './MissingConversations.tsx'
-import { ProjectPopover } from './ProjectPopover.tsx'
+import { ProjectQuickOpen } from './ProjectQuickOpen.tsx'
 import { canWrite, fromConversation, isBlank, newSession, toConversation, withBlankFor, withSessionFor, type Session } from './session.ts'
 import { useSidebarLayout } from './useSidebarLayout.ts'
 import { useLastModel } from './useLastModel.ts'
 import { useChatEvents } from './useChatEvents.ts'
-import { useShellDrawerKeys } from './useShellDrawerKeys.ts'
+import { useTerminalKeys } from './useTerminalKeys.ts'
 import { Sidebar } from './Sidebar.tsx'
 import { ConversationView } from './ConversationView.tsx'
 import { Composer } from './Composer.tsx'
@@ -258,15 +258,10 @@ export function App() {
       },
     }
   }, [sessions, projects, lastViewed, projectPath, projectName, notices.state, providers, mode])
-  /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
-  const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
-  /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
-  const [shellFocus, setShellFocus] = useState(0)
-  /** AI 가 칸을 폈을 때의 shellFocus (앱 MCP open(터미널), 이슈 #51) — 그렇게 편 칸은 키를 가져가지 않는다. ⌘↓ 를 누르면 값이 달라져 풀린다 */
-  const [shellQuietAt, setShellQuietAt] = useState<number>()
-  useAppMcp(features.has('appMcp'), active?.project, (directory) => {
-    setShellQuietAt(shellFocus)
-    setShellOpen((open) => ({ ...open, [directory]: true }))
+  // 터미널은 오른쪽 패널의 탭 (이슈 #303) — 열린 탭·고른 탭은 filePreviewStore 가 쥔다. AI 가 open(터미널) 을 부른 것은(id) 조용히 연다 —
+  // 키(포커스)를 가져오지 않게 (이슈 #51)
+  useAppMcp(features.has('appMcp'), active?.project, (directory, id) => {
+    openTerminalTab(directory, id, { quiet: true })
   })
   const trigger = useTriggers({
     directory: active?.project,
@@ -322,10 +317,24 @@ export function App() {
       if (!handled) send()
     })
 
-  // 터미널 칸의 ⌘↓/⌘↑ (useShellDrawerKeys.ts)
-  const drawerProject = active?.project
-  const drawerOpen = !!drawerProject && !!shellOpen[drawerProject]
-  useShellDrawerKeys({ drawerProject, drawerOpen, terminalOn, setShellOpen, setShellFocus, inputRef: trigger.inputRef })
+  // 터미널 탭의 단축키 — ⌘↓(열기/새 터미널) · ⌘↑(접기) · ⌘⇧↓(새 터미널) · ⌘[·⌘](이전/다음) (useTerminalKeys.ts)
+  useTerminalKeys({ project: active?.project, terminalOn, inputRef: trigger.inputRef })
+
+  // 프로젝트 전환 — 패널의 탭 묶음은 건너가지 않는다(이전부터 그랬고). 다만 터미널은 메인에 셸로 남아 있으므로 떠나면
+  // 그 프로젝트의 터미널 셸을 끝낸다 — 안 하면 탭은 사라지고 셸만 남는다 (이슈 #303 받아들인 한계)
+  const prevTerminalProject = useRef(active?.project)
+  useEffect(() => {
+    const prev = prevTerminalProject.current
+    const next = active?.project
+    prevTerminalProject.current = next
+    if (prev === undefined || next === undefined || prev === next) return
+    const panel = getPanelState()
+    if (panel?.directory !== prev) return // 이미 새 프로젝트 상태로 바뀌었다면 할 일이 없다
+    for (const key of panel.tabs) {
+      const id = terminalIdOf(key)
+      if (id !== undefined) void window.litecode.closeTerminal(prev, id).catch(() => {})
+    }
+  }, [active?.project])
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
   useEffect(() => {
@@ -401,11 +410,31 @@ export function App() {
     else closeSwitcher(true)
   }
 
-  /** 전환 버튼(사이드바 카드·접힌 줄의 배지) — 고를 최근 프로젝트가 없으면 한 줄짜리 팝오버 대신 바로 폴더 열기 (dsh ui-workspace) */
+  /** 전환 버튼(사이드바 카드·접힌 줄의 배지) — 열려 있으면 닫고, 아니면 빠른 열기 패널을 연다. 고를 최근 프로젝트가 없으면 바로 폴더 열기 (이슈 #305) */
   function toggleSwitcher(): void {
-    if (projects?.length === 0) void openFolder()
-    else setSwitching((open) => !open)
+    if (switching) closeSwitcher(false)
+    else if (projects?.length === 0) void openFolder()
+    else setSwitching(true)
   }
+
+  /** ⌘K / Ctrl+K (이슈 #305) — 열려 있으면 닫고, 아니면 연다. 핸들러는 처음 한 번만 끼우고 그 안은 래퍼가 최신이라
+   *  projects·switching 값이 오래되지 않는다 */
+  const switchingRef = useRef(switching)
+  switchingRef.current = switching
+  const toggleSwitcherRef = useRef(toggleSwitcher)
+  toggleSwitcherRef.current = toggleSwitcher
+  const closeSwitcherRef = useRef(closeSwitcher)
+  closeSwitcherRef.current = closeSwitcher
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
+      event.preventDefault()
+      if (switchingRef.current) closeSwitcherRef.current(false)
+      else toggleSwitcherRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   /** 새 대화 — 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace). 이미 있으면 새로 만들지 않고 그리로 간다 */
   function startNewChat(): void {
@@ -556,9 +585,9 @@ export function App() {
   }
 
 
-  // 프로젝트 전환 팝오버 — 펼친 사이드바에선 전환 카드 아래, 접힌 줄에선 배지 옆에 뜬다 (한 번에 한 곳)
-  const popover = switching && (
-    <ProjectPopover
+  // 프로젝트 빠른 열기 (이슈 #305) — 상단 중앙에 뜬다 (⌘K 또는 전환 버튼)
+  const quickOpen = switching && (
+    <ProjectQuickOpen
       projects={projects ?? []}
       current={project?.path}
       statusOf={(dir) => projectStatus(notices.state, dir)}
@@ -571,6 +600,7 @@ export function App() {
       onRemove={remove}
       onRename={async (target, name) => setProjects(await window.litecode.renameProject(target.path, name))}
       onClose={closeSwitcher}
+      switchButton={switchRef}
     />
   )
 
@@ -594,9 +624,7 @@ export function App() {
             setRunningOnly(true)
           }}
           onSettings={() => setSettingsOpen(true)}
-        >
-          {popover}
-        </Rail>
+        />
       )}
       <Sidebar
         t={t}
@@ -607,7 +635,6 @@ export function App() {
         picking={picking}
         switchRef={switchRef}
         settingsRef={settingsRef}
-        popover={popover}
         notices={notices}
         sessions={sessions}
         running={running}
@@ -700,18 +727,6 @@ export function App() {
               attachFiles={attachFiles}
               addAttachments={addAttachments}
             />
-            {terminalOn && shellOpen[active.project] && (
-              <ShellDrawer
-                key={active.project}
-                directory={active.project}
-                focusSignal={shellFocus}
-                quiet={shellQuietAt === shellFocus}
-                onClose={() => {
-                  setShellOpen((open) => ({ ...open, [active.project]: false }))
-                  trigger.inputRef.current?.focus()
-                }}
-              />
-            )}
           </DelegationContext.Provider>
         )}
         {dropping && <DropVeil />}
@@ -723,6 +738,7 @@ export function App() {
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
       <RemotePairPrompt on={features.has('remote')} />
+      {quickOpen}
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
     </div>
   )

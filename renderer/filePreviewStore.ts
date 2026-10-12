@@ -71,6 +71,50 @@ export function openFilePreview(directory: string, token: string, line?: number,
 /** Git 탭의 열쇠 (이슈 #290) — 파일 탭 열쇠(프로젝트 기준 경로)와 겹치지 않는 글자. 고정 탭이라 tabs 에는 없다 */
 export const GIT_TAB = '\0git'
 
+/** 터미널 탭의 열쇠 (이슈 #303) — `\0term/<id>`, id 는 메인(ctx.terminals)이 주는 폴더별 번호(탭 이름 터미널 1·2·…).
+ *  파일 탭 열쇠(경로)와 겹치지 않는다 */
+export const TERM_PREFIX = '\0term/'
+export function terminalTabKey(id: number): string {
+  return TERM_PREFIX + id
+}
+export function terminalIdOf(key: string): number | undefined {
+  if (!key.startsWith(TERM_PREFIX)) return undefined
+  const id = Number(key.slice(TERM_PREFIX.length))
+  return Number.isInteger(id) && id > 0 ? id : undefined
+}
+export function isTerminalTab(key: string | undefined): key is string {
+  return !!key && terminalIdOf(key) !== undefined
+}
+
+/** 터미널 탭으로 연다 — id 는 메인에서 새로 연(또는 재사용한) 터미널. quiet — 사용자가 누른 것이 아니다(AI 의 open(터미널)): 탭만 열고 고른다.
+ *  focus 를 올리지 않아 패널·터미널이 포커스를 가져가지 않는다 */
+export function openTerminalTab(directory: string, id: number, { quiet = false }: { quiet?: boolean } = {}): void {
+  const state = base(directory)
+  const key = terminalTabKey(id)
+  const focus = quiet ? state.focus : state.focus + 1
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, quiet })
+}
+
+/** ⌘↓ — 마지막으로 연 터미널 탭을 그 자리에서 고른다. 없으면 false (호출이 새로 연다) */
+export function focusLastTerminalTab(directory: string): boolean {
+  if (!current || current.directory !== directory) return false
+  const termTabs = current.tabs.filter((key) => isTerminalTab(key))
+  if (termTabs.length === 0) return false
+  set({ ...current, open: true, active: termTabs[termTabs.length - 1], focus: current.focus + 1, quiet: false })
+  return true
+}
+
+/** ⌘[·⌘] — 터미널 탭을 넘나든다 (이전·다음). 고른 것이 없으면 마지막 연 것으로. 하나 없으면 false */
+export function cycleTerminalTab(directory: string, delta: 1 | -1): boolean {
+  if (!current || current.directory !== directory) return false
+  const termTabs = current.tabs.filter((key) => isTerminalTab(key))
+  if (termTabs.length === 0) return false
+  const index = termTabs.indexOf(current.active ?? '')
+  const next = index < 0 ? termTabs[termTabs.length - 1] : termTabs[(index + delta + termTabs.length) % termTabs.length]
+  set({ ...current, open: true, active: next, focus: current.focus + 1, quiet: false })
+  return true
+}
+
 /** Git 탭으로 연다 — sub 를 주면 그 하위 탭(브랜치 알약은 'branches') */
 export function openGitTab(directory: string, sub?: 'changes' | 'log' | 'branches'): void {
   const state = base(directory)
@@ -94,8 +138,9 @@ export function revealPanel(directory: string): void {
   set({ ...state, open: true, focus: state.focus + 1, quiet: false })
 }
 
+/** 탭을 고른다(사용자가 누른 것) — quiet 를 푼다: AI 가 조용히 연 터미널 탭도 사용자가 직접 고르면 키를 가져간다 */
 export function selectTab(key: string | undefined): void {
-  if (current && current.active !== key) set({ ...current, active: key })
+  if (current && current.active !== key) set({ ...current, active: key, quiet: false })
 }
 
 /** 탭 닫기 — 고른 탭이면 오른쪽 이웃, 없으면 왼쪽, 없으면 Files 탭 */

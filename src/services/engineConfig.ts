@@ -149,18 +149,20 @@ const MAKE_TOOLS_ASK = { litecode_create: 'ask' }
 const MAKE_TOOLS_DENY = { litecode_create: 'deny' }
 const LIST_TOOL_ALLOW = { litecode_list_projects: 'allow' }
 // git 도구 (이슈 #290, 시안의 권한표): 읽기(status·diff·log·branches)는 결과물 선언과 같은 모양 — 네 모드 모두 묻지 않는다(계획·매번 묻기 포함).
-// 쓰기(stage·commit·branch_create·switch·push·pull)는 만들기 도구와 같은 모양 — 기본·매번 묻기·전체 권한 모두 승인 카드, 계획엔 없다.
+// 쓰기(stage·commit·branch_create·switch·push·pull)는 만들기 도구와 같은 모양 — 기본·매번 묻기는 승인 카드, 전체 권한은 허용(2026-10-12), 계획엔 없다.
 // 하위 작업은 둘 다 못 쓴다(전역 deny + general-ask 맨 뒤 deny). 되돌리기·브랜치 삭제·강제 push 는 도구가 없다.
 // ⚠️ 따로 실측하지 않았다 — present(전역 deny + 에이전트 allow)·create(전역 deny + 에이전트 ask)와 같은 규칙 순서에 기댄다
 const gitRules = (tools: readonly string[], action: string): Record<string, string> => Object.fromEntries(tools.map((tool) => [`litecode_${tool}`, action]))
 const GIT_READ_ALLOW = gitRules(GIT_READ_TOOLS, 'allow')
 const GIT_WRITE_ASK = gitRules(GIT_WRITE_TOOLS, 'ask')
+const GIT_WRITE_ALLOW = gitRules(GIT_WRITE_TOOLS, 'allow')
 const GIT_TOOLS_DENY = gitRules([...GIT_READ_TOOLS, ...GIT_WRITE_TOOLS], 'deny')
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
   plan: { '*_*': 'deny', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
   [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ASK },
   [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
-  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ASK },
+  // 전체 권한은 git 쓰기도 묻지 않는다 (2026-10-12) — 기본·매번 묻기는 카드
+  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW },
   // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
   [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...MAKE_TOOLS_DENY, ...GIT_TOOLS_DENY, ...SEND_TOOLS_DENY },
 }
