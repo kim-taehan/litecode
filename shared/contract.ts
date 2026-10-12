@@ -60,6 +60,8 @@ export interface Subtask {
   endedAt?: number
   error?: string
   tokens?: number
+  /** 백그라운드 작업이 이 시각(마지막 활동) 뒤로 조용하다 — TASK_QUIET_MS 를 넘기면 붙고 활동이 다시 오면 빠진다. 죽이지 않는다 (shared/tasks.ts) */
+  quietSince?: number
   items: TurnItem[]
 }
 

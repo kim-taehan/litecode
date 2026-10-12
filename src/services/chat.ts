@@ -6,7 +6,7 @@ import './settings.ts' // 'settings/changed' 선언 — 설정 서비스는 inje
 import type { ChatImage, ChatResult, Interjection } from './llm.ts'
 import { outgoing } from './attachments.ts'
 import { SendQueues } from './sendQueue.ts'
-import { runningTaskLimit } from '../../shared/tasks.ts'
+import { runningTaskLimit, type TaskStatusEntry } from '../../shared/tasks.ts'
 import { BackgroundTasks, type TaskInput } from './backgroundTasks.ts'
 import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
@@ -274,6 +274,11 @@ export class ChatService extends Service {
   /** 그 대화에서 끝나지 않은 백그라운드 작업 수(실행 + 대기) — 목표는 이것이 0 일 때만 다음 라운드를 보낸다 */
   tasksRunning(cid: string): number {
     return this.tasks.live(cid)
+  }
+
+  /** 그 대화의 백그라운드 작업 상태 (앱 MCP 의 task_status) */
+  taskStatus(cid: string): TaskStatusEntry[] {
+    return this.tasks.status(cid)
   }
 
   /** 그 엔진 세션이 백그라운드 작업의 것인가 — 작업은 작업 도구를 못 부른다 */

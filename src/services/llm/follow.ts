@@ -30,6 +30,8 @@ export function follow(
   onAttentionSignal: (type: string, properties: Record<string, unknown>) => void,
   userStop?: AbortSignal,
   calls?: ToolCalls,
+  /** 주면 평소 한도(모델·도구 인자) 대신 이 한도 하나 — 백그라운드 작업 턴 (ChatOptions.stallTimeoutMs) */
+  stallTimeoutMs?: number,
 ): {
   connected: Promise<void>
   result: Promise<TurnOutcome>
@@ -61,14 +63,15 @@ export function follow(
   let idleDeferred = false
   let over = false
   /** 모델 무응답 감시 (이슈 #264) — 엔진이 프롬프트를 받은 뒤 이 턴의 이벤트마다 다시 건다. running 인 도구 호출이 있으면 걸지 않는다.
-   *  모델이 도구 인자를 만드는 중(pending)이면 더 긴 한도 — 그동안 엔진은 이벤트를 안 낸다 (#321, limits.ts TOOL_INPUT_STALL_TIMEOUT_MS) */
+   *  모델이 도구 인자를 만드는 중(pending)이면 더 긴 한도 — 그동안 엔진은 이벤트를 안 낸다 (#321, limits.ts TOOL_INPUT_STALL_TIMEOUT_MS).
+   *  stallTimeoutMs 를 받은 턴(백그라운드 작업)은 둘 대신 그 한도 하나 — 그 전의 조용함은 작업 쪽이 알린다(backgroundTasks.ts) */
   const toolsRunning = new Set<string>()
   const toolsPending = new Set<string>()
   let watching = false
   let stallTimer: ReturnType<typeof setTimeout> | undefined
   const progressed = (): void => {
     clearTimeout(stallTimer)
-    const limit = toolsPending.size > 0 ? TOOL_INPUT_STALL_TIMEOUT_MS : MODEL_STALL_TIMEOUT_MS
+    const limit = stallTimeoutMs ?? (toolsPending.size > 0 ? TOOL_INPUT_STALL_TIMEOUT_MS : MODEL_STALL_TIMEOUT_MS)
     stallTimer = watching && !over && toolsRunning.size === 0 ? setTimeout(() => stalled(limit), limit) : undefined
   }
   const stalled = (limit: number): void => {

@@ -4,7 +4,20 @@ import { tr } from '../i18n.ts'
 import { upsertItem } from '../../shared/chatReducer.ts'
 import { GOAL_GET_TOOL, GOAL_UPDATE_TOOL } from '../../shared/goal.ts'
 import { DEFAULT_MODE, type Mode } from '../../shared/modes.ts'
-import { TASK_START_TOOL, taskCap, taskPrompt, taskReport, type TaskAgent, type TaskEnd } from '../../shared/tasks.ts'
+import {
+  TASK_QUIET_MS,
+  TASK_STALL_TIMEOUT_MS,
+  TASK_START_TOOL,
+  TASK_STATUS_TOOL,
+  taskActivity,
+  taskCap,
+  taskPrompt,
+  taskQuietNotice,
+  taskReport,
+  type TaskAgent,
+  type TaskEnd,
+  type TaskStatusEntry,
+} from '../../shared/tasks.ts'
 import type { QueuedSend } from '../../shared/chat.ts'
 import type { Conversation, Subtask, TurnItem } from '../../shared/contract.ts'
 
@@ -22,6 +35,10 @@ import type { Conversation, Subtask, TurnItem } from '../../shared/contract.ts'
 //   대기 중엔 엔진에 아무것도 안 보냈으므로 stall 타이머(MODEL_STALL_TIMEOUT_MS)도 없다. 실행 + 대기 합계 상한은 taskCap. 대기 중인 작업도 중지할 수 있다.
 //   설정을 바꾸면 도는 작업은 그대로, 대기 중인 것은 새 수에 맞춰 시작한다(pumpAll)
 //   (엔진 없이 곧바로 "중단됨" 결과 턴). 모드·모델·폴더는 띄울 때의 대화 것으로 돈다
+// - **타이머로 죽이지 않는다** (사용자 결정 2026-10-12): 작업 턴은 ctx.llm 의 평소 무응답 한도(120초·도구 인자 600초) 대신 하드 한도
+//   TASK_STALL_TIMEOUT_MS 하나로만 끊긴다(게이트웨이가 정말 죽은 경우). 그 전엔 진행 줄 변화를 마지막 활동으로 적어 두고, TASK_QUIET_MS 동안 조용하면
+//   작업 줄에 표시(quietSince)하고 메인에게 출처 'task' 의 알림 턴을 **한 번** 넣는다 — 판단(기다리기·중지)은 메인·사람이. 활동이 다시 오면 표시를 풀고
+//   다시 무장한다. 상태는 litecode_task_status 로 본다(status)
 // - 앱을 끄면 메모리째 사라진다 (실행·대기 작업은 종료 확인의 수에 든다 — ctx.chat.running)
 // 화면은 진행 줄의 하위 작업 줄(Subtask)과 같은 모양으로 받아 작업 줄(JobsDock)에 그린다
 
@@ -63,6 +80,11 @@ interface Task {
   stop: AbortController
   /** 대화가 지워져 결과를 넣지 않는다 */
   dropped: boolean
+  /** 마지막 활동 시각·종류 — 시작하면 시작 시각, 그 뒤로 진행 줄이 바뀔 때마다 */
+  lastActivityAt?: number
+  lastActivity?: string
+  /** 조용함 감시 (TASK_QUIET_MS) — 실행 중에만 */
+  quietTimer?: ReturnType<typeof setTimeout>
 }
 
 export class BackgroundTasks {
@@ -127,6 +149,7 @@ export class BackgroundTasks {
     for (const task of this.tasks.get(cid) ?? []) {
       task.dropped = true
       task.stop.abort()
+      clearTimeout(task.quietTimer)
     }
     this.tasks.delete(cid)
     clearTimeout(this.timers.get(cid))
@@ -160,6 +183,8 @@ export class BackgroundTasks {
 
   private begin(task: Task): void {
     task.view = { ...task.view, status: 'running', startedAt: Date.now() }
+    task.lastActivityAt = task.view.startedAt
+    this.watchQuiet(task)
     void this.run(task)
   }
 
@@ -167,6 +192,26 @@ export class BackgroundTasks {
   owns(sessionId: string): boolean {
     for (const list of this.tasks.values()) if (list.some((task) => task.sessionId === sessionId)) return true
     return false
+  }
+
+  /** 그 대화의 작업 상태 (litecode_task_status) — 들어온 순서 */
+  status(cid: string): TaskStatusEntry[] {
+    return (this.tasks.get(cid) ?? []).map((task) => {
+      const { status, startedAt, endedAt, error } = task.view
+      const state = status === 'done' ? 'completed' : status === 'error' ? 'failed' : status === 'stopped' ? 'stopped' : status === 'queued' ? 'queued' : 'running'
+      return {
+        number: task.number,
+        agent: task.agent,
+        description: task.description,
+        state,
+        ...(startedAt !== undefined && { startedAt }),
+        ...(endedAt !== undefined && { endedAt }),
+        ...(state === 'running' && task.lastActivityAt !== undefined && { lastActivityAt: task.lastActivityAt }),
+        ...(state === 'running' && task.lastActivity && { lastActivity: task.lastActivity }),
+        quiet: state === 'running' && task.view.quietSince !== undefined,
+        ...(error && { error }),
+      }
+    })
   }
 
   list(cid: string): Subtask[] {
@@ -191,6 +236,7 @@ export class BackgroundTasks {
         onSession: async (sessionId) => void (task.sessionId = sessionId),
         onProgress: (item: TurnItem) => {
           if (task.view.status !== 'running') return
+          this.touch(task, item)
           task.view = { ...task.view, items: upsertItem(task.view.items, item) }
           this.emit(task.cid)
         },
@@ -204,7 +250,8 @@ export class BackgroundTasks {
           }
         },
         stop: task.stop.signal,
-        hideMcpTools: { [APP_MCP_NAME]: [TASK_START_TOOL, GOAL_GET_TOOL, GOAL_UPDATE_TOOL] },
+        stallTimeoutMs: TASK_STALL_TIMEOUT_MS, // 평소 무응답 한도로 죽이지 않는다 — 조용함은 알림으로 (quiet)
+        hideMcpTools: { [APP_MCP_NAME]: [TASK_START_TOOL, TASK_STATUS_TOOL, GOAL_GET_TOOL, GOAL_UPDATE_TOOL] },
       })
       .catch((error: unknown): ChatResult => ({ ok: false, error: (error as Error).message }))
     const end: TaskEnd = result.ok ? 'completed' : result.interrupted || task.stop.signal.aborted ? 'stopped' : 'failed'
@@ -214,7 +261,9 @@ export class BackgroundTasks {
 
   /** 작업 끝 — 작업 줄을 고치고, 다음 대기 작업을 시작하고, 결과 턴을 넣는다 (지워진 대화면 아무것도 안 한다) */
   private async finish(task: Task, end: TaskEnd, resultText?: string, error?: string): Promise<void> {
-    task.view = { ...task.view, status: end === 'completed' ? 'done' : end === 'stopped' ? 'stopped' : 'error', endedAt: Date.now(), ...(error && { error }) }
+    clearTimeout(task.quietTimer)
+    task.quietTimer = undefined
+    task.view = { ...awake(task.view), status: end === 'completed' ? 'done' : end === 'stopped' ? 'stopped' : 'error', endedAt: Date.now(), ...(error && { error }) }
     if (task.dropped) return
     this.pump(task.cid)
     this.trim(task.cid)
@@ -223,6 +272,32 @@ export class BackgroundTasks {
     await this.host
       .report(task.cid, { text, display: tr(`task.report.${end}`, { number: task.number, description: task.description }), origin: 'task' })
       .catch((reason: unknown) => console.error('[tasks] 결과 턴 넣기 실패', (reason as Error).message))
+  }
+
+  /** 작업이 움직였다 — 마지막 활동을 적고, 조용함 표시를 풀고, 감시를 다시 건다 */
+  private touch(task: Task, item: TurnItem): void {
+    task.lastActivityAt = Date.now()
+    task.lastActivity = taskActivity(item)
+    task.view = awake(task.view)
+    this.watchQuiet(task)
+  }
+
+  private watchQuiet(task: Task): void {
+    clearTimeout(task.quietTimer)
+    task.quietTimer = setTimeout(() => this.quiet(task), TASK_QUIET_MS)
+  }
+
+  /** TASK_QUIET_MS 동안 조용했다 — 죽이지 않고 작업 줄에 표시하고 메인에게 한 번 알린다 (다음 알림은 활동이 다시 온 뒤에만 — touch 가 다시 건다) */
+  private quiet(task: Task): void {
+    task.quietTimer = undefined
+    if (task.view.status !== 'running' || task.dropped) return
+    task.view = { ...task.view, quietSince: task.lastActivityAt ?? Date.now() }
+    this.emit(task.cid, true)
+    const minutes = Math.round(TASK_QUIET_MS / 60_000)
+    const text = taskQuietNotice({ number: task.number, description: task.description, quietMs: TASK_QUIET_MS, ...(task.lastActivity && { lastActivity: task.lastActivity }) })
+    void this.host
+      .report(task.cid, { text, display: tr('task.notice.quiet', { number: task.number, description: task.description, minutes }), origin: 'task' })
+      .catch((reason: unknown) => console.error('[tasks] 조용함 알림 넣기 실패', (reason as Error).message))
   }
 
   /** 끝난 작업은 최근 것만 남긴다 */
@@ -247,4 +322,11 @@ export class BackgroundTasks {
       }, EMIT_MS),
     )
   }
+}
+
+/** 조용함 표시를 뺀 작업 줄 */
+function awake(view: Subtask): Subtask {
+  if (view.quietSince === undefined) return view
+  const { quietSince: _quiet, ...rest } = view
+  return rest
 }

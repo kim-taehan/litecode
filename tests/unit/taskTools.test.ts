@@ -7,7 +7,7 @@ import { TaskTools } from '../../src/services/appMcp/tools/tasks.ts'
 import type { AppMcpTool } from '../../src/services/appMcp/rpc.ts'
 import type { ToolCaller } from '../../src/services/toolCalls.ts'
 import type { TaskInput } from '../../src/services/backgroundTasks.ts'
-import { TASK_DESCRIPTION_MAX, TASK_START_TOOL, taskPrompt, taskReport, TASK_RESULT_MAX } from '../../shared/tasks.ts'
+import { TASK_DESCRIPTION_MAX, TASK_START_TOOL, TASK_STATUS_TOOL, taskPrompt, taskReport, TASK_RESULT_MAX, type TaskStatusEntry } from '../../shared/tasks.ts'
 import { mergeHidden } from '../../src/services/llm/prompt.ts'
 import type { Conversation } from '../../shared/contract.ts'
 
@@ -60,6 +60,11 @@ class FakeChat extends Service {
   isTaskSession(sessionId: string): boolean {
     return this.taskSessions.has(sessionId)
   }
+  statusAsked: string[] = []
+  taskStatus(cid: string): TaskStatusEntry[] {
+    this.statusAsked.push(cid)
+    return [{ number: 1, agent: 'explore', description: 'find config', state: 'queued', quiet: false }]
+  }
 }
 
 let root: string
@@ -84,7 +89,7 @@ async function start() {
   ctx.plugin(TaskTools)
   const ready = await new Promise<Context>((resolve) => ctx.inject(['appMcp', 'llm', 'sessions', 'chat'], resolve))
   const appMcp = ready.appMcp as unknown as FakeAppMcp
-  for (let tries = 0; tries < 200 && !appMcp.tools.has(TASK_START_TOOL); tries++) await new Promise((resolve) => setTimeout(resolve, 5))
+  for (let tries = 0; tries < 200 && !(appMcp.tools.has(TASK_START_TOOL) && appMcp.tools.has(TASK_STATUS_TOOL)); tries++) await new Promise((resolve) => setTimeout(resolve, 5))
   const llm = ready.llm as unknown as FakeLlm
   const sessions = ready.sessions as unknown as FakeSessions
   const chat = ready.chat as unknown as FakeChat
@@ -92,7 +97,8 @@ async function start() {
   llm.caller = { sessionId: 'ses_main', callId: 'call_1', child: false, approved: false } as unknown as ToolCaller
   const tool = appMcp.tools.get(TASK_START_TOOL)!
   const call = (args: Record<string, unknown>) => tool.run(args, { directory: project })
-  return { tool, call, llm, sessions, chat }
+  const status = (extra: Record<string, unknown> = {}) => appMcp.tools.get(TASK_STATUS_TOOL)!.run(extra, { directory: project })
+  return { tool, call, status, appMcp, llm, sessions, chat }
 }
 
 const args = { agent: 'explore', description: 'find config', prompt: 'Where is the config loaded?' }
@@ -136,6 +142,29 @@ describe('litecode_task_start (이슈 #319)', () => {
     await expect(call({ ...args, description: 'x'.repeat(TASK_DESCRIPTION_MAX + 1) })).rejects.toThrow(/too long/)
     await expect(call({ ...args, prompt: undefined })).rejects.toThrow(/prompt is required/)
     expect(chat.started).toHaveLength(0)
+  })
+})
+
+describe('litecode_task_status (작업 상태 — 읽기 전용)', () => {
+  it('부른 대화의 작업 상태를 글로 돌려준다 — 설명은 "사용자가 진행을 물을 때" 쓰라고 한다', async () => {
+    const { status, appMcp, chat, llm } = await start()
+    const text = await status()
+    expect(chat.statusAsked).toEqual(['c1'])
+    expect(text).toContain('- Task 1 (explore) "find config": waiting in the queue')
+    expect(llm.asked[0]).toEqual([project, { server: 'litecode', tool: TASK_STATUS_TOOL }, {}])
+    expect(appMcp.tools.get(TASK_STATUS_TOOL)!.description).toMatch(/when the user asks how the tasks are going/)
+  })
+
+  it('작업 세션·하위 작업이 부르면 거절한다 (작업 턴에선 도구도 숨긴다), 부른 대화를 못 가리면 거절', async () => {
+    const { status, chat, llm } = await start()
+    chat.taskSessions.add('ses_main')
+    await expect(status()).rejects.toThrow(/cannot see other tasks/)
+    chat.taskSessions.clear()
+    llm.caller = { ...llm.caller!, child: true }
+    await expect(status()).rejects.toThrow(/cannot see other tasks/)
+    llm.caller = undefined
+    await expect(status()).rejects.toThrow(/Could not tell which conversation/)
+    expect(chat.statusAsked).toHaveLength(0)
   })
 })
 

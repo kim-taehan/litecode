@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { Subtask, TurnItem } from '../shared/ipc.ts'
 import { useNow } from './useNow.ts'
-import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, recentLines, VISIBLE_ROWS } from './jobsView.ts'
+import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, quietMinutes, recentLines, VISIBLE_ROWS } from './jobsView.ts'
 import { useT } from './settingsStore.ts'
 import './jobs.css'
 
@@ -200,6 +200,8 @@ function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; ope
   const live = item.status === 'running' || item.status === 'preparing'
   const time = item.startedAt === undefined ? undefined : elapsed((live ? now : (item.endedAt ?? item.startedAt)) - item.startedAt)
   const last = live ? lastLine(item.items) : undefined
+  /** 백그라운드 작업이 조용하다 — 죽이지 않고 표시만 (판단은 사람·메인) */
+  const quiet = quietMinutes(item, now)
   const state =
     item.status === 'done'
       ? t('chat.completed')
@@ -211,11 +213,13 @@ function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; ope
             ? t('chat.toolPreparing')
             : item.status === 'queued'
               ? t('jobs.queued') // 백그라운드 작업이 차례를 기다린다 (#321)
-              : undefined
+              : quiet !== undefined
+                ? t('jobs.quiet', { minutes: quiet })
+                : undefined
   const lines = recentLines(item.items)
   const meta = [time, item.tokens !== undefined ? compactTokens(item.tokens) : undefined].filter(Boolean).join(' · ')
   return (
-    <div className="jobs__row" data-job="subtask" data-status={item.status} data-open={open || undefined} role="listitem">
+    <div className="jobs__row" data-job="subtask" data-status={item.status} data-quiet={quiet !== undefined || undefined} data-open={open || undefined} role="listitem">
       <div className="jobs__line">
         <button type="button" className="jobs__cells" aria-expanded={open} title={item.description || undefined} onClick={onToggle}>
           <span className="jobs__dot" aria-hidden="true" />

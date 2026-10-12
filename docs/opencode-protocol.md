@@ -171,6 +171,9 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     시작 때 `message.part.updated` tool `pending`(state.input `{}`, raw `""`) **한 번뿐**이고, 인자를 다 받을 때까지(10초) `message.part.delta` 도 없이 heartbeat 만 온다.
     다 받으면 `running`(input 채워짐) → `completed`. 그래서 `ctx.llm` 의 모델 무응답 한도(#264, 120초)는 pending 동안엔 600초로 늘린다(`TOOL_INPUT_STALL_TIMEOUT_MS`).
     실사용: 하위 작업이 300~400줄 문서를 write 한 번에 쓰다 pending 에서 120초에 잘렸다(작업 세션 3개의 마지막 메시지가 모두 write error)
+    **백그라운드 작업 턴은 이 두 한도를 쓰지 않는다** (2026-10-12, 사용자 결정 "타이머로 죽이지 말고 상태를 알리고 판단은 메인/사람에게"): `ChatOptions.stallTimeoutMs`
+    로 하드 한도 하나(`shared/tasks.ts` `TASK_STALL_TIMEOUT_MS` 600초 — pending 이든 아니든)만 남긴다. 그 전에 조용하면(`TASK_QUIET_MS` 180초, 진행 줄 변화 기준)
+    앱이 작업 줄에 표시하고 메인에게 알린다(backgroundTasks.ts). 일반 채팅 턴은 위 그대로. 엔진 쪽으로 새로 잰 것은 없다
   - **백그라운드 task — 실험 플래그** (실측 2026-10-12, 1.18.18 바이너리 코드 + 가짜 LLM, 시나리오마다 1/1, 스크립트 `probe-bg.mts` 일회용): **쓰지 않기로 했다(#319)**.
     `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true` 면 task 에 `background: true` 인자가 생긴다(없이 주면 task 가 error "Background subagents require …=true").
     - 켜면: task 가 곧바로 completed(`<task … state="running">` "Background task started")로 끝나고 부모는 idle, 자식은 계속 돈다

@@ -34,6 +34,12 @@ export function leadJob(running: readonly Subtask[]): Subtask | undefined {
   return lead
 }
 
+/** 조용한 백그라운드 작업(quietSince)이 몇 분째 조용한가 — 실행 중이 아니거나 표시가 없으면 undefined. 표시는 TASK_QUIET_MS 뒤에 붙으므로 1분 이상 */
+export function quietMinutes(item: Subtask, now: number): number | undefined {
+  if (item.status !== 'running' || item.quietSince === undefined) return undefined
+  return Math.max(1, Math.floor((now - item.quietSince) / 60_000))
+}
+
 /** 펼친 목록에 한 번에 보일 하위 작업 줄 수 — 나머지는 "+N개 더 보기" (이슈 #295 시안 G) */
 export const VISIBLE_ROWS = 3
 

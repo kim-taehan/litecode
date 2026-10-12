@@ -9,7 +9,7 @@ import { SettingsService } from '../../src/services/settings.ts'
 import type { ChatImage, ChatOptions, ChatResult } from '../../src/services/llm.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import type { Attention, AttentionAnswer, Subtask, TurnItem, TurnUsage } from '../../shared/contract.ts'
-import { MAX_RUNNING_TASKS, MAX_TASKS, TASK_START_TOOL } from '../../shared/tasks.ts'
+import { MAX_RUNNING_TASKS, MAX_TASKS, TASK_STALL_TIMEOUT_MS, TASK_START_TOOL, TASK_STATUS_TOOL } from '../../shared/tasks.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
 // ctx.chat — 대화별 턴 소유 (이슈 #52). 원래 화면(App.tsx send·useSendQueue)이 하던 규칙을 그대로 지킨다: 턴 중 보내기는 대기열,
@@ -26,6 +26,7 @@ interface Call {
   mode?: string
   images: readonly ChatImage[]
   hide?: ChatOptions['hideMcpTools']
+  stall?: number
   progress(item: TurnItem): void
   attention(requests: Attention[]): void
   finish(result?: Partial<ChatResult>): void
@@ -57,7 +58,7 @@ class FakeLlm extends Service {
   newMessageId(): string {
     return `msg_${++this.ids}`
   }
-  async chat({ providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, mode, onAttention, stop, images = [], hideMcpTools }: ChatOptions): Promise<ChatResult> {
+  async chat({ providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, mode, onAttention, stop, images = [], hideMcpTools, stallTimeoutMs }: ChatOptions): Promise<ChatResult> {
     const id = sessionId ?? `ses_${this.calls.length + 1}`
     if (!sessionId) await onSession?.(id)
     this.peak = Math.max(this.peak, ++this.open)
@@ -71,7 +72,7 @@ class FakeLlm extends Service {
         resolve(result.unanswered || cancelled.length === 0 ? result : { ...result, unanswered: cancelled })
       }
       this.calls.push({
-        providerId, modelId, directory, prompt, sessionId, messageId, mode, images, hide: hideMcpTools,
+        providerId, modelId, directory, prompt, sessionId, messageId, mode, images, hide: hideMcpTools, stall: stallTimeoutMs,
         progress: (item) => onProgress?.(item),
         attention: (requests) => onAttention?.(requests),
         finish: (result = {}) => end({ ok: true, sessionId: id, text: `echo: ${prompt}`, ...result }),
@@ -1022,7 +1023,9 @@ describe('ChatService — 백그라운드 하위 작업 (이슈 #319)', () => {
     expect(first).toMatchObject({ sessionId: undefined, mode: 'plan', directory: '/work/a', providerId: 'gw', modelId: 'm1' })
     expect(first.prompt).toContain('Task: 파일 조사')
     expect(first.prompt).toContain('find the config')
-    expect(first.hide).toEqual({ litecode: [TASK_START_TOOL, 'goal_get', 'goal_update'] })
+    expect(first.hide).toEqual({ litecode: [TASK_START_TOOL, TASK_STATUS_TOOL, 'goal_get', 'goal_update'] })
+    expect(first.stall).toBe(TASK_STALL_TIMEOUT_MS) // 평소 무응답 한도 대신 하드 한도 하나
+    expect((await turn(1)).stall).toBeUndefined() // 메인 대화 턴은 평소 무응답 감시(#264) 그대로
     expect((await turn(3)).mode).toBe('build') // general 은 그 대화의 모드
     expect(chat.tasksRunning('c1')).toBe(2)
     expect(chat.running()).toBe(2) // 종료 확인이 센다
