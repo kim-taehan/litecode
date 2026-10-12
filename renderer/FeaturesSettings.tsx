@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { FEATURE_REQUIRES, featureDefault, featureOn, type ChoosableFeatureId, type FeatureReason } from '../shared/features.ts'
 import type { MessageKey } from '../shared/i18n/index.ts'
 import { useFeatureStatuses } from './featuresStore.ts'
+import { FeatureIcon } from './featureIcons.tsx'
 import { FEATURE_ROWS, filterByQuery } from './featuresView.ts'
 import { SessionSearch, type SearchLabels } from './SessionListTools.tsx'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
@@ -24,11 +25,11 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 
 const SEARCH_LABELS: SearchLabels = { label: 'settings.features.search', placeholder: 'settings.features.searchPlaceholder', clear: 'settings.features.searchClear' }
 
-/** 펼침 버튼 — ▸ + 두 줄(이름 + 묶음 뱃지 / 한 줄 요약) */
-function RowToggle({ id, open, title, badge, summary, onToggle }: { id: string; open: boolean; title: string; badge: string; summary: string; onToggle(): void }) {
+/** 펼침 버튼 — 아이콘 칸 + 두 줄(이름 + 묶음 뱃지 / 한 줄 요약) */
+function RowToggle({ id, feature, open, title, badge, summary, onToggle }: { id: string; feature: ChoosableFeatureId; open: boolean; title: string; badge: string; summary: string; onToggle(): void }) {
   return (
     <button type="button" className="feature-row__toggle" aria-expanded={open} aria-controls={`feature-detail-${id}`} onClick={onToggle}>
-      <Chevron className="feature-row__chevron" />
+      <span className="feature-row__tile"><FeatureIcon feature={feature} /></span>
       <span className="feature-row__text">
         <span className="feature-row__line">
           <span className="feature-row__title">{title}</span>
@@ -37,14 +38,6 @@ function RowToggle({ id, open, title, badge, summary, onToggle }: { id: string; 
         <span className="feature-row__summary">{summary}</span>
       </span>
     </button>
-  )
-}
-
-function Chevron({ className }: { className: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   )
 }
 
@@ -129,10 +122,11 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
     const failure = status?.state === 'failed' ? status.reason : undefined
     const wanted = stored[feature] ?? featureDefault(feature) // 이 기능 스스로의 스위치 값 (필요한 기능과 무관)
     return (
-      <li key={feature} className="feature-row" data-feature={feature} data-expanded={open || undefined}>
+      <li key={feature} className="feature-row" data-feature={feature} data-expanded={open || undefined} data-on={on || undefined}>
         <div className="feature-row__head">
           <RowToggle
             id={feature}
+            feature={feature}
             open={open}
             title={t(`feature.${feature}`)}
             badge={t(`settings.features.group.${group}`)}

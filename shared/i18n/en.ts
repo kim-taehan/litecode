@@ -174,6 +174,7 @@ export const en = {
   'filePreview.files': 'Files',
   'filePreview.filesLabel': 'Project files',
   'filePreview.closeTab': 'Close {name}',
+  'filePreview.newTab': 'New tab',
   'filePreview.addTab': 'File list',
   'filePreview.fullscreen': 'Full screen',
   'filePreview.exitFullscreen': 'Exit full screen',
