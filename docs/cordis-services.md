@@ -27,7 +27,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `settings` | `src/services/settings.ts` | 앱 설정(`settings.json`) — 언어·테마·글자 크기·기능 켜기. 잘못된 값은 그 값만 기본값으로. `settings/changed` | — |
 | `providers` | `providers.ts` | 모델 provider 목록·키(키는 `safeStorage` 로 봉인). `providers/changed` | — |
 | `engine` | `engine.ts`·`engineConfig.ts` | opencode 서버 하나를 띄우고 설정(`opencode.json`)을 **기동마다 새로 만든다**, 키 프록시, MCP·권한 규칙 | `providers` |
-| `llm` | `llm.ts` `history.ts` | 엔진과의 대화 — 턴·구독·승인·질문·기록. `model`·`agent` 를 매 턴 명시. 엔진 지식은 `llm` 과 `engine` 에만 | `providers`, `engine` |
+| `llm` | `llm.ts`(진입점)·`llm/*`(서비스·턴 따라가기·승인·엔진 호출, #289) `history.ts` | 엔진과의 대화 — 턴·구독·승인·질문·기록. `model`·`agent` 를 매 턴 명시. 엔진 지식은 `llm` 과 `engine` 에만 | `providers`, `engine` |
 | `projects` | `projects.ts` | 최근 프로젝트 목록 | — |
 | `sessions` | `sessions.ts` | 대화 목록(제목·시각·모델·통계·고정·마지막에 보던 대화). 내용의 정본은 opencode DB | `llm` |
 | `triggers` | `triggers.ts` | 입력창 트리거(`@` `/` `!`) 등록소 — 트리거 플러그인이 effect 로 등록 | — |
@@ -61,6 +61,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `browser` | `browser` | `browser.ts` + `browser/*` | Chrome 조종(Playwright MCP 를 MCP 서버로 등록) | `mcp` | **꺼짐** |
 | `updates` | `updates` | `updates.ts` (+ 순수 `shared/updates.ts`) | 새 버전 알림 — GitHub 릴리즈(또는 설정 `updateUrl`)에 묻기만, 설치본에서만(#273) | `settings` | **꺼짐** |
 | `repeatGuard` | `repeatGuard` | `repeatGuard.ts` (+ 순수 `repeatCounter.ts`) | 같은 도구·같은 인자 연속 3·5·8번째로 실행에 들어갈 때(`llm/tool-started`) 모델에게만 한 줄(`ctx.llm.remind`, 합성 글) — 막지 않는다(#284) | `llm` | 켜짐 |
+| `git` | `git` | `git.ts` + `appMcp/tools/git.ts` (+ 모양 `shared/git.ts`) | 시스템 git(인자 배열, 인증 창 없음) — 상태·diff·기록·브랜치·stage·커밋·전환·push/pull(충돌이면 멈춤)·되돌리기·실행 취소. 바꾸면 `git/changed`. AI 도구 `litecode_git_*`(읽기 넷 바로, 쓰기 여섯 승인 카드)는 `appMcp` 가 켜져 있을 때만 뜬다(#290) | — (도구는 `appMcp`) | **꺼짐** |
 
 - `FEATURE_REQUIRES`: `bang → shell`, `appMcp → mcp`, `goal → appMcp`, `browser → mcp`, `lan → remote`, `bluetooth → remote` (필요한 기능이 꺼지면 같이 못 뜬다).
 - `skills`·`web`·`appMcp`·`browser` 는 **엔진 설정에도 영향**이 있다 — `features/changed` 를 `ctx.engine` 이 듣고 설정을 다시 쓰고 엔진을 재시작한다(도는 턴은 끊긴다).
@@ -71,7 +72,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 |---|---|---|---|
 | `RemoteHttp` · `RemoteHttps` | `remote/http.ts` `https.ts` | `remote` | 모바일 요청을 받는 **운반**. 리스너를 열고 `ctx.remote.carrier(…)` 로 자신을 올린다. `RemoteHttps` 는 기능 `lan` 의 묶음 |
 | `RemoteBluetooth` | `remote/bluetooth.ts` | `remote` | 같은 자리의 BLE 운반(기능 `bluetooth` 의 묶음, #210) — 광고하고, 폰 연결마다 Noise NK → `serveFramed` → `ctx.remote.handle` |
-| `OpenTool` · `PresentTool` · `SessionTools` · `MakeTools` | `appMcp/tools/*` | `appMcp` (+`chat` `llm` `sessions` …) | 앱 MCP 서버에 도구를 등록(effect) |
+| `OpenTool` · `PresentTool` · `SessionTools` · `MakeTools` · `GoalTools` · `GitTools` | `appMcp/tools/*` | `appMcp` (+`chat` `llm` `sessions` …) | 앱 MCP 서버에 도구를 등록(effect) |
 | `AtTrigger` · `SlashTrigger` | `src/triggers/*` | `triggers`, `llm` | 트리거를 등록소에 등록(effect). 하나를 내리면 그 문자는 평범한 글자 |
 | `*Bridge` (chatBridge 등) | `electron/main.ts` | 각 서비스 | 서비스 ↔ **IPC** 연결 (5절) |
 
@@ -86,7 +87,7 @@ providers ─► engine ─► llm ─┬─► sessions ─► chat ─┬─�
                             │                      └─► quit
                             ├─► skills · mcp · terminals · trajectory
                             └─► (at/slash 트리거는 triggers + llm)
-mcp ─► appMcp ─► OpenTool · PresentTool · SessionTools · MakeTools
+mcp ─► appMcp ─► OpenTool · PresentTool · SessionTools · MakeTools · GitTools(+git)
 mcp ─► browser
 projects ─► openIn
 ```
@@ -137,6 +138,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 | `providers` | `providers/changed` | provider 변경 → 엔진 설정 갱신 |
 | `features` | `features/changed` | 켜진 묶음을 다 올리고 내린 **뒤** — 엔진이 듣고 재시작 |
 | | `features/status` | 기능 상태(`FeatureStatuses` — 켜진 기능만)가 바뀌었다(#224) — 화면(설정 > 기능)이 `features:statuses-changed` 로 받는다 |
+| `git` | `git/changed` | 그 폴더의 저장소가 바뀌었을 수 있다(화면·AI 의 작업 뒤) — 화면이 `git:changed` 로 받아 다시 읽는다 |
 | `remote` | `remote/changed` | 모바일 연결 상태 |
 | `speech` · `notifications` | `speech/changed` · `notifications/changed` `toast` `open` | 상태·토스트 |
 | `shell` · `terminals` | `shell/data` · `terminal/data` `terminal/exit` | 출력 조각 |

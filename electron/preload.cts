@@ -122,6 +122,13 @@ const Channel = {
   GOAL_COMMAND: 'goal:command',
   GOAL_GET: 'goal:get',
   GOAL_CHANGED: 'goal:changed',
+  GIT_VIEW: 'git:view',
+  GIT_DIFF: 'git:diff',
+  GIT_LOG: 'git:log',
+  GIT_BRANCHES: 'git:branches',
+  GIT_RUN: 'git:run',
+  GIT_OPEN_REMOTE: 'git:open-remote',
+  GIT_CHANGED: 'git:changed',
 } as const
 
 /** 경로 없는 이미지(붙여넣은 스크린숏)를 읽어 메인에 넘길 상한 — shared/attachments.ts 의 imageBytes 와 같아야 한다 (메인이 다시 본다) */
@@ -285,6 +292,13 @@ const bridge: LitecodeBridge = {
   goalCommand: (conversationId, args) => ipcRenderer.invoke(Channel.GOAL_COMMAND, conversationId, args),
   goal: (conversationId) => ipcRenderer.invoke(Channel.GOAL_GET, conversationId),
   onGoalChanged: (listener) => listen(Channel.GOAL_CHANGED, listener),
+  gitView: (directory) => ipcRenderer.invoke(Channel.GIT_VIEW, directory),
+  gitDiff: (directory, path, staged) => ipcRenderer.invoke(Channel.GIT_DIFF, directory, path, staged),
+  gitLog: (directory) => ipcRenderer.invoke(Channel.GIT_LOG, directory),
+  gitBranches: (directory) => ipcRenderer.invoke(Channel.GIT_BRANCHES, directory),
+  gitRun: (directory, action) => ipcRenderer.invoke(Channel.GIT_RUN, directory, action),
+  openGitRemote: (directory) => ipcRenderer.invoke(Channel.GIT_OPEN_REMOTE, directory),
+  onGitChanged: (listener) => listen(Channel.GIT_CHANGED, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

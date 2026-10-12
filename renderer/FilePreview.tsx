@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { DirectoryListing, FilePreview, HtmlAsset } from '../shared/ipc.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
+import { BranchIcon, GitPanel, GitTabCount } from './Git.tsx'
 import {
+  GIT_TAB,
   closeFilePreview,
   closeTab,
   openFilePreview,
@@ -87,7 +89,10 @@ function Panel({ state }: { state: PanelState }) {
   const root = useRef<HTMLElement>(null)
   const returnFocus = useRef<Element | null>(null)
   const drag = useRef<{ x: number; width: number; max: number }>(undefined)
-  const { directory, tabs, active, fullscreen, jump } = state
+  const { directory, tabs, fullscreen, jump } = state
+  // Git 탭 (이슈 #290) — 기능 git 이 켜져 있을 때만. 꺼졌는데 Git 탭을 고른 채면 파일 탭으로 본다
+  const gitOn = useFeatures().has('git')
+  const active = state.active === GIT_TAB && !gitOn ? undefined : state.active
   // 파일 탭은 한 번 본 뒤부터 계속 마운트 — 다른 탭에 갔다 와도 펼친 폴더·스크롤이 그대로 (dsh keepMounted, 안 본 탭은 미리 안 그린다)
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
@@ -166,6 +171,20 @@ function Panel({ state }: { state: PanelState }) {
             <FolderIcon className="file-preview__tab-icon file-preview__tab-icon--folder" />
             <span className="file-preview__tab-title">{t('filePreview.files')}</span>
           </div>
+          {gitOn && (
+            <div
+              role="tab"
+              tabIndex={0}
+              className="file-preview__tab file-preview__tab--files file-preview__tab--git"
+              aria-selected={active === GIT_TAB}
+              onClick={() => selectTab(GIT_TAB)}
+              onKeyDown={(event) => activateOnKey(event, () => selectTab(GIT_TAB))}
+            >
+              <BranchIcon className="file-preview__tab-icon" />
+              <span className="file-preview__tab-title">{t('git.tab')}</span>
+              <GitTabCount directory={directory} />
+            </div>
+          )}
           {tabs.map((key) => (
             <div
               key={key}
@@ -231,7 +250,8 @@ function Panel({ state }: { state: PanelState }) {
         </span>
       </div>
       {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} />}
-      {active !== undefined && <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />}
+      {active === GIT_TAB && <GitPanel directory={directory} gitSub={state.gitSub} />}
+      {active !== undefined && active !== GIT_TAB && <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />}
     </aside>
   )
 }
