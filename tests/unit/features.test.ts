@@ -45,11 +45,11 @@ let ipc: FakeIpc
 let tmp: string
 let file: string
 
-/** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)·훅(hooks, 이슈 #102)·음성 입력(voice)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56).
+/** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)·음성 입력(voice)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56). 훅(hooks)은 #302 부터 필수(늘 켜짐).
  *  사내망 연결(lan)·블루투스 연결(bluetooth)은 기본 꺼짐 (이슈 #210, 사내망은 #268 부터 — 켜는 순간 키체인의 TLS 키를 읽는다).
  *  새 버전 알림(updates)도 기본 꺼짐 (이슈 #273 — 켜기 전엔 바깥 요청 0). Git(git, 이슈 #290)도 기본 꺼짐 */
 const DEFAULT_ON = FEATURES.filter(
-  (feature) => !['web', 'notifications', 'remote', 'lan', 'bluetooth', 'hooks', 'voice', 'browser', 'updates', 'git'].includes(feature),
+  (feature) => !['web', 'notifications', 'remote', 'lan', 'bluetooth', 'voice', 'browser', 'updates', 'git'].includes(feature),
 )
 /** 묶음이 있는 기능 (web 은 없다) */
 const BUNDLED = FEATURES.filter((feature) => feature !== 'web')
@@ -98,8 +98,8 @@ async function start(bundles: FeatureDefinition[] = definitions()): Promise<{ ct
 
 /** 걸린 채널 (정렬) */
 const channels = () => [...ipc.handlers.keys()].sort()
-/** 기본으로 걸리는 채널 — 알림은 기본 꺼짐 */
-const ALL = ['appMcp:x', 'at:x', 'bang:x', 'goal:x', 'mcp:x', 'openIn:x', 'repeatGuard:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
+/** 기본으로 걸리는 채널 — 알림은 기본 꺼짐, 훅은 필수 (#302) */
+const ALL = ['appMcp:x', 'at:x', 'bang:x', 'goal:x', 'hooks:x', 'mcp:x', 'openIn:x', 'repeatGuard:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
 
 beforeEach(async () => {
   ipc = new FakeIpc()
@@ -407,15 +407,15 @@ describe('featureOn', () => {
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates', 'repeatGuard', 'git'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'voice', 'browser', 'updates', 'repeatGuard', 'git'])
     expect(featureOn(undefined, 'git')).toBe(false) // Git 은 기본 꺼짐, 데스크탑 MCP 가 꺼져도 켤 수 있다 (도구만 빠진다, 이슈 #290)
     expect(featureOn({ git: true, appMcp: false }, 'git')).toBe(true)
     expect(featureOn(undefined, 'updates')).toBe(false) // 새 버전 알림은 기본 꺼짐 — 켜기 전엔 바깥 요청 0 (이슈 #273)
     expect(featureOn({ updates: true }, 'updates')).toBe(true)
     expect(featureOn(undefined, 'voice')).toBe(false) // 음성 입력은 기본 꺼짐 — 마이크 권한을 묻는 기능
     expect(featureOn({ voice: true }, 'voice')).toBe(true)
-    expect(featureOn(undefined, 'hooks')).toBe(false) // 훅은 기본 꺼짐 (이슈 #102)
-    expect(featureOn({ hooks: true }, 'hooks')).toBe(true)
+    expect(featureOn(undefined, 'hooks')).toBe(true) // 훅은 필수 — 꺼 둔 저장값이 있어도 켜짐 (#302, 전엔 기본 꺼짐 #102)
+    expect(featureOn({ hooks: false }, 'hooks')).toBe(true)
     expect(featureOn(undefined, 'remote')).toBe(false)
     expect(featureOn({ remote: true }, 'remote')).toBe(true)
     // 모바일 연결의 길 (이슈 #210) — 둘 다 따로 켜야 한다(사내망도 #268 부터 기본 꺼짐 — 모바일 연결만 켜서는 TLS 키를 읽지 않는다). 둘 다 모바일 연결이 꺼지면 꺼진다

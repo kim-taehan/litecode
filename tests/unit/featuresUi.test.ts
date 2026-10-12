@@ -4,9 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import { ko } from '../../shared/i18n/ko.ts'
 import { en } from '../../shared/i18n/en.ts'
-import { CHOOSABLE_FEATURES, FEATURE_FIXED, FEATURE_GROUPS, FEATURE_REQUIRES, MOBILE_PATH_FEATURES, type FeatureId, type FeatureStatuses, type FeatureSwitches } from '../../shared/features.ts'
+import { CHOOSABLE_FEATURES, FEATURE_FIXED, FEATURE_GROUPS, FEATURE_REQUIRES, MOBILE_PATH_FEATURES, type ChoosableFeatureId, type FeatureId, type FeatureStatuses, type FeatureSwitches } from '../../shared/features.ts'
 import { FeaturesPage } from '../../renderer/FeaturesSettings.tsx'
-import { ALWAYS_ON_FEATURES } from '../../renderer/featuresView.ts'
 
 // 설정 > 기능 — 한 줄에 기능 하나, 줄을 누르면 아래로 자세한 설명 (시안 _workspace/mock-features Main·Detail).
 // 저장된 기능 값은 테스트마다 바꿔 끼운다 (settingsStore 목킹 — reportUi.test.ts 방식)
@@ -21,7 +20,7 @@ vi.mock('../../renderer/featuresStore.ts', () => ({
   useFeatureStatuses: () => store.statuses,
 }))
 
-function render(features: FeatureSwitches = {}, initialExpanded: FeatureId | undefined = undefined, statuses: FeatureStatuses = {}, initialQuery = ''): string {
+function render(features: FeatureSwitches = {}, initialExpanded: ChoosableFeatureId | undefined = undefined, statuses: FeatureStatuses = {}, initialQuery = ''): string {
   store.features = features
   store.statuses = statuses
   return renderToStaticMarkup(createElement(FeaturesPage, { initialExpanded, initialQuery }))
@@ -32,7 +31,7 @@ const CARDS = CHOOSABLE_FEATURES.filter((feature) => !MOBILE_PATH_FEATURES.inclu
 
 const count = (html: string, needle: string): number => html.split(needle).length - 1
 
-/** 줄의 펼침 버튼 (항상 켜짐 소묶음의 펼침 버튼은 세지 않는다) */
+/** 줄의 펼침 버튼 */
 const ROW_CLOSED = 'class="feature-row__toggle" aria-expanded="false"'
 const ROW_OPEN = 'class="feature-row__toggle" aria-expanded="true"'
 
@@ -40,7 +39,7 @@ describe('FeaturesPage — 접힌 첫 그림', () => {
   it('고르는 기능마다 한 줄: 펼침 버튼(aria-expanded=false) + 이름 + 한 줄 요약 + 스위치', () => {
     const html = render()
     expect(count(html, 'role="switch"')).toBe(CARDS.length)
-    expect(count(html, ROW_CLOSED)).toBe(CARDS.length) // 항상 켜짐 줄은 접힌 묶음 안이라 없다
+    expect(count(html, ROW_CLOSED)).toBe(CARDS.length)
     expect(html).not.toContain(ROW_OPEN)
     for (const feature of CARDS) {
       expect(html).toContain(`data-feature="${feature}"`)
@@ -168,118 +167,106 @@ describe('기능 문구', () => {
       }
     }
   })
+
+  it('묶음마다 뱃지 이름이 ko/en 둘 다 있다 (#302)', () => {
+    for (const group of FEATURE_GROUPS) {
+      const key = `settings.features.group.${group.id}`
+      expect([key, key in ko && key in en]).toEqual([key, true])
+    }
+  })
 })
 
-// 이슈 #277 — 항상 켜짐 줄·찾기 (보고서 _workspace/report-plugins/builtin-plugins.html 4절). 앱 전체/대화마다 큰 묶음·모드 표는 #281 에서 없앴다
-/** 항상 켜짐 소묶음 머리의 펼침 버튼 */
-const headToggle = (open: boolean, disabled = false): string =>
-  `class="feature-scope__toggle" aria-expanded="${open}"${disabled ? ' disabled=""' : ''}>`
+// 이슈 #302 — 평평한 한 목록 + 묶음 뱃지, 두 줄 줄, 고정 기능은 줄이 없다 (사용자 "구분하지 말고 뱃지로", "애들은 안 보여도 될 것 같아").
+// 찾기는 #277 (보고서 _workspace/report-plugins/builtin-plugins.html 4절). 앱 전체/대화마다 큰 묶음·모드 표는 #281 에서 없앴다
+const shownFeatures = (html: string): string[] => [...html.matchAll(/data-feature="(\w+)"/g)].map((match) => match[1])
+const groupName = (id: string): string => translate('ko', `settings.features.group.${id}` as MessageKey)
+/** 이름·한 줄 요약·뱃지 이름 중 하나에 든 줄 — 화면의 거르기와 같은 규칙 */
+const matching = (needle: string): string[] =>
+  FEATURE_GROUPS.flatMap((group) =>
+    group.features.filter((feature) =>
+      [translate('ko', `feature.${feature}` as MessageKey), translate('ko', `feature.${feature}.description` as MessageKey), groupName(group.id)].some((text) =>
+        text.toLowerCase().includes(needle.toLowerCase()),
+      ),
+    ),
+  )
 
-describe('FeaturesPage — 묶음 (#281 큰 묶음 없음)', () => {
-  it('앱 전체/대화마다 큰 묶음과 모드 줄이 없다', () => {
+describe('FeaturesPage — 평평한 목록 (#302)', () => {
+  it('앱 전체/대화마다 큰 묶음과 모드 줄이 없다 (#281)', () => {
     const html = render()
     expect(html).not.toContain('data-feature-scope=')
-    expect(html).not.toContain('앱 전체 (Global)')
-    expect(html).not.toContain('대화마다 (Session)')
     expect(html).not.toContain('data-mode=')
     expect(html).not.toContain('<table')
   })
 
-  it('네 소묶음이 평평하게 놓이고 맨 아래에 접힌 "항상 켜짐" 소묶음 — 고르는 줄은 전부 그 위', () => {
+  it('구역 제목·힌트 없이 목록 한 장 — 줄 순서는 묶음 순서를 이어 붙인 것', () => {
     const html = render()
-    const order = [...FEATURE_GROUPS.map((group) => group.id), 'alwaysOn'].map((id) => html.indexOf(`data-feature-group="${id}"`))
-    expect(order.every((at) => at >= 0)).toBe(true)
-    expect([...order].sort((a, b) => a - b)).toEqual(order)
-    const alwaysOnAt = html.indexOf('data-feature-group="alwaysOn"')
-    for (const feature of CARDS) expect(html.indexOf(`data-feature="${feature}"`)).toBeLessThan(alwaysOnAt)
-    const alwaysOn = html.slice(alwaysOnAt)
-    expect(count(html, 'class="feature-scope__toggle"')).toBe(1) // 접기 버튼은 항상 켜짐 하나뿐
-    expect(alwaysOn).toContain(headToggle(false))
-    expect(alwaysOn).toContain('>항상 켜짐<')
-    expect(alwaysOn).not.toContain('data-always-on') // 접혀 있다
-  })
-})
-
-describe('FeaturesPage — 항상 켜짐 (필수 기능 읽기 전용)', () => {
-  it('늘 켜진 기능은 FEATURE_FIXED 의 여섯', () => {
-    expect([...ALWAYS_ON_FEATURES].sort()).toEqual(Object.keys(FEATURE_FIXED).sort())
-    expect(ALWAYS_ON_FEATURES).toHaveLength(6)
+    expect(count(html, '<ul class="feature-rows">')).toBe(1)
+    expect(html).not.toContain('data-feature-group=')
+    expect(html).not.toContain('feature-group')
+    expect(html).not.toContain('<h3')
+    expect(shownFeatures(html)).toEqual(FEATURE_GROUPS.flatMap((group) => group.features))
   })
 
-  it('펼치면 여섯 줄 — 이름·한 줄 요약·"항상 켜짐" 알약, 스위치는 없다', () => {
-    const html = render({}, 'at')
-    const alwaysOn = html.slice(html.indexOf('data-feature-group="alwaysOn"'))
-    expect(alwaysOn).toContain(headToggle(true))
-    expect(count(alwaysOn, 'data-always-on=""')).toBe(6)
-    for (const feature of ALWAYS_ON_FEATURES) {
-      expect(alwaysOn).toContain(`data-feature="${feature}"`)
-      expect(alwaysOn).toContain(translate('ko', `feature.${feature}` as MessageKey))
-      expect(alwaysOn).toContain(translate('ko', `feature.${feature}.description` as MessageKey))
+  it('줄마다 두 줄: 첫 줄 = 이름 + 묶음 뱃지(이름 바로 옆), 둘째 줄 = 한 줄 요약', () => {
+    const html = render()
+    for (const group of FEATURE_GROUPS) {
+      for (const feature of group.features) {
+        const row = html.slice(html.indexOf(`data-feature="${feature}"`))
+        const toggle = row.slice(0, row.indexOf('</button>'))
+        expect(toggle).toContain(
+          `<span class="feature-row__line"><span class="feature-row__title">${translate('ko', `feature.${feature}` as MessageKey)}</span><span class="feature-row__badge">${groupName(group.id)}</span></span><span class="feature-row__summary">`,
+        )
+      }
     }
-    expect(count(alwaysOn, 'class="feature-row__status feature-row__status--fixed">항상 켜짐<')).toBe(6)
-    expect(alwaysOn).not.toContain('role="switch"')
-    expect(count(html, 'role="switch"')).toBe(CARDS.length) // 스위치는 고르는 기능에만
+    expect(count(html, 'class="feature-row__badge"')).toBe(CARDS.length)
   })
 
-  it('항상 켜짐 줄을 펼치면 자세한 설명·필요·쓰는 곳 — 기본값 칩은 없다', () => {
-    const html = render({}, 'bang')
-    const bang = html.slice(html.indexOf('data-feature="bang"'), html.indexOf('data-feature="shell"'))
-    expect(bang).toContain('class="feature-row__toggle" aria-expanded="true"')
-    expect(bang).toContain('>필요: !명령 실행<')
-    expect(bang).toContain(`>${translate('ko', 'feature.bang.where')}<`)
-    expect(bang).not.toContain('기본값:')
+  it('고정된 필수 기능(훅 포함)은 줄이 없다 — "항상 켜짐" 구역도 없다', () => {
+    expect(FEATURE_FIXED.hooks).toBe(true)
+    const html = render({ hooks: false }) // 꺼 둔 저장값이 있어도 줄이 생기지 않는다
+    for (const feature of Object.keys(FEATURE_FIXED)) expect(html).not.toContain(`data-feature="${feature}"`)
+    expect(html).not.toContain('항상 켜짐')
+    expect(html).not.toContain('data-always-on')
+    expect(html).not.toContain('feature-scope__toggle')
   })
 })
 
 describe('FeaturesPage — 찾기', () => {
-  it('찾기 칸은 맨 위, 기능 찾기 문구를 단다', () => {
+  it('찾기 칸은 목록 위, 기능 찾기 문구를 단다', () => {
     const html = render()
     expect(html).toContain('aria-label="기능 찾기"')
     expect(html).toContain('placeholder="기능 이름·설명 찾기"')
-    expect(html.indexOf('session-search__input')).toBeLessThan(html.indexOf('data-feature-group='))
+    expect(html.indexOf('session-search__input')).toBeLessThan(html.indexOf('class="feature-rows"'))
   })
 
-  it('찾는 동안은 접힌 "항상 켜짐" 도 펼쳐지고 일치하는 줄만 보인다 — 일치 없는 소묶음 제목은 숨긴다 (앞뒤 공백 무시)', () => {
-    const html = render({}, undefined, {}, '  명령 ')
-    expect(html).toContain(headToggle(true, true))
-    const shown = [...html.matchAll(/data-feature="(\w+)"/g)].map((match) => match[1]).sort()
-    expect(shown).toEqual(['bang', 'hooks', 'shell', 'slash'])
-    expect(html).not.toContain('data-mode=')
-    expect(html).toContain('data-feature-group="automation"')
-    expect(html).toContain('data-feature-group="alwaysOn"')
-    for (const hidden of ['screen', 'ai', 'devices']) expect(html).not.toContain(`data-feature-group="${hidden}"`)
-    expect(html).not.toContain('일치하는 기능이 없습니다.')
+  it('뱃지 이름으로도 찾는다 — "AI 도구" 는 그 묶음 줄을 모두 보인다', () => {
+    const html = render({}, undefined, {}, 'AI 도구')
+    expect(shownFeatures(html)).toEqual(matching('AI 도구'))
+    for (const feature of FEATURE_GROUPS.find((group) => group.id === 'ai')!.features) expect(shownFeatures(html)).toContain(feature)
+  })
+
+  it('고정 기능은 찾아도 나오지 않는다 — "입력" 은 "! 입력"(고정) 없이 고르는 줄만 (앞뒤 공백 무시)', () => {
+    const html = render({}, undefined, {}, '  입력 ')
+    expect(shownFeatures(html)).toEqual(matching('입력'))
+    expect(shownFeatures(html)).toContain('voice')
+    for (const feature of Object.keys(FEATURE_FIXED)) expect(html).not.toContain(`data-feature="${feature}"`)
   })
 
   it('대소문자를 가리지 않는다 — mcp 는 MCP 가 든 줄을 찾는다', () => {
     const html = render({}, undefined, {}, 'mcp')
-    const shown = [...html.matchAll(/data-feature="(\w+)"/g)].map((match) => match[1]).sort()
-    expect(shown).toEqual(['appMcp', 'browser', 'mcp'].filter((feature) => translate('ko', `feature.${feature}` as MessageKey).includes('MCP') || translate('ko', `feature.${feature}.description` as MessageKey).includes('MCP')).sort())
-    expect(shown).toContain('mcp')
+    expect(shownFeatures(html)).toEqual(matching('MCP'))
+    expect(shownFeatures(html)).toContain('appMcp')
   })
 
   it('하나도 없으면 "일치하는 기능이 없습니다." 한 줄만', () => {
     const html = render({}, undefined, {}, 'zzzz')
     expect(html).toContain('>일치하는 기능이 없습니다.<')
-    expect(html).not.toContain('data-feature-group=')
+    expect(html).not.toContain('class="feature-rows"')
     expect(html).not.toContain('data-feature=')
   })
 
   it('빈 찾기(공백만)는 거르지 않는다 — 처음 그림과 같다', () => {
-    const list = (html: string): string => html.slice(html.indexOf('<section')) // 찾기 칸(글·지우기 버튼) 아래의 목록만
+    const list = (html: string): string => html.slice(html.indexOf('<ul class="feature-rows"')) // 찾기 칸(글·지우기 버튼) 아래의 목록만
     expect(list(render({}, undefined, {}, '   '))).toBe(list(render()))
-  })
-})
-
-describe('기능 화면 문구 (#277)', () => {
-  it('늘 켜진 기능마다 이름·한 줄 요약·자세한 설명·쓰는 곳이 ko/en 둘 다 있다 — 요약은 한 줄', () => {
-    for (const feature of ALWAYS_ON_FEATURES) {
-      for (const suffix of ['', '.description', '.detail', '.where']) {
-        const key = `feature.${feature}${suffix}`
-        expect([key, key in ko && (ko as Record<string, string>)[key].length > 0]).toEqual([key, true])
-        expect([key, key in en && (en as Record<string, string>)[key].length > 0]).toEqual([key, true])
-      }
-      for (const dict of [ko, en] as Record<string, string>[]) expect(dict[`feature.${feature}.description`]).not.toContain('\n')
-    }
   })
 })

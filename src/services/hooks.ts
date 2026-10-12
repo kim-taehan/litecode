@@ -33,7 +33,7 @@ import type { Conversation } from '../../shared/contract.ts'
 
 // 훅 (ctx.hooks, 이슈 #102 1단계, 설계 _workspace/01af_hooks.md §6 — 방식 B) — 사용자가 이벤트에 걸어 둔 셸 명령을 **앱 메인 프로세스가**
 // 프로젝트 폴더에서 돌린다. 엔진 플러그인을 쓰지 않는다(엔진은 `--pure` 그대로)·엔진을 모른다 — 듣는 것은 ctx.chat 의 턴 앞뒤 확장점과
-// ctx.llm 의 중립 이벤트뿐이다. 기능 `hooks`(기본 꺼짐)의 묶음이라 꺼져 있으면 이 서비스가 통째로 없다.
+// ctx.llm 의 중립 이벤트뿐이다. 기능 `hooks`(#302 부터 필수 — 늘 켜짐, 전엔 기본 꺼짐)의 묶음이다.
 //
 // - 정의: userData `hooks.json`(모든 프로젝트) + `hooks-projects.json`(이 프로젝트만 + 프로젝트별 켜기 값) — hooks/config.ts.
 //   **돌 때마다 다시 읽는다** — 파일을 직접 고쳐도 되고(사람이 고치는 파일이라 들여 써서 저장한다), 고치면 다음 실행부터 반영된다.
