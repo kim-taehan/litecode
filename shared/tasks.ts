@@ -2,8 +2,18 @@
 // (따로 만든 엔진 세션에서 ctx.llm.chat 한 턴), 끝나면(완료·실패·중지) 그 대화에 출처 'task' 의 새 턴으로 결과를 넣는다.
 // 타입·상수·글 만들기뿐이다 (Node·Electron·React 를 모른다). 모델이 읽는 글은 화면 언어와 무관하게 영어
 
+import type { TurnItem } from './contract.ts'
+
 /** 앱 MCP 서버의 도구 이름 — 엔진 이름은 `litecode_task_start` */
 export const TASK_START_TOOL = 'task_start'
+/** 작업 상태 보기 (읽기 전용) — 엔진 이름은 `litecode_task_status`. 작업 세션에선 숨긴다 */
+export const TASK_STATUS_TOOL = 'task_status'
+
+/** 실행 중 작업이 이만큼 조용하면(진행 줄 변화 없음) 죽이지 않고 작업 줄에 표시하고 메인에게 한 번 알린다 — 활동이 다시 오면 풀리고 다시 무장한다 */
+export const TASK_QUIET_MS = 180_000
+/** 작업 턴의 무응답 하드 한도 — 작업 턴은 ctx.llm 의 평소 한도(120초·도구 인자 600초) 대신 이것 하나로만 끊는다(게이트웨이가 정말 죽은 경우).
+ *  그 전의 판단은 메인·사람에게 (위 TASK_QUIET_MS 알림) */
+export const TASK_STALL_TIMEOUT_MS = 600_000
 
 /** 작업 종류 — explore 는 읽기 전용(계획 모드 규칙으로 돈다), general 은 그 대화의 모드로 돈다 */
 export const TASK_AGENTS = ['explore', 'general'] as const
@@ -80,4 +90,72 @@ export function taskReport(task: { number: number; agent: TaskAgent; description
 
 function clip(text: string): string {
   return text.length > TASK_RESULT_MAX ? `${text.slice(0, TASK_RESULT_MAX)}…[truncated ${text.length - TASK_RESULT_MAX} chars]` : text
+}
+
+/** 진행 줄 하나 → 마지막 활동 한 마디 (모델이 읽는다 — 영어). 도구는 이름과 상태 — 인자를 만드는 중(preparing)이면 긴 파일을 쓰는 중일 수 있다 */
+export function taskActivity(item: TurnItem): string {
+  if (item.kind === 'tool') {
+    const name = item.mcp ? `${item.mcp.server}_${item.mcp.tool}` : item.name
+    return `tool ${name} (${item.status === 'preparing' ? 'preparing input' : item.status})`
+  }
+  if (item.kind === 'think') return 'thinking'
+  if (item.kind === 'text') return 'writing its answer'
+  return item.kind
+}
+
+/** 작업 상태 도구가 돌려줄 한 작업 */
+export interface TaskStatusEntry {
+  number: number
+  agent: TaskAgent
+  description: string
+  state: 'running' | 'queued' | TaskEnd
+  startedAt?: number
+  endedAt?: number
+  /** 마지막 활동 시각 (실행 중에만) — 시작 시각에서 시작한다 */
+  lastActivityAt?: number
+  lastActivity?: string
+  /** TASK_QUIET_MS 를 넘겨 조용하다 */
+  quiet: boolean
+  error?: string
+}
+
+/** 작업 상태 도구의 결과 글 */
+export function taskStatusText(entries: readonly TaskStatusEntry[], now: number): string {
+  if (entries.length === 0) return 'There are no background tasks in this conversation.'
+  const lines = entries.map((task) => {
+    const head = `- Task ${task.number} (${task.agent}) "${task.description}": `
+    if (task.state === 'queued') return `${head}waiting in the queue (not started yet).`
+    if (task.state === 'running') {
+      const last = task.lastActivityAt === undefined ? '' : `; last activity ${duration(now - task.lastActivityAt)} ago${task.lastActivity ? ` (${task.lastActivity})` : ''}`
+      const quiet = task.quiet ? ` — quiet for over ${Math.round(TASK_QUIET_MS / 60_000)} minutes` : ''
+      return `${head}running for ${duration(now - (task.startedAt ?? now))}${last}${quiet}.`
+    }
+    const took = task.startedAt !== undefined && task.endedAt !== undefined ? ` after ${duration(task.endedAt - task.startedAt)}` : ''
+    return `${head}${task.state}${took}${task.error ? ` (${task.error})` : ''}.`
+  })
+  return [
+    `Background tasks in this conversation (${entries.length}):`,
+    ...lines,
+    '',
+    'A quiet task may still be working (for example while it writes a long file). You cannot stop a task yourself — keep waiting, or tell the user so they can stop it from the task bar.',
+  ].join('\n')
+}
+
+/** 메인에게 보내는 "조용함" 알림 글 */
+export function taskQuietNotice(task: { number: number; description: string; quietMs: number; lastActivity?: string }): string {
+  const minutes = Math.round(task.quietMs / 60_000)
+  return [
+    `<task-notice number="${task.number}" status="quiet">`,
+    `Background task ${task.number} ("${task.description}") has shown no activity for ${minutes} minutes${task.lastActivity ? ` (last activity: ${task.lastActivity})` : ''}. It has not been stopped.`,
+    '</task-notice>',
+    '',
+    `Call litecode_${TASK_STATUS_TOOL} to check it, then decide: keep waiting, or tell the user briefly so they can stop it from the task bar. Do not start a duplicate task.`,
+  ].join('\n')
+}
+
+/** 경과 시간 — 45s · 3m05s */
+function duration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, '0')}s`
 }

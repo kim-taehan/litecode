@@ -2,7 +2,8 @@ import type { Context } from 'cordis'
 import { realDirectory } from '../../projectPath.ts'
 import { APP_MCP_NAME } from '../../mcp.ts'
 import type { AppMcpTool } from '../rpc.ts'
-import { isTaskAgent, TASK_AGENTS, TASK_DESCRIPTION_MAX, TASK_PROMPT_MAX, TASK_START_TOOL } from '../../../../shared/tasks.ts'
+import type { Conversation } from '../../../../shared/contract.ts'
+import { isTaskAgent, TASK_AGENTS, TASK_DESCRIPTION_MAX, TASK_PROMPT_MAX, TASK_START_TOOL, TASK_STATUS_TOOL, taskStatusText } from '../../../../shared/tasks.ts'
 import '../../appMcp.ts'
 import '../../chat.ts'
 import '../../llm.ts'
@@ -13,6 +14,8 @@ import '../../sessions.ts'
 // 부른 대화: 목표 도구와 같은 길(ctx.llm.callerOf → 저장된 대화의 engineSessionId). 작업 세션이 부르면 거절(재귀 금지 — 작업 턴에선 도구도 숨긴다).
 // 엔진 권한 규칙은 따로 적지 않았다 — 계획은 `*_*: deny` 라 도구가 없고(내장 task 를 막던 것과 같다), 매번 묻기는 `*_*: ask` 로 시작마다 묻고,
 // 기본·전체 권한은 묻지 않는다. 설명·결과 글은 모델이 읽는다 — 영어
+// 상태 도구 litecode_task_status (읽기 전용, 사용자 결정 2026-10-12 "타이머로 죽이지 말고 상태를 보고 판단은 메인/사람에게"): 그 대화의 작업별
+// 번호·설명·상태·경과·마지막 활동. 부른 대화를 가리는 길·작업 세션 거절은 시작 도구와 같다
 
 const NO_CALLER = 'Could not tell which conversation made this call. Call the tool again.'
 
@@ -21,6 +24,16 @@ function text(args: Record<string, unknown>, name: string, max: number): string 
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required.`)
   if (value.length > max) throw new Error(`${name} is too long (${value.length} characters, the limit is ${max}).`)
   return value.trim()
+}
+
+/** 그 도구를 부른 대화 — 목표 도구와 같은 길(ctx.llm.callerOf → 저장된 대화의 engineSessionId). 작업 세션·하위 작업이면 refused 로 던진다 */
+async function callerConversation(ctx: Context, directory: string, tool: string, args: Record<string, unknown>, refused: string): Promise<Conversation> {
+  const found = await ctx.llm.callerOf(directory, { server: APP_MCP_NAME, tool }, args)
+  if (!found) throw new Error(NO_CALLER)
+  if (found.child || ctx.chat.isTaskSession(found.sessionId)) throw new Error(refused)
+  const conversation = (await ctx.sessions.list()).find((entry) => entry.engineSessionId === found.sessionId)
+  if (!conversation || (await realDirectory(conversation.project)) !== directory) throw new Error(NO_CALLER)
+  return conversation
 }
 
 export function TaskTools(ctx: Context): void {
@@ -47,11 +60,7 @@ export function TaskTools(ctx: Context): void {
       if (!isTaskAgent(agent)) throw new Error(`agent must be one of: ${TASK_AGENTS.join(', ')}.`)
       const description = text(args, 'description', TASK_DESCRIPTION_MAX)
       const prompt = text(args, 'prompt', TASK_PROMPT_MAX)
-      const found = await ctx.llm.callerOf(directory, { server: APP_MCP_NAME, tool: TASK_START_TOOL }, args)
-      if (!found) throw new Error(NO_CALLER)
-      if (found.child || ctx.chat.isTaskSession(found.sessionId)) throw new Error('A background task cannot start other tasks. Do the work yourself.')
-      const conversation = (await ctx.sessions.list()).find((entry) => entry.engineSessionId === found.sessionId)
-      if (!conversation || (await realDirectory(conversation.project)) !== directory) throw new Error(NO_CALLER)
+      const conversation = await callerConversation(ctx, directory, TASK_START_TOOL, args, 'A background task cannot start other tasks. Do the work yourself.')
       const { number, queued, limit } = await ctx.chat.startTask(conversation.id, { agent, description, prompt })
       const head = queued
         ? `Queued background task ${number} (${agent}): "${description}". ${limit} tasks are already running in this conversation; it starts when one of them ends.`
@@ -63,6 +72,20 @@ export function TaskTools(ctx: Context): void {
     },
   }
 
+  const status: AppMcpTool = {
+    name: TASK_STATUS_TOOL,
+    description:
+      'Show the background tasks of this conversation: number, description, state (running, queued, completed, failed, stopped), how long it has run, ' +
+      'and when it last showed activity and what it was doing. Read-only. Use it when the user asks how the tasks are going, or when a task is reported as quiet. ' +
+      'Do not call it repeatedly to wait for a task — results arrive on their own.',
+    inputSchema: { type: 'object', properties: {} },
+    async run(args, { directory }) {
+      const conversation = await callerConversation(ctx, directory, TASK_STATUS_TOOL, args, 'A background task cannot see other tasks.')
+      return taskStatusText(ctx.chat.taskStatus(conversation.id), Date.now())
+    },
+  }
+
   ctx.effect(() => ctx.appMcp.register(start))
+  ctx.effect(() => ctx.appMcp.register(status))
 }
 TaskTools.inject = ['appMcp', 'llm', 'sessions', 'chat']

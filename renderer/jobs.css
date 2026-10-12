@@ -113,6 +113,12 @@ button.jobs__cells:focus-visible {
   color: var(--danger);
 }
 
+/* 조용한 백그라운드 작업 — 죽이지 않고 주의 색으로만 (backgroundTasks.ts TASK_QUIET_MS) */
+.jobs__row[data-quiet] .jobs__state {
+  color: var(--warn);
+}
+.jobs__row[data-quiet] .jobs__dot { border-color: var(--warn); background: var(--warn); }
+
 /* 중지·⌄ — 줄에 마우스를 올리거나 포커스가 있거나 펼쳤을 때만. 터치(hover 없음)에선 늘.
    폭을 늘 잡아 둔다(84 = 중지 버튼 + ⌄ + 오른쪽 8) — 중지가 없는 줄(메인·준비 중·끝난 것)도 시간 칸이 같은 자리에 오게 */
 .jobs__actions {

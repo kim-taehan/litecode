@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Subtask, TurnItem } from '../../shared/ipc.ts'
-import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, recentLines, VISIBLE_ROWS } from '../../renderer/jobsView.ts'
+import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, quietMinutes, recentLines, VISIBLE_ROWS } from '../../renderer/jobsView.ts'
 
 const subtask = (id: string, status: Subtask['status'], items: TurnItem[] = []): Subtask => ({ kind: 'subtask', id, agent: 'general', description: id, status, items })
 
@@ -132,5 +132,15 @@ describe('jobList — 차례를 기다리는 백그라운드 작업 (queued, 이
     expect(running.map((item) => item.id)).toEqual(['a', 'b'])
     expect(finished.map((item) => item.id)).toEqual(['c'])
     expect(leadJob(running)?.id).toBe('a')
+  })
+})
+
+describe('quietMinutes — 조용한 백그라운드 작업 표시 ("N분째 조용함")', () => {
+  const task = (patch: Partial<Subtask>): Subtask => ({ kind: 'subtask', id: 't', agent: 'explore', description: 'd', status: 'running', items: [], ...patch })
+  it('실행 중이고 quietSince 가 있을 때만 — 분 단위(내림, 최소 1)', () => {
+    expect(quietMinutes(task({}), 1_000_000)).toBeUndefined()
+    expect(quietMinutes(task({ quietSince: 0 }), 185_000)).toBe(3)
+    expect(quietMinutes(task({ quietSince: 0 }), 10_000)).toBe(1)
+    expect(quietMinutes(task({ quietSince: 0, status: 'done' }), 185_000)).toBeUndefined()
   })
 })
