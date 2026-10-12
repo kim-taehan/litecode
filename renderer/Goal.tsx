@@ -3,7 +3,7 @@ import { GOAL_MAX_ROUNDS, goalActions, goalHeadline, type Goal } from '../shared
 import { useT } from './settingsStore.ts'
 import './goal.css'
 
-// 목표 줄 (이슈 #285) — 입력 카드 위에 붙은 얇은 판 하나: "목표 · <첫 줄 말줄임> · 라운드 n/8 · [일시 정지|계속] [지우기]".
+// 목표 줄 (이슈 #285) — 입력 카드 위에 붙은 얇은 판 하나: "목표 · <첫 줄 말줄임> · 자동 이어가기 n/8회 · [일시 정지|계속] [지우기]".
 // 새 시각 언어를 만들지 않는다 — 할 일 줄(TodoDock)·대기열 판(QueueDock)과 같은 판 치수·글자·버튼 모양(goal.css). 판이 여럿이면 목표가 맨 위다
 // (목표 → 할 일 → 대기열 → 입력 카드: 오래 가는 것이 위, 곧 보낼 것이 카드 쪽). 상태·라운드는 메인(ctx.goal)이 쥐고 화면은 그린다.
 
@@ -65,7 +65,7 @@ export const GoalDock = memo(
           <span className="goal-dock__text" title={goal.text}>
             {goalHeadline(goal.text)}
           </span>
-          <span className="goal-dock__status" title={status}>
+          <span className="goal-dock__status" title={goal.status === 'active' ? t('goal.roundsHint', { max: GOAL_MAX_ROUNDS }) : status}>
             {status}
           </span>
           {goalActions(goal).map((action) => (
