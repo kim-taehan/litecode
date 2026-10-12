@@ -9,9 +9,9 @@ import type { MessageKey } from './i18n/ko.ts'
 export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates', 'repeatGuard', 'git'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
-/** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 스위치가 없다(#277 부터 "항상 켜짐" 읽기 전용 줄).
- *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP */
-const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true } as const satisfies Partial<Record<FeatureId, boolean>>
+/** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 줄이 없다(#277 의 "항상 켜짐" 읽기 전용 줄은 #302 에서 뺐다).
+ *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP, 훅(hooks — #302 에서 고르는 기능(기본 꺼짐)에서 필수로) */
+const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true, hooks: true } as const satisfies Partial<Record<FeatureId, boolean>>
 export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = FIXED
 
 /** 사용자가 켜고 끄는 기능의 id — 카드의 이름·설명 글(`feature.<id>`)은 이것에만 있다 */
@@ -23,11 +23,11 @@ export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature
 /** 설정 > 기능에 카드를 두지 않는 기능 — 모바일 연결의 길(사내망·블루투스)은 설정 > 모바일 한 곳에서만 켜고 끈다 (사용자 결정 2026-10-09: "기능 화면에서는 하나만") */
 export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
 
-/** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
-export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
+/** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 순서대로 이어 붙인 것이 줄 순서,
+ *  묶음 이름은 줄마다 뱃지로 보인다 (#302 — 구역 제목은 없앴다). 자동화 묶음은 훅이 필수가 되며 비어 뺐다 */
+export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn', 'git'] },
   { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser', 'repeatGuard'] },
-  { id: 'automation', features: ['hooks'] },
   { id: 'devices', features: ['voice', 'remote', 'notifications', 'updates'] },
 ]
 
@@ -37,7 +37,6 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
  *  나머지(터미널 칸·추론 과정·다른 앱에서 열기·데스크탑 MCP)는 기본 켜짐.
  *  목표(goal — ctx.goal, 이슈 #285)는 기본 켜짐 — `/goal` 로 목표를 정했을 때만 움직인다. 모델이 끝을 알리는 도구가 데스크탑 MCP 에 있어 그것이 켜져 있어야 한다.
  *  데스크탑 MCP(appMcp, 이슈 #99)는 앱 내장 MCP 서버(ctx.appMcp)와 그 도구 — 끄면 서버가 내려가고 다음 턴부터 엔진에서 `litecode_*` 도구가 빠진다.
- *  훅(hooks, 이슈 #102)은 기본 꺼짐 — 사용자 셸 명령을 AI 의 행동에 걸어 돌리는 기능이라 사용자가 켠다.
  *  음성 입력(voice — ctx.speech)도 기본 꺼짐 — 마이크 권한을 묻고 쓰는 동안 메모리 ~1GB 인 기능이라 사용자가 켠다. 꺼져 있으면 마이크 권한도 거절한다.
  *  브라우저(browser — ctx.browser, 이슈 #147)도 기본 꺼짐 — AI 가 Chrome 창을 조종하고, 켜면 도구 25개의 스키마(26KB)가 매 요청에 실린다.
  *  모바일 연결의 길은 둘이다 (이슈 #210, 설계 01ab "연결 수단 고르기" — 길마다 토글): 사내망 연결(lan — TLS 리스너, 기본 꺼짐: 켜는 순간 safeStorage 로 봉한
@@ -46,7 +45,7 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
  *  새 버전 알림(updates — ctx.updates, 이슈 #273)도 기본 꺼짐 — 켜면 GitHub 릴리즈(또는 설정의 주소)에 묻는다. 폐쇄망 규칙: 켜기 전에는 바깥 요청 0.
  *  Git(git — ctx.git, 이슈 #290)도 기본 꺼짐 — 시스템 git 이 필요하고 커밋·올리기를 하는 기능이라 사용자가 켠다. 데스크탑 MCP 를 요구하지 않는다
  *  (데스크탑 MCP 가 꺼져 있으면 AI 도구만 빠지고 Git 탭·브랜치 알약은 그대로) */
-export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser', 'lan', 'bluetooth', 'updates', 'git']
+export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'voice', 'browser', 'lan', 'bluetooth', 'updates', 'git']
 
 /** 저장된 값이 없을 때의 켜짐 */
 export function featureDefault(feature: FeatureId): boolean {

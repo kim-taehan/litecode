@@ -665,30 +665,6 @@
   overflow: hidden;
 }
 
-.feature-group + .feature-group {
-  margin-top: 4px;
-}
-
-.feature-group__head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.feature-group__title {
-  margin: 0;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.feature-group__hint {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
 .feature-row + .feature-row {
   border-top: 0.5px solid var(--border);
 }
@@ -742,6 +718,26 @@
   font-size: 14px;
   line-height: 20px;
   font-weight: 500;
+}
+
+/* 첫 줄 = 이름 + 묶음 뱃지 (#302 — 구역 제목 대신, 분류 용도라 색 없는 회색 알약. 모양은 .mobile-device__via) */
+.feature-row__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.feature-row__badge {
+  flex-shrink: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border-ring);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-tertiary);
 }
 
 .feature-row__summary {
@@ -1030,7 +1026,7 @@
   color: var(--text);
 }
 
-/* 찾기 칸 + 항상 켜짐 줄 (이슈 #277) — 기존 줄·칩·알약 모양을 그대로 쓰고 자리만 더한다 */
+/* 찾기 칸 (이슈 #277) — 기존 줄·칩·알약 모양을 그대로 쓰고 자리만 더한다 */
 .features-page__search .session-search {
   margin: 0;
 }
@@ -1040,30 +1036,4 @@
   font-size: 13px;
   line-height: 20px;
   color: var(--text-caption);
-}
-
-.feature-scope__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
-
-.feature-scope__toggle:disabled {
-  cursor: default;
-}
-
-.feature-scope__toggle[aria-expanded='true'] .feature-row__chevron {
-  transform: rotate(90deg);
-  color: var(--text-secondary);
-}
-
-.feature-row__status--fixed {
-  background: var(--fill-active);
-  color: var(--text-secondary);
 }
