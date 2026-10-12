@@ -33,23 +33,29 @@ const PLAN_PROMPT = [
 // 계획 모드에서 파일을 만들었다(1/1). → 매번 묻기는 묻는 하위 에이전트(SUBAGENT_ASK — general 과 같은 설명, 편집·명령·웹을 묻는다)만 쓰게 하고,
 // 계획은 task 를 막는다(도구가 빠진다). 그 하위 에이전트는 다른 모드에서 막는다 — 전역 규칙(build) + 전체 권한의 "*":allow 뒤. 규칙은 뒤가 이기고,
 // 막힌 하위 에이전트는 task 설명의 목록에서도 빠진다 (hidden 으로는 안 빠졌다)
+//
+// **내장 task 는 모든 모드에서 끈다** (이슈 #319): task 는 동기식이라 하위 작업이 도는 동안 메인 턴이 막히고 사용자는 채팅을 못 한다. 대신 앱 MCP 의
+// `litecode_task_start`(appMcp/tools/tasks.ts)가 따로 만든 세션에서 작업을 돌리고 번호만 곧바로 돌려준다 — 끝나면 ctx.chat 이 결과를 새 턴으로 넣는다.
+// 전역 deny 와 모드 에이전트마다 deny (웹 도구처럼 에이전트 규칙이 되살리지 않게). deny 면 도구가 LLM 요청에서 빠진다(계획의 task deny 와 같은 모양, #31 실측).
+// opencode 의 실험 플래그 `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`(task 의 background:true)는 실측 뒤 쓰지 않기로 했다 — docs/opencode-protocol.md 하위 작업.
+// general-ask 정의는 남겨 두었다 — task 가 꺼져 지금은 닿을 길이 없다(되살릴 때 규칙째 돌아오게)
 export const SUBAGENT_ASK = 'general-ask'
 const GENERAL_DESCRIPTION =
   'General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.'
-const SUBAGENT_ASK_DENY = { task: { [SUBAGENT_ASK]: 'deny' } }
+const TASK_DENY = { task: 'deny' }
 type Permission = Record<string, string | Record<string, string>>
 // 웹 도구(webfetch·websearch)는 켰을 때 이 규칙을 따른다 — 계획 deny, 매번 묻기 ask, 기본·전체 허용 (이슈 #14)
 export const ENGINE_AGENTS: Record<string, { mode?: string; prompt?: string; description?: string; permission: Permission }> = {
   plan: { prompt: PLAN_PROMPT, permission: { edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny' } },
   // 기본 모드는 opencode 기본 그대로다 — 여기 적는 것은 권한 규칙을 얹을 자리뿐이다 (MCP_TOOL_RULES 의 보내기 도구 ask, 이슈 #55).
   // 권한만 적은 build 는 다른 동작이 그대로였다 (도구 목록 동일, 01z 1-3)
-  [MODE_AGENT.build]: { permission: {} },
+  [MODE_AGENT.build]: { permission: { ...TASK_DENY } },
   [MODE_AGENT.ask]: {
     mode: 'primary',
     prompt: BUILD_PROMPT,
-    permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow', task: { '*': 'deny', [SUBAGENT_ASK]: 'allow' } },
+    permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow', ...TASK_DENY },
   },
-  [MODE_AGENT.full]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { '*': 'allow', ...SUBAGENT_ASK_DENY } },
+  [MODE_AGENT.full]: { mode: 'primary', prompt: BUILD_PROMPT, permission: { '*': 'allow', ...TASK_DENY } },
   // general 과 같다(todowrite deny, 시스템 프롬프트 없음) + 매번 묻기와 같은 묻기
   [SUBAGENT_ASK]: { mode: 'subagent', description: GENERAL_DESCRIPTION, permission: { todowrite: 'deny', edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask' } },
 }
@@ -379,7 +385,7 @@ export function engineConfig(
     : Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
   // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
   const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
-  const permission = { ...SUBAGENT_ASK_DENY, ...SEND_TOOLS_DENY, ...MAKE_TOOLS_DENY, ...PRESENT_DENY, ...GIT_TOOLS_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
+  const permission = { ...TASK_DENY, ...SEND_TOOLS_DENY, ...MAKE_TOOLS_DENY, ...PRESENT_DENY, ...GIT_TOOLS_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
   const ruled: Record<string, { permission: Permission }> = skillRule
     ? Object.fromEntries(Object.entries(agent).map(([name, def]) => [name, { ...def, permission: withLast(def.permission, 'skill', skillRule) as Permission }]))
     : agent

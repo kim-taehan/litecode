@@ -17,7 +17,7 @@ import '../engine.ts'
 import type { Attention, AttentionAnswer, AttentionTarget, History } from '../../../shared/contract.ts'
 import { CALLER_WAIT_MS, STREAM_IDLE_TIMEOUT_MS } from './limits.ts'
 import { abort, at, createSession, dropUnfinishedCompactions, engineMessages, subtaskMessages, waitForAgent, waitForModel } from './engineApi.ts'
-import { ascendingId, promptParts, promptTools, sessionTitle } from './prompt.ts'
+import { ascendingId, mergeHidden, promptParts, promptTools, sessionTitle } from './prompt.ts'
 import { follow } from './follow.ts'
 import { replyAttention, watchAttention, type AttentionHost, type AttentionRequest } from './attention.ts'
 import type { ChatImage, ChatOptions, ChatResult, EngineCommand, EngineMessage, EngineSkill, FileEntry, Interjection, LlmConfig, McpStatus, RunningTurn } from './types.ts'
@@ -87,12 +87,13 @@ export class LlmService extends Service {
     stop,
     images = [],
     context,
+    hideMcpTools,
   }: ChatOptions): Promise<ChatResult> {
     this.turns++
     /** busy: 이 턴이 쥔 세션(addContext 를 막는다), sessionId: 받아들여진 턴의 세션 — 그때만 turn-started/ended 를 낸다 */
     const admitted: { busy?: string; sessionId?: string } = {}
     try {
-      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention, stop, images, context)
+      const result = await this.turn(providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, admitted, mode, onAttention, stop, images, context, hideMcpTools)
       const interrupted = !result.ok && !!result.interrupted
       if (admitted.sessionId) {
         this.ctx.emit('llm/turn-ended', {
@@ -247,6 +248,7 @@ export class LlmService extends Service {
     stop: AbortSignal | undefined,
     images: readonly ChatImage[],
     context: string | undefined,
+    hideMcpTools: Readonly<Record<string, readonly string[]>> = {},
   ): Promise<ChatResult> {
     const provider = this.ctx.providers.get(providerId)
     if (!provider) return { ok: false, error: tr('error.noProvider', { id: providerId }) }
@@ -293,7 +295,7 @@ export class LlmService extends Service {
           const joined = [system, extraSystem].filter(Boolean).join('\n\n')
           return { messageID, model: { providerID: providerId, modelID: modelId }, agent: MODE_AGENT[mode], ...(joined && { system: joined }), tools }
         }
-        const tools = promptTools(this.hiddenMcpTools.get(workdir))
+        const tools = promptTools(mergeHidden(this.hiddenMcpTools.get(workdir) ?? {}, hideMcpTools))
         const send = await fetch(`${conn.url}/session/${id}/prompt_async?${at(workdir)}`, {
           method: 'POST',
           headers: { ...conn.headers, 'content-type': 'application/json' },

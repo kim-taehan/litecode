@@ -3,7 +3,7 @@
 
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../src/services/providers.ts'
 import type { Mode } from './modes.ts'
-import type { AttachmentKind, AttachmentPick, Attention, AttentionAnswer, AttentionTarget, Conversation, History, NoticeState, Project, ShellCard, TurnItem } from './contract.ts'
+import type { AttachmentKind, AttachmentPick, Attention, AttentionAnswer, AttentionTarget, Conversation, History, NoticeState, Project, ShellCard, Subtask, TurnItem } from './contract.ts'
 import type { ChatEventMap, ChatModel, ChatSnapshot, QueuedSend, SendResult } from './chat.ts'
 import type { TriggerQuery, TriggerResult, TriggerScope } from '../src/services/triggers.ts'
 import type { Trajectory } from '../src/services/trajectory.ts'
@@ -114,6 +114,10 @@ export const Channel = {
   STOP_TURN: 'chat:stop',
   COMPACT_CHAT: 'chat:compact',
   STOP_SUBTASK: 'chat:stop-subtask',
+  /** 백그라운드 하위 작업 전부 (대화 id → 작업, 이슈 #319) — 화면이 (다시) 뜰 때 한 번 */
+  TASK_SNAPSHOT: 'chat:tasks-snapshot',
+  /** 메인 → 화면 (대화 id, 작업 목록) — 그 대화의 백그라운드 하위 작업이 바뀌었다 (이슈 #319) */
+  TASKS_CHANGED: 'chat:tasks',
   RESOLVE_FILES: 'chat:resolve-files',
   REVEAL_FILE: 'chat:reveal-file',
   PREVIEW_FILE: 'chat:preview-file',
@@ -337,6 +341,9 @@ export interface LitecodeBridge {
   compactChat(conversationId: string): Promise<{ ok: true } | { ok: false; error: string }>
   /** 도는 턴의 하위 작업 하나만 멈춘다 (subtaskId = 그 하위 작업 진행 줄의 id) — 턴은 이어 간다. 도는 턴의 하위 작업이 아니면 false */
   stopSubtask(subtaskId: string): Promise<boolean>
+  /** 백그라운드 하위 작업 (이슈 #319) — 대화 id → 작업 줄(진행 줄의 하위 작업 줄과 같은 모양). 중지는 stopSubtask 에 그 id */
+  taskSnapshot(): Promise<Record<string, Subtask[]>>
+  onTasksChanged(listener: (conversationId: string, tasks: Subtask[]) => void): () => void
   /** 답의 인라인 코드 중 그 프로젝트 안의 실제 파일인 것만 (받은 글자 그대로) — 파일 언급 칩 */
   resolveFiles(directory: string, tokens: string[]): Promise<string[]>
   /** 프로젝트 안의 그 파일을 OS 파일 관리자에서 보여 준다 (열지·실행하지 않는다). 프로젝트 밖·없는 파일이면 false */

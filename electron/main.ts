@@ -60,6 +60,7 @@ import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { GoalService } from '../src/services/goal.ts'
 import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
+import { TaskTools } from '../src/services/appMcp/tools/tasks.ts'
 import { GitService } from '../src/services/git.ts'
 import { GitTools } from '../src/services/appMcp/tools/git.ts'
 import { gitWebUrl, type GitAction } from '../shared/git.ts'
@@ -312,6 +313,7 @@ function chatBridge(ctx: Context): void {
   handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => ctx.chat.stop(String(conversationId)))
   handle(ctx, Channel.COMPACT_CHAT, async (_event, conversationId: string) => ctx.chat.compact(String(conversationId)))
   handle(ctx, Channel.STOP_SUBTASK, async (_event, subtaskId: string) => ctx.chat.stopSubtask(String(subtaskId)))
+  handle(ctx, Channel.TASK_SNAPSHOT, async () => ctx.chat.taskSnapshot())
   // target: 지시 보내기 승인 카드에서 고른 받을 대화 (이슈 #67) — 모양만 거른다. 그 대화로 보낼 수 있는지는 도구가 실행할 때 다시 본다
   handle(ctx, Channel.REPLY_ATTENTION, async (_event, sessionId: string, requestId: string, answer: AttentionAnswer, target?: unknown) => ctx.chat.reply(sessionId, requestId, answer, attentionTarget(target)))
   ctx.on('chat/turn-started', (data) => broadcast(Channel.TURN_STARTED, data))
@@ -321,6 +323,7 @@ function chatBridge(ctx: Context): void {
   ctx.on('chat/turn-interjected', (data) => broadcast(Channel.TURN_INTERJECTED, data))
   ctx.on('chat/queue-changed', (data) => broadcast(Channel.QUEUE_CHANGED, data))
   ctx.on('chat/conversations-changed', (data) => broadcast(Channel.CONVERSATIONS_CHANGED, data))
+  ctx.on('chat/tasks-changed', (cid, tasks) => broadcast(Channel.TASKS_CHANGED, cid, tasks))
 }
 chatBridge.inject = ['chat']
 mounted.push(ctx.plugin(ChatService))
@@ -721,6 +724,7 @@ const features: FeatureDefinition[] = [
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
       ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
+      ctx.plugin(TaskTools) // 앱 MCP 의 task_start — 백그라운드 하위 작업, 내장 task 를 대신한다 (이슈 #319)
       ctx.plugin(appMcpBridge)
     },
   },

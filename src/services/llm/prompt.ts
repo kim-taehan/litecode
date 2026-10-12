@@ -39,6 +39,16 @@ export function promptTools(hidden: Readonly<Record<string, readonly string[]>> 
   return tools
 }
 
+/** 숨길 MCP 도구 둘을 서버별로 합친다 — 폴더의 숨김(ctx.mcp)과 그 턴만의 숨김(백그라운드 작업 턴이 작업 도구를 뺀다, #319) */
+export function mergeHidden(
+  a: Readonly<Record<string, readonly string[]>>,
+  b: Readonly<Record<string, readonly string[]>>,
+): Record<string, readonly string[]> {
+  const merged: Record<string, readonly string[]> = { ...a }
+  for (const [server, names] of Object.entries(b)) merged[server] = [...new Set([...(merged[server] ?? []), ...names])]
+  return merged
+}
+
 /** prompt_async 의 parts (01y 1절) — 글 파트 뒤에 이미지를 `{type:"file", mime, filename, url:"data:<mime>;base64,…"}` 로. 글이 없고 이미지만
  *  있으면 글 파트를 싣지 않는다. url 은 늘 data: 다 — `file://` 는 없는 파일이 끝 신호 없는 거절이 되고, LLM 에 "Called the Read tool…" 머리
  *  줄이 끼며, 폴더 밖 읽기가 권한을 안 거친다. **이미지 밖의 mime 을 file 파트로 보내지 않는다** — `application/json` 등은 그 세션의 모든 턴을
