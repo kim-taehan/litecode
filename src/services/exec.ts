@@ -47,6 +47,16 @@ export interface ExecHandle {
 
 export function execShell(opts: ExecOptions): ExecHandle {
   const [file, args] = shellCommand(opts.command)
+  return launch(file, args, true, opts)
+}
+
+/** 셸을 거치지 않고 실행 파일 하나를 인자 배열로 띄운다 (ctx.git, 이슈 #290) — 인자를 셸 글로 잇지 않으니 따옴표·`;` 가 명령이 되지 않는다.
+ *  멈춤·기한·출력 규칙은 execShell 과 같다. 실행 파일을 못 찾으면 status 'error' (error 에 ENOENT) */
+export function execProgram(opts: Omit<ExecOptions, 'command'> & { file: string; args: readonly string[] }): ExecHandle {
+  return launch(opts.file, [...opts.args], false, opts)
+}
+
+function launch(file: string, args: string[], verbatim: boolean, opts: Omit<ExecOptions, 'command'>): ExecHandle {
   const env = { ...process.env, ...opts.env }
   delete env['OPENCODE_SERVER_PASSWORD']
   let stop: ExecHandle['stop'] = () => {}
@@ -59,7 +69,7 @@ export function execShell(opts: ExecOptions): ExecHandle {
         detached: process.platform !== 'win32',
         stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
         windowsHide: true,
-        windowsVerbatimArguments: true, // Windows 에서만 뜻이 있다 (shellCommand 의 따옴표)
+        windowsVerbatimArguments: verbatim, // Windows 에서만 뜻이 있다 (shellCommand 의 따옴표)
       })
     } catch (error) {
       return resolve({ exitCode: null, status: 'error', error: (error as Error).message }) // 띄우기부터 던졌다 (잘못된 인자 등)

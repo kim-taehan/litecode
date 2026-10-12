@@ -9,6 +9,7 @@ import { RemotePairPrompt } from './MobileSettings.tsx'
 import { useTriggers } from './useTriggers.ts'
 import { ShellDrawer } from './ShellDrawer.tsx'
 import { useAppMcp } from './useAppMcp.ts'
+import { useGitWatch } from './gitStore.ts'
 import type { ShellCardView } from './ShellCard.tsx'
 import { useSettings, useT } from './settingsStore.ts'
 import { useFeatures } from './featuresStore.ts'
@@ -290,6 +291,8 @@ export function App() {
   })
   /** 지금 대화의 목표 (이슈 #285) — 입력 카드 위 줄 */
   const goal = useGoal(features.has('goal'), active?.id)
+  // Git 상태 다시 읽기 (이슈 #290) — 작업 뒤·턴 끝·창 포커스. 탭 숫자와 브랜치 알약이 같은 값을 본다
+  useGitWatch(features.has('git'), active?.project)
   /** 목표 줄의 버튼 — 못 했으면(그사이 상태가 바뀌었다) 그 사유를 알린다 */
   const goalAction = (id: string, action: 'pause' | 'resume' | 'clear') =>
     void window.litecode.goalCommand(id, action).then((reply) => reply.message && notices.say(reply.message), () => {})

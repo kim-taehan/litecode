@@ -6,7 +6,7 @@
 import type { MessageKey } from './i18n/ko.ts'
 
 // skills(이슈 #7)는 묶음(ctx.skills — `+` 메뉴의 스킬 팝업 목록(#43)·`/` 후보·본문 붙이기)과 엔진 설정(끄면 opencode skill 도구 deny — ctx.engine 이 재시작) 둘 다다
-export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates', 'repeatGuard'] as const
+export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory', 'notifications', 'openIn', 'skills', 'mcp', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'hooks', 'voice', 'browser', 'updates', 'repeatGuard', 'git'] as const
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 스위치가 없다(#277 부터 "항상 켜짐" 읽기 전용 줄).
@@ -25,7 +25,7 @@ export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
 
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B — 네 묶음) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 안 순서가 카드 순서 */
 export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
-  { id: 'screen', features: ['terminal', 'trajectory', 'openIn'] },
+  { id: 'screen', features: ['terminal', 'trajectory', 'openIn', 'git'] },
   { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser', 'repeatGuard'] },
   { id: 'automation', features: ['hooks'] },
   { id: 'devices', features: ['voice', 'remote', 'notifications', 'updates'] },
@@ -43,8 +43,10 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'automation' | 'de
  *  모바일 연결의 길은 둘이다 (이슈 #210, 설계 01ab "연결 수단 고르기" — 길마다 토글): 사내망 연결(lan — TLS 리스너, 기본 꺼짐: 켜는 순간 safeStorage 로 봉한
  *  TLS 키를 읽어 macOS 가 키체인 접근을 물을 수 있다, 이슈 #268)과 블루투스 연결(bluetooth — 기본 꺼짐: 켜는 순간 macOS 가 블루투스 허용을 묻고, 네이티브 모듈을
  *  그때 읽는다). 둘 다 모바일 연결(remote)이 켜져 있어야 한다 — 모바일 연결만 켜면 길은 고르지 않은 상태다(설정 > 모바일에서 고른다).
- *  새 버전 알림(updates — ctx.updates, 이슈 #273)도 기본 꺼짐 — 켜면 GitHub 릴리즈(또는 설정의 주소)에 묻는다. 폐쇄망 규칙: 켜기 전에는 바깥 요청 0 */
-export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser', 'lan', 'bluetooth', 'updates']
+ *  새 버전 알림(updates — ctx.updates, 이슈 #273)도 기본 꺼짐 — 켜면 GitHub 릴리즈(또는 설정의 주소)에 묻는다. 폐쇄망 규칙: 켜기 전에는 바깥 요청 0.
+ *  Git(git — ctx.git, 이슈 #290)도 기본 꺼짐 — 시스템 git 이 필요하고 커밋·올리기를 하는 기능이라 사용자가 켠다. 데스크탑 MCP 를 요구하지 않는다
+ *  (데스크탑 MCP 가 꺼져 있으면 AI 도구만 빠지고 Git 탭·브랜치 알약은 그대로) */
+export const FEATURE_DEFAULT_OFF: readonly FeatureId[] = ['notifications', 'remote', 'web', 'hooks', 'voice', 'browser', 'lan', 'bluetooth', 'updates', 'git']
 
 /** 저장된 값이 없을 때의 켜짐 */
 export function featureDefault(feature: FeatureId): boolean {

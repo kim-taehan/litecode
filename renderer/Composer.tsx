@@ -8,6 +8,7 @@ import type { Triggers } from './useTriggers.ts'
 import { TriggerPopup } from './TriggerPopup.tsx'
 import type { Translate } from './settingsStore.ts'
 import { ModeChip, nextMode } from './ModeChip.tsx'
+import { GitBranchPill } from './Git.tsx'
 import { PlusMenu } from './PlusMenu.tsx'
 import { VoiceButton, VoiceStrip, type VoiceInput } from './VoiceInput.tsx'
 import { AttachmentChips } from './Attachments.tsx'
@@ -163,6 +164,8 @@ export function Composer({
             onAttach={(kind) => void addAttachments(kind)}
           />
           <ModeChip value={mode} locked={!!active.pending} onChange={chooseMode} />
+          {/* 브랜치 알약 (이슈 #290) — 기능 git 이 켜지고 저장소일 때만 */}
+          <GitBranchPill directory={active.project} />
           <div className="composer__trailing">
             <ModelSelect providers={providers} value={selected} onChange={chooseModel} />
             <VoiceButton voice={voice} />

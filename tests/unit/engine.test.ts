@@ -7,6 +7,11 @@ import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
 
+// git 도구 (#290) — 읽기는 모드 에이전트에 allow, 쓰기는 기본·전체 권한에 ask, 전역·하위 작업은 둘 다 deny
+const GIT_READ_ALLOW = { litecode_git_status: 'allow', litecode_git_diff: 'allow', litecode_git_log: 'allow', litecode_git_branches: 'allow' }
+const GIT_WRITE_ASK = { litecode_git_stage: 'ask', litecode_git_commit: 'ask', litecode_git_branch_create: 'ask', litecode_git_switch: 'ask', litecode_git_push: 'ask', litecode_git_pull: 'ask' }
+const GIT_DENY = Object.fromEntries([...Object.keys(GIT_READ_ALLOW), ...Object.keys(GIT_WRITE_ASK)].map((name) => [name, 'deny']))
+
 const provider = (id: string, baseURL = `http://${id}.local/v1`): ProviderConfig => ({
   id,
   displayName: id.toUpperCase(),
@@ -28,7 +33,7 @@ describe('engineConfig — 앱이 생성하는 opencode.json', () => {
         b: { npm: '@ai-sdk/openai-compatible', name: 'B', options: { baseURL: 'http://127.0.0.1:9/b', apiKey: 'proxy-token' }, models: { m1: { name: 'Model 1' } } },
       },
       agent: engineConfig([], proxy).agent,
-      permission: { task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', webfetch: 'deny', websearch: 'deny' },
+      permission: { task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, webfetch: 'deny', websearch: 'deny' },
       snapshot: false,
       model: 'a/m1',
       enabled_providers: ['a', 'b'],
@@ -125,14 +130,14 @@ describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
 
   it('계획은 opencode plan 을 덮어써 편집·명령·웹을 막고 계획 프롬프트를 준다', () => {
     expect(MODE_AGENT.plan).toBe('plan')
-    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', litecode_open: 'allow', litecode_list_projects: 'allow', litecode_read_project: 'allow', litecode_present: 'allow', external_directory: 'ask', doom_loop: 'ask' })
+    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', litecode_open: 'allow', litecode_list_projects: 'allow', litecode_read_project: 'allow', litecode_present: 'allow', ...GIT_READ_ALLOW, external_directory: 'ask', doom_loop: 'ask' })
     expect(agent['plan']!.prompt).toMatch(/plan mode/)
   })
 
   it('매번 묻기는 편집·명령·웹을 묻고 질문 도구를 다시 허용한다, 전체 권한은 모두 허용 — 둘 다 primary 에 build 첫 줄 프롬프트', () => {
     expect(agent[MODE_AGENT.ask]).toMatchObject({ mode: 'primary', permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow' } })
     expect(agent[MODE_AGENT.full]).toMatchObject({ mode: 'primary', permission: { '*': 'allow' } })
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ASK })
     expect(agent[MODE_AGENT.ask]!.prompt).toMatch(/^You are an AI coding agent\./)
     expect(agent[MODE_AGENT.full]!.prompt).toBe(agent[MODE_AGENT.ask]!.prompt)
   })
@@ -143,7 +148,7 @@ describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
     expect(agent[SUBAGENT_ASK]).toMatchObject({ mode: 'subagent', permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', todowrite: 'deny' } })
     expect(agent[SUBAGENT_ASK]!.description).toMatch(/^General-purpose agent/)
     expect(agent[SUBAGENT_ASK]!.prompt).toBeUndefined() // general 처럼 opencode 기본 시스템 프롬프트
-    expect(engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true }).permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny' })
+    expect(engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true }).permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY })
   })
 })
 
@@ -155,7 +160,7 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
   const agent = config.agent as Record<string, { permission: Record<string, string> }>
 
   it('전역 permission 에 webfetch·websearch deny (build·하위 에이전트용) — 묻는 하위 에이전트 막기와 함께', () => {
-    expect(config.permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', webfetch: 'deny', websearch: 'deny' })
+    expect(config.permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, webfetch: 'deny', websearch: 'deny' })
   })
 
   it('정의한 에이전트마다 규칙 맨 뒤에 webfetch·websearch deny — "*":allow·ask 를 덮는다', () => {
@@ -166,13 +171,13 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
         ['websearch', 'deny'],
       ])
     }
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ASK, webfetch: 'deny', websearch: 'deny' })
     expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ edit: 'ask', bash: 'ask', question: 'allow' })
   })
 
   it('켜면 전역 permission 에 웹 deny 가 없고 에이전트 정의는 ENGINE_AGENTS 그대로', () => {
     const on = engineConfig([], { token: 't', baseURLFor: () => '' }, { webTools: true })
-    expect(on.permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny' })
+    expect(on.permission).toEqual({ task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY })
     expect(Object.keys(on.agent as object).sort()).toEqual(Object.keys(ENGINE_AGENTS).sort())
     for (const [name, def] of Object.entries(ENGINE_AGENTS)) expect((on.agent as Record<string, unknown>)[name], name).toMatchObject(def)
   })
@@ -193,7 +198,7 @@ describe('engineConfig — MCP 도구 권한 (#28)', () => {
   it('매번 묻기와 그 하위 작업은 MCP 도구를 묻는다, 기본(build)·전체 권한은 와일드카드 규칙이 없다(허용)', () => {
     expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
     expect(agent[SUBAGENT_ASK]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow', webfetch: 'deny', websearch: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: { [SUBAGENT_ASK]: 'deny' }, litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ASK, webfetch: 'deny', websearch: 'deny' })
     expect(agent['build']!.permission).not.toHaveProperty('*_*')
   })
 })
@@ -511,7 +516,7 @@ describe('engineConfig — 도구 실행 전 게이트 (#102)', () => {
     expect(full.at(-1)).toEqual(['*_*', 'ask'])
     const general = Object.entries(agent['general']!.permission)
     expect(general[0]).toEqual(['*_*', 'ask'])
-    expect(Object.fromEntries(general.slice(1))).toEqual({ plan_enter: 'deny', plan_exit: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny' })
+    expect(Object.fromEntries(general.slice(1))).toEqual({ plan_enter: 'deny', plan_exit: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY })
     expect(agent['explore']).toBeUndefined() // explore 는 MCP 도구가 없다 ("*": deny)
   })
 
