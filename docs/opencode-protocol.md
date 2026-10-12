@@ -165,6 +165,17 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     `state.metadata.sessionId` 로 이어진다. 자식 이벤트·승인 요청(sessionID = 자식)은 같은 `/event` 로 오고, 부모 턴 끝은 부모 idle 만 본다. **자식은 부모 모드 권한을 안 물려받는다** —
     매번 묻기에서 general 이 묻지 않고 bash 를 실행했고 레거시 explore 엔 bash 가 있다 → 매번 묻기는 `general-ask`(묻는 하위 에이전트)만, 계획은 `task: deny`, `general-ask` 는 다른 모드에서 deny
     (`hidden` 으로는 목록에서 안 빠진다). 부모 abort 는 자식까지 멈춘다(task 오류 "Task cancelled"). 재시작하면 task·자식 도구가 running 으로 남는다. 자식 토큰은 부모 합계에 안 넣는다(dsh)
+    **#319 부터 앱은 내장 task 를 모든 모드에서 끈다**(전역·모드 에이전트마다 `task: deny`) — task 는 동기식이라 하위 작업이 도는 동안 부모 턴이 막힌다. 대신 앱 MCP 의
+    `litecode_task_start` 가 **따로 만든 세션(부모 없음)의 보통 턴**으로 작업을 돌리고 번호만 곧바로 돌려준다. 끝나면 앱(`ctx.chat`)이 그 대화에 결과 턴을 넣는다 — 엔진 왕복은 보통 턴과 같아 새로 잴 것이 없다
+  - **백그라운드 task — 실험 플래그** (실측 2026-10-12, 1.18.18 바이너리 코드 + 가짜 LLM, 시나리오마다 1/1, 스크립트 `probe-bg.mts` 일회용): **쓰지 않기로 했다(#319)**.
+    `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true` 면 task 에 `background: true` 인자가 생긴다(없이 주면 task 가 error "Background subagents require …=true").
+    - 켜면: task 가 곧바로 completed(`<task … state="running">` "Background task started")로 끝나고 부모는 idle, 자식은 계속 돈다
+    - 자식이 끝나면 **엔진이 스스로** 부모 세션에 합성 user(`synthetic:true`, `<task id state="completed"><summary>…</summary><task_result>…</task_result></task>`)를 넣고 새 루프를 돌린다 —
+      agent 는 부모의 것(build), 모델은 sticky, `system`(앱이 매 턴 싣는 프로젝트 지시문)은 없다. 부모가 도는 중이면 그 턴에 끼워 넣기처럼 들어가 idle 은 맨 끝 한 번
+    - 자식만 abort 하면 부모에 아무것도 안 넣는다(중지 알림 없음). **부모 abort 는 백그라운드 자식도 멈춘다**(같은 루프에서 띄운 것, 알림 없음)
+    - `POST /experimental/session/{id}/background` → 200 `true`: 도는 전경 task 를 백그라운드로 옮긴다(부모 턴이 끝나고, 끝나면 위처럼 주입)
+    - 쓰지 않는 이유: 완료 턴이 앱이 모르는 엔진 주도 턴이다(ctx.chat 의 대기열·목표·알림·지시문을 안 거치고 화면도 모른다 — 받으려면 턴이 끝난 뒤에도 구독을 이어 "엔진이 시작한 턴" 을
+      넘겨받는 구조가 필요하다), 중지 알림을 못 준다, 메인 ■ 가 작업까지 죽인다, 다시 연 대화에서 합성 user 뒤 답이 앞 말풍선에 붙는다(코드 추론)
   - **옛 대화 이어 쓰기** (#21): 신규 세대 기록과 레거시 기록은 같은 세션 id 여도 서로 안 보인다. 다시 열 때 신규 기록(`/api/session/{id}/message`, 읽기 전용)을 앞에 붙이고,
     레거시 기록이 없고 신규 기록이 있는 세션의 첫 레거시 입력 직전에 옛 user·답 글을 `prompt_async {noReply, parts:[{synthetic:true, text:"<previous-conversation>…"}]}` 로 한 번
     (id 는 이번 입력 바로 앞, 뒤에서 12,000자). "한 번" 은 DB 의 레거시 기록 유무로 판단(`limit=1`). 추론 과정 탭엔 옛 기록이 없다. `src/services/migrate.ts`

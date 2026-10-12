@@ -7,7 +7,8 @@ import { ChatService } from '../../src/services/chat.ts'
 import { SessionsService } from '../../src/services/sessions.ts'
 import type { ChatImage, ChatOptions, ChatResult } from '../../src/services/llm.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
-import type { Attention, AttentionAnswer, TurnItem, TurnUsage } from '../../shared/contract.ts'
+import type { Attention, AttentionAnswer, Subtask, TurnItem, TurnUsage } from '../../shared/contract.ts'
+import { TASK_START_TOOL, TASKS_RUNNING_MAX } from '../../shared/tasks.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
 // ctx.chat — 대화별 턴 소유 (이슈 #52). 원래 화면(App.tsx send·useSendQueue)이 하던 규칙을 그대로 지킨다: 턴 중 보내기는 대기열,
@@ -23,6 +24,7 @@ interface Call {
   messageId?: string
   mode?: string
   images: readonly ChatImage[]
+  hide?: ChatOptions['hideMcpTools']
   progress(item: TurnItem): void
   attention(requests: Attention[]): void
   finish(result?: Partial<ChatResult>): void
@@ -54,7 +56,7 @@ class FakeLlm extends Service {
   newMessageId(): string {
     return `msg_${++this.ids}`
   }
-  async chat({ providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, mode, onAttention, stop, images = [] }: ChatOptions): Promise<ChatResult> {
+  async chat({ providerId, modelId, directory, prompt, sessionId, onSession, messageId, onProgress, mode, onAttention, stop, images = [], hideMcpTools }: ChatOptions): Promise<ChatResult> {
     const id = sessionId ?? `ses_${this.calls.length + 1}`
     if (!sessionId) await onSession?.(id)
     this.peak = Math.max(this.peak, ++this.open)
@@ -68,7 +70,7 @@ class FakeLlm extends Service {
         resolve(result.unanswered || cancelled.length === 0 ? result : { ...result, unanswered: cancelled })
       }
       this.calls.push({
-        providerId, modelId, directory, prompt, sessionId, messageId, mode, images,
+        providerId, modelId, directory, prompt, sessionId, messageId, mode, images, hide: hideMcpTools,
         progress: (item) => onProgress?.(item),
         attention: (requests) => onAttention?.(requests),
         finish: (result = {}) => end({ ok: true, sessionId: id, text: `echo: ${prompt}`, ...result }),
@@ -992,5 +994,134 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
     await until(() => llm.reserved[0]?.cancelled === true)
     first.finish()
     expect((await ended(1)).unanswered).toEqual([llm.reserved[0]!.messageId])
+  })
+})
+
+// 백그라운드 하위 작업 (이슈 #319) — 모델이 litecode_task_start 로 띄운 작업을 ctx.chat 이 쥔다. 작업은 따로 만든 엔진 세션의 한 턴(가짜 ctx.llm.chat)이고,
+// 번호는 곧바로 돌아온다. 끝나면(완료·실패·중지) 그 대화에 출처 'task' 의 새 턴으로 결과를 넣는다 — 메인이 돌면 대기열
+describe('ChatService — 백그라운드 하위 작업 (이슈 #319)', () => {
+  const explore = { agent: 'explore' as const, description: '파일 조사', prompt: 'find the config' }
+
+  /** 저장된 대화 c1 (첫 턴을 끝낸 뒤) */
+  async function withConversation(mode: 'build' | 'ask' = 'build') {
+    const harness = await start()
+    await harness.chat.send('c1', input('첫 턴', { mode }))
+    ;(await harness.turn(1)).finish()
+    await harness.ended(1)
+    const tasks: [string, Subtask[]][] = []
+    harness.ctx.on('chat/tasks-changed', (cid, list) => void tasks.push([cid, list]))
+    return { ...harness, tasks }
+  }
+
+  it('띄우면 번호를 곧바로 준다 — 따로 만든 세션(sessionId 없음)에서 explore 는 계획 모드로, 작업·목표 도구를 숨겨 돈다', async () => {
+    const { chat, turn, tasks } = await withConversation()
+    expect(await chat.startTask('c1', explore)).toEqual({ number: 1, id: 'bgtask:c1:1' })
+    expect(await chat.startTask('c1', { ...explore, agent: 'general' })).toEqual({ number: 2, id: 'bgtask:c1:2' })
+    const first = await turn(2)
+    expect(first).toMatchObject({ sessionId: undefined, mode: 'plan', directory: '/work/a', providerId: 'gw', modelId: 'm1' })
+    expect(first.prompt).toContain('Task: 파일 조사')
+    expect(first.prompt).toContain('find the config')
+    expect(first.hide).toEqual({ litecode: [TASK_START_TOOL, 'goal_get', 'goal_update'] })
+    expect((await turn(3)).mode).toBe('build') // general 은 그 대화의 모드
+    expect(chat.tasksRunning('c1')).toBe(2)
+    expect(chat.running()).toBe(2) // 종료 확인이 센다
+    expect(chat.isTaskSession('ses_2')).toBe(true)
+    expect(chat.isTaskSession('ses_1')).toBe(false) // 메인 대화의 세션
+    expect(tasks.at(-1)![1].map((task) => [task.id, task.status, task.agent])).toEqual([['bgtask:c1:1', 'running', 'explore'], ['bgtask:c1:2', 'running', 'general']])
+    expect(chat.taskSnapshot()['c1']).toHaveLength(2)
+  })
+
+  it('끝나면 그 대화에 출처 task 의 새 턴으로 결과를 넣는다 — 말풍선은 "작업 N 완료 · 설명", 본문은 <task-result>', async () => {
+    const { chat, turn, of, ended } = await withConversation()
+    await chat.startTask('c1', explore)
+    ;(await turn(2)).finish({ text: 'config is in app.json' })
+    const report = await turn(3)
+    expect(report.sessionId).toBe('ses_1') // 메인 대화의 세션으로
+    expect(report.prompt).toContain('<task-result number="1" agent="explore" status="completed">')
+    expect(report.prompt).toContain('config is in app.json')
+    expect(of('turn.started').at(-1)).toMatchObject({ cid: 'c1', origin: 'task', message: { text: tr('task.report.completed', { number: 1, description: '파일 조사' }) } })
+    expect(chat.taskSnapshot()['c1']![0]).toMatchObject({ status: 'done' })
+    expect(chat.tasksRunning('c1')).toBe(0)
+    report.finish()
+    await ended(2)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(of('turn.started')).toHaveLength(2) // 한 번만 넣는다
+  })
+
+  it('메인 턴이 도는 중에 끝나면 대기열에 선다 (사람 글이 아니라 끼워 넣지 않는다) — 메인이 끝나면 결과 턴', async () => {
+    const { chat, llm, turn, of } = await withConversation()
+    llm.steerable = true
+    await chat.send('c1', input('메인 둘째 턴'))
+    const main = await turn(2)
+    await chat.startTask('c1', explore)
+    ;(await turn(3)).finish({ text: 'found' })
+    await until(() => chat.queued('c1') === 1)
+    expect(llm.reserved).toHaveLength(0)
+    expect(of('queue.changed').at(-1)!.items).toEqual([tr('task.report.completed', { number: 1, description: '파일 조사' })])
+    expect(llm.calls).toHaveLength(3)
+    main.finish()
+    expect((await turn(4)).prompt).toContain('<task-result number="1"')
+  })
+
+  it('실패도 알린다 — 결과 턴에 실패 사유, 작업 줄은 error', async () => {
+    const { chat, turn, of } = await withConversation()
+    await chat.startTask('c1', explore)
+    ;(await turn(2)).finish({ ok: false, error: 'gateway down' })
+    const report = await turn(3)
+    expect(report.prompt).toContain('status="failed"')
+    expect(report.prompt).toContain('The task failed: gateway down')
+    expect(of('turn.started').at(-1)!.message.text).toBe(tr('task.report.failed', { number: 1, description: '파일 조사' }))
+    expect(chat.taskSnapshot()['c1']![0]).toMatchObject({ status: 'error', error: 'gateway down' })
+  })
+
+  it('작업 줄의 중지(stopSubtask)는 그 작업만 멈추고 "중단됨" 결과 턴을 넣는다 — 메인 ■ 는 작업을 건드리지 않는다', async () => {
+    const { chat, llm, turn, of, ended } = await withConversation()
+    await chat.startTask('c1', explore)
+    await turn(2)
+    await chat.send('c1', input('메인'))
+    await turn(3)
+    expect(chat.stop('c1')).toBe(true)
+    await ended(2)
+    expect(chat.tasksRunning('c1')).toBe(1) // 메인 ■ 뒤에도 돈다
+
+    expect(await chat.stopSubtask('bgtask:c1:1')).toBe(true)
+    const report = await turn(4)
+    expect(report.prompt).toContain('status="stopped"')
+    expect(report.prompt).toContain('The user stopped this task')
+    expect(of('turn.started').at(-1)!.message.text).toBe(tr('task.report.stopped', { number: 1, description: '파일 조사' }))
+    expect(chat.taskSnapshot()['c1']![0]!.status).toBe('stopped')
+    expect(await chat.stopSubtask('bgtask:c1:1')).toBe(false) // 이미 끝났다 — 도는 턴의 하위 작업으로 넘긴다(가짜는 sub_1 만 안다)
+    expect(llm.calls).toHaveLength(4)
+  })
+
+  it('작업의 승인·질문 요청은 곧바로 거절한다 (물을 사람이 없다)', async () => {
+    const { chat, llm, turn } = await withConversation()
+    await chat.startTask('c1', explore)
+    const task = await turn(2)
+    const asked = { kind: 'permission', id: 'per_9', sessionId: 'ses_2', permission: 'external_directory', patterns: ['/etc'] } as unknown as Attention
+    task.attention([asked])
+    task.attention([asked]) // 같은 요청이 다시 와도 한 번만
+    await until(() => llm.replies.length === 1)
+    expect(llm.replies[0]).toEqual(['ses_2', 'per_9', 'reject'])
+  })
+
+  it('못 띄우는 것 — 매번 묻기의 general, 도는 작업 상한, 저장 안 된 대화', async () => {
+    const asking = await withConversation('ask')
+    await expect(asking.chat.startTask('c1', { ...explore, agent: 'general' })).rejects.toThrow(/ask every time/)
+    expect(await asking.chat.startTask('c1', explore)).toMatchObject({ number: 1 }) // explore 는 된다
+    for (let n = 2; n <= TASKS_RUNNING_MAX; n++) await asking.chat.startTask('c1', explore)
+    await expect(asking.chat.startTask('c1', explore)).rejects.toThrow(/Too many background tasks/)
+    await expect(asking.chat.startTask('nope', explore)).rejects.toThrow(/Unknown conversation/)
+  })
+
+  it('대화를 지우면 그 대화의 작업을 멈추고 결과를 넣지 않는다', async () => {
+    const { chat, sessions, llm, turn, tasks } = await withConversation()
+    await chat.startTask('c1', explore)
+    await turn(2)
+    await sessions.remove('c1')
+    await until(() => chat.tasksRunning('c1') === 0)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(llm.calls).toHaveLength(2)
+    expect(tasks.at(-1)).toEqual(['c1', []])
   })
 })

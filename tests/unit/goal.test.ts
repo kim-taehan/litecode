@@ -418,3 +418,65 @@ describe('기능 꺼짐', () => {
     expect(llm.calls).toHaveLength(1)
   })
 })
+
+// 백그라운드 하위 작업과의 맞물림 (이슈 #319, 시안 _workspace/mock-task-bg/Relations.html) — 작업이 도는 동안은 "계속해" 라운드를 보내지 않고 기다린다.
+// 결과 턴(출처 task)은 라운드로 세지 않고 연속도 끊지 않는다. 남은 작업이 없고 그 턴이 끝나면 목표가 이어 간다. 멈춘 목표는 작업 결과로 이어 가지 않는다
+describe('ctx.goal — 백그라운드 하위 작업 (#319)', () => {
+  const explore = { agent: 'explore' as const, description: '파일 조사', prompt: 'find things' }
+
+  it('작업이 도는 동안 턴이 끝나면 라운드를 보내지 않는다 — 결과 턴은 라운드로 안 세고, 그 턴이 끝나면 라운드 1 을 보낸다', async () => {
+    const { chat, llm, stored, turn, endedCount, setGoal, started } = await start()
+    await setGoal('c1', 'X')
+    const first = await turn(1)
+    await until(async () => !!(await stored('c1'))?.engineSessionId)
+    await chat.startTask('c1', explore)
+    const task = await turn(2)
+    first.finish()
+    await endedCount(1)
+    await settle()
+    expect(llm.calls).toHaveLength(2) // 라운드 없음 — 작업을 기다린다
+    expect((await stored('c1'))?.goal).toMatchObject({ status: 'active', rounds: 0 })
+
+    task.finish({ text: 'found it' })
+    const report = await turn(3)
+    expect(report.prompt).toContain('<task-result number="1"')
+    expect(started.at(-1)).toMatchObject({ cid: 'c1', origin: 'task' })
+    expect((await stored('c1'))?.goal).toMatchObject({ status: 'active', rounds: 0 }) // 결과 턴은 라운드가 아니다
+    report.finish()
+    expect((await turn(4)).prompt).toContain(`Round: 1/${GOAL_MAX_ROUNDS}`)
+  })
+
+  it('목표를 멈춰도 도는 작업은 그대로 끝나 결과 턴이 들어온다 — 목표는 이어 가지 않는다', async () => {
+    const { ctx, chat, llm, stored, turn, endedCount, setGoal } = await start()
+    await setGoal('c1', 'X')
+    const first = await turn(1)
+    await until(async () => !!(await stored('c1'))?.engineSessionId)
+    await chat.startTask('c1', explore)
+    const task = await turn(2)
+    expect(await ctx.goal.command('c1', 'pause')).toEqual({})
+    first.finish()
+    await endedCount(1)
+    task.finish()
+    ;(await turn(3)).finish()
+    await endedCount(2)
+    await settle()
+    expect(llm.calls).toHaveLength(3)
+    expect((await stored('c1'))?.goal).toMatchObject({ status: 'paused', reason: 'user' })
+  })
+
+  it('메인 ■ 중지는 작업을 건드리지 않는다 — 목표는 paused(stopped), 작업 결과는 그대로 들어온다', async () => {
+    const { chat, llm, stored, turn, endedCount, setGoal } = await start()
+    await setGoal('c1', 'X')
+    await turn(1)
+    await until(async () => !!(await stored('c1'))?.engineSessionId)
+    await chat.startTask('c1', explore)
+    const task = await turn(2)
+    chat.stop('c1')
+    await endedCount(1)
+    expect(chat.tasksRunning('c1')).toBe(1)
+    task.finish({ text: 'done' })
+    expect((await turn(3)).prompt).toContain('status="completed"')
+    expect((await stored('c1'))?.goal?.reason).toBe('stopped')
+    expect(llm.calls).toHaveLength(3)
+  })
+})

@@ -27,7 +27,8 @@ import {
 // - ■ 중지로 끝난 턴(stopped) · 오류로 끝난 턴(failed) · 승인·질문을 거절해 끝난 턴(declined) · 승인·질문 카드가 뜸(attention)
 // - 연속 자동 라운드 GOAL_MAX_ROUNDS 번(limit) — `/goal resume` 이 다시 센다. 사람이 직접 보낸 턴이 시작되면 연속이 끊겨 0 부터
 // - 앱(또는 이 기능)을 다시 켜면 진행 중이던 목표는 restart — 저절로 다시 이어 가지 않는다
-// 사람 글이 대기열에 있으면 그것이 먼저 간다(그 턴이 끝난 뒤 다시 본다). 모델이 done·blocked 를 알리면(appMcp/tools/goal.ts) 다음 라운드는 없다.
+// 사람 글이 대기열에 있으면 그것이 먼저 간다(그 턴이 끝난 뒤 다시 본다). 백그라운드 하위 작업(#319)이 도는 동안은 라운드를 보내지 않는다 — 결과 턴
+// (출처 'task')은 라운드로 세지 않고 연속도 끊지 않으며, 남은 작업이 없을 때 그 턴이 끝나면 이어 간다. 목표를 멈추거나 지워도 도는 작업은 그대로다. 모델이 done·blocked 를 알리면(appMcp/tools/goal.ts) 다음 라운드는 없다.
 // 읽고-고치고-쓰기는 한 줄로 선다(serial) — 도구의 done 과 턴 끝 판정이 엇갈려 끝난 목표에 라운드를 하나 더 보내지 않게.
 // 엔진을 모른다 — 턴은 ctx.chat.send 로만 보낸다.
 
@@ -149,8 +150,10 @@ export class GoalService extends Service {
     }
   }
 
+  /** 도는 턴·대기열이 있거나 백그라운드 작업이 돌면 쉬지 않는 것이다 (#319 — 작업을 기다리며 "계속해" 라운드를 헛쓰지 않게. 작업이 끝나면 그 결과
+   *  턴(출처 'task')이 끝날 때 다시 본다) */
   private busy(cid: string): boolean {
-    return !!this.ctx.chat.turnOf(cid) || this.ctx.chat.queued(cid) > 0
+    return !!this.ctx.chat.turnOf(cid) || this.ctx.chat.queued(cid) > 0 || this.ctx.chat.tasksRunning(cid) > 0
   }
 
   /** 한 줄로 세운다 — 한 번 실패해도 다음 것은 돈다 */
