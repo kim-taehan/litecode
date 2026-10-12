@@ -221,57 +221,52 @@ button {
   color: var(--text-tertiary);
 }
 
-.project-popover {
-  position: absolute;
-  top: calc(100% - 6px);
-  left: 14px;
-  z-index: 10;
-  width: 300px;
-  padding: 4px;
+/* 빠른 열기 (이슈 #305) — ⌘K 로 상단 중앙에 뜬다. 별도 검색칸 없음: 맨 윗 칸이 곧 검색칸 */
+.project-open__panel {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  width: min(520px, calc(100vw - 32px));
+  padding: 6px;
   background: var(--menu);
   backdrop-filter: blur(40px) saturate(150%);
   border-radius: 16px;
   box-shadow: var(--shadow-prominent);
 }
 
-/* dsh 목록 검색칸 — 30px, 0.5px l4, 반경 12, 포커스 링 없음 */
-.project-popover__search {
+.project-open__search {
   width: 100%;
-  height: 30px;
+  height: 36px;
+  margin: 0 4px 4px;
   padding: 0 10px;
-  border: 0.5px solid var(--border-strong);
-  border-radius: 12px;
-  font-size: 13px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
   line-height: 18px;
   font-family: inherit;
   color: var(--text);
   background: transparent;
 }
 
-.project-popover__search:focus {
+.project-open__search:focus {
   outline: none;
 }
 
-.project-popover__label {
-  padding: 8px 8px 2px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--text-tertiary);
-}
-
-.project-popover__list {
-  max-height: 280px;
+.project-open__list {
+  max-height: min(340px, 55vh);
   overflow-y: auto;
 }
 
-.project-popover__empty {
+.project-open__empty {
   padding: 12px 8px;
   font-size: 12px;
   color: var(--text-caption);
   text-align: center;
 }
 
-.project-popover__error {
+.project-open__error {
   padding: 8px;
   font-size: 12px;
   color: var(--danger);
@@ -306,10 +301,16 @@ button {
 /* 키보드 포커스 행은 hover 와 같은 채움 (dsh ui-primitives Menu) — 포커스가 행 안의 ☆·× 로 가도 행이 채워진 채 */
 .project-item:hover,
 .project-item:focus-within,
-.project-popover__open:hover:not(:disabled),
-.project-popover__open:focus-visible {
+.project-open__open:hover:not(:disabled),
+.project-open__open:focus-visible {
   background: var(--fill-hover);
   outline: none;
+}
+
+/* 빠른 열기: ↑/↓·hover 로 고른 행 (이슈 #305) */
+.project-item--selected,
+.project-open__open--selected {
+  background: var(--fill-hover);
 }
 
 /* 지금 프로젝트는 바탕 없이 오른쪽 끝 ✓ (dsh Menu 선택 항목) */
@@ -320,7 +321,7 @@ button {
 
 .project-item__main:disabled,
 .project-item__action:disabled,
-.project-popover__open:disabled {
+.project-open__open:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -366,13 +367,8 @@ button {
   outline: none;
 }
 
-.project-popover__divider {
-  height: 0.5px;
-  margin: 4px 0;
-  background: var(--border);
-}
-
-.project-popover__open {
+/* 빠른 열기의 맨 아래 "폴더 열기" 행 (이슈 #305) */
+.project-open__open {
   width: 100%;
   min-height: 34px;
   padding: 6px 8px;
@@ -1322,12 +1318,6 @@ button {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-}
-
-/* 팝오버는 배지 옆으로 — 줄 경계(56)에서 4px 떨어져 뜬다 (버튼 오른쪽 끝 46 + 14) */
-.rail .project-popover {
-  top: 0;
-  left: calc(100% + 14px);
 }
 
 .rail__notice,

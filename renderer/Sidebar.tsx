@@ -1,4 +1,4 @@
-import { Fragment, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react'
+import { Fragment, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import type { Project } from '../shared/ipc.ts'
 import { TITLE_MAX } from '../shared/chat.ts'
 import { ago } from './ago.ts'
@@ -28,8 +28,6 @@ interface SidebarProps {
   picking: boolean
   switchRef: RefObject<HTMLButtonElement | null>
   settingsRef: RefObject<HTMLButtonElement | null>
-  /** 프로젝트 전환 팝오버 — 펼친 사이드바에선 전환 카드 아래 */
-  popover: ReactNode
   notices: ReturnType<typeof useNotices>
   sessions: Session[]
   /** 지금 프로젝트에서 도는 대화 id */
@@ -70,7 +68,6 @@ export function Sidebar({
   picking,
   switchRef,
   settingsRef,
-  popover,
   notices,
   sessions,
   running,
@@ -155,7 +152,6 @@ export function Sidebar({
           />
           <span className="project-switch__caret">▾</span>
         </button>
-        {!layout.hidden && popover}
       </div>
 
       <div className="sidebar__new">
