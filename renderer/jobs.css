@@ -1,38 +1,4 @@
-/* 도는 작업 목록 (이슈 #32) — 대화 머리 "작업 N" 버튼 + 펼침 목록. 치수는 시안 B(_workspace/mock-32/Header.dc.html), 색은 토큰만 */
-
-.jobs {
-  position: relative;
-  margin-left: auto;
-  flex-shrink: 0;
-  font-weight: 400;
-}
-
-/* 머리 오른쪽 묶음: 작업 → 다른 앱에서 열기 → 오른쪽 패널. 작업 버튼이 있으면 그것이 묶음을 오른쪽으로 민다 */
-.main__header .jobs + .open-in,
-.main__header .jobs + .right-panel-open {
-  margin-left: 8px;
-}
-
-.jobs__button {
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font: inherit;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-
-.jobs__button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
+/* 작업 목록 — 입력 카드 위 한 줄과 그 자리에서 펼치는 목록 (이슈 #295, 머리 버튼 #32 를 대신한다). 색은 토큰만 */
 
 .jobs__spinner {
   animation: jobs-spin 1s linear infinite;
@@ -44,61 +10,45 @@
   }
 }
 
-/* 버튼 오른쪽 끝에 맞춰 머리(52px) 아래 6px — 버튼(30px) 아래로는 17px */
-.jobs__panel {
-  position: absolute;
-  top: calc(100% + 17px);
-  right: 0;
-  z-index: 20;
-  width: 440px;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 80px);
-  overflow-y: auto;
-  box-sizing: border-box;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: var(--shadow-lv3);
-  color: var(--text);
-  -webkit-app-region: no-drag;
-}
-
-.jobs__heading {
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
+/* 한 작업 = 한 줄 (이슈 #295 시안 G) — "● 종류 · 제목 · 시간·토큰", 오른쪽에 중지·⌄. */
+.jobs__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .jobs__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  align-items: center;
-  column-gap: 8px;
-  padding: 0 10px;
   border-radius: 8px;
   font-size: 13px;
 }
 
-.jobs__row[data-job='subtask']:hover {
+.jobs__row[data-open] {
   background: var(--fill-hover);
 }
 
-.jobs__row[data-open] {
-  background: var(--accent-soft);
+.jobs__line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.jobs__row[data-job='subtask'] .jobs__line:hover {
+  background: var(--fill-hover);
 }
 
 .jobs__cells {
   display: grid;
-  grid-template-columns: 44px 70px minmax(0, 1fr);
+  grid-template-columns: 14px auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 8px;
   min-width: 0;
-  padding: 8px 0;
+  height: 32px;
+  padding: 0 8px;
   border: 0;
+  border-radius: 8px;
   background: transparent;
-  color: inherit;
+  color: var(--text-secondary);
   font: inherit;
   text-align: left;
 }
@@ -109,71 +59,96 @@ button.jobs__cells {
 
 button.jobs__cells:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 6px;
+  outline-offset: -2px;
 }
 
-.jobs__mono,
-.jobs__time {
+/* 점 — 파랑 = 도는 중, 빈 고리 = 준비 중, 초록 = 완료, 빨강 = 실패, 회색 = 중단됨 */
+.jobs__dot {
+  justify-self: center;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.jobs__row[data-status='preparing'] .jobs__dot { background: transparent; }
+.jobs__row[data-status='done'] .jobs__dot { border-color: var(--ok); background: var(--ok); }
+.jobs__row[data-status='error'] .jobs__dot { border-color: var(--danger); background: var(--danger); }
+.jobs__row[data-status='stopped'] .jobs__dot { border-color: var(--text-caption); background: var(--text-caption); }
+
+.jobs__kind {
+  max-width: 120px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs__mono {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px;
 }
 
-.jobs__time {
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 끝난 것 — 걸린 시간은 더 오르지 않는다 */
-.jobs__row:not([data-job='main'], [data-status='running'], [data-status='preparing']) .jobs__time {
+/* 시간·토큰 — 회색 숫자 */
+.jobs__meta {
   color: var(--text-tertiary);
-}
-
-.jobs__kind {
-  color: var(--accent);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.jobs__kind--main {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.jobs__doing {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.jobs__activity {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.jobs__tokens {
-  flex: none;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.jobs__row[data-status='error'] .jobs__activity {
+.jobs__row[data-status='error'] .jobs__state {
   color: var(--danger);
 }
 
+/* 중지·⌄ — 줄에 마우스를 올리거나 포커스가 있거나 펼쳤을 때만. 터치(hover 없음)에선 늘.
+   폭을 늘 잡아 둔다(84 = 중지 버튼 + ⌄ + 오른쪽 8) — 중지가 없는 줄(메인·준비 중·끝난 것)도 시간 칸이 같은 자리에 오게 */
+.jobs__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 84px;
+  box-sizing: border-box;
+  padding-right: 8px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.jobs__row:hover .jobs__actions,
+.jobs__row:focus-within .jobs__actions,
+.jobs__row[data-open] .jobs__actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .jobs__actions { opacity: 1; }
+}
+
 .jobs__stop {
-  width: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 24px;
-  padding: 0;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -182,17 +157,57 @@ button.jobs__cells:focus-visible {
   background: var(--fill-hover);
 }
 
+.jobs__stop:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .jobs__stop:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-/* 펼친 하위 작업의 최근 줄 — 종류 칸 아래에서 시작 (10 + 44 + 8) */
+.jobs__chevron {
+  flex: none;
+  color: var(--text-caption);
+  cursor: pointer;
+  transition: transform 100ms ease;
+}
+
+.jobs__row[data-open] .jobs__chevron {
+  transform: rotate(180deg);
+}
+
+/* "+N개 더 보기" · "접기" — 점 칸 다음(8 + 14 + 8)에서 시작 */
+.jobs__more {
+  align-self: flex-start;
+  height: 28px;
+  padding: 0 8px 0 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.jobs__more:hover,
+.jobs__more:focus-visible {
+  color: var(--text);
+}
+
+.jobs__more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 펼친 하위 작업 — 점 칸 다음(8 + 14 + 8)에서 시작 */
 .jobs__detail {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 2px 10px 6px 62px;
+  margin: 0 8px 8px 30px;
   padding: 8px 10px;
   border: 1px solid var(--border-light);
   border-radius: 8px;
@@ -251,4 +266,106 @@ button.jobs__cells:focus-visible {
 
 .jobs__fold[aria-expanded='true'] svg {
   transform: rotate(180deg);
+}
+
+.jobs__detail > .jobs__full {
+  color: var(--text);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* 입력 카드 위 작업 줄 (이슈 #295) — 판 치수·글자는 할 일 줄(todo.css .todo-dock)·목표 줄(goal.css)과 같다. 목표 → 할 일 → 작업 → 대기열 → 카드 */
+.jobs-dock {
+  box-sizing: border-box;
+  width: calc(100% - 32px);
+  max-width: calc(clamp(712px, calc((100% + 32px) * 0.64 + 32px), 952px) - 32px);
+  margin-bottom: -3px;
+  padding: 2px 0 5px;
+  border: 0.5px solid var(--border);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  background: var(--menu);
+  backdrop-filter: blur(20px);
+}
+
+/* 위에 목표·할 일 판이 있으면 이어 붙게 작업 줄의 위 모서리를, 아래 대기열이 있으면 대기열의 위 모서리를 편다 */
+.goal-dock + .jobs-dock,
+.todo-dock + .jobs-dock,
+.jobs-dock + .queue-dock {
+  border-radius: 0;
+}
+
+.jobs-dock__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jobs-dock__head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+.jobs-dock__head .jobs__spinner {
+  flex: none;
+  color: var(--accent);
+}
+
+/* 다 끝났으면 도는 고리 대신 회색 체크 */
+.jobs-dock__done {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.jobs-dock__title {
+  flex: none;
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-dock__lead {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs-dock__time {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-dock__chevron {
+  flex: none;
+  transition: transform 100ms ease;
+}
+
+.jobs-dock__head[aria-expanded='true'] .jobs-dock__chevron {
+  transform: rotate(180deg);
+}
+
+/* 펼친 목록 — 그 자리에서 위로 자란다. 창이 낮으면 안에서 스크롤 */
+.jobs-dock__body {
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+  padding: 2px 6px 4px;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Subtask, TurnItem } from '../../shared/ipc.ts'
-import { compactTokens, elapsed, jobList, lastLine, recentLines } from '../../renderer/jobsView.ts'
+import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, recentLines, VISIBLE_ROWS } from '../../renderer/jobsView.ts'
 
 const subtask = (id: string, status: Subtask['status'], items: TurnItem[] = []): Subtask => ({ kind: 'subtask', id, agent: 'general', description: id, status, items })
 
@@ -66,5 +66,61 @@ describe('elapsed·compactTokens', () => {
     expect(compactTokens(3_000)).toBe('3k')
     expect(compactTokens(12_800)).toBe('12k')
     expect(compactTokens(1_250_000)).toBe('1.2M')
+  })
+})
+
+describe('leadJob — 입력 카드 위 접힌 줄이 가리키는 대표 작업 (이슈 #295)', () => {
+  const at = (id: string, startedAt?: number): Subtask => ({ ...subtask(id, 'running'), startedAt })
+
+  it('가장 먼저 시작한 것 — 나타난 순서와 다르더라도', () => {
+    expect(leadJob([at('a', 300), at('b', 100), at('c', 200)])?.id).toBe('b')
+  })
+
+  it('시작 시각이 없는(준비 중) 것은 뒤로, 같으면 나타난 순서', () => {
+    expect(leadJob([at('a'), at('b', 500)])?.id).toBe('b')
+    expect(leadJob([at('a'), at('b')])?.id).toBe('a')
+    expect(leadJob([at('a', 100), at('b', 100)])?.id).toBe('a')
+  })
+
+  it('도는 것이 없으면 undefined (줄을 안 띄운다)', () => {
+    expect(leadJob([])).toBeUndefined()
+  })
+})
+
+describe('jobList(items, ended) — 턴이 끝난 뒤 입력 카드 위 줄에 남는 끝난 작업 (이슈 #295)', () => {
+  it('턴이 끝났으면 전부 끝난 것 — 남은 준비·진행 중은 "중단됨" 으로 (중지 버튼이 안 남게)', () => {
+    const list = jobList([subtask('a', 'done'), subtask('b', 'running'), subtask('c', 'preparing'), subtask('d', 'error')], true)
+    expect(list.running).toEqual([])
+    expect(list.finished.map((item) => [item.id, item.status])).toEqual([
+      ['a', 'done'],
+      ['b', 'stopped'],
+      ['c', 'stopped'],
+      ['d', 'error'],
+    ])
+  })
+
+  it('턴이 도는 중이면 지금과 같다', () => {
+    expect(jobList([subtask('b', 'running')], false).running.map((item) => item.id)).toEqual(['b'])
+  })
+})
+
+describe('capRows — 3줄까지만, 나머지는 "+N개 더 보기" (이슈 #295)', () => {
+  const rows = ['a', 'b', 'c', 'd', 'e']
+
+  it('기본은 3줄', () => {
+    expect(VISIBLE_ROWS).toBe(3)
+  })
+
+  it('넘치면 앞의 3줄과 남은 개수', () => {
+    expect(capRows(rows, false)).toEqual({ shown: ['a', 'b', 'c'], more: 2 })
+  })
+
+  it('다 보기면 전부, 남은 것 0', () => {
+    expect(capRows(rows, true)).toEqual({ shown: rows, more: 0 })
+  })
+
+  it('3줄 이하는 자르지 않는다', () => {
+    expect(capRows(['a', 'b', 'c'], false)).toEqual({ shown: ['a', 'b', 'c'], more: 0 })
+    expect(capRows([], false)).toEqual({ shown: [], more: 0 })
   })
 })

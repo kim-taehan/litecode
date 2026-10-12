@@ -1,29 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { Subtask, TurnItem } from '../shared/ipc.ts'
 import { useNow } from './useNow.ts'
-import { compactTokens, elapsed, jobList, lastLine, recentLines } from './jobsView.ts'
+import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, recentLines, VISIBLE_ROWS } from './jobsView.ts'
 import { useT } from './settingsStore.ts'
 import './jobs.css'
 
-// 도는 작업 목록 (이슈 #32) — 대화 머리의 "작업 N" 버튼과 그 아래 펼침 목록. 시안 B(_workspace/mock-32/Header.dc.html)가 구조의 정본이고,
-// 역할은 dsh ui-jobs(머리 버튼 하나에 도는 것·끝난 것 묶음, 줄 앞에 오르는 시간, 줄마다 중지)·ui-subagent 참조 — 코드는 새로 썼다.
-// 데이터는 도는 턴의 진행 줄(chat:progress)뿐이다: 메인 한 줄 + 하위 작업(#31 Subtask) 줄. 하위 작업이 없는 턴엔 버튼이 없다.
-// ■ 는 그 하위 작업만 멈춘다(ctx.llm.stopSubtask) — 턴은 남은 결과로 이어 간다.
+// 작업 목록 — 입력 카드 위 한 줄(JobsDock). 누르면 그 자리에서 목록이 펼쳐진다 (이슈 #295, 시안 _workspace/mock-jobs2 0번).
+// 처음(#32)엔 대화 머리의 "작업 N" 버튼 + 팝오버였다 — 위아래 둘 다 뜨면 헷갈린다(사용자 2026-10-12)고 해서 머리 버튼을 걷고 이 줄 하나만 둔다.
+// 줄 모양은 시안 G(_workspace/mock-jobs4) — 한 작업 = 한 줄 "● 종류 · 제목 · 시간·토큰", 올리면(포커스) 중지·⌄.
+// 역할은 dsh ui-jobs(도는 것·끝난 것 묶음, 오르는 시간, 줄마다 중지)·ui-subagent 참조 — 코드는 새로 썼다.
+// 데이터는 도는 턴의 진행 줄(chat:progress)뿐이다: 메인 한 줄 + 하위 작업(#31 Subtask) 줄. 하위 작업이 없는 턴엔 줄이 없다.
+// 중지는 그 하위 작업만 멈춘다(ctx.llm.stopSubtask) — 턴은 남은 결과로 이어 간다.
 
-interface JobsButtonProps {
-  /** 도는 턴의 진행 줄 */
-  items: readonly TurnItem[]
-  /** 턴을 보낸 시각 — 메인 줄의 경과 시간 */
-  startedAt?: number
-}
-
-export function JobsButton({ items, startedAt }: JobsButtonProps) {
-  const t = useT()
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-  const { running, finished } = jobList(items)
-
-  // 바깥을 누르거나 Esc 면 닫는다. Esc 는 여기서 쓴 것으로 표시한다 — 답변 중지의 "Esc 두 번" 에 세지 않게 (stopTurn.tsx)
+/** 바깥을 누르거나 Esc 면 닫는다. Esc 는 여기서 쓴 것으로 표시한다 — 답변 중지의 "Esc 두 번" 에 세지 않게 (stopTurn.tsx) */
+function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, setOpen: (open: boolean) => void, focusSelector: string) {
   useEffect(() => {
     if (!open) return
     const onMouseDown = (event: MouseEvent) => {
@@ -33,7 +23,7 @@ export function JobsButton({ items, startedAt }: JobsButtonProps) {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
       setOpen(false)
-      root.current?.querySelector<HTMLButtonElement>('.jobs__button')?.focus()
+      root.current?.querySelector<HTMLButtonElement>(focusSelector)?.focus()
     }
     document.addEventListener('mousedown', onMouseDown)
     document.addEventListener('keydown', onKeyDown)
@@ -41,46 +31,113 @@ export function JobsButton({ items, startedAt }: JobsButtonProps) {
       document.removeEventListener('mousedown', onMouseDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [open])
+  }, [open, root, setOpen, focusSelector])
+}
 
-  if (running.length + finished.length === 0) return null
+interface JobsDockProps {
+  /** 도는 턴의 진행 줄 (턴이 안 돌면 undefined) */
+  items: readonly TurnItem[] | undefined
+  /** 그 대화의 턴이 도는 중 */
+  pending: boolean
+  /** 턴을 보낸 시각 — 메인 줄의 경과 시간 */
+  startedAt?: number
+}
+
+/** 입력 카드 위 접힌 한 줄 — 도는 하위 작업이 있으면 "작업 N · 종류 · 제목 · 경과 ⌄"(대표 = 가장 먼저 시작한 것),
+ *  다 끝났으면 "끝난 작업 N ⌄". 턴이 끝난 뒤에도 그 턴의 끝난 작업을 새 턴을 보낼 때까지 보인다 — 진행 줄은 턴이 끝나면 비므로
+ *  돌던 동안의 진행 줄을 잡아 둔다(새 턴이 시작되면 빈 진행 줄로 바뀐다). 대화를 바꾸면 key 로 새로 그려 잊는다 */
+export function JobsDock({ items, pending, startedAt }: JobsDockProps) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const [kept, setKept] = useState<readonly TurnItem[]>()
+  const root = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (pending) setKept(items)
+  }, [pending, items])
+  const { running, finished } = jobList((pending ? items : kept) ?? [], !pending)
+  const lead = leadJob(running)
+  const now = useNow(!!lead)
+  useDismiss(open, root, setOpen, '.jobs-dock__head')
+  // 줄이 사라지면(새 턴) 접어 둔다 — 다음 턴의 하위 작업이 펼친 채로 나타나지 않게
+  const empty = running.length + finished.length === 0
+  useEffect(() => {
+    if (empty) setOpen(false)
+  }, [empty])
+
+  if (empty) return null
   const count = 1 + running.length
   return (
-    <div className="jobs" ref={root}>
-      <button type="button" className="jobs__button" aria-label={t('jobs.buttonLabel', { count })} aria-expanded={open} onClick={() => setOpen((now) => !now)}>
-        <Spinner />
-        {t('jobs.button', { count })}
+    <section className="jobs-dock" aria-label={t('jobs.title')} ref={root}>
+      <button
+        type="button"
+        className="jobs-dock__head"
+        aria-expanded={open}
+        aria-label={lead ? t('jobs.buttonLabel', { count }) : undefined}
+        onClick={() => setOpen((was) => !was)}
+      >
+        {lead ? <Spinner /> : <DoneIcon />}
+        <span className="jobs-dock__title">{lead ? t('jobs.button', { count }) : t('jobs.finished', { count: finished.length })}</span>
+        <span className="jobs-dock__lead" title={lead?.description || undefined}>
+          {lead && [lead.agent || t('chat.subtask'), lead.description].filter(Boolean).join(' · ')}
+        </span>
+        {lead && startedAt !== undefined && <span className="jobs-dock__time">{elapsed(now - startedAt)}</span>}
+        <svg className="jobs-dock__chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 10L8 6L12 10" />
+        </svg>
       </button>
-      {open && <JobsPanel items={items} running={running} finished={finished} startedAt={startedAt} />}
-    </div>
+      {open && (
+        <div className="jobs-dock__body">
+          <JobsList running={running} finished={finished} startedAt={startedAt} now={now} />
+        </div>
+      )}
+    </section>
   )
 }
 
-function JobsPanel({ items, running, finished, startedAt }: { items: readonly TurnItem[]; running: Subtask[]; finished: Subtask[]; startedAt?: number }) {
+/** 도는 하위 작업이 있으면 메인 한 줄(고정) → 도는 것(3줄까지, 나머지는 "+N개 더 보기") → 끝난 작업(접힘).
+ *  다 끝났으면 끝난 작업 줄만 (접지 않는다 — 접힌 줄이 이미 "끝난 작업 N" 이다).
+ *  now 는 부모의 시계 — 접힌 줄의 경과와 메인 줄의 경과가 같은 초를 보이게 */
+function JobsList({ running, finished, startedAt, now }: { running: Subtask[]; finished: Subtask[]; startedAt?: number; now: number }) {
   const t = useT()
-  const now = useNow(true)
   const [expanded, setExpanded] = useState<string>()
+  const [showAll, setShowAll] = useState(false)
   const [showFinished, setShowFinished] = useState(false)
   const toggle = (id: string) => setExpanded((was) => (was === id ? undefined : id))
-  // 메인이 지금 하는 일 — 하위 작업이 돌면 그것을 기다리는 중, 아니면 메인의 마지막 생각·도구 줄
-  const mainLine = running.length > 0 ? undefined : lastLine(items.filter((item) => item.kind !== 'subtask'))
+  const finishedRows = finished.map((item) => <JobRow key={item.id} item={item} now={now} open={expanded === item.id} onToggle={() => toggle(item.id)} />)
+  if (running.length === 0) {
+    return (
+      <div className="jobs__list" role="list">
+        {finishedRows}
+      </div>
+    )
+  }
+  const { shown, more } = capRows(running, showAll)
   return (
-    <section className="jobs__panel" aria-label={t('jobs.title')}>
-      <div className="jobs__heading">{t('jobs.running', { count: 1 + running.length })}</div>
-      <div className="jobs__row" data-job="main">
-        <div className="jobs__cells">
-          <span className="jobs__time">{startedAt === undefined ? '…' : elapsed(now - startedAt)}</span>
-          <span className="jobs__kind jobs__kind--main">{t('jobs.main')}</span>
-          <span className="jobs__doing">
-            <span className="jobs__activity">
-              {running.length > 0 ? t('jobs.waiting') : mainLine ? <span className={mainLine.mono ? 'jobs__mono' : undefined}>{mainLine.text}</span> : t('chat.working')}
-            </span>
-          </span>
+    <div className="jobs__list" role="list">
+      <div className="jobs__row" data-job="main" role="listitem">
+        <div className="jobs__line">
+          <div className="jobs__cells">
+            <span className="jobs__dot" aria-hidden="true" />
+            <span className="jobs__kind">{t('jobs.main')}</span>
+            <span className="jobs__title">{t('jobs.waiting')}</span>
+            <span className="jobs__meta">{startedAt === undefined ? '…' : elapsed(now - startedAt)}</span>
+          </div>
+          <span className="jobs__actions" />
         </div>
       </div>
-      {running.map((item) => (
+      {shown.map((item) => (
         <JobRow key={item.id} item={item} now={now} open={expanded === item.id} onToggle={() => toggle(item.id)} />
       ))}
+      {more > 0 && (
+        <button type="button" className="jobs__more" onClick={() => setShowAll(true)}>
+          {t('jobs.more', { count: more })}
+        </button>
+      )}
+      {showAll && running.length > VISIBLE_ROWS && (
+        <button type="button" className="jobs__more" onClick={() => setShowAll(false)}>
+          {t('jobs.less')}
+        </button>
+      )}
       {finished.length > 0 && (
         <>
           <div className="jobs__finished-head">
@@ -97,66 +154,97 @@ function JobsPanel({ items, running, finished, startedAt }: { items: readonly Tu
               </svg>
             </button>
           </div>
-          {showFinished && finished.map((item) => <JobRow key={item.id} item={item} now={now} open={expanded === item.id} onToggle={() => toggle(item.id)} />)}
+          {showFinished && finishedRows}
         </>
       )}
-    </section>
+    </div>
   )
 }
 
-/** 하위 작업 한 줄 — 경과 시간 · 종류 · 설명 + 지금 하는 일 · 토큰, 도는 것은 ■. 누르면 아래에 그 작업의 최근 생각·도구 줄 */
+/** 하위 작업 한 줄 — ● 종류 · 제목 · 시간·토큰, 올리면(포커스) 중지·⌄. 누르면 아래에 전체 제목 · ▸ 지금 하는 일 · 최근 생각·도구 줄 */
 function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; open: boolean; onToggle(): void }) {
   const t = useT()
   const [stopping, setStopping] = useState(false)
   const live = item.status === 'running' || item.status === 'preparing'
-  const time = item.startedAt === undefined ? '…' : elapsed((live ? now : (item.endedAt ?? item.startedAt)) - item.startedAt)
+  const time = item.startedAt === undefined ? undefined : elapsed((live ? now : (item.endedAt ?? item.startedAt)) - item.startedAt)
   const last = live ? lastLine(item.items) : undefined
-  const state = item.status === 'done' ? t('chat.completed') : item.status === 'error' ? t('chat.subtaskFailed') : item.status === 'stopped' ? t('chat.subtaskStopped') : undefined
+  const state =
+    item.status === 'done'
+      ? t('chat.completed')
+      : item.status === 'error'
+        ? t('chat.subtaskFailed')
+        : item.status === 'stopped'
+          ? t('chat.subtaskStopped')
+          : item.status === 'preparing'
+            ? t('chat.toolPreparing')
+            : undefined
   const lines = recentLines(item.items)
+  const meta = [time, item.tokens !== undefined ? compactTokens(item.tokens) : undefined].filter(Boolean).join(' · ')
   return (
-    <>
-      <div className="jobs__row" data-job="subtask" data-status={item.status} data-open={open || undefined}>
-        <button type="button" className="jobs__cells" aria-expanded={open} onClick={onToggle}>
-          <span className="jobs__time">{time}</span>
-          <span className="jobs__kind" title={item.agent}>{item.agent || t('chat.subtask')}</span>
-          <span className="jobs__doing">
-            <span className="jobs__activity">
-              {item.description}
-              {item.description && (last || state || item.status === 'preparing') && ' · '}
-              {last ? <span className={last.mono ? 'jobs__mono' : undefined}>{last.text}</span> : (state ?? (item.status === 'preparing' ? t('chat.toolPreparing') : ''))}
-            </span>
-            {item.tokens !== undefined && <span className="jobs__tokens">· ↓ {compactTokens(item.tokens)}</span>}
+    <div className="jobs__row" data-job="subtask" data-status={item.status} data-open={open || undefined} role="listitem">
+      <div className="jobs__line">
+        <button type="button" className="jobs__cells" aria-expanded={open} title={item.description || undefined} onClick={onToggle}>
+          <span className="jobs__dot" aria-hidden="true" />
+          <span className="jobs__kind">{item.agent || t('chat.subtask')}</span>
+          <span className="jobs__title">{item.description}</span>
+          <span className="jobs__meta">
+            {meta}
+            {state && <span className="jobs__state">{meta ? ` · ${state}` : state}</span>}
           </span>
         </button>
-        {item.status === 'running' && (
-          <button
-            type="button"
-            className="jobs__stop"
-            aria-label={t('jobs.stop')}
-            title={t('jobs.stop')}
-            disabled={stopping}
-            onClick={() => {
-              setStopping(true)
-              // 멈추면 그 줄이 "중단됨" 으로 끝난 것에 들어간다. 못 멈췄으면(이미 끝남 등) 버튼을 되살린다
-              void window.litecode.stopSubtask(item.id).then((stopped) => stopped || setStopping(false), () => setStopping(false))
-            }}
-          >
-            ■
-          </button>
-        )}
+        <span className="jobs__actions">
+          {item.status === 'running' && (
+            <button
+              type="button"
+              className="jobs__stop"
+              aria-label={t('jobs.stop')}
+              title={t('jobs.stop')}
+              disabled={stopping}
+              onClick={() => {
+                setStopping(true)
+                // 멈추면 그 줄이 "중단됨" 으로 끝난 것에 들어간다. 못 멈췄으면(이미 끝남 등) 버튼을 되살린다
+                void window.litecode.stopSubtask(item.id).then((stopped) => stopped || setStopping(false), () => setStopping(false))
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <rect x="3" y="3" width="10" height="10" rx="2" />
+              </svg>
+              {stopping ? t('jobs.stopping') : t('jobs.stopShort')}
+            </button>
+          )}
+          {/* 펼침 단서 — 누르기는 줄(왼쪽 버튼)이 맡는다. 화살표를 눌러도 같은 일 */}
+          <svg className="jobs__chevron" onClick={onToggle} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 6L8 10L12 6" />
+          </svg>
+        </span>
       </div>
       {open && (
         <div className="jobs__detail">
+          {item.description && <div className="jobs__full">{item.description}</div>}
+          {last && (
+            <div className={last.mono ? 'jobs__mono' : undefined} data-state="running">
+              ▸ {last.text}
+            </div>
+          )}
+          {item.error && <div data-state="error">▸ {item.error}</div>}
           {lines.map((line) => (
             <div key={line.id} className={line.mono ? 'jobs__mono' : undefined} data-state={line.state}>
               {line.mono ? `${line.text} ${line.state === 'done' ? '✓' : line.state === 'error' ? '✕' : '…'}` : `${t('chat.think')} · ${line.text}`}
             </div>
           ))}
           {lines.length === 0 && !item.error && <div className="jobs__empty">{t('chat.subtaskEmpty')}</div>}
-          {item.error && <div data-state="error">{item.error}</div>}
         </div>
       )}
-    </>
+    </div>
+  )
+}
+
+/** 다 끝난 표시 — 접힌 줄 앞 체크 */
+function DoneIcon() {
+  return (
+    <svg className="jobs-dock__done" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3.5 8.5l3 3 6-7" />
+    </svg>
   )
 }
 

@@ -33,7 +33,7 @@ import { DropVeil } from './DropVeil.tsx'
 import { countOf } from './attachmentsView.ts'
 import { OpenInButton } from './OpenInButton.tsx'
 import { ConversationMenu } from './Report.tsx'
-import { JobsButton } from './Jobs.tsx'
+import { JobsDock } from './Jobs.tsx'
 import { FilePreviewPanel, RightPanelButton } from './FilePreview.tsx'
 import { QueueDock } from './QueueDock.tsx'
 import { TodoDock } from './Todo.tsx'
@@ -1032,8 +1032,6 @@ export function App() {
           <DelegationContext.Provider value={delegation}>
             <div className="main__header">
               {titleOf(active)}
-              {/* 도는 작업 목록 (#32) — 하위 작업이 있는 턴이 도는 동안만, 열기 버튼 왼쪽 */}
-              {active.pending && <JobsButton key={active.id} items={active.progress ?? []} startedAt={active.sentAt} />}
               {features.has('openIn') && <OpenInButton directory={active.project} />}
               <RightPanelButton directory={active.project} />
               {/* 더 보기 ⋯ — 대화 내보내기 (이슈 #177) */}
@@ -1137,6 +1135,9 @@ export function App() {
               {goal && <GoalDock goal={goal} onCommand={(action) => goalAction(active.id, action)} />}
               {/* AI 의 지금 할 일 목록 (이슈 #83) — 남은 일이 있을 때만. 대화를 바꾸면 접힌다 (key) */}
               <TodoDock key={active.id} messages={active.messages} progress={active.progress} running={!!active.pending} />
+              {/* 작업 목록 (이슈 #295, 머리 버튼 #32 를 대신한다) — 하위 작업이 있는 턴만, 누르면 그 자리에서 목록. 턴이 끝나도 새 턴 전까지 끝난 작업을 남긴다.
+                  key 는 같은 부모의 TodoDock(key=대화 id)과 겹치면 안 된다 — 겹치면 React 가 옛 줄을 안 지운다 (#295 에서 머리 버튼으로 실측) */}
+              <JobsDock key={`jobs-${active.id}`} items={active.progress} pending={!!active.pending} startedAt={active.sentAt} />
               <QueueDock
                 items={active.queue ?? []}
                 sources={active.queueSources}
