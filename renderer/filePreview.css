@@ -171,6 +171,11 @@
   color: var(--text-secondary);
 }
 
+.file-preview__add-menu {
+  position: fixed;
+  right: auto;
+}
+
 .file-preview__add:hover {
   color: var(--text);
   background: var(--fill-hover);

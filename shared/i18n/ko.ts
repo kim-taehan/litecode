@@ -182,6 +182,7 @@ export const ko = {
   'filePreview.files': '파일',
   'filePreview.filesLabel': '프로젝트 파일',
   'filePreview.closeTab': '{name} 닫기',
+  'filePreview.newTab': '새 탭',
   'filePreview.addTab': '파일 목록',
   'filePreview.fullscreen': '전체 화면',
   'filePreview.exitFullscreen': '전체 화면 끝내기',

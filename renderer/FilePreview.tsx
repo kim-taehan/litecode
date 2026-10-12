@@ -25,6 +25,7 @@ import { useFeatures } from './featuresStore.ts'
 import { reason } from './ipcError.ts'
 import { lineJump } from './lineJump.ts'
 import { useT } from './settingsStore.ts'
+import { TabAddMenu } from './TabAddMenu.tsx'
 import { TerminalView } from './TerminalView.tsx'
 import './filePreview.css'
 
@@ -266,29 +267,12 @@ function Panel({ state }: { state: PanelState }) {
               </div>
             )
           })}
-          {/* 새 터미널 — 메인(번호가 폴더에서 1부터)에서 열고 그 탭으로 */}
-          {terminalOn && (
-            <button
-              type="button"
-              className="file-preview__add file-preview__add--terminal"
-              aria-label={t('terminal.newTerminal')}
-              title={t('terminal.newTerminal')}
-              onClick={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id)).catch(() => {})}
-            >
-              <TerminalIcon size={15} />
-            </button>
-          )}
-          <button
-            type="button"
-            className="file-preview__add"
-            aria-label={t('filePreview.addTab')}
-            title={t('filePreview.addTab')}
-            onClick={() => openFilesTab(directory)}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-              <path d="M8 3V13M3 8H13" />
-            </svg>
-          </button>
+          {/* `+` 하나 — 파일 목록 / 새 터미널(메인이 번호를 폴더에서 1부터 매겨 열고 그 탭으로) */}
+          <TabAddMenu
+            terminal={terminalOn}
+            onFiles={() => openFilesTab(directory)}
+            onTerminal={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id)).catch(() => {})}
+          />
         </div>
         <span className="file-preview__chrome">
           <button
