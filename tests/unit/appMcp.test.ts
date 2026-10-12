@@ -120,14 +120,21 @@ class FakeLlm extends Service {
   async mcpConnect() {}
 }
 
-/** ctx.terminals 흉내 — 쓴 글을 적는다 */
+/** ctx.terminals 흉내 — 연 것(마지막)을 재사용하고, 쓴 글을 (폴더, 번호, 글)로 적는다 */
 class FakeTerminals extends Service {
-  written: [string, string][] = []
+  opened: number[] = []
+  written: [string, number, string][] = []
   constructor(ctx: Context) {
     super(ctx, 'terminals')
   }
-  async write(directory: string, data: string) {
-    this.written.push([directory, data])
+  async openOrReuse(_directory: string): Promise<number> {
+    if (this.opened.length > 0) return this.opened[this.opened.length - 1]
+    const id = this.opened.length + 1
+    this.opened.push(id)
+    return id
+  }
+  async write(directory: string, id: number, data: string) {
+    this.written.push([directory, id, data])
   }
 }
 
@@ -348,14 +355,15 @@ describe('present', () => {
 })
 
 describe('open — kind terminal', () => {
-  it('보고 있는 프로젝트의 터미널에 명령을 채우기만 한다 — 엔터(개행)는 보내지 않는다', async () => {
+  it('보고 있는 프로젝트의 터미널에 명령을 채우기만 한다 — 엔터(개행)는 보내지 않는다, 번호(id)를 실어 보낸다', async () => {
     const { appMcp, tool, terminals, events } = await start()
     appMcp.view(project)
     expect(await tool('open', { kind: 'terminal', command: 'npm run build\n' })).toEqual({ text: 'Typed into the terminal (not executed): npm run build', isError: false })
-    expect(terminals.written).toEqual([[project, 'npm run build']])
+    expect(terminals.written).toEqual([[project, 1, 'npm run build']])
     expect(await tool('open', { kind: 'terminal' })).toEqual({ text: 'Opened the terminal pane.', isError: false })
-    expect(terminals.written).toHaveLength(1)
-    expect(events).toEqual([['terminal', project], ['terminal', project]])
+    expect(terminals.written).toHaveLength(1) // 두 번째는 맨 마지막 연 터미널(1) 을 재사용 — 새로 안 연다
+    expect(terminals.opened).toEqual([1])
+    expect(events).toEqual([['terminal', project, 1], ['terminal', project, 1]])
   })
 
   it('개행이 든 명령은 거절 — 아무것도 쓰지 않고 칸도 열지 않는다', async () => {

@@ -30,8 +30,8 @@ declare module 'cordis' {
   interface Events {
     /** open(파일) — 화면이 그 프로젝트의 오른쪽 패널에 연다. file 은 프로젝트 기준 상대 경로, line 은 1부터 */
     'appMcp/open-file'(directory: string, file: string, line?: number): void
-    /** open(터미널) — 화면이 그 프로젝트의 터미널 칸을 편다 (명령은 메인이 이미 채웠다) */
-    'appMcp/open-terminal'(directory: string): void
+    /** open(터미널) — 화면이 그 프로젝트의 터미널 탭(id)을 조용히 연다 (명령은 메인이 이미 채웠다) */
+    'appMcp/open-terminal'(directory: string, id: number): void
   }
 }
 

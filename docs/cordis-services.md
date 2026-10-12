@@ -46,7 +46,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `bang` `shell` | `shell` | `shell.ts` | `!명령` 실행 | — | 고정 켜짐 |
 | `skills` | `skills` | `skills.ts` | 스킬 목록·본문 붙이기(앱 폴더·프로젝트 `.opencode/skills`) | `llm` | 고정 켜짐 |
 | `mcp` | `mcp` | `mcp.ts` `mcpClient.ts` | MCP 서버 목록·편집·연결 시험·서버 안 도구 고르기 | `llm` | 고정 켜짐 |
-| `terminal` | `terminals` | `terminals.ts` | 터미널 칸(opencode pty) | `llm` | 켜짐 |
+ | `terminal` | `terminals` | `terminals.ts` | 터미널 탭, 다중 — (프로젝트, 번호)별 pty + 출력 축적, 이벤트에 번호 (#303) | `llm` | 켜짐 |
 | `trajectory` | `trajectory` | `trajectory.ts` | 추론 과정 보기 | `llm` | 켜짐 |
 | `openIn` | `openIn` | `openIn.ts` | 다른 앱에서 열기 | `projects` | 켜짐 |
 | `appMcp` | `appMcp` | `appMcp.ts` + `appMcp/tools/*` | 앱 내장 MCP 서버(`litecode_*` 도구 6개) | `mcp` | 켜짐 |

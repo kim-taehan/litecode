@@ -7,7 +7,7 @@ import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
 import { RemotePairPrompt } from './MobileSettings.tsx'
 import { useTriggers } from './useTriggers.ts'
-import { ShellDrawer } from './ShellDrawer.tsx'
+import { getPanelState, openTerminalTab, terminalIdOf } from './filePreviewStore.ts'
 import { useAppMcp } from './useAppMcp.ts'
 import { useGitWatch } from './gitStore.ts'
 import type { ShellCardView } from './ShellCard.tsx'
@@ -38,7 +38,7 @@ import { canWrite, fromConversation, isBlank, newSession, toConversation, withBl
 import { useSidebarLayout } from './useSidebarLayout.ts'
 import { useLastModel } from './useLastModel.ts'
 import { useChatEvents } from './useChatEvents.ts'
-import { useShellDrawerKeys } from './useShellDrawerKeys.ts'
+import { useTerminalKeys } from './useTerminalKeys.ts'
 import { Sidebar } from './Sidebar.tsx'
 import { ConversationView } from './ConversationView.tsx'
 import { Composer } from './Composer.tsx'
@@ -258,15 +258,10 @@ export function App() {
       },
     }
   }, [sessions, projects, lastViewed, projectPath, projectName, notices.state, providers, mode])
-  /** 터미널 칸이 펴진 프로젝트 — 프로젝트마다 따로 (closed-code 셸 서랍) */
-  const [shellOpen, setShellOpen] = useState<Record<string, boolean>>({})
-  /** ⌘↓ 를 누른 횟수 — 칸이 이미 펴져 있어도 키를 칸으로 내린다 */
-  const [shellFocus, setShellFocus] = useState(0)
-  /** AI 가 칸을 폈을 때의 shellFocus (앱 MCP open(터미널), 이슈 #51) — 그렇게 편 칸은 키를 가져가지 않는다. ⌘↓ 를 누르면 값이 달라져 풀린다 */
-  const [shellQuietAt, setShellQuietAt] = useState<number>()
-  useAppMcp(features.has('appMcp'), active?.project, (directory) => {
-    setShellQuietAt(shellFocus)
-    setShellOpen((open) => ({ ...open, [directory]: true }))
+  // 터미널은 오른쪽 패널의 탭 (이슈 #303) — 열린 탭·고른 탭은 filePreviewStore 가 쥔다. AI 가 open(터미널) 을 부른 것은(id) 조용히 연다 —
+  // 키(포커스)를 가져오지 않게 (이슈 #51)
+  useAppMcp(features.has('appMcp'), active?.project, (directory, id) => {
+    openTerminalTab(directory, id, { quiet: true })
   })
   const trigger = useTriggers({
     directory: active?.project,
@@ -322,10 +317,24 @@ export function App() {
       if (!handled) send()
     })
 
-  // 터미널 칸의 ⌘↓/⌘↑ (useShellDrawerKeys.ts)
-  const drawerProject = active?.project
-  const drawerOpen = !!drawerProject && !!shellOpen[drawerProject]
-  useShellDrawerKeys({ drawerProject, drawerOpen, terminalOn, setShellOpen, setShellFocus, inputRef: trigger.inputRef })
+  // 터미널 탭의 단축키 — ⌘↓(열기/새 터미널) · ⌘↑(접기) · ⌘⇧↓(새 터미널) · ⌘[·⌘](이전/다음) (useTerminalKeys.ts)
+  useTerminalKeys({ project: active?.project, terminalOn, inputRef: trigger.inputRef })
+
+  // 프로젝트 전환 — 패널의 탭 묶음은 건너가지 않는다(이전부터 그랬고). 다만 터미널은 메인에 셸로 남아 있으므로 떠나면
+  // 그 프로젝트의 터미널 셸을 끝낸다 — 안 하면 탭은 사라지고 셸만 남는다 (이슈 #303 받아들인 한계)
+  const prevTerminalProject = useRef(active?.project)
+  useEffect(() => {
+    const prev = prevTerminalProject.current
+    const next = active?.project
+    prevTerminalProject.current = next
+    if (prev === undefined || next === undefined || prev === next) return
+    const panel = getPanelState()
+    if (panel?.directory !== prev) return // 이미 새 프로젝트 상태로 바뀌었다면 할 일이 없다
+    for (const key of panel.tabs) {
+      const id = terminalIdOf(key)
+      if (id !== undefined) void window.litecode.closeTerminal(prev, id).catch(() => {})
+    }
+  }, [active?.project])
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
   useEffect(() => {
@@ -718,18 +727,6 @@ export function App() {
               attachFiles={attachFiles}
               addAttachments={addAttachments}
             />
-            {terminalOn && shellOpen[active.project] && (
-              <ShellDrawer
-                key={active.project}
-                directory={active.project}
-                focusSignal={shellFocus}
-                quiet={shellQuietAt === shellFocus}
-                onClose={() => {
-                  setShellOpen((open) => ({ ...open, [active.project]: false }))
-                  trigger.inputRef.current?.focus()
-                }}
-              />
-            )}
           </DelegationContext.Provider>
         )}
         {dropping && <DropVeil />}

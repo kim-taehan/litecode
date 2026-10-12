@@ -61,7 +61,7 @@ opencode(1.18.18 고정) ──▶ 사내 LLM 게이트웨이 (LiteLLM 등)   �
 | `shell` (필수) | — | `!명령` 실행, `shell/data` |
 | `skills` (필수) | `skills` | 스킬 목록·본문 붙이기 (llm) |
 | `mcp` (필수) | `mcp` | MCP 서버 목록·편집·매 턴 폴더에 붙이기 (llm), `llm/before-turn` 경청 |
-| `terminal` | `terminals` | 폴더별 pty + 출력 축적 (llm), `terminal/data` |
+| `terminal` | `terminals` | (프로젝트, 번호)별 pty + 출력 축적 (llm) — 다중 터미널 탭 (#303), `terminal/data`(folder, id) |
 | `trajectory` | `trajectory` | 레거시 기록 읽기 (llm) |
 | `openIn` | `openIn` | 허용 목록 앱으로 폴더/파일 열기 (projects) |
 | `appMcp` | `appMcp` | 앱 내장 MCP 서버 — `litecode_*` 도구 (mcp) |
@@ -162,7 +162,7 @@ llm.chat({onSession}) ─▶ sessions.attach (engineSessionId 조기 연결 — 
 ### 7.2 App 구조
 
 - 라우팅 없음 — 단일 화면, `useState`로 프로젝트/대화 선택. **App이 상태 허브**(sessions[], projects[], drafts, 탭); 자식은 "그리기만".
-- 트리는 `App.tsx`: `Rail`(접힘) + `Sidebar` + `main{ConversationView, Composer, ShellDrawer}` + `FilePreviewPanel`(별도 ErrorBoundary) + `SettingsModal`/`RemotePairPrompt`/Toasts + 루트의 `ProjectQuickOpen`.
+- 트리는 `App.tsx`: `Rail`(접힘) + `Sidebar` + `main{ConversationView, Composer}` + `FilePreviewPanel`(별도 ErrorBoundary) + `SettingsModal`/`RemotePairPrompt`/Toasts + 루트의 `ProjectQuickOpen`. 터미널은 본문 아래 서랍이 아니라 `FilePreviewPanel` 의 탭 (#303) — `TerminalView`(xterm).
 - 초기 로딩: `listConversations` → `chatSnapshot`(메인 소유의 live 턴 복원) → `listProjects` → 첫 프로젝트 자동 오픈.
 
 ### 7.3 상태 관리
@@ -179,7 +179,7 @@ llm.chat({onSession}) ─▶ sessions.attach (engineSessionId 조기 연결 — 
 - 입력: `+` 메뉴 트리거(`@`/`/`/`!`)는 `useTriggers`→메인 `queryTrigger` — 렌더러는 어떤 문자인지 모름. 첨부·음성(16kHz PCM)·대기열(QueueDock).
 - 사이드바: 접힘/리사이즈, 진행중만 보기, 찾기, 고정/변경/삭제. **프로젝트 전환 = 빠른 열기**(#305): `ProjectQuickOpen` 상단 중앙 패널, ⌘K/Ctrl+K(또는 전환 버튼)로 열고 타이핑 즉시 필터, ↑↓·Enter·Esc·Home/End, 즐겨찾기 ★ 먼저 — 옛 앵커형 popover 제거.
 - 설정 모달: 기본/모델/기능(4그룹: screen·ai·automation·devices)/모바일.
-- 오른쪽 패널: Files/파일/Git 탭(filePreviewStore), PDF는 OS 앱으로.
+- 오른쪽 패널: Files/파일/Git/**터미널** 탭(filePreviewStore) — 터미널은 다중(번호=탭 이름)·닫아도 셸 유지·탭 닫으면 셸 종료. 단축키는 `useTerminalKeys`(⌘↓ 열기/새 터미널·⌘↑ 접기·⌘⇧↓ 새 터미널·⌘[·⌘] 이전/다음, #303). PDF는 OS 앱으로.
 
 ## 8. 모바일 (mobile/, Android-Expo)
 

@@ -4,7 +4,7 @@ import { FEATURE_ROWS, filterByQuery } from '../../renderer/featuresView.ts'
 
 // 설정 > 기능 찾기 거르기 (이슈 #277) — 대소문자 무시 부분일치, trim, 빈 말은 전부
 const items = [
-  { id: 'terminal', texts: ['터미널 칸', '⌘↓ 로 프로젝트 폴더의 터미널을 엽니다'] },
+  { id: 'terminal', texts: ['터미널 탭', '오른쪽 패널 탭으로 프로젝트 폴더의 터미널을 여는 칸 — ⌘↓ 로 엽니다'] },
   { id: 'mcp', texts: ['MCP', '추가한 MCP 서버의 도구를 AI 가 씁니다'] },
   { id: 'web', texts: ['웹 가져오기', 'AI 가 주소의 웹 페이지를 읽습니다'] },
 ]

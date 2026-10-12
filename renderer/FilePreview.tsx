@@ -6,11 +6,14 @@ import {
   GIT_TAB,
   closeFilePreview,
   closeTab,
+  isTerminalTab,
   openFilePreview,
   panelTakesFocus,
   openFilesTab,
+  openTerminalTab,
   revealPanel,
   selectTab,
+  terminalIdOf,
   toggleFullscreen,
   usePanelState,
   type PanelState,
@@ -22,6 +25,7 @@ import { useFeatures } from './featuresStore.ts'
 import { reason } from './ipcError.ts'
 import { lineJump } from './lineJump.ts'
 import { useT } from './settingsStore.ts'
+import { TerminalView } from './TerminalView.tsx'
 import './filePreview.css'
 
 // 오른쪽 패널 (이슈 #17 파일 미리보기 → #29 탭·폴더 탐색·HTML 실행). dsh ui-sidebar-right·ui-sidebar-files·ui-sidebar-documentpreview 참조
@@ -89,10 +93,14 @@ function Panel({ state }: { state: PanelState }) {
   const root = useRef<HTMLElement>(null)
   const returnFocus = useRef<Element | null>(null)
   const drag = useRef<{ x: number; width: number; max: number }>(undefined)
-  const { directory, tabs, fullscreen, jump } = state
   // Git 탭 (이슈 #290) — 기능 git 이 켜져 있을 때만. 꺼졌는데 Git 탭을 고른 채면 파일 탭으로 본다
   const gitOn = useFeatures().has('git')
-  const active = state.active === GIT_TAB && !gitOn ? undefined : state.active
+  // 터미널 탭 (이슈 #303) — 기능 terminal 이 켜져 있을 때만. 꺼졌는데 터미널 탭을 고른 채면 파일 탭으로 본다
+  const terminalOn = useFeatures().has('terminal')
+  const { directory, tabs: allTabs, fullscreen, jump } = state
+  // 기능이 꺼지면(셸도 다 끝났다) 터미널 탭은 보이지 않는다
+  const tabs = terminalOn ? allTabs : allTabs.filter((key) => !isTerminalTab(key))
+  const active = state.active === GIT_TAB && !gitOn ? undefined : isTerminalTab(state.active) && !terminalOn ? undefined : state.active
   // 파일 탭은 한 번 본 뒤부터 계속 마운트 — 다른 탭에 갔다 와도 펼친 폴더·스크롤이 그대로 (dsh keepMounted, 안 본 탭은 미리 안 그린다)
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
@@ -101,6 +109,7 @@ function Panel({ state }: { state: PanelState }) {
   // AI 가 연 것(open(파일))은 잡지 않는다 — 닫혀 있던 패널이 새로 뜰 때도 (치던 입력창의 글이 끊기지 않게)
   useLayoutEffect(() => {
     if (!panelTakesFocus(state)) return
+    if (isTerminalTab(state.active)) return // 터미널 탭 본문이 키를 가져간다 (TerminalView)
     if (!root.current?.contains(document.activeElement)) returnFocus.current = document.activeElement
     root.current?.focus({ preventScroll: true })
   }, [state.focus])
@@ -118,6 +127,12 @@ function Panel({ state }: { state: PanelState }) {
     closeFilePreview()
     if (back instanceof HTMLElement && back.isConnected) back.focus()
     else document.querySelector<HTMLElement>('.composer__input')?.focus()
+  }
+
+  /** 터미널 탭을 닫는다 — 셸도 끝낸다(메인), 탭은 closeTab 이 이웃을 고른다. 패널은 닫지 않는다 */
+  function closeTerminal(key: string, terminalId: number): void {
+    void window.litecode.closeTerminal(directory, terminalId).catch(() => {})
+    closeTab(key)
   }
 
   // Esc — 전체 화면이면 먼저 풀고, 아니면 닫는다
@@ -185,36 +200,84 @@ function Panel({ state }: { state: PanelState }) {
               <GitTabCount directory={directory} />
             </div>
           )}
-          {tabs.map((key) => (
-            <div
-              key={key}
-              role="tab"
-              tabIndex={0}
-              className="file-preview__tab"
-              aria-selected={active === key}
-              title={key}
-              aria-label={baseName(key)}
-              data-file={key}
-              onClick={() => selectTab(key)}
-              onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
-              onAuxClick={(event) => event.button === 1 && closeTab(key)}
-            >
-              <FileIcon className="file-preview__tab-icon" />
-              <span className="file-preview__tab-title">{baseName(key)}</span>
-              <button
-                type="button"
-                className="file-preview__tab-close"
-                aria-label={t('filePreview.closeTab', { name: baseName(key) })}
-                title={t('filePreview.closeTab', { name: baseName(key) })}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  closeTab(key)
-                }}
+          {tabs.map((key) => {
+            const terminalId = terminalIdOf(key)
+            if (terminalId !== undefined) {
+              const name = t('terminal.tab', { id: terminalId })
+              return (
+                <div
+                  key={key}
+                  role="tab"
+                  tabIndex={0}
+                  className="file-preview__tab file-preview__tab--term"
+                  aria-selected={active === key}
+                  title={`${name} · ${directory}`}
+                  aria-label={name}
+                  data-terminal={terminalId}
+                  onClick={() => selectTab(key)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
+                  onAuxClick={(event) => event.button === 1 && closeTerminal(key, terminalId)}
+                >
+                  <TerminalIcon className="file-preview__tab-icon" />
+                  <span className="file-preview__tab-title">{name}</span>
+                  <button
+                    type="button"
+                    className="file-preview__tab-close"
+                    aria-label={t('terminal.close', { name })}
+                    title={t('terminal.close', { name })}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      closeTerminal(key, terminalId)
+                    }}
+                  >
+                    <CrossIcon size={12} />
+                  </button>
+                </div>
+              )
+            }
+            return (
+              <div
+                key={key}
+                role="tab"
+                tabIndex={0}
+                className="file-preview__tab"
+                aria-selected={active === key}
+                title={key}
+                aria-label={baseName(key)}
+                data-file={key}
+                onClick={() => selectTab(key)}
+                onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
+                onAuxClick={(event) => event.button === 1 && closeTab(key)}
               >
-                <CrossIcon size={12} />
-              </button>
-            </div>
-          ))}
+                <FileIcon className="file-preview__tab-icon" />
+                <span className="file-preview__tab-title">{baseName(key)}</span>
+                <button
+                  type="button"
+                  className="file-preview__tab-close"
+                  aria-label={t('filePreview.closeTab', { name: baseName(key) })}
+                  title={t('filePreview.closeTab', { name: baseName(key) })}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    closeTab(key)
+                  }}
+                >
+                  <CrossIcon size={12} />
+                </button>
+              </div>
+            )
+          })}
+          {/* 새 터미널 — 메인(번호가 폴더에서 1부터)에서 열고 그 탭으로 */}
+          {terminalOn && (
+            <button
+              type="button"
+              className="file-preview__add file-preview__add--terminal"
+              aria-label={t('terminal.newTerminal')}
+              title={t('terminal.newTerminal')}
+              onClick={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id)).catch(() => {})}
+            >
+              <TerminalIcon size={15} />
+            </button>
+          )}
           <button
             type="button"
             className="file-preview__add"
@@ -251,7 +314,12 @@ function Panel({ state }: { state: PanelState }) {
       </div>
       {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} />}
       {active === GIT_TAB && <GitPanel directory={directory} gitSub={state.gitSub} />}
-      {active !== undefined && active !== GIT_TAB && <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />}
+      {active !== undefined && isTerminalTab(active) && (
+        <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
+      )}
+      {active !== undefined && !isTerminalTab(active) && active !== GIT_TAB && (
+        <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />
+      )}
     </aside>
   )
 }
@@ -663,6 +731,15 @@ function FolderIcon({ className, open }: { className?: string; open?: boolean })
       ) : (
         <path d="M1.75 4.25C1.75 3.42 2.42 2.75 3.25 2.75H6.25L7.75 4.25H12.75C13.58 4.25 14.25 4.92 14.25 5.75V11.75C14.25 12.58 13.58 13.25 12.75 13.25H3.25C2.42 13.25 1.75 12.58 1.75 11.75Z" />
       )}
+    </svg>
+  )
+}
+
+function TerminalIcon({ className = 'file-preview__icon', size = 14 }: { className?: string; size?: number }) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 4.5L6.5 8L3 11.5" />
+      <path d="M8.5 12H13" />
     </svg>
   )
 }

@@ -69,8 +69,9 @@ export function OpenTool(ctx: Context): void {
     const terminals = ctx.get('terminals')
     if (!terminals) throw new Error('The terminal pane is turned off in Settings > Features, so nothing was opened.')
     ctx.appMcp.requireViewed(directory)
-    if (command) await terminals.write(directory, command)
-    ctx.emit('appMcp/open-terminal', directory)
+    const id = await terminals.openOrReuse(directory) // 켜져 있으면 마지막 연 탭, 없으면 새 탭
+    if (command) await terminals.write(directory, id, command)
+    ctx.emit('appMcp/open-terminal', directory, id)
     return command ? `Typed into the terminal (not executed): ${command}` : 'Opened the terminal pane.'
   }
 

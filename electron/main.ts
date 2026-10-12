@@ -87,6 +87,14 @@ if (!app.requestSingleInstanceLock()) {
 // Windows 토스트는 이 id 가 없으면 안 뜨거나 앱 이름이 틀린다 (electron-builder.yml appId 와 같게 — Windows 실행은 미검증)
 if (process.platform === 'win32') app.setAppUserModelId('com.litecode.desktop')
 
+// 자식 프로세스(opencode·pty·`!`셸·MCP)의 로그인 셸 환경 — GUI 과정은 셸의 환경(LANG)을 물려받지 못해 C 로케일이 되고,
+// 그 환경에서는 zle 가 다바이트 입력을 제어문자로 풀어 한글이 깨진다 (실측 2026-10-12, 이슈 #303: 한글 에코 EC 95 88 →
+// U+FFFD·C1 박스). 값은 `en_US.UTF-8` — 이 머신(15.2)의 `locale -a` 에 C.UTF-8 이 없어 setlocale 이 조용히 C 로 떨어지는 걸
+// 실측해서 고른 것(LC_ALL 이 없으면 LANG 으로도 못 이김). 사용자가 명시적으로 정한 값은 안 덮는다. (git 는 `git.ts` 가 자기
+// env 로 LC_ALL="C" 를 다시 정한다 — 영향 없음)
+if (!process.env.LANG) process.env.LANG = 'en_US.UTF-8'
+if (!process.env.LC_ALL) process.env.LC_ALL = 'en_US.UTF-8'
+
 // Cordis 컨텍스트는 메인 프로세스에 하나만 둔다 — 렌더러는 IPC 로만 닿는다.
 const ctx = new Context()
 ctx.logger.exporter({
@@ -371,13 +379,15 @@ function shellBridge(ctx: Context): void {
 }
 shellBridge.inject = ['shell', 'sessions']
 
-// 터미널 칸 — 출력은 메인이 먼저 안다. 모든 창에 흘려보낸다 (화면이 폴더로 거른다). ctx.on 은 묶음이 내려가면 같이 풀린다
+// 터미널 탭 (이슈 #303) — 출력은 메인이 먼저 안다. 모든 창에 흘려보낸다 (화면이 폴더·번호로 거른다). ctx.on 은 묶음이 내려가면 같이 풀린다
 function terminalsBridge(ctx: Context): void {
-  handle(ctx, Channel.OPEN_TERMINAL, async (_event, directory: string) => ctx.terminals.attach(directory))
-  handle(ctx, Channel.WRITE_TERMINAL, async (_event, directory: string, data: string) => ctx.terminals.write(directory, data))
-  handle(ctx, Channel.RESIZE_TERMINAL, async (_event, directory: string, rows: number, cols: number) => ctx.terminals.resize(directory, rows, cols))
-  ctx.on('terminal/data', (directory, chunk, end) => broadcast(Channel.TERMINAL_DATA, directory, chunk, end))
-  ctx.on('terminal/exit', (directory) => broadcast(Channel.TERMINAL_EXIT, directory))
+  handle(ctx, Channel.OPEN_TERMINAL, async (_event, directory: string) => ctx.terminals.open(directory))
+  handle(ctx, Channel.ATTACH_TERMINAL, async (_event, directory: string, id: number) => ctx.terminals.attach(directory, id))
+  handle(ctx, Channel.WRITE_TERMINAL, async (_event, directory: string, id: number, data: string) => ctx.terminals.write(directory, id, data))
+  handle(ctx, Channel.RESIZE_TERMINAL, async (_event, directory: string, id: number, rows: number, cols: number) => ctx.terminals.resize(directory, id, rows, cols))
+  handle(ctx, Channel.CLOSE_TERMINAL, async (_event, directory: string, id: number) => ctx.terminals.close(directory, id))
+  ctx.on('terminal/data', (directory, id, chunk, end) => broadcast(Channel.TERMINAL_DATA, directory, id, chunk, end))
+  ctx.on('terminal/exit', (directory, id) => broadcast(Channel.TERMINAL_EXIT, directory, id))
 }
 terminalsBridge.inject = ['terminals']
 
@@ -504,7 +514,7 @@ mcpBridge.inject = ['mcp']
 function appMcpBridge(ctx: Context): void {
   handle(ctx, Channel.APP_MCP_VIEW, async (_event, directory?: string) => ctx.appMcp.view(typeof directory === 'string' ? directory : undefined))
   ctx.on('appMcp/open-file', (directory, file, line) => broadcast(Channel.APP_MCP_OPEN_FILE, directory, file, line))
-  ctx.on('appMcp/open-terminal', (directory) => broadcast(Channel.APP_MCP_OPEN_TERMINAL, directory))
+  ctx.on('appMcp/open-terminal', (directory, id) => broadcast(Channel.APP_MCP_OPEN_TERMINAL, directory, id))
   ctx.effect(() => {
     const onAllClosed = () => ctx.appMcp.view(undefined)
     app.on('window-all-closed', onAllClosed)

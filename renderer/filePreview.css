@@ -551,3 +551,17 @@ html[data-platform='darwin']:not([data-fullscreen]) .file-preview--full .file-pr
 .main__header .open-in + .right-panel-open {
   margin-left: 8px;
 }
+
+/* 터미널 탭 본문 (이슈 #303) — xterm. 패널 컬럼이 flex 이라 탭은 남은 높이를 다 채운다 */
+.terminal-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-view__screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 0 6px 10px;
+}
