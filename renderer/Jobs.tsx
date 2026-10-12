@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { Subtask, TurnItem } from '../shared/ipc.ts'
 import { useNow } from './useNow.ts'
-import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, quietMinutes, recentLines, VISIBLE_ROWS } from './jobsView.ts'
+import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, peekLine, quietMinutes, recentLines, VISIBLE_ROWS } from './jobsView.ts'
+import { openTaskTab } from './filePreviewStore.ts'
 import { useT } from './settingsStore.ts'
+import { useTaskMap } from './tasksStore.ts'
 import './jobs.css'
 
 // 작업 목록 — 입력 카드 위 한 줄(JobsDock). 누르면 그 자리에서 목록이 펼쳐진다 (이슈 #295, 시안 _workspace/mock-jobs2 0번).
@@ -13,22 +15,12 @@ import './jobs.css'
 // 중지는 그 하위 작업만 멈춘다(ctx.llm.stopSubtask) — 턴은 남은 결과로 이어 간다.
 // 백그라운드 하위 작업(#319, litecode_task_start)은 메인 턴이 끝난 뒤에도 돈다 — 메인이 쥔 대화별 목록(chat:tasks)을 같은 줄에 더한다.
 // 그 작업이 도는 동안 메인은 기다리지 않으므로 "메인" 줄은 메인 턴이 내장 하위 작업을 기다릴 때만 보인다. 중지는 같은 버튼(그 작업만, 결과 턴으로 "중단됨")
+// 백그라운드 작업 줄은 Claude Code 에이전트 뷰처럼 (#325, 시안 _workspace/mock-task-bg/Detail.html): 줄을 누르면 훑어보기(마지막 활동 한 줄),
+// 줄 끝 › 는 오른쪽 패널의 "작업 N" 탭(TaskTab.tsx — 전체 기록). 턴의 하위 작업 줄은 예전 펼침 그대로(턴이 끝나면 사라져 탭이 없다)
 
 /** 그 대화의 백그라운드 하위 작업 (이슈 #319) — 처음 한 번 받고 그 뒤는 알림으로. 대화를 바꾸면 그 대화 것으로 */
 export function useBackgroundTasks(conversationId: string | undefined): Subtask[] {
-  const [all, setAll] = useState<Record<string, Subtask[]>>({})
-  useEffect(() => {
-    let heard = false
-    const off = window.litecode.onTasksChanged((cid, tasks) => {
-      heard = true
-      setAll((was) => ({ ...was, [cid]: tasks }))
-    })
-    void window.litecode.taskSnapshot().then(
-      (snapshot) => !heard && setAll(snapshot),
-      () => {},
-    )
-    return off
-  }, [])
+  const all = useTaskMap() // 작업 탭(#325)과 같은 저장소
   return (conversationId && all[conversationId]) || NO_TASKS
 }
 const NO_TASKS: Subtask[] = []
@@ -64,12 +56,14 @@ interface JobsDockProps {
   startedAt?: number
   /** 그 대화의 백그라운드 하위 작업 (#319) — 턴과 상관없이 돈다 */
   background?: readonly Subtask[]
+  /** 그 대화의 프로젝트 — 백그라운드 작업 줄의 › 가 이 프로젝트의 오른쪽 패널에 작업 탭을 연다 (#325) */
+  directory?: string
 }
 
 /** 입력 카드 위 접힌 한 줄 — 도는 하위 작업이 있으면 "작업 N · 종류 · 제목 · 경과 ⌄"(대표 = 가장 먼저 시작한 것),
  *  다 끝났으면 "끝난 작업 N ⌄". 턴이 끝난 뒤에도 그 턴의 끝난 작업을 새 턴을 보낼 때까지 보인다 — 진행 줄은 턴이 끝나면 비므로
  *  돌던 동안의 진행 줄을 잡아 둔다(새 턴이 시작되면 빈 진행 줄로 바뀐다). 대화를 바꾸면 key 로 새로 그려 잊는다 */
-export function JobsDock({ items, pending, startedAt, background = [] }: JobsDockProps) {
+export function JobsDock({ items, pending, startedAt, background = [], directory }: JobsDockProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [kept, setKept] = useState<readonly TurnItem[]>()
@@ -96,6 +90,7 @@ export function JobsDock({ items, pending, startedAt, background = [] }: JobsDoc
 
   if (empty) return null
   const count = (waiting ? 1 : 0) + running.length
+  const onOpen = directory === undefined ? undefined : (item: Subtask) => (background.includes(item) ? () => openTaskTab(directory, item.id) : undefined)
   return (
     <section className="jobs-dock" aria-label={t('jobs.title')} ref={root}>
       <button
@@ -117,7 +112,7 @@ export function JobsDock({ items, pending, startedAt, background = [] }: JobsDoc
       </button>
       {open && (
         <div className="jobs-dock__body">
-          <JobsList running={running} finished={finished} waiting={waiting} startedAt={startedAt} now={now} />
+          <JobsList running={running} finished={finished} waiting={waiting} startedAt={startedAt} now={now} onOpen={onOpen} />
         </div>
       )}
     </section>
@@ -127,13 +122,28 @@ export function JobsDock({ items, pending, startedAt, background = [] }: JobsDoc
 /** 도는 하위 작업이 있으면 메인 한 줄(고정 — 메인 턴이 기다릴 때만) → 도는 것(3줄까지, 나머지는 "+N개 더 보기") → 끝난 작업(접힘).
  *  다 끝났으면 끝난 작업 줄만 (접지 않는다 — 접힌 줄이 이미 "끝난 작업 N" 이다).
  *  now 는 부모의 시계 — 접힌 줄의 경과와 메인 줄의 경과가 같은 초를 보이게 */
-function JobsList({ running, finished, waiting, startedAt, now }: { running: Subtask[]; finished: Subtask[]; waiting: boolean; startedAt?: number; now: number }) {
+function JobsList({
+  running,
+  finished,
+  waiting,
+  startedAt,
+  now,
+  onOpen,
+}: {
+  running: Subtask[]
+  finished: Subtask[]
+  waiting: boolean
+  startedAt?: number
+  now: number
+  /** 작업 탭을 여는 손잡이 — 백그라운드 작업 줄에만 (#325) */
+  onOpen?: (item: Subtask) => (() => void) | undefined
+}) {
   const t = useT()
   const [expanded, setExpanded] = useState<string>()
   const [showAll, setShowAll] = useState(false)
   const [showFinished, setShowFinished] = useState(false)
   const toggle = (id: string) => setExpanded((was) => (was === id ? undefined : id))
-  const finishedRows = finished.map((item) => <JobRow key={item.id} item={item} now={now} open={expanded === item.id} onToggle={() => toggle(item.id)} />)
+  const finishedRows = finished.map((item) => <JobRow key={item.id} item={item} now={now} open={expanded === item.id} onToggle={() => toggle(item.id)} onOpen={onOpen?.(item)} />)
   if (running.length === 0) {
     return (
       <div className="jobs__list" role="list">
@@ -158,7 +168,7 @@ function JobsList({ running, finished, waiting, startedAt, now }: { running: Sub
         </div>
       )}
       {shown.map((item) => (
-        <JobRow key={item.id} item={item} now={now} open={expanded === item.id} onToggle={() => toggle(item.id)} />
+        <JobRow key={item.id} item={item} now={now} open={expanded === item.id} onToggle={() => toggle(item.id)} onOpen={onOpen?.(item)} />
       ))}
       {more > 0 && (
         <button type="button" className="jobs__more" onClick={() => setShowAll(true)}>
@@ -193,8 +203,9 @@ function JobsList({ running, finished, waiting, startedAt, now }: { running: Sub
   )
 }
 
-/** 하위 작업 한 줄 — ● 종류 · 제목 · 시간·토큰, 올리면(포커스) 중지·⌄. 누르면 아래에 전체 제목 · ▸ 지금 하는 일 · 최근 생각·도구 줄 */
-function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; open: boolean; onToggle(): void }) {
+/** 하위 작업 한 줄 — ● 종류 · 제목 · 시간·토큰, 올리면(포커스) 중지·⌄. 누르면 아래에 전체 제목 · ▸ 지금 하는 일 · 최근 생각·도구 줄.
+ *  onOpen 이 있으면(백그라운드 작업, #325) 누르면 훑어보기 한 줄(peekLine)만, ⌄ 대신 › 가 작업 탭을 연다 */
+function JobRow({ item, now, open, onToggle, onOpen }: { item: Subtask; now: number; open: boolean; onToggle(): void; onOpen?: () => void }) {
   const t = useT()
   const [stopping, setStopping] = useState(false)
   const live = item.status === 'running' || item.status === 'preparing'
@@ -250,13 +261,22 @@ function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; ope
               {stopping ? t('jobs.stopping') : t('jobs.stopShort')}
             </button>
           )}
-          {/* 펼침 단서 — 누르기는 줄(왼쪽 버튼)이 맡는다. 화살표를 눌러도 같은 일 */}
-          <svg className="jobs__chevron" onClick={onToggle} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M4 6L8 10L12 6" />
-          </svg>
+          {onOpen ? (
+            <button type="button" className="jobs__open" aria-label={t('jobs.openTab')} title={t('jobs.openTab')} onClick={onOpen}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 4L10 8L6 12" />
+              </svg>
+            </button>
+          ) : (
+            /* 펼침 단서 — 누르기는 줄(왼쪽 버튼)이 맡는다. 화살표를 눌러도 같은 일 */
+            <svg className="jobs__chevron" onClick={onToggle} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 6L8 10L12 6" />
+            </svg>
+          )}
         </span>
       </div>
-      {open && (
+      {open && onOpen && <JobPeek item={item} />}
+      {open && !onOpen && (
         <div className="jobs__detail">
           {item.description && <div className="jobs__full">{item.description}</div>}
           {last && (
@@ -272,6 +292,23 @@ function JobRow({ item, now, open, onToggle }: { item: Subtask; now: number; ope
           ))}
           {lines.length === 0 && !item.error && <div className="jobs__empty">{t('chat.subtaskEmpty')}</div>}
         </div>
+      )}
+    </div>
+  )
+}
+
+/** 훑어보기 (#325) — 마지막 활동 한 줄(실패면 사유). 전체 기록은 › 의 작업 탭 */
+function JobPeek({ item }: { item: Subtask }) {
+  const t = useT()
+  const line = peekLine(item)
+  return (
+    <div className="jobs__detail jobs__peek">
+      {line ? (
+        <div className={line.mono ? 'jobs__mono' : undefined} data-state={line.state}>
+          ▸ {line.text}
+        </div>
+      ) : (
+        <div className="jobs__empty">{t('chat.subtaskEmpty')}</div>
       )}
     </div>
   )

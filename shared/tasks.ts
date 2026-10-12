@@ -103,6 +103,41 @@ export function taskActivity(item: TurnItem): string {
   return item.kind
 }
 
+// 작업 탭(#325)은 진행 줄의 전문(생각·응답 글·도구 입출력)을 그린다 — 엔진이 주는 진행 줄은 이미 잘리지 않은 전문이라, 작업 줄에 쌓을 때
+// 상한만 건다. 목록 전체가 EMIT_MS 마다 화면으로 가고, 끝난 작업도 대화마다 FINISHED_KEEP 개 남는다
+/** 작업 하나에 남길 진행 줄 수 — 넘으면 오래된 것부터 버리고 수를 센다 (Subtask.omitted) */
+export const TASK_ITEMS_MAX = 200
+/** 생각·응답 글 한 줄의 글자 상한 */
+export const TASK_ITEM_TEXT_MAX = 20_000
+/** 도구 입력·결과·오류 각각의 글자 상한 */
+export const TASK_TOOL_TEXT_MAX = 8_000
+
+function clipTo(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]` : text
+}
+
+/** 진행 줄 하나를 작업 줄에 실을 크기로 — 글자 상한, 도구의 diff(작업 화면에선 안 쓴다)는 뺀다 */
+export function capTaskItem(item: TurnItem): TurnItem {
+  if (item.kind === 'think' || item.kind === 'text') return item.text.length > TASK_ITEM_TEXT_MAX ? { ...item, text: clipTo(item.text, TASK_ITEM_TEXT_MAX) } : item
+  if (item.kind !== 'tool') return item
+  const { diffs: _diffs, ...tool } = item
+  return {
+    ...tool,
+    ...(tool.input !== undefined && { input: clipTo(tool.input, TASK_TOOL_TEXT_MAX) }),
+    ...(tool.result !== undefined && { result: clipTo(tool.result, TASK_TOOL_TEXT_MAX) }),
+    ...(tool.error !== undefined && { error: clipTo(tool.error, TASK_TOOL_TEXT_MAX) }),
+  }
+}
+
+/** 작업 줄의 진행 줄에 하나를 더하거나 바꾼다(같은 id) — 상한을 넘으면 앞에서 버리고 버린 수를 더한다 */
+export function addTaskItem(items: readonly TurnItem[], omitted: number, item: TurnItem): { items: TurnItem[]; omitted: number } {
+  const capped = capTaskItem(item)
+  const index = items.findIndex((existing) => existing.id === capped.id)
+  const next = index === -1 ? [...items, capped] : items.map((existing, at) => (at === index ? capped : existing))
+  const over = next.length - TASK_ITEMS_MAX
+  return over > 0 ? { items: next.slice(over), omitted: omitted + over } : { items: next, omitted }
+}
+
 /** 작업 상태 도구가 돌려줄 한 작업 */
 export interface TaskStatusEntry {
   number: number

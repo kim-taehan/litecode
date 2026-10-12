@@ -1,0 +1,248 @@
+/* 오른쪽 패널의 작업 탭 (이슈 #325, 시안 _workspace/mock-task-bg/Detail.html) — 색은 토큰만 (라이트·다크는 토큰이 맡는다) */
+
+.task-tab {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 머리 — 상태 점 · #번호 설명 · 종류·경과 알약 · ■ 중지 */
+.task-tab__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+
+.task-tab__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-tab__pill {
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.task-tab__pill--num {
+  font-variant-numeric: tabular-nums;
+}
+
+.task-tab[data-status='error'] .task-tab__state {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* 점 — 파랑 = 도는 중, 빈 고리 = 대기, 초록 = 완료, 빨강 = 실패, 회색 = 중단됨 (작업 줄 .jobs__dot 과 같다) */
+.task-tab__dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.task-tab[data-status='queued'] .task-tab__dot { border-color: var(--text-caption); background: transparent; }
+.task-tab[data-status='done'] .task-tab__dot { border-color: var(--ok); background: var(--ok); }
+.task-tab[data-status='error'] .task-tab__dot { border-color: var(--danger); background: var(--danger); }
+.task-tab[data-status='stopped'] .task-tab__dot { border-color: var(--text-caption); background: var(--text-caption); }
+
+.task-tab__stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.task-tab__stop:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.task-tab__stop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.task-tab__stop:focus-visible,
+.task-tab__more:focus-visible,
+.task-tab__tool-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 본문 — 지시 · 생각 · 도구 · 응답 · 작업 중 */
+.task-tab__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.task-tab__label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.task-tab__pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.task-tab__ask {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--bg-sidebar);
+  color: var(--text-secondary);
+}
+
+.task-tab__think {
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.task-tab__more {
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.task-tab__text {
+  min-width: 0;
+}
+
+/* 도구 카드 — 이름·입력 한 줄 + 결과 앞부분, "전체 보기" 로 펼침 */
+.task-tab__tool {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.task-tab__tool-head {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--bg-sidebar);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+}
+
+.task-tab__tick {
+  flex: none;
+  color: var(--text-caption);
+}
+
+.task-tab__tool[data-status='done'] .task-tab__tick { color: var(--ok); }
+.task-tab__tool[data-status='error'] .task-tab__tick { color: var(--danger); }
+.task-tab__tool[data-status='running'] .task-tab__tick,
+.task-tab__tool[data-status='preparing'] .task-tab__tick { color: var(--accent); }
+
+.task-tab__tool-name {
+  flex: none;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.task-tab__tool-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-tab__code {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  font: 12px/1.5 ui-monospace, 'SF Mono', Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.task-tab__code[data-part='result']:not([data-folded]) {
+  max-height: 480px;
+  overflow: auto;
+}
+
+.task-tab__code--error {
+  color: var(--danger);
+}
+
+.task-tab__tool-more {
+  display: block;
+  width: 100%;
+  padding: 4px 10px;
+  border: 0;
+  border-top: 1px solid var(--border-light);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-tab__error {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.task-tab__note {
+  margin: 0;
+  color: var(--text-caption);
+  font-size: 12px;
+}
+
+.task-tab__live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}

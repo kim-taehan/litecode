@@ -95,6 +95,26 @@ export function openTerminalTab(directory: string, id: number, { quiet = false }
   set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, quiet })
 }
 
+/** 백그라운드 작업 탭의 열쇠 (이슈 #325) — `\0task/<작업 id>`, 작업 id 는 메인(BackgroundTasks)이 주는 `bgtask:<대화>:<번호>`.
+ *  탭은 작업이 끝나도 남고 사용자가 닫는다. 프로젝트를 옮기면 터미널 탭처럼 새로 시작한다(base) */
+export const TASK_PREFIX = '\0task/'
+export function taskTabKey(taskId: string): string {
+  return TASK_PREFIX + taskId
+}
+export function taskIdOf(key: string | undefined): string | undefined {
+  return key?.startsWith(TASK_PREFIX) && key.length > TASK_PREFIX.length ? key.slice(TASK_PREFIX.length) : undefined
+}
+export function isTaskTab(key: string | undefined): key is string {
+  return taskIdOf(key) !== undefined
+}
+
+/** 작업 탭을 연다 — 이미 열려 있으면 그 탭을 고른다 (작업 줄의 ›) */
+export function openTaskTab(directory: string, taskId: string): void {
+  const state = base(directory)
+  const key = taskTabKey(taskId)
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus: state.focus + 1, quiet: false })
+}
+
 /** ⌘↓ — 마지막으로 연 터미널 탭을 그 자리에서 고른다. 없으면 false (호출이 새로 연다) */
 export function focusLastTerminalTab(directory: string): boolean {
   if (!current || current.directory !== directory) return false

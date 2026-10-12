@@ -82,6 +82,22 @@ export function lastLine(items: readonly TurnItem[]): JobLine | undefined {
   return recentLines(items, 1)[0]
 }
 
+/** 백그라운드 작업 줄의 훑어보기 한 줄 (#325) — 실패·중단 사유가 있으면 그것, 아니면 마지막 활동(생각·도구·응답 글의 첫 줄). 없으면 undefined */
+export function peekLine(item: Subtask): JobLine | undefined {
+  if (item.error) return { id: 'error', text: item.error, mono: false, state: 'error' }
+  for (let at = item.items.length - 1; at >= 0; at--) {
+    const entry = item.items[at]!
+    if (entry.kind === 'text') {
+      const text = entry.text.trim().split('\n')[0]?.trim()
+      if (text) return { id: entry.id, text, mono: false }
+      continue
+    }
+    const line = jobLine(entry)
+    if (line) return line
+  }
+  return undefined
+}
+
 /** 경과 시간 — 좁은 칸(44px 고정폭)에 들어가게 12s · 1m05s · 1h02m */
 export function elapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
