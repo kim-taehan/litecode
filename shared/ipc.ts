@@ -23,6 +23,7 @@ import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, Spee
 import type { UpdateStatus } from './updates.ts'
 import type { Goal } from './goal.ts'
 import type { GoalReply } from '../src/services/goal.ts'
+import type { GitAction, GitBranch, GitCommit, GitResult, GitView } from './git.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Mode } from './modes.ts'
@@ -207,6 +208,20 @@ export const Channel = {
   GOAL_GET: 'goal:get',
   /** 메인 → 화면 (conversationId, Goal | null) */
   GOAL_CHANGED: 'goal:changed',
+  /** Git(ctx.git, 이슈 #290) — 기능 `git` 이 켜졌을 때만 있다. 화면 → 메인 (directory) → GitView. directory 는 등록된 프로젝트여야 한다 */
+  GIT_VIEW: 'git:view',
+  /** 화면 → 메인 (directory, path, staged) → unified diff */
+  GIT_DIFF: 'git:diff',
+  /** 화면 → 메인 (directory) → GitCommit[] */
+  GIT_LOG: 'git:log',
+  /** 화면 → 메인 (directory) → GitBranch[] */
+  GIT_BRANCHES: 'git:branches',
+  /** 화면 → 메인 (directory, GitAction) → GitResult — 바꾸는 작업 전부 */
+  GIT_RUN: 'git:run',
+  /** 화면 → 메인 (directory) — origin 주소를 https 로 바꿔 기본 브라우저로 연다. 못 바꾸면 false */
+  GIT_OPEN_REMOTE: 'git:open-remote',
+  /** 메인 → 화면 (directory) — 그 폴더의 저장소가 바뀌었을 수 있다 (화면·AI 의 작업 뒤) */
+  GIT_CHANGED: 'git:changed',
 } as const
 
 export interface LitecodeBridge {
@@ -441,6 +456,14 @@ export interface LitecodeBridge {
   goalCommand(conversationId: string, args: string): Promise<GoalReply>
   goal(conversationId: string): Promise<Goal | null>
   onGoalChanged(listener: (conversationId: string, goal: Goal | null) => void): () => void
+  /** Git (ctx.git, 이슈 #290) — **기능 `git` 이 켜져 있을 때만 부른다**. directory 는 등록된 프로젝트 (아니면 거절) */
+  gitView(directory: string): Promise<GitView>
+  gitDiff(directory: string, path: string, staged: boolean): Promise<string>
+  gitLog(directory: string): Promise<GitCommit[]>
+  gitBranches(directory: string): Promise<GitBranch[]>
+  gitRun(directory: string, action: GitAction): Promise<GitResult<Record<string, unknown>>>
+  openGitRemote(directory: string): Promise<boolean>
+  onGitChanged(listener: (directory: string) => void): () => void
 }
 
 declare global {

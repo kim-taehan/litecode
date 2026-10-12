@@ -84,6 +84,17 @@ describe('modePermission — 하위 작업 (자식은 부모 모드 권한을 �
     }
   })
 
+  it('git 도구 (#290): 읽기는 네 모드 모두 묻지 않고, 쓰기는 계획엔 없고 나머지는 늘 묻는다. 하위 작업은 둘 다 못 쓴다', () => {
+    for (const permission of ['litecode_git_status', 'litecode_git_diff', 'litecode_git_log', 'litecode_git_branches']) {
+      expect(row(permission), permission).toEqual({ plan: 'allow', build: 'allow', ask: 'allow', full: 'allow' })
+      expect(child(permission), permission).toMatchObject({ build: 'deny', ask: 'deny', full: 'deny' })
+    }
+    for (const permission of ['litecode_git_stage', 'litecode_git_commit', 'litecode_git_branch_create', 'litecode_git_switch', 'litecode_git_push', 'litecode_git_pull']) {
+      expect(row(permission), permission).toEqual({ plan: 'deny', build: 'ask', ask: 'ask', full: 'ask' })
+      expect(child(permission), permission).toMatchObject({ build: 'deny', ask: 'deny', full: 'deny' })
+    }
+  })
+
   it('하위 작업은 보내기·읽기·결과물·만들기 도구와 task 를 못 쓴다', () => {
     for (const permission of ['litecode_send_to_project', 'litecode_read_project', 'litecode_present', 'litecode_create', 'task']) {
       expect(child(permission, ['general']), permission).toMatchObject({ build: 'deny', ask: 'deny', full: 'deny' })

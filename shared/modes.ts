@@ -3,6 +3,7 @@
 // plan: 읽기·검색만 / build: opencode 기본(편집·명령 허용, 폴더 밖·.env 는 묻는다) / ask: 편집·명령·웹마다 묻는다 / full: 다 묻지 않는다
 
 import { browserToolKind } from './browser.ts'
+import { GIT_READ_TOOLS, GIT_WRITE_TOOLS } from './git.ts'
 
 export const MODES = ['plan', 'build', 'ask', 'full'] as const
 export type Mode = (typeof MODES)[number]
@@ -34,6 +35,8 @@ const APP_SEND_TOOL = 'litecode_send_to_project'
 const APP_READ_TOOL = 'litecode_read_project'
 /** 스킬·MCP 서버·훅 만들기 (이슈 #145) — 전체 권한에서도 묻는다, 계획·하위 작업에는 없다 */
 const APP_MAKE_TOOL = 'litecode_create'
+const GIT_READ_PERMISSIONS: readonly string[] = GIT_READ_TOOLS.map((tool) => `litecode_${tool}`)
+const GIT_WRITE_PERMISSIONS: readonly string[] = GIT_WRITE_TOOLS.map((tool) => `litecode_${tool}`)
 
 /** `.env` 파일 읽기 — 엔진 기본이 묻는다 (`.env.example` 은 아니다) */
 function readsEnvFile(resources: readonly string[]): boolean {
@@ -59,6 +62,9 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
       if (mode === 'plan') return browser === 'read' ? 'allow' : 'deny'
       return asking || browser === 'ask' ? 'ask' : 'allow'
     }
+    // git 도구 (이슈 #290) — 읽기는 네 모드 모두 묻지 않고, 쓰기는 계획 밖 모두 묻는다. 하위 작업은 못 쓴다 (engineConfig.ts 와 같은 표)
+    if (GIT_READ_PERMISSIONS.includes(permission)) return child ? 'deny' : 'allow'
+    if (GIT_WRITE_PERMISSIONS.includes(permission)) return child || mode === 'plan' ? 'deny' : 'ask'
     if (permission === APP_SEND_TOOL || permission === APP_MAKE_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
     if (permission === APP_READ_TOOL) return child ? 'deny' : asking ? 'ask' : 'allow'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'

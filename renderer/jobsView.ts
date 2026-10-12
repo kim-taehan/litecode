@@ -14,11 +14,32 @@ export interface JobList {
   finished: Subtask[]
 }
 
-/** 진행 줄에서 하위 작업을 도는 것과 끝난 것으로 가른다 */
-export function jobList(items: readonly TurnItem[]): JobList {
+/** 진행 줄에서 하위 작업을 도는 것과 끝난 것으로 가른다.
+ *  ended: 턴이 이미 끝났다(입력 카드 위 줄이 새 턴 전까지 끝난 작업을 보인다, 이슈 #295) — 남은 준비·진행 중은 "중단됨" 으로 끝난 것에 */
+export function jobList(items: readonly TurnItem[], ended = false): JobList {
   const subtasks = items.filter((item): item is Subtask => item.kind === 'subtask')
   const live = (item: Subtask) => item.status === 'running' || item.status === 'preparing'
+  if (ended) return { running: [], finished: subtasks.map((item) => (live(item) ? { ...item, status: 'stopped' as const } : item)) }
   return { running: subtasks.filter(live), finished: subtasks.filter((item) => !live(item)) }
+}
+
+/** 입력 카드 위 접힌 줄이 가리키는 대표 작업 (이슈 #295) — 도는 것 중 가장 먼저 시작한 것.
+ *  시작 시각이 없는(준비 중) 것은 뒤로, 같으면 나타난 순서 */
+export function leadJob(running: readonly Subtask[]): Subtask | undefined {
+  let lead: Subtask | undefined
+  for (const item of running) {
+    if (!lead || (item.startedAt ?? Infinity) < (lead.startedAt ?? Infinity)) lead = item
+  }
+  return lead
+}
+
+/** 펼친 목록에 한 번에 보일 하위 작업 줄 수 — 나머지는 "+N개 더 보기" (이슈 #295 시안 G) */
+export const VISIBLE_ROWS = 3
+
+/** 앞의 limit 줄과 남은 개수. all 이면 전부 */
+export function capRows<T>(rows: readonly T[], all: boolean, limit = VISIBLE_ROWS): { shown: T[]; more: number } {
+  const shown = all ? rows.slice() : rows.slice(0, limit)
+  return { shown, more: rows.length - shown.length }
 }
 
 /** 생각·도구 줄 하나의 글. mono 면 고정폭(도구), state 는 도구의 끝 표시 */

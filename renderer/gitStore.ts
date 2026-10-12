@@ -1,0 +1,66 @@
+import { useEffect, useSyncExternalStore } from 'react'
+import type { GitView } from '../shared/git.ts'
+
+// Git 상태의 화면 쪽 저장소 (이슈 #290) — 오른쪽 패널의 Git 탭(변경 수·목록)과 입력 카드의 브랜치 알약이 같은 값을 본다.
+// 파일 워처는 없다: 다시 읽는 때는 ① 메인이 git:changed 를 알릴 때(화면·AI 도구의 작업 뒤) ② 턴이 끝날 때 ③ 창이 앞으로 올 때 ④ 패널을 열 때(Git.tsx).
+// 같은 폴더를 겹쳐 읽으면 마지막 요청의 답만 쓴다
+
+const views = new Map<string, GitView>()
+const asked = new Map<string, number>()
+const listeners = new Set<() => void>()
+let version = 0
+
+function notify(): void {
+  version++
+  for (const listener of listeners) listener()
+}
+
+/** 그 폴더를 다시 읽는다. 기능이 꺼졌거나(채널 없음) 실패하면 아무것도 안 바꾼다 */
+export function refreshGit(directory: string, read: (directory: string) => Promise<GitView> = (dir) => window.litecode.gitView(dir)): Promise<void> {
+  const seq = (asked.get(directory) ?? 0) + 1
+  asked.set(directory, seq)
+  return read(directory).then(
+    (view) => {
+      if (asked.get(directory) !== seq) return
+      views.set(directory, view)
+      notify()
+    },
+    () => {},
+  )
+}
+
+export function gitViewOf(directory: string | undefined): GitView | undefined {
+  return directory === undefined ? undefined : views.get(directory)
+}
+
+/** 변경 수 — 탭 이름 옆 숫자·알약의 점 */
+export function changeCount(view: GitView | undefined): number {
+  return view?.state === 'ok' ? view.staged.length + view.changed.length + view.conflicts.length : 0
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+export function useGitView(directory: string | undefined): GitView | undefined {
+  useSyncExternalStore(subscribe, () => version, () => version)
+  return gitViewOf(directory)
+}
+
+/** App 이 한 번 건다 — 기능이 켜져 있고 프로젝트를 보고 있을 때 다시 읽는 때를 잇는다 */
+export function useGitWatch(enabled: boolean, directory: string | undefined): void {
+  useEffect(() => {
+    if (!enabled || !directory) return
+    const reread = (): void => void refreshGit(directory)
+    reread()
+    const offChanged = window.litecode.onGitChanged((changed) => changed === directory && reread())
+    const offTurn = window.litecode.onTurnEnded(reread)
+    window.addEventListener('focus', reread)
+    return () => {
+      offChanged()
+      offTurn()
+      window.removeEventListener('focus', reread)
+    }
+  }, [enabled, directory])
+}

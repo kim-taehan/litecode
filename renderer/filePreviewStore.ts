@@ -11,7 +11,7 @@ export interface PanelState {
   open: boolean
   /** 연 파일들 (프로젝트 기준 정규화 경로) — 같은 파일은 한 탭 */
   tabs: string[]
-  /** 고른 파일 탭. undefined 면 Files 탭 */
+  /** 고른 파일 탭. undefined 면 Files 탭, GIT_TAB 이면 Git 탭 */
   active?: string
   /** 패널이 창을 채운다 */
   fullscreen: boolean
@@ -22,6 +22,8 @@ export interface PanelState {
   /** 줄 이동 (이슈 #51 — AI 의 open(파일) 이 줄을 줬다): 그 탭을 그 줄로 스크롤하고 강조한다. seq 는 줄을 줄 때마다 오른다 — 같은 줄을 다시 열어도 다시 간다.
    *  줄 없이 그 탭을 다시 열면 지워진다 */
   jump?: { key: string; line: number; seq: number }
+  /** Git 탭을 열며 고르라고 한 하위 탭 (이슈 #290) — seq 가 오를 때마다 그 하위 탭으로 */
+  gitSub?: { sub: 'changes' | 'log' | 'branches'; seq: number }
 }
 
 let current: PanelState | undefined
@@ -64,6 +66,15 @@ export function openFilePreview(directory: string, token: string, line?: number,
   const focus = quiet ? state.focus : state.focus + 1
   const jump = line !== undefined ? { key, line, seq: ++jumps } : state.jump?.key === key ? undefined : state.jump
   set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, quiet, jump })
+}
+
+/** Git 탭의 열쇠 (이슈 #290) — 파일 탭 열쇠(프로젝트 기준 경로)와 겹치지 않는 글자. 고정 탭이라 tabs 에는 없다 */
+export const GIT_TAB = '\0git'
+
+/** Git 탭으로 연다 — sub 를 주면 그 하위 탭(브랜치 알약은 'branches') */
+export function openGitTab(directory: string, sub?: 'changes' | 'log' | 'branches'): void {
+  const state = base(directory)
+  set({ ...state, open: true, active: GIT_TAB, focus: state.focus + 1, quiet: false, ...(sub && { gitSub: { sub, seq: ++jumps } }) })
 }
 
 /** 패널이 지금 포커스를 잡아도 되는가 — focus 가 오르거나 패널이 새로 뜰 때 묻는다. 조용히 연 것(AI)이 마지막이면 잡지 않는다 */
