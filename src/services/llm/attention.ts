@@ -2,6 +2,7 @@ import type { Context } from 'cordis'
 import path from 'node:path'
 import type { EngineConnection } from '../engine.ts'
 import { DEFAULT_MODE, modePermission, type Mode } from '../../../shared/modes.ts'
+import { GIT_WRITE_TOOLS } from '../../../shared/git.ts'
 import type { McpToolResolver, TurnScope, TurnTracker } from '../turnProgress.ts'
 import type { ToolCalls } from '../toolCalls.ts'
 import { tr } from '../../i18n.ts'
@@ -116,7 +117,7 @@ export function watchAttention(
           ? { reply: 'reject', message: decision.reason.trim() || 'Blocked before running.' }
           : decision !== 'ask' &&
               ((conn.gated(entry.permission) && modePermission(mode, entry.permission, { resources: entry.patterns, child }) === 'allow') ||
-                // 이 대화에서 [항상 허용]한 폴더 밖 패턴 (이슈 #242) — 사용자가 미리 정한 허용이지만 이 호출을 본 것은 아니라 장부에는 적지 않는다
+                // 이 대화에서 [항상 허용]한 폴더 밖·git 쓰기 패턴 (이슈 #242 + 2026-10-12) — 사용자가 미리 정한 허용이지만 이 호출을 본 것은 아니라 장부에는 적지 않는다
                 allowedAlready(host, sessionId, entry.permission, entry.patterns))
             ? { reply: 'once' }
             : undefined
@@ -206,8 +207,9 @@ export function watchAttention(
  *  **`always` 는 보내지 않는다** — 그 폴더의 모든 세션에서 더는 묻지 않게 된다 (01z 1-3).
  *  허용(once)한 도구 호출은 그 턴의 장부에 적는다 — 앱 MCP 서버가 "사용자가 앱에서 누른 허용" 만 받게 (callerOf 의 approved, 01z 1-4).
  *  target 은 허용하며 사용자가 고른 받을 대화 (이슈 #67) — 장부에만 적는다. **엔진에는 보내지 않는다**(엔진에 가는 답은 once 그대로).
- *  always(항상 허용, 이슈 #242)는 폴더 밖 접근(external_directory)에만 — 엔진에는 once 로 보내고, 성공하면 그 대화(request.turn) + 그 패턴을
- *  기억해 다음 요청은 카드 없이 once 로 답하고(watchAttention 의 judge), 이미 떠 있는 같은 패턴의 카드도 once 로 함께 푼다 */
+ *  always(항상 허용)는 폴더 밖 접근(external_directory, 이슈 #242)·git 쓰기 도구(2026-10-12)에만 — 엔진에는 once 로 보내고, 성공하면
+ *  그 대화(request.turn) + 그 권한 + 그 패턴을 기억해 다음 요청은 카드 없이 once 로 답하고(watchAttention 의 judge),
+ *  이미 떠 있는 같은 권한·패턴의 카드도 once 로 함께 푼다 */
 export async function replyAttention(host: AttentionHost, sessionId: string, requestId: string, answer: AttentionAnswer, target?: AttentionTarget): Promise<void> {
   const request = host.requests.get(requestId)
   if (!request || request.sessionId !== sessionId) throw new Error(tr('error.attentionGone'))
@@ -215,7 +217,7 @@ export async function replyAttention(host: AttentionHost, sessionId: string, req
   const valid =
     answer === 'reject' ||
     (request.kind === 'permission'
-      ? answer === 'once' || (always && request.action === ALLOW_ALWAYS_ACTION)
+      ? answer === 'once' || (always && canAlways(request.action))
       : Array.isArray(answer) && answer.length > 0 && answer.every((entry) => Array.isArray(entry) && entry.length > 0 && entry.every((label) => typeof label === 'string' && label.trim() !== '')))
   if (!valid) throw new Error(tr('error.attentionAnswer'))
   const conn = await host.ctx.engine.connection()
@@ -241,26 +243,35 @@ export async function replyAttention(host: AttentionHost, sessionId: string, req
   host.requests.delete(requestId)
   host.watchers.get(request.turn)?.answered(requestId)
   if (!always) return
-  const key = allowKey(request.resources ?? [])
+  const key = rememberKey(request.action ?? '', request.resources ?? [])
   const remembered = host.allowed.get(request.turn) ?? new Set<string>()
   remembered.add(key)
   host.allowed.set(request.turn, remembered)
-  // 이미 떠 있는 같은 대화·같은 패턴의 카드 — 하나가 실패해도 그 카드만 남는다(다시 누를 수 있다)
-  const same = [...host.requests].filter(([, other]) => other.turn === request.turn && other.kind === 'permission' && other.action === ALLOW_ALWAYS_ACTION && allowKey(other.resources ?? []) === key)
+  // 이미 떠 있는 같은 대화·같은 권한·같은 패턴의 카드 — 하나가 실패해도 그 카드만 남는다(다시 누를 수 있다)
+  const same = [...host.requests].filter(
+    ([, other]) => other.turn === request.turn && other.kind === 'permission' && other.action === request.action && rememberKey(other.action ?? '', other.resources ?? []) === key,
+  )
   await Promise.all(same.map(([id, other]) => replyAttention(host, other.sessionId, id, 'once').catch(() => {})))
 }
 
-/** 이 대화(턴의 엔진 세션)에서 [항상 허용]한 폴더 밖 접근 패턴의 요청이다 (이슈 #242) */
+/** 이 대화(턴의 엔진 세션)에서 [항상 허용]한 패턴의 요청이다 (이슈 #242 + git 쓰기 2026-10-12) */
 function allowedAlready(host: AttentionHost, turn: string, permission: string, patterns: readonly string[] | undefined): boolean {
-  return permission === ALLOW_ALWAYS_ACTION && !!host.allowed.get(turn)?.has(allowKey(patterns ?? []))
+  return canAlways(permission) && !!host.allowed.get(turn)?.has(rememberKey(permission, patterns ?? []))
 }
 
-/** [항상 허용]을 받는 권한 — 폴더 밖 접근만 (이슈 #242). 다른 권한·보내기·만들기·질문은 늘 묻는다 */
-const ALLOW_ALWAYS_ACTION = 'external_directory'
+/** [항상 허용]을 받는 권한 — 폴더 밖 접근(이슈 #242) + git 쓰기 도구(2026-10-12, 전체 권한은 아예 안 묻는다).
+ *  다른 권한·보내기·만들기·질문은 늘 묻는다 */
+const ALLOW_ALWAYS_ACTIONS: readonly string[] = ['external_directory', ...GIT_WRITE_TOOLS.map((tool) => `litecode_${tool}`)]
+const canAlways = (action: string | undefined): boolean => action !== undefined && ALLOW_ALWAYS_ACTIONS.includes(action)
 
 /** 요청 패턴의 비교 열쇠 — 패턴 목록이 같아야 같은 요청이다 */
 function allowKey(patterns: readonly string[]): string {
   return JSON.stringify([...patterns].sort())
+}
+
+/** [항상 허용] 기억 열쇠 — 같은 권한 + 같은 패턴 (2026-10-12). 권한 이름까지 넣는다 — 폴더 밖 패턴과 git 쓰기가 서로 섞이지 않게 */
+function rememberKey(action: string, patterns: readonly string[]): string {
+  return `${action}\u0000${allowKey(patterns)}`
 }
 
 /** 파일 하나를 다루는 도구의 인자면 그 파일 (절대 경로) — read·write·edit 의 `filePath` */

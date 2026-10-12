@@ -133,11 +133,11 @@ describe('탭 숫자·브랜치 알약', () => {
 
 describe('AI 의 git 쓰기 도구 승인 카드', () => {
   const card = (tool: string, input: unknown): Attention => ({ kind: 'permission', id: 'per_1', sessionId: 'ses_1', action: `litecode_${tool}`, resources: ['*'], mcp: { server: 'litecode', tool }, input: JSON.stringify(input) })
-  it('무엇을 하는지 제목, 커밋 메시지를 그대로 — 항상 허용은 없다', () => {
+  it('무엇을 하는지 제목, 커밋 메시지를 그대로 — 항상 허용은 있다 (2026-10-12, 이 대화에서 기억)', () => {
     const out = html(createElement(AttentionCard, { request: card('git_commit', { message: 'llm.ts 를 나눈다' }), onAnswer: async () => {} }))
     expect(out).toContain('AI 가 커밋하려고 합니다')
     expect(out).toContain('llm.ts 를 나눈다')
-    expect(out).not.toContain('항상 허용')
+    expect(out).toContain('>항상 허용</button>')
     expect(html(createElement(AttentionCard, { request: card('git_push', {}), onAnswer: async () => {} }))).toContain('AI 가 원격에 올리려고 합니다 (push)')
   })
 })

@@ -11,8 +11,9 @@ import { translate } from '../../shared/i18n/index.ts'
 
 vi.mock('../../renderer/settingsStore.ts', () => ({ useT: () => (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('ko', key, vars) }))
 
-// "프로젝트 폴더 밖 접근" 카드의 [항상 허용] (이슈 #242). 엔진에는 늘 once 만 간다 — 엔진의 always 는 그 폴더의 모든 대화에 걸린다(01z 1-3).
-// 앱이 기억한다: 그 대화(엔진 세션) + 그 패턴의 external_directory 요청은 카드 없이 once, 이미 떠 있는 같은 패턴 카드도 함께 푼다.
+// "프로젝트 폴더 밖 접근" 카드의 [항상 허용] (이슈 #242) + git 쓰기 도구 (2026-10-12). 엔진에는 늘 once 만 간다 —
+// 엔진의 always 는 그 폴더의 모든 대화에 걸린다(01z 1-3). 앱이 기억한다: 그 대화(엔진 세션) + 그 권한 + 그 패턴의 요청은
+// 카드 없이 once, 이미 떠 있는 같은 권한·패턴 카드도 함께 푼다. git 쓰기는 MCP 도구가 늘 patterns:["*"] 라 대화 전체다.
 // opencode 는 승인에 필요한 것만 흉내 낸 HTTP 서버다 (모양은 turnEvents.test.ts 의 가짜와 같다 — 01w 실측). 세션은 POST /session 마다 ses_1, ses_2 …
 
 const PROXY = 'http://proxy.invalid/v1'
@@ -224,7 +225,25 @@ describe('항상 허용 — 폴더 밖 접근 (이슈 #242)', () => {
     expect(replies).toEqual(['per_a {"reply":"once"}', 'per_b {"reply":"once"}', 'per_x {"reply":"once"}'])
   })
 
-  it('항상 허용은 external_directory 에만 — 다른 권한·질문에 보내면 답이 틀렸다고 던지고 엔진에 아무것도 안 간다', async () => {
+  it('git 쓰기 카드에 [항상 허용] — 같은 대화의 그 다음 git 쓰기는 카드 없이 once, 다른 대화는 카드 (2026-10-12)', async () => {
+    const llm = await start(await fakeOpencode())
+    const git = (id: string): Ask => ({ id, permission: 'litecode_git_commit', patterns: ['*'] })
+    const first = await runTurn(llm, [[git('per_g1')]], (cards) => {
+      if (cards[0]) void llm.reply(cards[0].sessionId, cards[0].id, 'always')
+    })
+    expect(first).toMatchObject({ ok: true, sessionId: 'ses_1' })
+    expect([...first.shown]).toEqual(['per_g1'])
+    // 같은 대화의 다음 턴 — 카드 없이
+    const again = await runTurn(llm, [[git('per_g2')]], () => {}, 'ses_1')
+    expect(again.ok).toBe(true)
+    expect(again.shown.size).toBe(0)
+    // 다른 대화 — 카드
+    const other = await runTurn(llm, [[git('per_g3')]], allowOnce(llm))
+    expect([...other.shown]).toEqual(['per_g3'])
+    expect(replies).toEqual(['per_g1 {"reply":"once"}', 'per_g2 {"reply":"once"}', 'per_g3 {"reply":"once"}'])
+  })
+
+  it('항상 허용은 external_directory·git 쓰기에만 — bash 같은 다른 권한에 보내면 답이 틀렸다고 던지고 엔진에 아무것도 안 간다', async () => {
     const llm = await start(await fakeOpencode())
     const errors: string[] = []
     const result = await runTurn(llm, [[{ id: 'per_d', permission: 'bash', patterns: ['ls'] }]], (cards) => {
@@ -241,7 +260,7 @@ describe('항상 허용 — 폴더 밖 접근 (이슈 #242)', () => {
   })
 })
 
-// 카드 화면 — [항상 허용] 은 external_directory 카드에만 (정적 마크업)
+// 카드 화면 — [항상 허용] 은 폴더 밖 접근·git 쓰기 카드에만 (정적 마크업)
 describe('승인 카드의 [항상 허용] 버튼 (이슈 #242)', async () => {
   const { createElement } = await import('react')
   const { renderToStaticMarkup } = await import('react-dom/server')
@@ -252,8 +271,15 @@ describe('승인 카드의 [항상 허용] 버튼 (이슈 #242)', async () => {
   it('폴더 밖 접근 카드에는 [항상 허용] 과 한 줄 설명이 있다', () => {
     const html = render(card('external_directory'))
     expect(html).toContain('>항상 허용</button>')
-    expect(html).toContain('이 대화에서 이 폴더는 다시 묻지 않습니다')
+    expect(html).toContain('이 대화에서 다시 묻지 않습니다')
     expect(html).toContain('>한 번 허용</button>')
+  })
+
+  it('git 쓰기 카드에도 [항상 허용] 가 있다 (2026-10-12)', () => {
+    for (const tool of ['git_commit', 'git_push', 'git_stage']) {
+      const html = render(card(`litecode_${tool}`, { resources: ['*'], mcp: { server: 'litecode', tool } }))
+      expect(html, tool).toContain('>항상 허용</button>')
+    }
   })
 
   it('다른 권한·MCP 도구·질문 카드에는 없다', () => {
