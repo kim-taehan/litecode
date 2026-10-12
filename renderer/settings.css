@@ -652,24 +652,26 @@
   color: var(--text-tertiary);
 }
 
-/* 묶음마다 둥근 테두리 목록 한 장, 한 줄에 기능 하나 (2026-10-07, 시안 _workspace/mock-features Main·Detail) */
+/* 기능마다 따로 둥근 카드 한 장, 두 칸 (2026-10-12, 사용자 "별개의 창으로 구분" — dsh 설정 카드처럼) */
 .feature-rows {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.feature-row {
   border: 0.5px solid var(--border-strong);
   border-radius: 20px;
   background: var(--surface-panel); /* 설정 카드 = R20 + 판과 같은 바탕 (이슈 #223) — --surface 면 다크에서 판보다 어두운 우물이 된다 */
   overflow: hidden;
 }
 
-.feature-row + .feature-row {
-  border-top: 0.5px solid var(--border);
-}
-
 .feature-row[data-expanded] {
+  grid-column: 1 / -1; /* 펼친 카드는 두 칸을 다 쓴다 */
   background: var(--fill-hover);
 }
 
