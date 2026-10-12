@@ -2,6 +2,7 @@
 
 2026-10-12 기준 코드 전체 분석 (서비스·IPC·렌더러·모바일·패키징).
 프로토콜 실측은 `opencode-protocol.md`, 기능별 착지 기록은 `status.md` — 그쪽을 먼저 읽으라.
+(같은 날 갱신: remote 분할 #298, jobs strip #295, 프로젝트 빠른 열기 #305, git 승인 흐름 #307)
 
 ## 1. 큰 그림
 
@@ -66,7 +67,7 @@ opencode(1.18.18 고정) ──▶ 사내 LLM 게이트웨이 (LiteLLM 등)   �
 | `appMcp` | `appMcp` | 앱 내장 MCP 서버 — `litecode_*` 도구 (mcp) |
 | `goal` | `goal` | 대화별 목표·자동 이어가기 (chat, sessions), `goal/changed` |
 | `notifications` | `notifications` | 턴 끝/승인 대기 알림·토스트 (settings, sessions, projects) |
-| `remote` | `remote` | 모바일 계약·인증·짝짓기·이벤트 링 (chat, sessions, projects, providers, settings) |
+| `remote` | `remote` | 모바일 계약·인증·짝짓기·이벤트 링 (chat, sessions, projects, providers, settings) — `remote/` 디렉터리로 책임별 분할(#298): service(상태·운반·이벤트 링)·routes(REST 표)·pairRequest(pairing)·chatEvents(폰 이벤트)·wire(계약 순수 함수)·types·limits |
 | `hooks` | `hooks` | 사용자 셸 훅, 메인에서 실행 (chat, sessions, llm) |
 | `voice` | `speech` | 음성 받아쓰기 (settings) |
 | `browser` | `browser` | Playwright MCP 엔진에 등록 (mcp) |
@@ -109,7 +110,7 @@ opencode(1.18.18 고정) ──▶ 사내 LLM 게이트웨이 (LiteLLM 등)   �
 - **프로토콜**: 채팅은 **레거시** `/session/*`. `POST /session?directory=` 생성 → `GET /event?directory=` **먼저** 구독 → `server.connected` 확인 → `POST /session/{id}/prompt_async?directory=` (204). 모든 호출에 `?directory=` 필수, 재구독 재생 없음(구독 우선), heartbeat 10초. 읽기 전용(모델 카탈로그·agent·pty·fs)만 신규 `/api/*`.
 - **모델/에이전트 매 턴 명시** — 안 주면 외부 provider로 샌다. sticky 모델+매 build 에이전트를 `turnFields`로 싣음.
 - **턴 끝 정의**: 이 턴 user 메시지를 **본 후의** `session.idle` (이전 idle은 버림). 끼어든 말 미달착 시 idle 보류. `session.error`는 사유 저장 후 idle 대기(없으면 `/session/status` 판정). 재시도/요약 상한 초과 시 abort, 모델 무응답 감시(`MODEL_STALL_TIMEOUT_MS`), SSE 끊김 → "중단됨"+abort.
-- **승인/질문(attention)**: 이벤트는 신호만 — `GET /permission·/question?directory=` 재읽기가 정본 → `onAttention` + `llm/attention*`. 권정본 400이면 `permission.asked` 폴백. `always`를 보내지 않음.
+- **승인/질문(attention)**: 이벤트는 신호만 — `GET /permission·/question?directory=` 재읽기가 정본 → `onAttention` + `llm/attention*`. 권정본 400이면 `permission.asked` 폴백. 카드 뜨기 **전** auto-판정(`llm/attention.ts` judge): `llm/pre-tool` serial(훅 — 막으면 reject) → 그 다음 (a) 게이트된 권한이고 모드 판정(`shared/modes.ts` `modePermission`)이 allow면 once / (b) 이 대화에서 [항상 허용]한 것(external_directory 패턴 + git 쓰기 전체)이면 once. 판정 표는 엔진 설정과 같은 표(모드×권한×자원)라 훅이 통과시킨 요청(allow)과 모드가 원래 묻는 요청(ask)을 가른다. **엔진에는 `always` 를 보내지 않는다** — 앱만 그 대화+권한(+패턴)을 기억하고(기억은 `host.allowed`, 앱 재시작 시 잊힘) 그 답을 once 로 보낸다(이슈 #242, git 쓰기 #307 — git 쓰기는 도구 상관없이 한 기억. 전체 권한 모드는 git 쓰기·폴더 밖·.env 도 안 묻고(하위 작업 제외), 보내기·만들기·브라우저 조작만 여전히 묻는다).
 - **키 프록시**: opencode env는 프로젝트 플러그인·bash에 샌다 → **진짜 키는 opencode 에 절대 두지 않는다**.
   - 메인의 127.0.0.1 HTTP 서버가 `/<providerId>/<path>` → 저장된 baseURL로 중계.
   - 나가는 Authorization에만 진짜 Bearer. opencode는 실행마다 난수 토큰(`randomBytes(24)`)만 갖는다 — 새어도 키가 아니라 "앱 도는 동안 LLM 쓰기 권한"뿐.
@@ -161,7 +162,7 @@ llm.chat({onSession}) ─▶ sessions.attach (engineSessionId 조기 연결 — 
 ### 7.2 App 구조
 
 - 라우팅 없음 — 단일 화면, `useState`로 프로젝트/대화 선택. **App이 상태 허브**(sessions[], projects[], drafts, 탭); 자식은 "그리기만".
-- 트리는 `App.tsx`: `Rail`(접힘) + `Sidebar` + `main{ConversationView, Composer, ShellDrawer}` + `FilePreviewPanel`(별도 ErrorBoundary) + `SettingsModal`/`RemotePairPrompt`/Toasts.
+- 트리는 `App.tsx`: `Rail`(접힘) + `Sidebar` + `main{ConversationView, Composer, ShellDrawer}` + `FilePreviewPanel`(별도 ErrorBoundary) + `SettingsModal`/`RemotePairPrompt`/Toasts + 루트의 `ProjectQuickOpen`.
 - 초기 로딩: `listConversations` → `chatSnapshot`(메인 소유의 live 턴 복원) → `listProjects` → 첫 프로젝트 자동 오픈.
 
 ### 7.3 상태 관리
@@ -174,9 +175,9 @@ llm.chat({onSession}) ─▶ sessions.attach (engineSessionId 조기 연결 — 
 ### 7.4 뷰 패턴 규칙
 
 - `.tsx` = JSX 렌더링+핸들러 / `*View.ts` = **순수 로직**(React·시간·IPC 금지) / 컴포넌트별 `.css`(전역 `styles.css` 별도).
-- 채팅: Markdown은 mdast→React (innerHTML 금지, 스트리밍 시 증분 파서); diff=`diffRows`+DiffCard; 툴 콜=접이식; 승인 카드는 주황 띠(Enter=허용/Esc=거절); 질문 카드는 보기+직수입; 모드 칩(Shift+Tab: plan→build→ask); 작업/답 분할은 `splitTurn`.
+- 채팅: Markdown은 mdast→React (innerHTML 금지, 스트리밍 시 증분 파서); diff=`diffRows`+DiffCard; 툴 콜=접이식; 승인 카드는 주황 띠(Enter=한 번 허용/Esc=거절, [항상 허용]은 폴더 밖·git 쓰기 카드에만); 질문 카드는 보기+직수입; 모드 칩(Shift+Tab: plan→build→ask, full은 메뉴+확인); 작업/답 분할은 `splitTurn`; 진행 중 작업은 inputs 위 **jobs strip**(`Jobs.tsx`, #295).
 - 입력: `+` 메뉴 트리거(`@`/`/`/`!`)는 `useTriggers`→메인 `queryTrigger` — 렌더러는 어떤 문자인지 모름. 첨부·음성(16kHz PCM)·대기열(QueueDock).
-- 사이드바: 접힘/리사이즈, 진행중만 보기, 찾기, 고정/변경/삭제, 프로젝트 전환+즐겨찾기.
+- 사이드바: 접힘/리사이즈, 진행중만 보기, 찾기, 고정/변경/삭제. **프로젝트 전환 = 빠른 열기**(#305): `ProjectQuickOpen` 상단 중앙 패널, ⌘K/Ctrl+K(또는 전환 버튼)로 열고 타이핑 즉시 필터, ↑↓·Enter·Esc·Home/End, 즐겨찾기 ★ 먼저 — 옛 앵커형 popover 제거.
 - 설정 모달: 기본/모델/기능(4그룹: screen·ai·automation·devices)/모바일.
 - 오른쪽 패널: Files/파일/Git 탭(filePreviewStore), PDF는 OS 앱으로.
 
@@ -223,5 +224,5 @@ llm.chat({onSession}) ─▶ sessions.attach (engineSessionId 조기 연결 — 
 6. 프로젝트 폴더(와 상위)의 opencode 플러그인 파일은 엔진 안에서 실행된다 → `engineFolder` 문에서 거부.
 7. 설정 변경은 엔진 재시작으로만 적용 + 재시작 시 도는 턴이 끊김.
 8. 레거시 세션 경로는 `?directory=` 필수, `server.connected` 확인 후 전송, 구독 재생 없음.
-9. `GET /permission` 정본은 400 가능 → `permission.asked` 이벤트 폴백. `always` 승인 금지.
+9. `GET /permission` 정본은 400 가능 → `permission.asked` 이벤트 폴백. **엔진의 `always` 는 보내지 않는다**(그 폴더 모든 세션에 걸림) — 카드의 [항상 허용]은 앱이 그 대화만 기억하고 once 로 답하는 것.
 10. 렌더러는 `src/services` 런타임 import 불가 — `window.litecode` 브리지 + type-only 재수출만.
