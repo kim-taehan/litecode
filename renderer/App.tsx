@@ -33,7 +33,7 @@ import { matchesTitle, pinnedFirst } from './sessionListView.ts'
 import { useHoverCard } from './hoverCard.tsx'
 import { Rail } from './Rail.tsx'
 import { MissingConversations } from './MissingConversations.tsx'
-import { ProjectPopover } from './ProjectPopover.tsx'
+import { ProjectQuickOpen } from './ProjectQuickOpen.tsx'
 import { canWrite, fromConversation, isBlank, newSession, toConversation, withBlankFor, withSessionFor, type Session } from './session.ts'
 import { useSidebarLayout } from './useSidebarLayout.ts'
 import { useLastModel } from './useLastModel.ts'
@@ -401,11 +401,31 @@ export function App() {
     else closeSwitcher(true)
   }
 
-  /** 전환 버튼(사이드바 카드·접힌 줄의 배지) — 고를 최근 프로젝트가 없으면 한 줄짜리 팝오버 대신 바로 폴더 열기 (dsh ui-workspace) */
+  /** 전환 버튼(사이드바 카드·접힌 줄의 배지) — 열려 있으면 닫고, 아니면 빠른 열기 패널을 연다. 고를 최근 프로젝트가 없으면 바로 폴더 열기 (이슈 #305) */
   function toggleSwitcher(): void {
-    if (projects?.length === 0) void openFolder()
-    else setSwitching((open) => !open)
+    if (switching) closeSwitcher(false)
+    else if (projects?.length === 0) void openFolder()
+    else setSwitching(true)
   }
+
+  /** ⌘K / Ctrl+K (이슈 #305) — 열려 있으면 닫고, 아니면 연다. 핸들러는 처음 한 번만 끼우고 그 안은 래퍼가 최신이라
+   *  projects·switching 값이 오래되지 않는다 */
+  const switchingRef = useRef(switching)
+  switchingRef.current = switching
+  const toggleSwitcherRef = useRef(toggleSwitcher)
+  toggleSwitcherRef.current = toggleSwitcher
+  const closeSwitcherRef = useRef(closeSwitcher)
+  closeSwitcherRef.current = closeSwitcher
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
+      event.preventDefault()
+      if (switchingRef.current) closeSwitcherRef.current(false)
+      else toggleSwitcherRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   /** 새 대화 — 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace). 이미 있으면 새로 만들지 않고 그리로 간다 */
   function startNewChat(): void {
@@ -556,9 +576,9 @@ export function App() {
   }
 
 
-  // 프로젝트 전환 팝오버 — 펼친 사이드바에선 전환 카드 아래, 접힌 줄에선 배지 옆에 뜬다 (한 번에 한 곳)
-  const popover = switching && (
-    <ProjectPopover
+  // 프로젝트 빠른 열기 (이슈 #305) — 상단 중앙에 뜬다 (⌘K 또는 전환 버튼)
+  const quickOpen = switching && (
+    <ProjectQuickOpen
       projects={projects ?? []}
       current={project?.path}
       statusOf={(dir) => projectStatus(notices.state, dir)}
@@ -571,6 +591,7 @@ export function App() {
       onRemove={remove}
       onRename={async (target, name) => setProjects(await window.litecode.renameProject(target.path, name))}
       onClose={closeSwitcher}
+      switchButton={switchRef}
     />
   )
 
@@ -594,9 +615,7 @@ export function App() {
             setRunningOnly(true)
           }}
           onSettings={() => setSettingsOpen(true)}
-        >
-          {popover}
-        </Rail>
+        />
       )}
       <Sidebar
         t={t}
@@ -607,7 +626,6 @@ export function App() {
         picking={picking}
         switchRef={switchRef}
         settingsRef={settingsRef}
-        popover={popover}
         notices={notices}
         sessions={sessions}
         running={running}
@@ -723,6 +741,7 @@ export function App() {
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
       <RemotePairPrompt on={features.has('remote')} />
+      {quickOpen}
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
     </div>
   )
