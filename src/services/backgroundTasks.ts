@@ -1,7 +1,6 @@
 import { APP_MCP_NAME } from './mcp.ts'
 import type { ChatOptions, ChatResult } from './llm.ts'
 import { tr } from '../i18n.ts'
-import { upsertItem } from '../../shared/chatReducer.ts'
 import { GOAL_GET_TOOL, GOAL_UPDATE_TOOL } from '../../shared/goal.ts'
 import { DEFAULT_MODE, type Mode } from '../../shared/modes.ts'
 import {
@@ -9,6 +8,7 @@ import {
   TASK_STALL_TIMEOUT_MS,
   TASK_START_TOOL,
   TASK_STATUS_TOOL,
+  addTaskItem,
   taskActivity,
   taskCap,
   taskPrompt,
@@ -40,7 +40,8 @@ import type { Conversation, Subtask, TurnItem } from '../../shared/contract.ts'
 //   작업 줄에 표시(quietSince)하고 메인에게 출처 'task' 의 알림 턴을 **한 번** 넣는다 — 판단(기다리기·중지)은 메인·사람이. 활동이 다시 오면 표시를 풀고
 //   다시 무장한다. 상태는 litecode_task_status 로 본다(status)
 // - 앱을 끄면 메모리째 사라진다 (실행·대기 작업은 종료 확인의 수에 든다 — ctx.chat.running)
-// 화면은 진행 줄의 하위 작업 줄(Subtask)과 같은 모양으로 받아 작업 줄(JobsDock)에 그린다
+// 화면은 진행 줄의 하위 작업 줄(Subtask)과 같은 모양으로 받아 작업 줄(JobsDock)에 그린다. 전체 기록은 오른쪽 패널의 작업 탭(TaskTab, #325) —
+// 그래서 view 에 지시문(prompt)·마지막 활동 시각을 싣고, 진행 줄은 상한을 걸어 전문으로 쌓는다(addTaskItem)
 
 /** 대화마다 남겨 둘 끝난 작업 수 (작업 줄의 "끝난 작업") */
 const FINISHED_KEEP = 10
@@ -117,7 +118,7 @@ export class BackgroundTasks {
       prompt: input.prompt,
       conversation,
       mode,
-      view: { kind: 'subtask', id, agent: input.agent, description: `#${number} ${input.description}`, status: 'queued', items: [] },
+      view: { kind: 'subtask', id, agent: input.agent, description: `#${number} ${input.description}`, status: 'queued', prompt: input.prompt, items: [] },
       stop: new AbortController(),
       dropped: false,
     }
@@ -184,6 +185,7 @@ export class BackgroundTasks {
   private begin(task: Task): void {
     task.view = { ...task.view, status: 'running', startedAt: Date.now() }
     task.lastActivityAt = task.view.startedAt
+    task.view.lastActivityAt = task.lastActivityAt
     this.watchQuiet(task)
     void this.run(task)
   }
@@ -237,7 +239,9 @@ export class BackgroundTasks {
         onProgress: (item: TurnItem) => {
           if (task.view.status !== 'running') return
           this.touch(task, item)
-          task.view = { ...task.view, items: upsertItem(task.view.items, item) }
+          // 작업 탭(#325)이 전문을 그린다 — 상한(shared/tasks.ts TASK_ITEMS_MAX 등)을 걸어 쌓는다
+          const { items, omitted } = addTaskItem(task.view.items, task.view.omitted ?? 0, item)
+          task.view = { ...task.view, items, ...(omitted > 0 && { omitted }) }
           this.emit(task.cid)
         },
         mode,
@@ -278,7 +282,7 @@ export class BackgroundTasks {
   private touch(task: Task, item: TurnItem): void {
     task.lastActivityAt = Date.now()
     task.lastActivity = taskActivity(item)
-    task.view = awake(task.view)
+    task.view = { ...awake(task.view), lastActivityAt: task.lastActivityAt }
     this.watchQuiet(task)
   }
 

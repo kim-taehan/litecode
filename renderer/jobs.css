@@ -185,6 +185,36 @@ button.jobs__cells:focus-visible {
   transform: rotate(180deg);
 }
 
+/* 백그라운드 작업 줄의 › — 작업 탭(전체 기록)을 연다 (#325) */
+.jobs__open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.jobs__open:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.jobs__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 훑어보기 한 줄 — 길면 말줄임 (전문은 탭) */
+.jobs__peek {
+  gap: 0;
+}
+
 /* "+N개 더 보기" · "접기" — 점 칸 다음(8 + 14 + 8)에서 시작 */
 .jobs__more {
   align-self: flex-start;

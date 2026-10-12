@@ -6,6 +6,7 @@ import {
   GIT_TAB,
   closeFilePreview,
   closeTab,
+  isTaskTab,
   isTerminalTab,
   openFilePreview,
   panelTakesFocus,
@@ -13,6 +14,7 @@ import {
   openTerminalTab,
   revealPanel,
   selectTab,
+  taskIdOf,
   terminalIdOf,
   toggleFullscreen,
   usePanelState,
@@ -26,6 +28,9 @@ import { reason } from './ipcError.ts'
 import { lineJump } from './lineJump.ts'
 import { useT } from './settingsStore.ts'
 import { TabAddMenu } from './TabAddMenu.tsx'
+import { TaskTab } from './TaskTab.tsx'
+import { taskTitle } from './taskTabView.ts'
+import { findTask, useTaskMap } from './tasksStore.ts'
 import { TerminalView } from './TerminalView.tsx'
 import './filePreview.css'
 
@@ -105,6 +110,8 @@ function Panel({ state }: { state: PanelState }) {
   // 파일 탭은 한 번 본 뒤부터 계속 마운트 — 다른 탭에 갔다 와도 펼친 폴더·스크롤이 그대로 (dsh keepMounted, 안 본 탭은 미리 안 그린다)
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
+  // 작업 탭 (이슈 #325) — 이름(작업 N · 설명)은 작업 목록 저장소에서. 기능 묶음과 무관하다 (작업이 있는 대화에서만 열린다)
+  const taskMap = useTaskMap()
 
   // 열 때마다(칩·버튼) 패널이 포커스를 잡는다 — Esc 로 닫고, 닫으면 누른 자리(칩)로 돌아간다.
   // AI 가 연 것(open(파일))은 잡지 않는다 — 닫혀 있던 패널이 새로 뜰 때도 (치던 입력창의 글이 끊기지 않게)
@@ -202,6 +209,41 @@ function Panel({ state }: { state: PanelState }) {
             </div>
           )}
           {tabs.map((key) => {
+            const taskId = taskIdOf(key)
+            if (taskId !== undefined) {
+              const { number, description } = taskTitle(taskId, findTask(taskMap, taskId))
+              const name = description ? t('taskTab.tabNamed', { number, description }) : t('taskTab.tab', { number })
+              return (
+                <div
+                  key={key}
+                  role="tab"
+                  tabIndex={0}
+                  className="file-preview__tab file-preview__tab--task"
+                  aria-selected={active === key}
+                  title={name}
+                  aria-label={name}
+                  data-task={taskId}
+                  onClick={() => selectTab(key)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
+                  onAuxClick={(event) => event.button === 1 && closeTab(key)}
+                >
+                  <TaskIcon className="file-preview__tab-icon" />
+                  <span className="file-preview__tab-title">{name}</span>
+                  <button
+                    type="button"
+                    className="file-preview__tab-close"
+                    aria-label={t('filePreview.closeTab', { name })}
+                    title={t('filePreview.closeTab', { name })}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      closeTab(key)
+                    }}
+                  >
+                    <CrossIcon size={12} />
+                  </button>
+                </div>
+              )
+            }
             const terminalId = terminalIdOf(key)
             if (terminalId !== undefined) {
               const name = t('terminal.tab', { id: terminalId })
@@ -301,7 +343,8 @@ function Panel({ state }: { state: PanelState }) {
       {active !== undefined && isTerminalTab(active) && (
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
       )}
-      {active !== undefined && !isTerminalTab(active) && active !== GIT_TAB && (
+      {active !== undefined && isTaskTab(active) && <TaskTab key={active} taskId={taskIdOf(active)!} directory={directory} />}
+      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && active !== GIT_TAB && (
         <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />
       )}
     </aside>
@@ -724,6 +767,18 @@ function TerminalIcon({ className = 'file-preview__icon', size = 14 }: { classNa
     <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 4.5L6.5 8L3 11.5" />
       <path d="M8.5 12H13" />
+    </svg>
+  )
+}
+
+/** 작업 탭 — 목록 그림 (점 셋 + 줄) */
+function TaskIcon({ className = 'file-preview__icon' }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
+      <circle cx="3.5" cy="4.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="8" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="11.5" r="0.9" fill="currentColor" stroke="none" />
+      <path d="M6.5 4.5H13M6.5 8H13M6.5 11.5H11" />
     </svg>
   )
 }
