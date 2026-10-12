@@ -652,11 +652,10 @@
   color: var(--text-tertiary);
 }
 
-/* 기능마다 따로 둥근 카드 한 장, 두 칸 (2026-10-12, 사용자 "별개의 창으로 구분" — dsh 설정 카드처럼) */
+/* 기능마다 따로 둥근 카드 한 장 (2026-10-12, 사용자 "별개의 창으로 구분" — dsh 설정 카드처럼) */
 .feature-rows {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   margin: 0;
   padding: 0;
@@ -671,7 +670,6 @@
 }
 
 .feature-row[data-expanded] {
-  grid-column: 1 / -1; /* 펼친 카드는 두 칸을 다 쓴다 */
   background: var(--fill-hover);
 }
 
