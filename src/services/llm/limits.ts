@@ -33,3 +33,7 @@ export const STREAM_IDLE_TIMEOUT_MS = 30_000
  *  않는 것으로 보고 멈추고(abort) 실패로 끝낸다. server.heartbeat(10초, sessionID 없음)는 진행이 아니다(01w). 도구가 running 인 동안은 세지 않는다
  *  (긴 bash·승인 대기 — 묻는 순간 그 도구는 이미 running 이다, PRE_TOOL_WAIT_MS) */
 export const MODEL_STALL_TIMEOUT_MS = 120_000
+/** 모델이 도구 인자를 만드는 중(도구 파트 pending)의 무응답 한도 (#321) — 실측 2026-10-12(1.18.18 + 가짜 LLM): 인자를 스트리밍하는 동안 /event 에는
+ *  시작 때 `pending`(input 비어 있음) 한 번뿐이고 다 받을 때까지 아무것도 없다. 큰 문서를 write 로 한 번에 쓰면 120초를 넘겨 멀쩡한 턴이 잘렸다
+ *  (실사용: 300~400줄 문서 작업 3개가 모두 write pending 에서 끝남). 이 동안은 더 길게 기다린다 — 게이트웨이 무응답은 여전히 이 한도에서 잡힌다 */
+export const TOOL_INPUT_STALL_TIMEOUT_MS = 600_000

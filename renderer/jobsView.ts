@@ -18,7 +18,8 @@ export interface JobList {
  *  ended: 턴이 이미 끝났다(입력 카드 위 줄이 새 턴 전까지 끝난 작업을 보인다, 이슈 #295) — 남은 준비·진행 중은 "중단됨" 으로 끝난 것에 */
 export function jobList(items: readonly TurnItem[], ended = false): JobList {
   const subtasks = items.filter((item): item is Subtask => item.kind === 'subtask')
-  const live = (item: Subtask) => item.status === 'running' || item.status === 'preparing'
+  // queued: 차례를 기다리는 백그라운드 작업 (#321) — 도는 것에 든다
+  const live = (item: Subtask) => item.status === 'running' || item.status === 'preparing' || item.status === 'queued'
   if (ended) return { running: [], finished: subtasks.map((item) => (live(item) ? { ...item, status: 'stopped' as const } : item)) }
   return { running: subtasks.filter(live), finished: subtasks.filter((item) => !live(item)) }
 }

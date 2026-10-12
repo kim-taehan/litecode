@@ -2,9 +2,11 @@ import { Context, Service } from 'cordis'
 import './llm.ts'
 import './sessions.ts'
 import './providers.ts'
+import './settings.ts' // 'settings/changed' 선언 — 설정 서비스는 inject 하지 않고 있으면 읽는다 (동시 실행 작업 수, #321)
 import type { ChatImage, ChatResult, Interjection } from './llm.ts'
 import { outgoing } from './attachments.ts'
 import { SendQueues } from './sendQueue.ts'
+import { runningTaskLimit } from '../../shared/tasks.ts'
 import { BackgroundTasks, type TaskInput } from './backgroundTasks.ts'
 import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
@@ -129,7 +131,10 @@ export class ChatService extends Service {
       reject: (sessionId, requestId) => this.ctx.llm.reply(sessionId, requestId, 'reject'),
       report: (cid, send) => this.send(cid, send),
       changed: (cid, tasks) => this.ctx.emit('chat/tasks-changed', cid, tasks),
+      limit: () => runningTaskLimit(this.ctx.get('settings')?.get().maxRunningTasks),
     })
+    // 동시 실행 작업 수를 바꾸면 대기 중인 작업이 새 수에 맞춰 시작한다 (#321)
+    ctx.on('settings/changed', () => this.tasks.pumpAll())
     ctx.effect(() => this.queues.subscribe((cid) => void ctx.emit('chat/queue-changed', this.queueOf(cid))))
     // 지워진 대화의 대기열은 같이 사라진다 (다른 대화가 보내 둔 지시 포함). 도는 턴도 멈춘다 — 답을 실을 대화가 없다
     ctx.on('sessions/removed', (ids) =>
@@ -256,19 +261,19 @@ export class ChatService extends Service {
 
   /** 지금 도는 턴 수 (대화마다 하나) + 도는 백그라운드 작업 수 — 앱을 끝내면 중단될 것들 (종료 확인 ctx.quit, 이슈 #92) */
   running(): number {
-    return this.turns.size + this.tasks.running()
+    return this.turns.size + this.tasks.live()
   }
 
-  /** 백그라운드 작업을 띄운다 (이슈 #319, 앱 MCP 의 task_start) — 번호를 곧바로 준다. 저장 안 된 대화·모델 없음·상한·매번 묻기의 general 은 던진다 */
-  async startTask(cid: string, input: TaskInput): Promise<{ number: number; id: string }> {
+  /** 백그라운드 작업을 띄운다 (이슈 #319, 앱 MCP 의 task_start) — 번호를 곧바로 준다(실행 자리가 없으면 대기 — queued, #321). 저장 안 된 대화·모델 없음·상한·매번 묻기의 general 은 던진다 */
+  async startTask(cid: string, input: TaskInput): Promise<{ number: number; id: string; queued: boolean; limit: number }> {
     const conversation = (await this.ctx.sessions.list()).find((entry) => entry.id === cid)
     if (!conversation) throw new Error('Unknown conversation.')
     return this.tasks.start(conversation, input)
   }
 
-  /** 그 대화에서 도는 백그라운드 작업 수 — 목표는 이것이 0 일 때만 다음 라운드를 보낸다 */
+  /** 그 대화에서 끝나지 않은 백그라운드 작업 수(실행 + 대기) — 목표는 이것이 0 일 때만 다음 라운드를 보낸다 */
   tasksRunning(cid: string): number {
-    return this.tasks.running(cid)
+    return this.tasks.live(cid)
   }
 
   /** 그 엔진 세션이 백그라운드 작업의 것인가 — 작업은 작업 도구를 못 부른다 */

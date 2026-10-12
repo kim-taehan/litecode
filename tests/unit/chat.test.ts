@@ -5,10 +5,11 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ChatService } from '../../src/services/chat.ts'
 import { SessionsService } from '../../src/services/sessions.ts'
+import { SettingsService } from '../../src/services/settings.ts'
 import type { ChatImage, ChatOptions, ChatResult } from '../../src/services/llm.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import type { Attention, AttentionAnswer, Subtask, TurnItem, TurnUsage } from '../../shared/contract.ts'
-import { TASK_START_TOOL, TASKS_RUNNING_MAX } from '../../shared/tasks.ts'
+import { MAX_RUNNING_TASKS, MAX_TASKS, TASK_START_TOOL } from '../../shared/tasks.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
 // ctx.chat — 대화별 턴 소유 (이슈 #52). 원래 화면(App.tsx send·useSendQueue)이 하던 규칙을 그대로 지킨다: 턴 중 보내기는 대기열,
@@ -1015,8 +1016,8 @@ describe('ChatService — 백그라운드 하위 작업 (이슈 #319)', () => {
 
   it('띄우면 번호를 곧바로 준다 — 따로 만든 세션(sessionId 없음)에서 explore 는 계획 모드로, 작업·목표 도구를 숨겨 돈다', async () => {
     const { chat, turn, tasks } = await withConversation()
-    expect(await chat.startTask('c1', explore)).toEqual({ number: 1, id: 'bgtask:c1:1' })
-    expect(await chat.startTask('c1', { ...explore, agent: 'general' })).toEqual({ number: 2, id: 'bgtask:c1:2' })
+    expect(await chat.startTask('c1', explore)).toEqual({ number: 1, id: 'bgtask:c1:1', queued: false, limit: 2 })
+    expect(await chat.startTask('c1', { ...explore, agent: 'general' })).toEqual({ number: 2, id: 'bgtask:c1:2', queued: false, limit: 2 })
     const first = await turn(2)
     expect(first).toMatchObject({ sessionId: undefined, mode: 'plan', directory: '/work/a', providerId: 'gw', modelId: 'm1' })
     expect(first.prompt).toContain('Task: 파일 조사')
@@ -1109,7 +1110,7 @@ describe('ChatService — 백그라운드 하위 작업 (이슈 #319)', () => {
     const asking = await withConversation('ask')
     await expect(asking.chat.startTask('c1', { ...explore, agent: 'general' })).rejects.toThrow(/ask every time/)
     expect(await asking.chat.startTask('c1', explore)).toMatchObject({ number: 1 }) // explore 는 된다
-    for (let n = 2; n <= TASKS_RUNNING_MAX; n++) await asking.chat.startTask('c1', explore)
+    for (let n = 2; n <= MAX_TASKS; n++) await asking.chat.startTask('c1', explore) // 실행 + 대기 합계
     await expect(asking.chat.startTask('c1', explore)).rejects.toThrow(/Too many background tasks/)
     await expect(asking.chat.startTask('nope', explore)).rejects.toThrow(/Unknown conversation/)
   })
@@ -1123,5 +1124,107 @@ describe('ChatService — 백그라운드 하위 작업 (이슈 #319)', () => {
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(llm.calls).toHaveLength(2)
     expect(tasks.at(-1)).toEqual(['c1', []])
+  })
+})
+
+// 대화마다 동시에 실행되는 작업은 2개 (이슈 #321 — 단일 게이트웨이가 동시 요청을 줄 세워 4개가 모두 120초 무응답으로 실패했다). 나머지는 대기로 줄 서고
+// 앞이 끝나면 시작한다. 대기 중엔 엔진에 아무것도 안 보낸다(stall 타이머 없음)
+describe('ChatService — 백그라운드 작업 대기열 (이슈 #321)', () => {
+  const job = (description: string) => ({ agent: 'explore' as const, description, prompt: `do ${description}` })
+
+  async function withConversation() {
+    const harness = await start()
+    await harness.chat.send('c1', input('첫 턴'))
+    ;(await harness.turn(1)).finish()
+    await harness.ended(1)
+    return harness
+  }
+  const statuses = (chat: ChatService) => chat.taskSnapshot()['c1']!.map((task) => task.status)
+
+  it(`${MAX_RUNNING_TASKS + 1}개를 띄우면 ${MAX_RUNNING_TASKS}개만 실행하고 나머지는 대기 — 엔진에 안 보낸다. 하나가 끝나면 다음 것이 시작한다`, async () => {
+    expect(MAX_RUNNING_TASKS).toBe(2)
+    const { chat, llm, turn } = await withConversation()
+    expect(await chat.startTask('c1', job('a'))).toMatchObject({ number: 1, queued: false })
+    expect(await chat.startTask('c1', job('b'))).toMatchObject({ number: 2, queued: false })
+    expect(await chat.startTask('c1', job('c'))).toMatchObject({ number: 3, queued: true })
+    const a = await turn(2)
+    await turn(3)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(llm.calls).toHaveLength(3) // c 는 아직 엔진에 안 갔다
+    expect(statuses(chat)).toEqual(['running', 'running', 'queued'])
+    expect(chat.taskSnapshot()['c1']![2]!.startedAt).toBeUndefined()
+    expect(chat.tasksRunning('c1')).toBe(3) // 목표·종료 확인은 대기도 센다
+
+    a.finish({ text: 'a done' })
+    await until(() => llm.calls.some((call) => call.prompt.includes('do c')))
+    expect(statuses(chat)).toEqual(['done', 'running', 'running'])
+    expect(chat.taskSnapshot()['c1']![2]!.startedAt).toBeTypeOf('number')
+    await until(() => llm.calls.some((call) => call.prompt.includes('<task-result number="1"')))
+  })
+
+  it('대기 중인 작업도 중지할 수 있다 — 엔진 없이 곧바로 "중단됨" 결과 턴, 실행 중인 작업은 그대로', async () => {
+    const { chat, llm, turn, of } = await withConversation()
+    for (const name of ['a', 'b', 'c']) await chat.startTask('c1', job(name))
+    await turn(3)
+    expect(await chat.stopSubtask('bgtask:c1:3')).toBe(true)
+    const report = await turn(4)
+    expect(report.prompt).toContain('<task-result number="3" agent="explore" status="stopped">')
+    expect(report.prompt).toContain('The user stopped this task')
+    expect(of('turn.started').at(-1)!.message.text).toBe(tr('task.report.stopped', { number: 3, description: 'c' }))
+    expect(statuses(chat)).toEqual(['running', 'running', 'stopped'])
+    expect(llm.calls.some((call) => call.prompt.includes('do c'))).toBe(false)
+  })
+
+  it(`상한 ${MAX_TASKS} 는 실행 + 대기 합계`, async () => {
+    const { chat } = await withConversation()
+    for (let n = 1; n <= MAX_TASKS; n++) await chat.startTask('c1', job(`t${n}`))
+    expect(statuses(chat)).toEqual(['running', 'running', 'queued', 'queued'])
+    await expect(chat.startTask('c1', job('more'))).rejects.toThrow(/at most 4 running or waiting/)
+  })
+
+  it('대화를 지우면 대기 중인 작업도 정리된다 — 시작하지 않고 결과도 안 넣는다', async () => {
+    const { chat, sessions, llm, turn, ctx } = await withConversation()
+    const changed: [string, Subtask[]][] = []
+    ctx.on('chat/tasks-changed', (cid, list) => void changed.push([cid, list]))
+    for (const name of ['a', 'b', 'c']) await chat.startTask('c1', job(name))
+    await turn(3)
+    await sessions.remove('c1')
+    await until(() => chat.tasksRunning('c1') === 0)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(llm.calls).toHaveLength(3)
+    expect(changed.at(-1)).toEqual(['c1', []])
+    expect(chat.running()).toBe(0)
+  })
+})
+
+// 동시 실행 수는 설정(settings.maxRunningTasks)을 따른다 — 바꾸면 도는 작업은 그대로, 대기 중인 것은 새 수에 맞춰 시작한다 (#321)
+describe('ChatService — 동시 실행 작업 수 설정 (이슈 #321)', () => {
+  const job = (description: string) => ({ agent: 'explore' as const, description, prompt: `do ${description}` })
+
+  it('설정 1 이면 하나씩 — 3 으로 늘리면 대기 중인 것이 곧바로 시작하고, 다시 1 로 줄여도 도는 것은 안 멈춘다', async () => {
+    const harness = await start()
+    harness.ctx.plugin(SettingsService)
+    const settings = await new Promise<SettingsService>((resolve) => harness.ctx.inject(['settings'], (ready) => resolve(ready.settings)))
+    settings.set({ maxRunningTasks: 1 })
+    await harness.chat.send('c1', input('첫 턴'))
+    ;(await harness.turn(1)).finish()
+    await harness.ended(1)
+
+    const { chat, llm, turn } = harness
+    expect(await chat.startTask('c1', job('a'))).toMatchObject({ queued: false, limit: 1 })
+    expect(await chat.startTask('c1', job('b'))).toMatchObject({ queued: true, limit: 1 })
+    expect(await chat.startTask('c1', job('c'))).toMatchObject({ queued: true })
+    await turn(2)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(llm.calls).toHaveLength(2)
+
+    settings.set({ maxRunningTasks: 3 })
+    await until(() => llm.calls.length === 4)
+    expect(chat.taskSnapshot()['c1']!.map((task) => task.status)).toEqual(['running', 'running', 'running'])
+
+    settings.set({ maxRunningTasks: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(chat.taskSnapshot()['c1']!.map((task) => task.status)).toEqual(['running', 'running', 'running'])
+    expect(await chat.startTask('c1', job('d'))).toMatchObject({ queued: true, limit: 1 })
   })
 })

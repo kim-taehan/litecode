@@ -74,6 +74,7 @@ button.jobs__cells:focus-visible {
 }
 
 .jobs__row[data-status='preparing'] .jobs__dot { background: transparent; }
+.jobs__row[data-status='queued'] .jobs__dot { border-color: var(--text-caption); background: transparent; }
 .jobs__row[data-status='done'] .jobs__dot { border-color: var(--ok); background: var(--ok); }
 .jobs__row[data-status='error'] .jobs__dot { border-color: var(--danger); background: var(--danger); }
 .jobs__row[data-status='stopped'] .jobs__dot { border-color: var(--text-caption); background: var(--text-caption); }

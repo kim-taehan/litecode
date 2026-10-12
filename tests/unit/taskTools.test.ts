@@ -143,6 +143,7 @@ describe('shared/tasks — 작업 글', () => {
   it('작업 세션의 첫 글: 사람에게 못 묻는다는 것·설명·지시', () => {
     const text = taskPrompt('find config', 'Where?')
     expect(text).toMatch(/nobody can answer questions or approve actions/)
+    expect(text).toMatch(/Write long files in several smaller steps/) // #321 — 큰 write 인자는 이벤트 없이 오래 걸린다
     expect(text).toContain('Task: find config')
     expect(text.endsWith('Where?')).toBe(true)
   })

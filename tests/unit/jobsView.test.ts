@@ -124,3 +124,13 @@ describe('capRows — 3줄까지만, 나머지는 "+N개 더 보기" (이슈 #29
     expect(capRows([], false)).toEqual({ shown: [], more: 0 })
   })
 })
+
+describe('jobList — 차례를 기다리는 백그라운드 작업 (queued, 이슈 #321)', () => {
+  it('대기 중인 작업은 도는 것에 든다 — 시작 시각이 없어 대표 작업은 실행 중인 것', () => {
+    const job = (id: string, status: Subtask['status'], startedAt?: number): Subtask => ({ kind: 'subtask', id, agent: 'explore', description: id, status, items: [], ...(startedAt !== undefined && { startedAt }) })
+    const { running, finished } = jobList([job('a', 'running', 10), job('b', 'queued'), job('c', 'done', 5)])
+    expect(running.map((item) => item.id)).toEqual(['a', 'b'])
+    expect(finished.map((item) => item.id)).toEqual(['c'])
+    expect(leadJob(running)?.id).toBe('a')
+  })
+})

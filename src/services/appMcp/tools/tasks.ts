@@ -29,6 +29,8 @@ export function TaskTools(ctx: Context): void {
     description:
       'Start a sub-task that runs in the background in its own session, and return at once with its task number. It does not block: keep working on something else or end your turn — ' +
       'the result arrives later as a new message in this conversation. Do not wait, sleep or poll for it, and do not duplicate its work. ' +
+      'Only a few tasks run at once in a conversation (2 by default, the user can change it); further ones wait in a queue and start when one ends — ' +
+      'so you may start several at once. ' +
       'agent "explore": read-only research (search and read files). agent "general": multi-step work with this conversation\'s permissions. ' +
       'The sub-task cannot ask the user anything (actions that need approval are refused), cannot see this conversation, and cannot start tasks — make the prompt self-contained.',
     inputSchema: {
@@ -50,9 +52,12 @@ export function TaskTools(ctx: Context): void {
       if (found.child || ctx.chat.isTaskSession(found.sessionId)) throw new Error('A background task cannot start other tasks. Do the work yourself.')
       const conversation = (await ctx.sessions.list()).find((entry) => entry.engineSessionId === found.sessionId)
       if (!conversation || (await realDirectory(conversation.project)) !== directory) throw new Error(NO_CALLER)
-      const { number } = await ctx.chat.startTask(conversation.id, { agent, description, prompt })
+      const { number, queued, limit } = await ctx.chat.startTask(conversation.id, { agent, description, prompt })
+      const head = queued
+        ? `Queued background task ${number} (${agent}): "${description}". ${limit} tasks are already running in this conversation; it starts when one of them ends.`
+        : `Started background task ${number} (${agent}): "${description}". It runs on its own (at most ${limit} at once; more wait in a queue).`
       return (
-        `Started background task ${number} (${agent}): "${description}". It runs on its own; its result will arrive as a new message when it ends. ` +
+        `${head} Its result will arrive as a new message when it ends. ` +
         'Do not wait or poll for it — continue with other work, or briefly tell the user what you started and end your response.'
       )
     },
