@@ -12,7 +12,6 @@ import { ShellCard } from './ShellCard.tsx'
 import type { Translate } from './settingsStore.ts'
 import { OpenInButton } from './OpenInButton.tsx'
 import { ConversationMenu } from './Report.tsx'
-import { JobsButton } from './Jobs.tsx'
 import { RightPanelButton } from './FilePreview.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
 import { ChatFind, FindingProvider } from './ChatFind.tsx'
@@ -67,8 +66,6 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
     <>
       <div className="main__header">
         {titleOf(active)}
-        {/* 도는 작업 목록 (#32) — 하위 작업이 있는 턴이 도는 동안만, 열기 버튼 왼쪽 */}
-        {active.pending && <JobsButton key={active.id} items={active.progress ?? []} startedAt={active.sentAt} />}
         {features.has('openIn') && <OpenInButton directory={active.project} />}
         <RightPanelButton directory={active.project} />
         {/* 더 보기 ⋯ — 대화 내보내기 (이슈 #177) */}
