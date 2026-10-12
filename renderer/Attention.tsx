@@ -3,6 +3,7 @@ import type { Attention, AttentionAnswer, AttentionQuestion, AttentionTarget } f
 import { useT } from './settingsStore.ts'
 import { reason } from './ipcError.ts'
 import { BROWSER_MCP_NAME, browserApprovalDetail } from '../shared/browser.ts'
+import { gitApprovalText, isGitWriteTool } from '../shared/git.ts'
 import { TargetPickerBody, useDelegation } from './Delegation.tsx'
 import { readRequest, targetPicker } from './delegationView.ts'
 import { MakeBody } from './Make.tsx'
@@ -72,6 +73,8 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   const [scope, setScope] = useState(make?.scope)
   // 브라우저 도구 (이슈 #147) — 서버·도구 이름만으로는 무엇을 승인하는지 모른다. 열 주소·넣을 글·실행할 스크립트를 줄이지 않고 보인다
   const browser = request.mcp?.server === BROWSER_MCP_NAME ? browserApprovalDetail(request.mcp.tool, request.input) : undefined
+  // git 쓰기 도구 (이슈 #290) — 무엇을 하는지 제목으로, 커밋 메시지·브랜치 이름·파일을 줄이지 않고 보인다
+  const git = isGitWriteTool(request.mcp) ? { tool: request.mcp.tool, text: gitApprovalText(request.mcp.tool, request.input) } : undefined
   /** [항상 허용] — 폴더 밖 접근만 (이슈 #242) */
   const always = request.action === 'external_directory' && !request.mcp
   const allow = (): void => {
@@ -101,7 +104,7 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
           <TargetPickerBody picker={delegation} selected={chosen?.key} disabled={busy} onSelect={setPicked} />
         ) : (
           <div className="attention-card__headline">
-            {reading !== undefined ? t('delegate.card.read') : request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
+            {reading !== undefined ? t('delegate.card.read') : git ? t(`git.card.${git.tool}`) : request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
           </div>
         )}
         {/* MCP 도구 요청의 patterns 는 늘 ["*"] 라 서버·도구 이름을 보인다 (이슈 #28) */}
@@ -122,6 +125,11 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
                     {browser.text}
                   </pre>
                 )}
+              </div>
+            )}
+            {git?.text && (
+              <div className="attention-card__detail" data-git={git.tool}>
+                <pre className="attention-card__detail-text">{git.text}</pre>
               </div>
             )}
           </>

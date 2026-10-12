@@ -60,6 +60,9 @@ import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { GoalService } from '../src/services/goal.ts'
 import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
+import { GitService } from '../src/services/git.ts'
+import { GitTools } from '../src/services/appMcp/tools/git.ts'
+import { gitWebUrl, type GitAction } from '../shared/git.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
@@ -552,6 +555,29 @@ function goalBridge(ctx: Context): void {
 }
 goalBridge.inject = ['goal']
 
+// Git (ctx.git, 이슈 #290) — 오른쪽 패널 Git 탭·브랜치 알약. 등록된 프로젝트 폴더에서만 돈다(화면이 오염돼도 아무 폴더에서나 git 을 돌리지 않는다).
+// 바뀌면(화면·AI 도구의 작업 뒤) 모든 창에 알린다 — 화면은 그 폴더를 보고 있으면 다시 읽는다
+function gitBridge(ctx: Context): void {
+  const project = async (directory: unknown): Promise<string> => {
+    if (typeof directory !== 'string' || !(await ctx.projects.has(directory))) throw new Error('not a registered project')
+    return directory
+  }
+  handle(ctx, Channel.GIT_VIEW, async (_event, directory: unknown) => ctx.git.view(await project(directory)))
+  handle(ctx, Channel.GIT_DIFF, async (_event, directory: unknown, file: unknown, staged: unknown) => ctx.git.diff(await project(directory), String(file), staged === true))
+  handle(ctx, Channel.GIT_LOG, async (_event, directory: unknown) => ctx.git.log(await project(directory)))
+  handle(ctx, Channel.GIT_BRANCHES, async (_event, directory: unknown) => ctx.git.branches(await project(directory)))
+  handle(ctx, Channel.GIT_RUN, async (_event, directory: unknown, action: GitAction) => ctx.git.perform(await project(directory), action))
+  handle(ctx, Channel.GIT_OPEN_REMOTE, async (_event, directory: unknown) => {
+    const view = await ctx.git.view(await project(directory))
+    const url = view.state === 'ok' ? gitWebUrl(view.remote) : undefined
+    if (!url) return false
+    await shell.openExternal(url)
+    return true
+  })
+  ctx.on('git/changed', (directory) => broadcast(Channel.GIT_CHANGED, directory))
+}
+gitBridge.inject = ['git', 'projects']
+
 /** 블루투스 라디오의 문제(꺼짐·권한 없음·미지원·실패)를 설정 > 기능의 블루투스 연결 줄에도 알린다 (이슈 #224). 광고·켜는 중은 문제가 아니다.
  *  묶음이 내려가면 ctx.features 가 문제를 지운다 */
 function bluetoothProblems(ctx: Context): void {
@@ -749,6 +775,17 @@ const features: FeatureDefinition[] = [
   },
   // 같은 도구 반복 알림 (이슈 #284) — 기본 켜짐. 'llm/tool-done' 을 듣고 연속 3·5·8번째에 ctx.llm.remind 로 모델에게만 한 줄. 끄면 알림만 사라진다
   { id: 'repeatGuard', service: 'repeatGuard', plugin: (ctx) => void ctx.plugin(RepeatGuardService) },
+  {
+    // Git (이슈 #290) — 기본 꺼짐. 시스템 git 을 인자 배열로 띄운다(인증 창 없음). AI 도구(litecode_git_*)는 데스크탑 MCP 가 켜져 있을 때만 뜬다 —
+    // GitTools 가 appMcp 를 inject 하므로 꺼져 있으면 그 플러그인만 기다리고, Git 탭·알약은 그대로 쓴다 (FEATURE_REQUIRES 에 넣지 않았다)
+    id: 'git',
+    service: 'git',
+    plugin: (ctx) => {
+      ctx.plugin(GitService)
+      ctx.plugin(GitTools)
+      ctx.plugin(gitBridge)
+    },
+  },
 ]
 // 종료 때 바탕보다 먼저 내려간다(거꾸로 내리므로) — 터미널·셸·알림이 엔진보다 먼저 정리된다
 mounted.push(ctx.plugin(FeaturesService, features))
