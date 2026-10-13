@@ -2,6 +2,8 @@
 
 /** 가짜 데스크탑과 같은 기본 포트 — 폰에 저장된 주소·방화벽 규칙이 오래 맞게 고정한다 (HTTP 운반이 듣는다) */
 export const REMOTE_DEFAULT_PORT = 47600
+/** 고정 포트가 다른 인스턴스(설치본 + dev 동시 구동)에 점유됐을 때 다음 포트 순으로 피해 보는 수 (이슈 #332 · 피드백 #2) */
+export const REMOTE_PORT_TRIES = 8
 export const PAIR_CODE_TTL_MS = 2 * 60_000
 export const PAIR_WAIT_MS = 60_000
 /** 긴 코드·짧은 코드를 합쳐 이만큼 틀리면 세션을 버린다 — 2자리 코드를 추측으로 맞힐 확률 3/100 (사용자 2026-10-06, 전에는 5) */

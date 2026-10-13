@@ -1,7 +1,7 @@
 import type { Context } from 'cordis'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { REMOTE_DEFAULT_PORT, type RemoteService } from '../remote.ts'
+import { REMOTE_DEFAULT_PORT, REMOTE_PORT_TRIES, type RemoteService } from '../remote.ts'
 import type { RemoteCarrierStatus, RemotePeer, RemoteReply, RemoteStreamSink } from './carrier.ts'
 import { readBody, sendJson } from '../httpUtil.ts'
 
@@ -86,26 +86,38 @@ export function RemoteHttp(ctx: Context, options: RemoteHttpOptions = {}): void 
       id: 'http',
       async start() {
         error = undefined
-        const opened: http.Server[] = []
-        const listening: string[] = []
-        let port = options.port ?? REMOTE_DEFAULT_PORT
-        try {
-          for (const { host } of options.listeners ?? [{ host: '127.0.0.1' }]) {
-            // 평문은 루프백만 — 사내망 주소는 TLS 리스너(다음 라운드)로만 연다
-            if (!isLoopback(host)) throw Object.assign(new Error(`plain http is loopback-only: ${host}`), { code: 'ENOTLOOPBACK' })
-            const server = http.createServer(serve)
-            opened.push(server)
-            port = await listenOn(server, port, host)
-            listening.push(hostPort(host, port))
+        const base = options.port ?? REMOTE_DEFAULT_PORT
+        const listeners = options.listeners ?? [{ host: '127.0.0.1' }]
+        // 고정 포트가 다른 인스턴스(설치본 + dev 동시 구동)에 점유됐으면 다음 포트 순으로 피한다 (이슈 #332).
+        // 0(빈 포트)은 OS 가 골라 주는 것이라 대체 포트가 없다
+        let port = base
+        let failure: NodeJS.ErrnoException | undefined
+        for (let attempt = 0; attempt < (base > 0 ? REMOTE_PORT_TRIES : 1); attempt++) {
+          const opened: http.Server[] = []
+          const listening: string[] = []
+          try {
+            for (const { host } of listeners) {
+              // 평문은 루프백만 — 사내망 주소는 TLS 리스너(다음 라운드)로만 연다
+              if (!isLoopback(host)) throw Object.assign(new Error(`plain http is loopback-only: ${host}`), { code: 'ENOTLOOPBACK' })
+              const server = http.createServer(serve)
+              opened.push(server)
+              port = await listenOn(server, port, host)
+              listening.push(hostPort(host, port))
+            }
+            servers = opened
+            addresses = listening
+            return
+          } catch (caught) {
+            failure = caught as NodeJS.ErrnoException
+            await Promise.all(opened.map(closeServer))
+            if (failure.code !== 'EADDRINUSE') break
+            port += 1
           }
-        } catch (failure) {
-          await Promise.all(opened.map(closeServer))
-          const { code, message } = failure as NodeJS.ErrnoException
-          error = { ...(code && { code }), message }
-          return
         }
-        servers = opened
-        addresses = listening
+        if (failure) {
+          const { code, message } = failure
+          error = { ...(code && { code }), message }
+        }
       },
       async stop() {
         error = undefined

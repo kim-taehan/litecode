@@ -1,7 +1,7 @@
 import type { Context } from 'cordis'
 import https from 'node:https'
 import type { TLSSocket } from 'node:tls'
-import { REMOTE_DEFAULT_PORT } from '../remote.ts'
+import { REMOTE_DEFAULT_PORT, REMOTE_PORT_TRIES } from '../remote.ts'
 import type { KeyCipher } from '../providers.ts'
 import type { RemoteCarrierStatus } from './carrier.ts'
 import { closeServer, hostPort, listenOn, remoteHandler } from './http.ts'
@@ -51,37 +51,54 @@ export function RemoteHttps(ctx: Context, options: RemoteHttpsOptions): void {
 
   const serve = (fingerprint: string) => remoteHandler(remote, (request) => ({ carrier: 'https', key: request.socket.remoteAddress ?? '', fingerprint }))
 
-  /** 지금 주소 목록에 맞춘다 — 새 주소를 열고 없어진 주소를 닫는다. 바뀌었으면 true */
+  /** 지금 주소 목록에 맞춘다 — 새 주소를 열고 없어진 주소를 닫는다. 바뀌었으면 true.
+   *  포트를 다른 인스턴스(설치본 + dev 동시 구동)가 쓰고 있으면 들리는 것 전체를 닫고 포트+1 로 다시 본다 — 운반 전체가 하나의
+   *  포트를 써야 하기 때문이다 (QR·hello 에 실리는 것은 이 포트다, 이슈 #332) */
   async function rebind(): Promise<boolean> {
     if (!identity) return false
     const next = wanted().filter((host) => !isUnspecified(host)) // 모든 주소에서 듣지 않는다
     const gone = [...servers.keys()].filter((host) => !next.includes(host))
     const added = next.filter((host) => !servers.has(host))
     if (gone.length === 0 && added.length === 0) return false
-    for (const host of gone) {
-      const server = servers.get(host)!
-      servers.delete(host)
-      await closeServer(server)
-    }
-    const failures: { code?: string; message: string }[] = []
-    for (const host of added) {
-      const server = https.createServer({ key: identity.key, cert: identity.cert, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3' }, serve(identity.fingerprint))
-      // TCP 가 붙는 순간 (TLS 전) — 사설 대역 밖은 닫는다. 막은 것도 수신 시도로 센다
-      server.on('connection', (socket) => {
-        lastAttemptAt = now()
-        if (!allowPeer(socket.remoteAddress)) socket.destroy()
-        remote.carrierChanged()
-      })
-      // 지문이 다른 폰·TLS 를 모르는 접속 — 오류로 남길 일이 아니다
-      server.on('tlsClientError', (_failure, socket: TLSSocket) => socket.destroy())
-      try {
-        port = await listenOn(server, port, host)
-        servers.set(host, server)
-      } catch (failure) {
-        const { code, message } = failure as NodeJS.ErrnoException
-        failures.push({ ...(code && { code }), message: `${host}: ${message}` })
+    let portNow = port
+    let failures: { code?: string; message: string }[] = []
+    for (let attempt = 0; attempt < REMOTE_PORT_TRIES; attempt++) {
+      // 포트를 피해서 바꿀 때 — 이전 묶음도 새 포트에 다시 열어 한 운반에 포트가 혼재하는 일이 없게 한다
+      const closing = attempt === 0 ? gone : [...servers.keys()]
+      for (const host of closing) {
+        const server = servers.get(host)!
+        servers.delete(host)
+        await closeServer(server)
       }
+      failures = []
+      let displaced = false
+      for (const host of next.filter((host) => !servers.has(host))) {
+        const server = https.createServer({ key: identity.key, cert: identity.cert, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3' }, serve(identity.fingerprint))
+        // TCP 가 붙는 순간 (TLS 전) — 사설 대역 밖은 닫는다. 막은 것도 수신 시도로 센다
+        server.on('connection', (socket) => {
+          lastAttemptAt = now()
+          if (!allowPeer(socket.remoteAddress)) socket.destroy()
+          remote.carrierChanged()
+        })
+        // 지문이 다른 폰·TLS 를 모르는 접속 — 오류로 남길 일이 아니다
+        server.on('tlsClientError', (_failure, socket: TLSSocket) => socket.destroy())
+        try {
+          portNow = await listenOn(server, portNow, host)
+          servers.set(host, server)
+        } catch (failure) {
+          const { code, message } = failure as NodeJS.ErrnoException
+          if (code === 'EADDRINUSE' && attempt < REMOTE_PORT_TRIES - 1) {
+            await closeServer(server) // 바인딩에 실패해 듣고 있지 않다
+            displaced = true
+            break
+          }
+          failures.push({ ...(code && { code }), message: `${host}: ${message}` })
+        }
+      }
+      if (!displaced) break
+      portNow += 1
     }
+    port = portNow
     error = failures[0] ?? (servers.size === 0 ? { code: 'ENOLAN', message: 'no private network address on this PC' } : undefined)
     return true
   }
