@@ -116,13 +116,18 @@ describe('떠 있음 = 켜짐', () => {
     expect(stored.devices).toHaveLength(2)
   })
 
-  it('포트를 다른 프로그램이 쓰고 있으면 사유(EADDRINUSE)를 남기고 짝짓기를 시작할 수 없다', async () => {
+  it('포트를 다른 프로그램이 쓰고 있으면 그 포트를 피해 듣고, 짝짓기는 그대로 된다 (이슈 #332)', async () => {
     const blocker = net.createServer()
     await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve))
     cleanups.push(() => new Promise((resolve) => blocker.close(resolve)))
-    const { remote } = await start({ port: (blocker.address() as net.AddressInfo).port })
-    expect(remote.status()).toMatchObject({ addresses: [], error: { code: 'EADDRINUSE' } })
-    expect(() => remote.startPairing()).toThrow()
+    const taken = (blocker.address() as net.AddressInfo).port
+    const { remote } = await start({ port: taken })
+    const status = remote.status()
+    expect(status.error).toBeUndefined()
+    expect(status.port).not.toBe(taken)
+    expect(status.addresses).toHaveLength(1)
+    expect(status.addresses[0]).toBe(`127.0.0.1:${status.port}`)
+    expect(remote.startPairing().pairing?.code).toMatch(/^[0-9A-Z-]{14}$/)
   })
 
   it('평문 리스너는 루프백 주소만 연다 — 0.0.0.0·사내망 주소는 열지 않는다', async () => {

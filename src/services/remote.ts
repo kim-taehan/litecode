@@ -3,7 +3,7 @@ import type { RemoteStatus } from './remote/types.ts'
 
 export { RemoteService } from './remote/service.ts'
 export type { RemoteServiceOptions, RemotePairRequest, RemoteDeviceInfo, RemoteStatus } from './remote/types.ts'
-export { REMOTE_DEFAULT_PORT } from './remote/limits.ts'
+export { REMOTE_DEFAULT_PORT, REMOTE_PORT_TRIES } from './remote/limits.ts'
 
 // 모바일 연결 (ctx.remote, 이슈 #56 — 설계 _workspace/01t_mobile_arch.md 의 R1). 폰 앱이 붙는 문: 짝짓기·기기 관리·REST·SSE.
 // 대화는 ctx.chat 이 쥔다 — 여기는 그 손님 하나를 네트워크로 내보내는 얇은 서비스다(모바일은 단독으로 대화를 유지하지 않는다).
