@@ -591,7 +591,11 @@ button {
 }
 
 .session-item--active {
-  background: var(--fill-active); /* 지금 보는 대화 — 더 짙은 바탕 + "현재" 뱃지 (2026-10-13 피드백 #3 · 그전엔 호버와 같은 --fill-hover) */
+  background: var(--accent-soft); /* 지금 보는 대화 — 액센트 연한 바탕 (2026-10-13 피드백 #5 · 그전엔 --fill-active, 그전엔 --fill-hover) */
+}
+
+.session-item--active .session-item__title {
+  font-weight: 500;
 }
 
 .sidebar__foot {
