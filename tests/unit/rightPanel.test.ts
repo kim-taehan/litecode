@@ -3,7 +3,6 @@ import {
   closeFilePreview,
   closeTab,
   cycleTerminalTab,
-  focusLastTerminalTab,
   isTerminalTab,
   openFilePreview,
   openFilesTab,
@@ -171,7 +170,7 @@ describe('경로 줄 종류', () => {
   })
 })
 
-// 이슈 #303 — 터미널이 오른쪽 패널의 탭: 파일 탭과 같은 탭 줄(열쇠 `\0term/<id>`), ⌘↓·⌘[·⌘] 의 저장소 쪽 규칙
+// 이슈 #303 — 터미널이 오른쪽 패널의 탭: 파일 탭과 같은 탭 줄(열쇠 `\0term/<id>`), ⌘[·⌘] 이전/다음의 저장소 쪽 규칙
 describe('터미널 탭', () => {
   const term = (id: number) => terminalTabKey(id)
 
@@ -210,18 +209,6 @@ describe('터미널 탭', () => {
     expect(read()!.quiet).toBe(false)
     expect(read()!.active).toBe(term(1))
     expect(panelTakesFocus(read()!)).toBe(true)
-  })
-
-  it('focusLastTerminalTab — 마지막으로 연 탭을 그 자리에서 고른다(패널을 열고 focus 올림). 없으면 false', () => {
-    openFilePreview('/term-f', 'a.ts')
-    expect(focusLastTerminalTab('/term-f')).toBe(false)
-    openTerminalTab('/term-f', 1)
-    openTerminalTab('/term-f', 2)
-    selectTab(undefined) // 파일 탭
-    const focus = read()!.focus
-    expect(focusLastTerminalTab('/term-f')).toBe(true)
-    expect(read()).toMatchObject({ open: true, active: term(2), quiet: false })
-    expect(read()!.focus).toBe(focus + 1)
   })
 
   it('cycleTerminalTab — ⌘[·⌘] 의 이전·다음(순환). 고른 것이 없으면 마지막, 하나 없으면 false', () => {

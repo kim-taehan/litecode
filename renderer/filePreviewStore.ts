@@ -115,15 +115,6 @@ export function openTaskTab(directory: string, taskId: string): void {
   set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus: state.focus + 1, quiet: false })
 }
 
-/** ⌘↓ — 마지막으로 연 터미널 탭을 그 자리에서 고른다. 없으면 false (호출이 새로 연다) */
-export function focusLastTerminalTab(directory: string): boolean {
-  if (!current || current.directory !== directory) return false
-  const termTabs = current.tabs.filter((key) => isTerminalTab(key))
-  if (termTabs.length === 0) return false
-  set({ ...current, open: true, active: termTabs[termTabs.length - 1], focus: current.focus + 1, quiet: false })
-  return true
-}
-
 /** ⌘[·⌘] — 터미널 탭을 넘나든다 (이전·다음). 고른 것이 없으면 마지막 연 것으로. 하나 없으면 false */
 export function cycleTerminalTab(directory: string, delta: 1 | -1): boolean {
   if (!current || current.directory !== directory) return false

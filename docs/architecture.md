@@ -177,9 +177,9 @@ llm.chat({onSession}) ─▶ sessions.attach (engineSessionId 조기 연결 — 
 - `.tsx` = JSX 렌더링+핸들러 / `*View.ts` = **순수 로직**(React·시간·IPC 금지) / 컴포넌트별 `.css`(전역 `styles.css` 별도).
 - 채팅: Markdown은 mdast→React (innerHTML 금지, 스트리밍 시 증분 파서); diff=`diffRows`+DiffCard; 툴 콜=접이식; 승인 카드는 주황 띠(Enter=한 번 허용/Esc=거절, [항상 허용]은 폴더 밖·git 쓰기 카드에만); 질문 카드는 보기+직수입; 모드 칩(Shift+Tab: plan→build→ask, full은 메뉴+확인); 작업/답 분할은 `splitTurn`; 진행 중 작업은 inputs 위 **jobs strip**(`Jobs.tsx`, #295).
 - 입력: `+` 메뉴 트리거(`@`/`/`/`!`)는 `useTriggers`→메인 `queryTrigger` — 렌더러는 어떤 문자인지 모름. 첨부·음성(16kHz PCM)·대기열(QueueDock).
-- 사이드바: 접힘/리사이즈, 진행중만 보기, 찾기, 고정/변경/삭제. **프로젝트 전환 = 빠른 열기**(#305): `ProjectQuickOpen` 상단 중앙 패널, ⌘K/Ctrl+K(또는 전환 버튼)로 열고 타이핑 즉시 필터, ↑↓·Enter·Esc·Home/End, 즐겨찾기 ★ 먼저 — 옛 앵커형 popover 제거.
+- 사이드바: 접힘/리사이즈, 진행중만 보기, 찾기, 고정/변경/삭제, **대화 이동 ⌘↑/⌘↓** (목록 순서·끝에서 감, `useSessionNav` #330) + 현재 대화 행 강조·"현재" 뱃지. **프로젝트 전환 = 빠른 열기**(#305): `ProjectQuickOpen` 전환 카드 옆(사이드바 우측) 패널, ⌘K/Ctrl+K(또는 전환 버튼)로 열고 타이핑 즉시 필터, ↑↓·Enter·Esc·Home/End, 즐겨찾기 ★ 먼저 — 옛 앵커형 popover 제거.
 - 설정 모달: 기본/모델/기능(4그룹: screen·ai·automation·devices)/모바일.
-- 오른쪽 패널: Files/파일/Git/**터미널** 탭(filePreviewStore) — 터미널은 다중(번호=탭 이름)·닫아도 셸 유지·탭 닫으면 셸 종료. 단축키는 `useTerminalKeys`(⌘↓ 열기/새 터미널·⌘↑ 접기·⌘⇧↓ 새 터미널·⌘[·⌘] 이전/다음, #303). PDF는 OS 앱으로.
+- 오른쪽 패널: Files/파일/Git/**터미널** 탭(filePreviewStore) — 터미널은 다중(번호=탭 이름)·닫아도 셸 유지·탭 닫으면 셸 종료. 단축키는 `useTerminalKeys`(⌘T 새 터미널·⌘[·⌘] 이전/다음, #303). PDF는 OS 앱으로.
 
 ## 8. 모바일 (mobile/, Android-Expo)
 
