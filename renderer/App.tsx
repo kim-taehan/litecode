@@ -585,7 +585,7 @@ export function App() {
   }
 
 
-  // 프로젝트 빠른 열기 (이슈 #305) — 상단 중앙에 뜬다 (⌘K 또는 전환 버튼)
+  // 프로젝트 빠른 열기 (이슈 #305) — 전환 카드 우측(사이드바 옆)에 뜬다 (⌘K 또는 전환 버튼, 2026-10-13 피드백 #1)
   const quickOpen = switching && (
     <ProjectQuickOpen
       projects={projects ?? []}
