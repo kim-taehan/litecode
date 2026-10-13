@@ -5,9 +5,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LlmService, MODEL_STALL_TIMEOUT_MS, type ChatResult } from '../../src/services/llm.ts'
+import { LlmService, MODEL_STALL_TIMEOUT_MS, TOOL_INPUT_STALL_TIMEOUT_MS, type ChatResult } from '../../src/services/llm.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
+import { TASK_STALL_TIMEOUT_MS } from '../../shared/tasks.ts'
 
 // 모델 무응답 한도 (이슈 #264) — 게이트웨이가 요청을 받고 답하지 않으면 엔진은 이 턴 이벤트를 하나도 안 보낸다(heartbeat 만 10초마다).
 // 가짜 opencode 는 interject.test.ts 와 같은 모양으로 시험이 이벤트를 한 줄씩 흘리고, 시계는 가짜(shouldAdvanceTime — HTTP 는 진짜로 돈다)
@@ -123,12 +124,12 @@ const reached = (partId: string, status?: string) =>
   until(() => items.some((item) => item.id === `msg_a1:${partId}` && (!status || (item as { status?: string }).status === status)), `${partId} 진행 줄`)
 
 /** 턴을 보내고 엔진이 받아 이 턴 user·답 메시지·첫 생각 줄이 닿은 데까지 — 그 뒤로 엔진은 조용하다 (게이트웨이가 답을 안 준다) */
-async function turn({ llm, ctx }: { llm: LlmService; ctx: Context }) {
+async function turn({ llm, ctx }: { llm: LlmService; ctx: Context }, stallTimeoutMs?: number) {
   let started = false
   items = []
   ctx.on('llm/turn-started', () => void (started = true))
   let result: ChatResult | undefined
-  void llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', messageId: A, onProgress: (item) => void items.push(item) }).then((done) => (result = done))
+  void llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', messageId: A, onProgress: (item) => void items.push(item), ...(stallTimeoutMs !== undefined && { stallTimeoutMs }) }).then((done) => (result = done))
   await until(() => started, '턴 받아들임')
   user(A)
   assistant('msg_a1', A)
@@ -185,6 +186,33 @@ describe(`ctx.llm — 모델 무응답 ${MODEL_STALL_TIMEOUT_MS / 1000}초 (이�
     expect(result()).toMatchObject({ ok: false, error: STALLED })
   })
 
+  // 실측 2026-10-12 (opencode 1.18.18 + 가짜 LLM, 일회용 probe-toolargs.mts): 모델이 도구 인자(write 의 content)를 스트리밍하는 동안 /event 에는 시작 때
+  // `tool pending`(input 비어 있음) 한 번뿐이고 다 받을 때까지 아무것도 없다(10초 스트리밍 1/1). 큰 문서를 쓰는 작업이 120초에 잘렸다 (#321 실사용)
+  it(`도구 인자를 만드는 중(pending)엔 ${TOOL_INPUT_STALL_TIMEOUT_MS / 1000}초까지 기다린다 — 그 한도를 넘으면 끊고, 인자가 다 오면(running) 평소대로`, async () => {
+    const result = await turn(await start())
+    part('msg_a1', { type: 'tool', id: 'prt_w', tool: 'write', callID: 'call_w', state: { status: 'pending', input: {}, raw: '' } })
+    await reached('prt_w', 'preparing')
+    await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS * 2)
+    expect(result()).toBeUndefined()
+    expect(aborts).toBe(0)
+    await vi.advanceTimersByTimeAsync(TOOL_INPUT_STALL_TIMEOUT_MS - MODEL_STALL_TIMEOUT_MS * 2)
+    await until(() => result() !== undefined, '도구 인자 무응답 끝')
+    expect(result()).toMatchObject({ ok: false, error: tr('error.modelStalled', { seconds: TOOL_INPUT_STALL_TIMEOUT_MS / 1000 }) })
+    await until(() => aborts === 1, 'abort')
+  })
+
+  it('pending 이 끝나면(인자를 다 받아 실행) 다시 평소 한도 — 게이트웨이 무응답(#264)은 그대로 잡는다', async () => {
+    const result = await turn(await start())
+    part('msg_a1', { type: 'tool', id: 'prt_w', tool: 'write', callID: 'call_w', state: { status: 'pending', input: {}, raw: '' } })
+    await reached('prt_w', 'preparing')
+    await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS * 2)
+    part('msg_a1', { type: 'tool', id: 'prt_w', tool: 'write', callID: 'call_w', state: { status: 'completed', input: { filePath: 'a', content: 'b' }, output: 'ok', time: { start: 1, end: 2 } } })
+    await reached('prt_w', 'done')
+    await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS)
+    await until(() => result() !== undefined, '평소 한도 무응답 끝')
+    expect(result()).toMatchObject({ ok: false, error: STALLED })
+  })
+
   it('정상으로 끝난 턴은 타이머를 남기지 않는다 — 한도가 지나도 abort 가 없다', async () => {
     const result = await turn(await start())
     part('msg_a1', { type: 'text', id: 'prt_t', text: '답', time: { start: 1, end: 2 } })
@@ -194,5 +222,35 @@ describe(`ctx.llm — 모델 무응답 ${MODEL_STALL_TIMEOUT_MS / 1000}초 (이�
     await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS * 2)
     await settle()
     expect(aborts).toBe(0)
+  })
+})
+
+// 백그라운드 작업 턴 (사용자 결정 2026-10-12 "타이머로 죽이지 말고 상태를 알리고 판단은 메인/사람에게") — stallTimeoutMs 를 주면 평소 한도(120초·도구 인자
+// 600초) 대신 그 하드 한도 하나만. 조용함 알림은 작업 쪽(backgroundTasks.ts)이다. 위의 일반 턴 시험들이 #264 감시 회귀를 지킨다
+describe(`ctx.llm — 작업 턴은 하드 한도 ${TASK_STALL_TIMEOUT_MS / 1000}초만 (stallTimeoutMs)`, () => {
+  it('평소 한도를 넘겨도 끊지 않는다 — 하드 한도에서만 멈추고(abort) 실패로 끝낸다', async () => {
+    const result = await turn(await start(), TASK_STALL_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(MODEL_STALL_TIMEOUT_MS * 2)
+    expect(result()).toBeUndefined()
+    expect(aborts).toBe(0)
+    await vi.advanceTimersByTimeAsync(TASK_STALL_TIMEOUT_MS - MODEL_STALL_TIMEOUT_MS * 2 - 1_000)
+    expect(result()).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await until(() => result() !== undefined, '하드 한도 끝')
+    expect(result()).toMatchObject({ ok: false, error: tr('error.modelStalled', { seconds: TASK_STALL_TIMEOUT_MS / 1000 }) })
+    await until(() => aborts === 1, 'abort')
+  })
+
+  it('도구 인자를 만드는 중(pending)에도 같은 하드 한도 하나 — 진행이 오면 다시 센다', async () => {
+    const result = await turn(await start(), TASK_STALL_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(TASK_STALL_TIMEOUT_MS - 1_000)
+    part('msg_a1', { type: 'tool', id: 'prt_w', tool: 'write', callID: 'call_w', state: { status: 'pending', input: {}, raw: '' } })
+    await reached('prt_w', 'preparing')
+    await vi.advanceTimersByTimeAsync(TASK_STALL_TIMEOUT_MS - 1_000)
+    expect(result()).toBeUndefined()
+    expect(aborts).toBe(0)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await until(() => result() !== undefined, '하드 한도 끝')
+    expect(result()).toMatchObject({ ok: false, error: tr('error.modelStalled', { seconds: TASK_STALL_TIMEOUT_MS / 1000 }) })
   })
 })

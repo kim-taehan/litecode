@@ -54,12 +54,18 @@ export interface Subtask {
   agent: string
   /** AI 가 붙인 짧은 설명 */
   description: string
-  /** stopped: 부모 턴을 멈춰 엔진이 취소했다 (실패가 아니다) */
-  status: 'preparing' | 'running' | 'done' | 'error' | 'stopped'
+  /** stopped: 부모 턴을 멈춰 엔진이 취소했다 (실패가 아니다). queued: 백그라운드 작업이 차례를 기다린다 (#321 — 엔진에 아직 안 보냈다) */
+  status: 'queued' | 'preparing' | 'running' | 'done' | 'error' | 'stopped'
   startedAt?: number
   endedAt?: number
   error?: string
   tokens?: number
+  /** 백그라운드 작업이 이 시각(마지막 활동) 뒤로 조용하다 — TASK_QUIET_MS 를 넘기면 붙고 활동이 다시 오면 빠진다. 죽이지 않는다 (shared/tasks.ts) */
+  quietSince?: number
+  /** 백그라운드 작업만 (#325 작업 탭): 받은 지시문, 마지막 활동 시각(실행 중 진행 줄이 바뀐 때), 상한(TASK_ITEMS_MAX)으로 앞에서 버린 진행 줄 수 */
+  prompt?: string
+  lastActivityAt?: number
+  omitted?: number
   items: TurnItem[]
 }
 

@@ -28,8 +28,6 @@ export type ModeRule = 'allow' | 'ask' | 'deny'
 const PLAIN_PERMISSIONS = ['bash', 'edit', 'read', 'glob', 'grep', 'task', 'webfetch', 'websearch', 'skill', 'todowrite']
 /** 계획이 막고 매번 묻기가 묻는 것 */
 const GUARDED_PERMISSIONS = ['edit', 'bash', 'webfetch', 'websearch']
-/** 매번 묻기에서만 쓰는 하위 에이전트 (engine.ts SUBAGENT_ASK) */
-const ASKING_SUBAGENT = 'general-ask'
 const APP_SEND_TOOL = 'litecode_send_to_project'
 /** 다른 프로젝트의 대화 읽기 — 계획 모드에서도 묻고 쓴다 (이슈 #137) */
 const APP_READ_TOOL = 'litecode_read_project'
@@ -74,11 +72,8 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
     return mode === 'plan' ? 'deny' : asking ? 'ask' : 'allow'
   }
   if (!PLAIN_PERMISSIONS.includes(permission)) return 'ask'
-  if (permission === 'task') {
-    if (child || mode === 'plan') return 'deny'
-    const subagents = resources.length > 0 ? resources : ['']
-    return subagents.every((name) => (name === ASKING_SUBAGENT) === asking) ? 'allow' : 'deny'
-  }
+  // 내장 task 는 모든 모드에서 꺼져 있다 (이슈 #319 — 백그라운드 작업은 앱 MCP 의 litecode_task_start, 위의 MCP 도구 규칙을 따른다)
+  if (permission === 'task') return 'deny'
   if (GUARDED_PERMISSIONS.includes(permission)) {
     if (mode === 'plan') return 'deny'
     if (asking) return 'ask'

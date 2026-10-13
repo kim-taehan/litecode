@@ -8,6 +8,7 @@ import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import { isFeatureSwitches, type FeatureSwitches } from '../../shared/features.ts'
 import { isSpeechLanguage, type SpeechLanguage } from '../../shared/speech.ts'
 import { isUpdateUrl } from '../../shared/updates.ts'
+import { isRunningTaskLimit } from '../../shared/tasks.ts'
 
 // 앱 설정(설정 > 일반) — 언어·테마·대화 글자 크기 등. 정본은 이 서비스, 앱에서는 userData 의 settings.json 하나
 // ("설정 파일 열기" 가 여는 파일 — dsh 처럼 사용자가 텍스트로 고칠 수 있다). 손으로 고친 값은 다음 실행 때 읽는다(파일 감시 없음).
@@ -41,6 +42,8 @@ export interface Settings {
   updateUrl?: string
   /** 사이드바의 새 버전 알림을 닫은 버전(릴리즈 태그) — 같은 버전은 다시 안 띄운다 */
   dismissedUpdate?: string
+  /** 대화마다 동시에 실행할 백그라운드 하위 작업 수 (설정 > 일반, 이슈 #321) — 1~8, 없으면 2(shared/tasks.ts MAX_RUNNING_TASKS). 나머지는 대기 */
+  maxRunningTasks?: number
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 새 대화는 기본 모드(01k §6).
@@ -77,6 +80,7 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   autoTitle: (value): value is boolean => typeof value === 'boolean',
   updateUrl: isUpdateUrl,
   dismissedUpdate: (value): value is string => typeof value === 'string',
+  maxRunningTasks: isRunningTaskLimit,
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

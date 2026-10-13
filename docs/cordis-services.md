@@ -132,6 +132,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 | | `llm/before-turn` · `llm/pre-tool` · `llm/tool-started` · `llm/tool-done` · `llm/attention-input` | **훅 자리** — 턴 전 · 도구 실행 전(결정 반환 가능) · 도구 실행 시작(running, #284) · 도구 끝 · 승인 입력 보정 |
 | `chat` | `chat/turn-started` `turn-progress` `turn-attention` `turn-ended` `queue-changed` `conversations-changed` | 화면·모바일이 받는 대화 이벤트 (`shared/chat.ts` `ChatEventMap` 과 같은 모양) |
 | | `chat/before-send` · `chat/after-turn` · `chat/attachments-read` | 보내기 전 · 턴 뒤 처리(훅이 듣는다) · 첨부 읽음 |
+| | `chat/tasks-changed` | 그 대화의 백그라운드 하위 작업 목록(#319, `backgroundTasks.ts`) — 화면 작업 줄. 모바일엔 안 간다 |
 | `sessions` | `sessions/removed` | 대화 삭제 |
 | `projects` | `projects/removed` | 프로젝트 제거 |
 | `settings` | `settings/changed` | 설정 변경 → 테마·기능 레지스트리·엔진이 듣는다 |

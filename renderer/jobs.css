@@ -74,6 +74,7 @@ button.jobs__cells:focus-visible {
 }
 
 .jobs__row[data-status='preparing'] .jobs__dot { background: transparent; }
+.jobs__row[data-status='queued'] .jobs__dot { border-color: var(--text-caption); background: transparent; }
 .jobs__row[data-status='done'] .jobs__dot { border-color: var(--ok); background: var(--ok); }
 .jobs__row[data-status='error'] .jobs__dot { border-color: var(--danger); background: var(--danger); }
 .jobs__row[data-status='stopped'] .jobs__dot { border-color: var(--text-caption); background: var(--text-caption); }
@@ -111,6 +112,12 @@ button.jobs__cells:focus-visible {
 .jobs__row[data-status='error'] .jobs__state {
   color: var(--danger);
 }
+
+/* 조용한 백그라운드 작업 — 죽이지 않고 주의 색으로만 (backgroundTasks.ts TASK_QUIET_MS) */
+.jobs__row[data-quiet] .jobs__state {
+  color: var(--warn);
+}
+.jobs__row[data-quiet] .jobs__dot { border-color: var(--warn); background: var(--warn); }
 
 /* 중지·⌄ — 줄에 마우스를 올리거나 포커스가 있거나 펼쳤을 때만. 터치(hover 없음)에선 늘.
    폭을 늘 잡아 둔다(84 = 중지 버튼 + ⌄ + 오른쪽 8) — 중지가 없는 줄(메인·준비 중·끝난 것)도 시간 칸이 같은 자리에 오게 */
@@ -176,6 +183,36 @@ button.jobs__cells:focus-visible {
 
 .jobs__row[data-open] .jobs__chevron {
   transform: rotate(180deg);
+}
+
+/* 백그라운드 작업 줄의 › — 작업 탭(전체 기록)을 연다 (#325) */
+.jobs__open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.jobs__open:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.jobs__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 훑어보기 한 줄 — 길면 말줄임 (전문은 탭) */
+.jobs__peek {
+  gap: 0;
 }
 
 /* "+N개 더 보기" · "접기" — 점 칸 다음(8 + 14 + 8)에서 시작 */

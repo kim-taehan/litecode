@@ -5,7 +5,7 @@ import type { Attention } from '../../shared/contract.ts'
 
 export { LlmService } from './llm/service.ts'
 export type { PreTool, PreToolDecision, ToolDone, ToolStarted, McpStatus, TurnInfo, ChatResult, Interjection, ChatImage, ChatOptions, EngineMessage, FileEntry, EngineCommand, EngineSkill, LlmConfig } from './llm/types.ts'
-export { MODEL_CATALOG_TIMEOUT_MS, AGENT_LIST_TIMEOUT_MS, MAX_COMPACTIONS_PER_TURN, MAX_RETRIES_PER_TURN, connectionRefused, CALLER_WAIT_MS, PRE_TOOL_WAIT_MS, STREAM_IDLE_TIMEOUT_MS, MODEL_STALL_TIMEOUT_MS } from './llm/limits.ts'
+export { MODEL_CATALOG_TIMEOUT_MS, AGENT_LIST_TIMEOUT_MS, MAX_COMPACTIONS_PER_TURN, MAX_RETRIES_PER_TURN, connectionRefused, CALLER_WAIT_MS, PRE_TOOL_WAIT_MS, STREAM_IDLE_TIMEOUT_MS, MODEL_STALL_TIMEOUT_MS, TOOL_INPUT_STALL_TIMEOUT_MS } from './llm/limits.ts'
 export { ascendingId, MCP_TOOLS_MARKER, promptTools, promptParts } from './llm/prompt.ts'
 export { finishedTool } from './llm/follow.ts'
 

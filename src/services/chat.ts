@@ -2,16 +2,19 @@ import { Context, Service } from 'cordis'
 import './llm.ts'
 import './sessions.ts'
 import './providers.ts'
+import './settings.ts' // 'settings/changed' 선언 — 설정 서비스는 inject 하지 않고 있으면 읽는다 (동시 실행 작업 수, #321)
 import type { ChatImage, ChatResult, Interjection } from './llm.ts'
 import { outgoing } from './attachments.ts'
 import { SendQueues } from './sendQueue.ts'
+import { runningTaskLimit, type TaskStatusEntry } from '../../shared/tasks.ts'
+import { BackgroundTasks, type TaskInput } from './backgroundTasks.ts'
 import { tr } from '../i18n.ts'
 import { isMode } from '../../shared/modes.ts'
 import { addTurn, type ChatUsage } from '../../shared/usage.ts'
 import { frozenAnswer, placeItem, segmentText, upsertItem } from '../../shared/chatReducer.ts'
 import { COMPACT_COMMAND, chipsOf, fromPerson, queueLabel, titleFrom, type ChatEventMap, type ChatOrigin, type ChatSnapshot, type QueuedSend, type SendResult, type TurnOutcome } from '../../shared/chat.ts'
 import type { Mode } from '../../shared/modes.ts'
-import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, TurnItem } from '../../shared/contract.ts'
+import type { Attention, AttentionAnswer, AttentionTarget, Conversation, HistoryMessage, Subtask, TurnItem } from '../../shared/contract.ts'
 
 // 대화별 "턴 소유" (ctx.chat, 이슈 #52) — 보내기·대기열·턴 끝 처리(제목·저장·통계 합산·대기열의 다음 것 보내기)·중지를 메인이 쥔다.
 // 원래 화면(App.tsx 의 send·useSendQueue — 지금은 없다)이 하던 일이다. 화면은 손님이다: 보내기를 부탁하고(send) 이벤트를 받아 그린다 —
@@ -28,6 +31,8 @@ import type { Attention, AttentionAnswer, AttentionTarget, Conversation, History
 // - 다른 대화가 보낸 지시 (이슈 #55, 세션 도구 appMcp/tools/sessions.ts 가 send 로 넣는다): origin 이 `session:<보낸 대화>` 이고 from 에 보낸 대화의
 //   id·제목이 있다. 사람 글과 합치지 않고(sendQueue), 그 말풍선에 출처를 적어 둔다(ctx.sessions.noteOrigin). 도는 턴은 자기 출처와 그 턴에서
 //   보낸 지시 수를 쥔다 — 지시를 받아 도는 턴은 다시 지시하지 못하고(깊이 1), 한 턴에 보낼 수 있는 수에 상한이 있다
+// - 백그라운드 하위 작업 (이슈 #319, backgroundTasks.ts): 모델이 띄운 작업을 대화별로 쥔다 — 따로 만든 엔진 세션에서 돌고, 끝나면 출처 'task' 의
+//   새 턴으로 결과를 넣는다(대기열 규칙 그대로). 메인 ■(stop)는 작업을 건드리지 않고, 작업 줄의 중지(stopSubtask)가 그 작업만 멈춘다
 // - 턴 앞뒤 확장점 (이슈 #102 — 지금 듣는 것은 ctx.hooks 뿐이고, 듣는 쪽이 없으면 아무 일도 없다): 엔진에 보내기 직전 'chat/before-send'
 //   (맥락을 더하거나 막는다 — 막힌 사람 글은 대기열 맨 앞에 붙잡혀 입력창으로 돌아가고 그 턴은 사유와 함께 실패로 끝난다),
 //   엔진이 턴을 끝낸 직후 'chat/after-turn' (followUp 을 채우면 그 글을 출처 'hook' 의 다음 턴으로 곧바로 보낸다). 둘 다 차례로 기다린다
@@ -48,6 +53,8 @@ declare module 'cordis' {
     'chat/attachments-read'(paths: string[]): void
     /** 턴을 엔진에 보내기 직전 (내 말은 이미 화면에 있다) — 듣는 쪽이 send 를 채운다. ctx.serial 로 차례로 기다린다 */
     'chat/before-send'(send: BeforeSend): Promise<void> | void
+    /** 그 대화의 백그라운드 작업 목록이 바뀌었다 (이슈 #319) — 화면의 작업 줄 */
+    'chat/tasks-changed'(cid: string, tasks: Subtask[]): void
     /** 엔진이 턴을 끝낸 직후, 'chat/turn-ended' 를 내기 전 (턴은 아직 도는 것으로 보인다) — 듣는 쪽이 turn 을 채운다. 차례로 기다린다 */
     'chat/after-turn'(turn: AfterTurn): Promise<void> | void
   }
@@ -114,15 +121,27 @@ export class ChatService extends Service {
   /** 사용자가 OS 파일 고르기로 골랐거나 놓거나 붙여넣은(이슈 #80) 첨부 경로 — 보낼 때 이 안의 것만 읽는다 (화면이 오염돼도 아무 파일이나 읽어 보내게 두지 않는다).
    *  값은 고른 횟수다 (같은 파일을 두 대화의 입력창에 붙일 수 있다) — 보내거나 칩을 뺄 때마다 하나씩 준다 (revokeAttachments) */
   private picked = new Map<string, number>()
+  /** 백그라운드 하위 작업 (이슈 #319) */
+  private tasks: BackgroundTasks
 
   constructor(ctx: Context) {
     super(ctx, 'chat')
+    this.tasks = new BackgroundTasks({
+      run: (options) => this.ctx.llm.chat(options),
+      reject: (sessionId, requestId) => this.ctx.llm.reply(sessionId, requestId, 'reject'),
+      report: (cid, send) => this.send(cid, send),
+      changed: (cid, tasks) => this.ctx.emit('chat/tasks-changed', cid, tasks),
+      limit: () => runningTaskLimit(this.ctx.get('settings')?.get().maxRunningTasks),
+    })
+    // 동시 실행 작업 수를 바꾸면 대기 중인 작업이 새 수에 맞춰 시작한다 (#321)
+    ctx.on('settings/changed', () => this.tasks.pumpAll())
     ctx.effect(() => this.queues.subscribe((cid) => void ctx.emit('chat/queue-changed', this.queueOf(cid))))
     // 지워진 대화의 대기열은 같이 사라진다 (다른 대화가 보내 둔 지시 포함). 도는 턴도 멈춘다 — 답을 실을 대화가 없다
     ctx.on('sessions/removed', (ids) =>
       ids.forEach((id) => {
         this.queues.clear(id)
         this.turns.get(id)?.stop.abort()
+        this.tasks.remove(id)
       }),
     )
   }
@@ -240,9 +259,36 @@ export class ChatService extends Service {
     return turn && { origin: turn.origin, waiting: turn.attention.length > 0 }
   }
 
-  /** 지금 도는 턴 수 (대화마다 하나) — 앱을 끝내면 중단될 것들 (종료 확인 ctx.quit, 이슈 #92) */
+  /** 지금 도는 턴 수 (대화마다 하나) + 도는 백그라운드 작업 수 — 앱을 끝내면 중단될 것들 (종료 확인 ctx.quit, 이슈 #92) */
   running(): number {
-    return this.turns.size
+    return this.turns.size + this.tasks.live()
+  }
+
+  /** 백그라운드 작업을 띄운다 (이슈 #319, 앱 MCP 의 task_start) — 번호를 곧바로 준다(실행 자리가 없으면 대기 — queued, #321). 저장 안 된 대화·모델 없음·상한·매번 묻기의 general 은 던진다 */
+  async startTask(cid: string, input: TaskInput): Promise<{ number: number; id: string; queued: boolean; limit: number }> {
+    const conversation = (await this.ctx.sessions.list()).find((entry) => entry.id === cid)
+    if (!conversation) throw new Error('Unknown conversation.')
+    return this.tasks.start(conversation, input)
+  }
+
+  /** 그 대화에서 끝나지 않은 백그라운드 작업 수(실행 + 대기) — 목표는 이것이 0 일 때만 다음 라운드를 보낸다 */
+  tasksRunning(cid: string): number {
+    return this.tasks.live(cid)
+  }
+
+  /** 그 대화의 백그라운드 작업 상태 (앱 MCP 의 task_status) */
+  taskStatus(cid: string): TaskStatusEntry[] {
+    return this.tasks.status(cid)
+  }
+
+  /** 그 엔진 세션이 백그라운드 작업의 것인가 — 작업은 작업 도구를 못 부른다 */
+  isTaskSession(sessionId: string): boolean {
+    return this.tasks.owns(sessionId)
+  }
+
+  /** 백그라운드 작업 목록 전부 (대화 id → 작업) — 화면이 다시 뜨면 이것으로 이어 그린다 */
+  taskSnapshot(): Record<string, Subtask[]> {
+    return this.tasks.snapshot()
   }
 
   /** 그 대화의 대기열에 쌓인 수 */
@@ -288,8 +334,9 @@ export class ChatService extends Service {
     return target ? this.ctx.llm.reply(sessionId, requestId, answer, target) : this.ctx.llm.reply(sessionId, requestId, answer)
   }
 
-  /** 도는 턴의 하위 작업 하나만 멈춘다 (ctx.llm.stopSubtask 그대로) */
+  /** 하위 작업 하나만 멈춘다 — 백그라운드 작업(#319)이면 그것을, 아니면 도는 턴의 하위 작업 (ctx.llm.stopSubtask) */
   stopSubtask(subtaskId: string): Promise<boolean> {
+    if (this.tasks.stop(subtaskId)) return Promise.resolve(true)
     return this.ctx.llm.stopSubtask(subtaskId)
   }
 

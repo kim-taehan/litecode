@@ -18,7 +18,8 @@ export interface JobList {
  *  ended: 턴이 이미 끝났다(입력 카드 위 줄이 새 턴 전까지 끝난 작업을 보인다, 이슈 #295) — 남은 준비·진행 중은 "중단됨" 으로 끝난 것에 */
 export function jobList(items: readonly TurnItem[], ended = false): JobList {
   const subtasks = items.filter((item): item is Subtask => item.kind === 'subtask')
-  const live = (item: Subtask) => item.status === 'running' || item.status === 'preparing'
+  // queued: 차례를 기다리는 백그라운드 작업 (#321) — 도는 것에 든다
+  const live = (item: Subtask) => item.status === 'running' || item.status === 'preparing' || item.status === 'queued'
   if (ended) return { running: [], finished: subtasks.map((item) => (live(item) ? { ...item, status: 'stopped' as const } : item)) }
   return { running: subtasks.filter(live), finished: subtasks.filter((item) => !live(item)) }
 }
@@ -31,6 +32,12 @@ export function leadJob(running: readonly Subtask[]): Subtask | undefined {
     if (!lead || (item.startedAt ?? Infinity) < (lead.startedAt ?? Infinity)) lead = item
   }
   return lead
+}
+
+/** 조용한 백그라운드 작업(quietSince)이 몇 분째 조용한가 — 실행 중이 아니거나 표시가 없으면 undefined. 표시는 TASK_QUIET_MS 뒤에 붙으므로 1분 이상 */
+export function quietMinutes(item: Subtask, now: number): number | undefined {
+  if (item.status !== 'running' || item.quietSince === undefined) return undefined
+  return Math.max(1, Math.floor((now - item.quietSince) / 60_000))
 }
 
 /** 펼친 목록에 한 번에 보일 하위 작업 줄 수 — 나머지는 "+N개 더 보기" (이슈 #295 시안 G) */
@@ -73,6 +80,22 @@ export function recentLines(items: readonly TurnItem[], limit = RECENT_LINES): J
 /** 지금 하는 일 — 마지막 생각·도구 줄 (없으면 undefined) */
 export function lastLine(items: readonly TurnItem[]): JobLine | undefined {
   return recentLines(items, 1)[0]
+}
+
+/** 백그라운드 작업 줄의 훑어보기 한 줄 (#325) — 실패·중단 사유가 있으면 그것, 아니면 마지막 활동(생각·도구·응답 글의 첫 줄). 없으면 undefined */
+export function peekLine(item: Subtask): JobLine | undefined {
+  if (item.error) return { id: 'error', text: item.error, mono: false, state: 'error' }
+  for (let at = item.items.length - 1; at >= 0; at--) {
+    const entry = item.items[at]!
+    if (entry.kind === 'text') {
+      const text = entry.text.trim().split('\n')[0]?.trim()
+      if (text) return { id: entry.id, text, mono: false }
+      continue
+    }
+    const line = jobLine(entry)
+    if (line) return line
+  }
+  return undefined
 }
 
 /** 경과 시간 — 좁은 칸(44px 고정폭)에 들어가게 12s · 1m05s · 1h02m */

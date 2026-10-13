@@ -112,6 +112,11 @@ export interface ChatOptions {
   stop?: AbortSignal
   images?: readonly ChatImage[]
   context?: string
+  /** 이 턴에만 모델에 안 보일 MCP 도구 (서버 → MCP 서버가 준 도구 이름) — 폴더의 숨김(hideMcpTools)에 더한다. 백그라운드 작업 턴이 작업 도구를 뺀다 (#319) */
+  hideMcpTools?: Readonly<Record<string, readonly string[]>>
+  /** 이 턴의 무응답 한도 — 주면 평소 한도(MODEL_STALL_TIMEOUT_MS·도구 인자 TOOL_INPUT_STALL_TIMEOUT_MS) 대신 이것 하나로만 끊는다.
+   *  백그라운드 작업 턴이 하드 한도만 남긴다 (shared/tasks.ts TASK_STALL_TIMEOUT_MS — 조용함은 끊지 않고 알린다) */
+  stallTimeoutMs?: number
 }
 
 /** 레거시 GET /session/{id}/message 의 항목 (01w 실측 — 감싸지 않은 배열, 오래된 것부터) */

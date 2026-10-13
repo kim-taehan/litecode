@@ -86,6 +86,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     },
     "build": {
       "permission": {
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -137,10 +138,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "edit": "ask",
         "bash": "ask",
         "question": "allow",
-        "task": {
-          "*": "deny",
-          "general-ask": "allow"
-        },
+        "task": "deny",
         "*_*": "ask",
         "litecode_open": "allow",
         "litecode_list_projects": "allow",
@@ -173,9 +171,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
       "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
       "permission": {
         "*": "allow",
-        "task": {
-          "general-ask": "deny"
-        },
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -251,9 +247,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     }
   },
   "permission": {
-    "task": {
-      "general-ask": "deny"
-    },
+    "task": "deny",
     "litecode_send_to_project": "deny",
     "litecode_read_project": "deny",
     "litecode_create": "deny",
@@ -368,6 +362,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     },
     "build": {
       "permission": {
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -390,10 +385,6 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "glob": "ask",
         "grep": "ask",
         "read": "ask",
-        "task": {
-          "*": "ask",
-          "general-ask": "deny"
-        },
         "todowrite": "ask",
         "*_*": "ask",
         "plan_exit": "deny",
@@ -432,6 +423,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "edit": "ask",
         "bash": "ask",
         "question": "allow",
+        "task": "deny",
         "*_*": "ask",
         "plan_enter": "deny",
         "plan_exit": "deny",
@@ -441,10 +433,6 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "glob": "ask",
         "grep": "ask",
         "read": "ask",
-        "task": {
-          "*": "deny",
-          "general-ask": "ask"
-        },
         "todowrite": "ask",
         "litecode_present": "ask",
         "litecode_git_status": "ask",
@@ -473,6 +461,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
       "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
       "permission": {
         "*": "allow",
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -495,10 +484,6 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "glob": "ask",
         "grep": "ask",
         "read": "ask",
-        "task": {
-          "*": "ask",
-          "general-ask": "deny"
-        },
         "todowrite": "ask",
         "*_*": "ask",
         "chrome_*": "ask",
@@ -559,10 +544,6 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "glob": "ask",
         "grep": "ask",
         "read": "ask",
-        "task": {
-          "*": "ask",
-          "general-ask": "deny"
-        },
         "chrome_*": "deny"
       }
     },
@@ -573,10 +554,6 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "glob": "ask",
         "grep": "ask",
         "read": "ask",
-        "task": {
-          "*": "ask",
-          "general-ask": "deny"
-        },
         "*_*": "ask",
         "plan_enter": "deny",
         "plan_exit": "deny",
@@ -608,9 +585,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     }
   },
   "permission": {
-    "task": {
-      "general-ask": "deny"
-    },
+    "task": "deny",
     "litecode_send_to_project": "deny",
     "litecode_read_project": "deny",
     "litecode_create": "deny",
@@ -724,6 +699,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     },
     "build": {
       "permission": {
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -778,10 +754,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "edit": "ask",
         "bash": "ask",
         "question": "allow",
-        "task": {
-          "*": "deny",
-          "general-ask": "allow"
-        },
+        "task": "deny",
         "*_*": "ask",
         "litecode_open": "allow",
         "litecode_list_projects": "allow",
@@ -817,9 +790,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
       "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
       "permission": {
         "*": "allow",
-        "task": {
-          "general-ask": "deny"
-        },
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -901,9 +872,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     }
   },
   "permission": {
-    "task": {
-      "general-ask": "deny"
-    },
+    "task": "deny",
     "litecode_send_to_project": "deny",
     "litecode_read_project": "deny",
     "litecode_create": "deny",
@@ -1025,6 +994,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     },
     "build": {
       "permission": {
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -1081,10 +1051,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "webfetch": "ask",
         "websearch": "ask",
         "question": "allow",
-        "task": {
-          "*": "deny",
-          "general-ask": "allow"
-        },
+        "task": "deny",
         "*_*": "ask",
         "litecode_open": "allow",
         "litecode_list_projects": "allow",
@@ -1118,9 +1085,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
       "prompt": "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
       "permission": {
         "*": "allow",
-        "task": {
-          "general-ask": "deny"
-        },
+        "task": "deny",
         "litecode_send_to_project": "ask",
         "litecode_read_project": "allow",
         "litecode_create": "ask",
@@ -1215,9 +1180,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     }
   },
   "permission": {
-    "task": {
-      "general-ask": "deny"
-    },
+    "task": "deny",
     "litecode_send_to_project": "deny",
     "litecode_read_project": "deny",
     "litecode_create": "deny",

@@ -39,10 +39,9 @@ describe('modePermission — 메인 대화', () => {
     for (const permission of ['external_directory', 'doom_loop']) expect(row(permission), permission).toEqual({ plan: 'ask', build: 'ask', ask: 'ask', full: 'allow' })
   })
 
-  it('하위 작업(task): 계획은 막고, 매번 묻기는 묻는 하위 에이전트만, 그 밖의 모드는 그 하위 에이전트만 빼고 허용', () => {
-    expect(row('task', { resources: ['general'] })).toEqual({ plan: 'deny', build: 'allow', ask: 'deny', full: 'allow' })
-    expect(row('task', { resources: ['explore'] })).toEqual({ plan: 'deny', build: 'allow', ask: 'deny', full: 'allow' })
-    expect(row('task', { resources: ['general-ask'] })).toEqual({ plan: 'deny', build: 'deny', ask: 'allow', full: 'deny' })
+  it('하위 작업(task): 내장 task 는 모든 모드에서 꺼져 있다 (#319 — 백그라운드 작업은 litecode_task_start, 보통의 MCP 도구 규칙)', () => {
+    for (const agent of ['general', 'explore', 'general-ask']) expect(row('task', { resources: [agent] }), agent).toEqual({ plan: 'deny', build: 'deny', ask: 'deny', full: 'deny' })
+    expect(row('litecode_task_start')).toEqual({ plan: 'deny', build: 'allow', ask: 'ask', full: 'allow' })
   })
 
   it('MCP 도구(<서버>_<도구>): 계획은 막고, 매번 묻기는 묻고, 기본·전체 권한은 허용', () => {
