@@ -542,7 +542,10 @@ button {
 
 .session-item:hover .session-item__time,
 .session-item:focus-within .session-item__time,
-.session-item--confirming .session-item__time {
+.session-item--confirming .session-item__time,
+.session-item:hover .session-item__current,
+.session-item:focus-within .session-item__current,
+.session-item--confirming .session-item__current {
   display: none;
 }
 
@@ -588,7 +591,7 @@ button {
 }
 
 .session-item--active {
-  background: var(--fill-hover); /* 선택은 바탕만 — 굵기·색 그대로 (dsh, 사용자 결정 2026-10-02) */
+  background: var(--fill-active); /* 지금 보는 대화 — 더 짙은 바탕 + "현재" 뱃지 (2026-10-13 피드백 #3 · 그전엔 호버와 같은 --fill-hover) */
 }
 
 .sidebar__foot {
@@ -1463,6 +1466,18 @@ html[data-platform]:not([data-platform='darwin']) .file-preview__head {
   font-size: 10px;
   line-height: 16px;
   color: var(--text-tertiary);
+}
+
+/* 지금 보는 대화의 "현재" 뱃지 — 시각 자리에 대신 서고, 호버·포커스 시 액션이 그 자리를 쓰면 시각처럼 숨김 (2026-10-13 피드백 #3) */
+.session-item__current {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--nav-active);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 /* 모델을 바꾼 뒤 버튼 위에 잠깐 뜨는 작은 알림 */

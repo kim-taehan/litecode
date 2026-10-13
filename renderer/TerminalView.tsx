@@ -7,7 +7,7 @@ import { useT, type Translate } from './settingsStore.ts'
 // 터미널 탭 본문 (이슈 #303) — 그 터미널의 xterm. 셸은 메인(ctx.terminals → 엔진)이 쥐고 출력도 쌓아 둔다: 탭이(다시) 실리면
 // 쌓인 출력을 받아 다시 그리고, 그 뒤 온 조각만 이어 쓴다 (end — 그린 출력의 끝 위치 — 이하인 조각은 이미 그렸다).
 // 셸이 끝났거나 메인에 없으면(exit·엔진 재시작) attach 가 비어 "[끝남]" 표시가 그 자리에 남는다 — 그 탭은 거기까지다.
-// quiet — AI 가 조용히 연 것(open(터미널)): 펼 때 키(포커스)를 가져오지 않는다. 그 뒤 focus 가 바뀌면(⌘↓·⌘[·⌘]·탭 클릭) 키를 가져온다.
+// quiet — AI 가 조용히 연 것(open(터미널)): 펼 때 키(포커스)를 가져오지 않는다. 그 뒤 focus 가 바뀌면(⌘T·⌘[·⌘]·탭 클릭) 키를 가져온다.
 
 const ended = (t: Translate) => `\r\n\x1b[2m[${t('terminal.ended')}]\x1b[0m\r\n`
 
@@ -25,7 +25,7 @@ export function TerminalView({ directory, terminalId, focus, quiet }: { director
   tRef.current = t
   const host = useRef<HTMLDivElement>(null)
   const screen = useRef<Terminal>(undefined)
-  /** 처음 실린 때의 값만 본다 — 그 뒤 focus 가 바뀌면(⌘↓·탭 이동) 늘 키를 가져온다 */
+  /** 처음 실린 때의 값만 본다 — 그 뒤 focus 가 바뀌면(⌘T·탭 이동) 늘 키를 가져온다 */
   const quietOpen = useRef(quiet)
   const openedAt = useRef(focus)
 

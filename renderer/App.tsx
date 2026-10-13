@@ -39,6 +39,7 @@ import { useSidebarLayout } from './useSidebarLayout.ts'
 import { useLastModel } from './useLastModel.ts'
 import { useChatEvents } from './useChatEvents.ts'
 import { useTerminalKeys } from './useTerminalKeys.ts'
+import { useSessionNav } from './useSessionNav.ts'
 import { Sidebar } from './Sidebar.tsx'
 import { ConversationView } from './ConversationView.tsx'
 import { Composer } from './Composer.tsx'
@@ -317,8 +318,8 @@ export function App() {
       if (!handled) send()
     })
 
-  // 터미널 탭의 단축키 — ⌘↓(열기/새 터미널) · ⌘↑(접기) · ⌘⇧↓(새 터미널) · ⌘[·⌘](이전/다음) (useTerminalKeys.ts)
-  useTerminalKeys({ project: active?.project, terminalOn, inputRef: trigger.inputRef })
+  // 터미널 탭의 단축키 — ⌘T(새 터미널) · ⌘[·⌘](이전/다음) (useTerminalKeys.ts)
+  useTerminalKeys({ project: active?.project, terminalOn })
 
   // 프로젝트 전환 — 패널의 탭 묶음은 건너가지 않는다(이전부터 그랬고). 다만 터미널은 메인에 셸로 남아 있으므로 떠나면
   // 그 프로젝트의 터미널 셸을 끝낸다 — 안 하면 탭은 사라지고 셸만 남는다 (이슈 #303 받아들인 한계)
@@ -435,6 +436,19 @@ export function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // ⌘↑/⌘↓ (2026-10-13 피드백 #3) — 바로 이전/다음 대화로. 사이드바 대화 목록 순서(진행중만 보기·찾기·고정 순) 기준, 끝에서 감돈다
+  const listedNavRef = useRef(listed)
+  listedNavRef.current = listed
+  useSessionNav({
+    onStep: (dir) => {
+      const list = listedNavRef.current
+      if (list.length === 0) return
+      const index = Math.max(0, list.findIndex((session) => session.id === activeIdRef.current))
+      const next = list[(index + dir + list.length) % list.length]
+      if (next && next.id !== activeIdRef.current) setActiveIds((ids) => ({ ...ids, [next.project]: next.id }))
+    },
+  })
 
   /** 새 대화 — 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace). 이미 있으면 새로 만들지 않고 그리로 간다 */
   function startNewChat(): void {
