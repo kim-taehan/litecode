@@ -221,7 +221,9 @@ button {
   color: var(--text-tertiary);
 }
 
-/* 빠른 열기 (이슈 #305) — ⌘K 로 상단 중앙에 뜬다. 별도 검색칸 없음: 맨 윗 칸이 곧 검색칸 */
+/* 빠른 열기 (이슈 #305) — 전환 카드 우측 바로 옆(사이드바 옆, 2026-10-13 피드백 #1). 좌표는
+   ProjectQuickOpen 이 전환 버튼 rect 로 준다(인라인 top/left + --po-left). 버튼이 없으면(테스트 등)
+   이 상단 중앙이 폴백. 별도 검색칸 없음: 맨 윗 칸이 곧 검색칸 */
 .project-open__panel {
   position: fixed;
   top: 84px;
@@ -234,6 +236,12 @@ button {
   backdrop-filter: blur(40px) saturate(150%);
   border-radius: 16px;
   box-shadow: var(--shadow-prominent);
+}
+
+/* 앵커 모드 — 전환 버튼 우측. 폭은 창 오른쪽 끝까지 16px 버퍼를 두고 넘지 않게 */
+.project-open__panel--anchored {
+  transform: none;
+  width: min(520px, calc(100vw - 32px), calc(100vw - var(--po-left) - 16px));
 }
 
 .project-open__search {

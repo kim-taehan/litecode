@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
 import type { ConversationStatus, Project } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
 import { StatusDot } from './Notices.tsx'
@@ -29,7 +29,9 @@ interface ProjectQuickOpenProps {
 
 type Row = { kind: 'project'; project: Project } | { kind: 'folder' }
 
-/** 빠른 열기 (이슈 #305) — VS Code 파일 열기 스타일. 상단 중앙 패널: 별도 검색칸 없이 타이핑한 즉시 목록이 거르고,
+/** 빠른 열기 (이슈 #305) — VS Code 파일 열기 스타일. 전환 카드 우측 바로 옆(사이드바 옆, 2026-10-13 피드백 #1):
+ *  버튼 rect 로 좌표를 정하고(인라인 top/left) — 사이드바 폭·접힘(레일) 모두 버튼 기준이라 자동으로 따라간다.
+ *  별도 검색칸 없이 타이핑한 즉시 목록이 거르고,
  *  ↑/↓ 로 이동(끝에서 처음으로), Enter 로 고르고, Esc 는 닫고 포커스를 전환 버튼으로 돌려준다.
  *  즐겨찾기/최근 그룹 라벨은 없애고 즐겨찾기가 ★ 표시와 함께 먼저 보인다. 행 hover 액션(✎·★·×)과
  *  맨 아래 "폴더 열기" 행은 이전 팝오버와 같다. 바깥 클릭은 그냥 닫는다.
@@ -43,6 +45,14 @@ export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy,
   const [editing, setEditing] = useState<string>()
   const searchRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  /** 전환 버튼 우측 8px·버튼 윗단과 같은 높이. 버튼이 없으면(테스트 등) undefined → CSS 상단 중앙 폴백 */
+  const [anchor, setAnchor] = useState<{ top: number; left: number }>()
+  useEffect(() => {
+    const button = switchButton?.current
+    if (!button) return
+    const rect = button.getBoundingClientRect()
+    setAnchor({ top: rect.top, left: rect.right + 8 })
+  }, [switchButton])
 
   useEffect(() => {
     function onMouseDown(event: MouseEvent): void {
@@ -105,7 +115,14 @@ export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy,
   }
 
   return (
-    <div className="project-open__panel" ref={panelRef} role="dialog" aria-label={t('project.search')} onKeyDown={onKey}>
+    <div
+      className={`project-open__panel${anchor ? ' project-open__panel--anchored' : ''}`}
+      ref={panelRef}
+      role="dialog"
+      aria-label={t('project.search')}
+      style={anchor ? ({ top: anchor.top, left: anchor.left, '--po-left': `${anchor.left}px` } as CSSProperties) : undefined}
+      onKeyDown={onKey}
+    >
       <input
         ref={searchRef}
         className="project-open__search"
