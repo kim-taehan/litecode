@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { McpScope, McpServerInput, McpServerSummary, McpTestResult, McpToolSelection, Project } from '../shared/ipc.ts'
 import { ALL_TOOLS_OFF, serverCost, shortTokens, toolBudget, TOOL_BUDGET_MAX_TOKENS, withTool } from '../shared/mcpTools.ts'
 import { PlusDialog, PlusGroup } from './PlusDialog.tsx'
-import { byScope, mcpState, toolPicking, toolRows } from './plusView.ts'
+import { builtinServerName, byScope, mcpState, toolPicking, toolRows } from './plusView.ts'
 import { reason } from './ipcError.ts'
 import { useSettings, useT } from './settingsStore.ts'
 import './mcp.css'
@@ -153,6 +153,8 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
   const state = mcpState(server)
   const picking = toolPicking(server)
   const cost = state === 'connected' ? serverCost(server) : undefined
+  // 내장 서버는 "… in litecode" 로 보인다 (#337) — 실제 이름(도구 접두어)은 그대로
+  const displayName = server.source === 'builtin' ? builtinServerName(server.name) : server.name
   // 출처 배지 — 폴더 정의는 그 파일 이름(시안의 ".mcp.json"), 개인 설정은 "개인 설정". 앱에서 만든 서버는 배지 없음
   // 내장 = 앱 자신의 MCP 서버(이슈 #51) — 읽기 전용, 주소 없음
   const badge =
@@ -174,9 +176,9 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
   return (
     <>
       <div className="mcp-row__main">
-        <button type="button" className="mcp-row__toggle" aria-expanded={open} title={t('mcp.expand', { name: server.name })} onClick={() => setOpen((now) => !now)}>
+        <button type="button" className="mcp-row__toggle" aria-expanded={open} title={t('mcp.expand', { name: displayName })} onClick={() => setOpen((now) => !now)}>
           <span className="mcp-row__name">
-            {server.name}
+            {displayName}
             {badge && <span className="provider-card__tag mcp-row__badge">{badge}</span>}
           </span>
           {target && <span className="mcp-row__target">{target}</span>}
@@ -200,7 +202,7 @@ function ServerRow({ server, editing, confirming, onEdit, onDelete, onCancelDele
           role="switch"
           className="settings-switch"
           aria-checked={server.enabled}
-          aria-label={t('mcp.enabled', { name: server.name })}
+          aria-label={t('mcp.enabled', { name: displayName })}
           disabled={!!server.shadowed}
           onClick={() => onToggle(!server.enabled)}
         >
