@@ -1,16 +1,11 @@
-import { useEffect, type RefObject } from 'react'
-import { closeFilePreview, cycleTerminalTab, focusLastTerminalTab, getPanelState, openTerminalTab } from './filePreviewStore.ts'
+import { useEffect } from 'react'
+import { cycleTerminalTab, openTerminalTab } from './filePreviewStore.ts'
 
-// 터미널 탭 (이슈 #303) — ⌘↓ 로 열고 키를 탭으로 내린다(터미널 탭이 없으면 새 터미널을 엽니다), ⌘↑ 로 패널을 접고 키를 입력창으로
-// 올려온다, ⌘⇧↓ 로 새 터미널, ⌘[·⌘] 로 이전·다음 터미널. Windows·Linux 는 Ctrl. ⌘⇧↑ 는 글 선택 확장이라 건드리지 않는다. (옛
-// 셸 서랍의 ⌘↓/⌘↑ — 지금은 오른쪽 패널의 터미널 탭으로)
+// 터미널 탭 (이슈 #303) — ⌘T 로 새 터미널을 연다(열려 있는 것이 있어도), ⌘[·⌘] 로 이전·다음 터미널. Windows·Linux 는 Ctrl.
+// (옛 셸 서랍의 ⌘↓/⌘↑ — ⌘↑ 접기 단축키는 2026-10-13 딴 데 쓰려고 풀었다)
 
-export function useTerminalKeys({ project, terminalOn, inputRef }: { project: string | undefined; terminalOn: boolean; inputRef: RefObject<HTMLTextAreaElement | null> }): void {
+export function useTerminalKeys({ project, terminalOn }: { project: string | undefined; terminalOn: boolean }): void {
   useEffect(() => {
-    function openNew(): void {
-      if (!project) return
-      void window.litecode.openTerminal(project).then(({ id }: { id: number }) => openTerminalTab(project, id)).catch(() => {})
-    }
     function onKeyDown(event: KeyboardEvent): void {
       const command = navigator.platform.startsWith('Mac') ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
       if (!command || event.altKey || !project || !terminalOn) return
@@ -18,20 +13,8 @@ export function useTerminalKeys({ project, terminalOn, inputRef }: { project: st
       if (document.querySelector('[aria-modal="true"]')) return
       const target = event.target instanceof HTMLElement ? event.target : undefined
       if (target?.matches('input, textarea, [contenteditable]') && !target.closest('.composer__input, .file-preview')) return
-      if (event.key === 'ArrowDown' && !event.shiftKey) {
-        if (!focusLastTerminalTab(project)) openNew()
-        event.preventDefault()
-        event.stopPropagation()
-      } else if (event.key === 'ArrowDown' && event.shiftKey) {
-        openNew() // 새 터미널
-        event.preventDefault()
-        event.stopPropagation()
-      } else if (event.key === 'ArrowUp' && !event.shiftKey) {
-        const panel = getPanelState()
-        // 이 프로젝트의 열린 패널만 접고, 안 열려 있으면 입력창의 것
-        if (!(panel?.open && panel.directory === project)) return
-        closeFilePreview()
-        inputRef.current?.focus()
+      if (event.key.toLowerCase() === 't' && !event.shiftKey) {
+        void window.litecode.openTerminal(project).then(({ id }: { id: number }) => openTerminalTab(project, id)).catch(() => {})
         event.preventDefault()
         event.stopPropagation()
       } else if (!event.shiftKey && event.key === '[') {

@@ -228,8 +228,11 @@ export function Sidebar({
               </span>
               <span className="session-item__title marquee">{titleOf(session)}</span>
               {session.pinned && <PinnedMark />}
-              {/* 시각 자리 — 지시로 새로 생긴 대화는 "새로 생김", 다른 대화가 시킨 일을 하는 중이면 그 아이콘 (이슈 #55 시안) */}
-              {sidebarMark(session, fresh) === 'fresh' ? (
+              {/* 시각 자리 — 지금 보는 대화는 "현재" 뱃지(2026-10-13 피드백 #3), 지시로 새로 생긴 대화는 "새로 생김",
+                  다른 대화가 시킨 일을 하는 중이면 그 아이콘 (이슈 #55 시안) */}
+              {session.id === active?.id ? (
+                <span className="session-item__current">{t('sidebar.current')}</span>
+              ) : sidebarMark(session, fresh) === 'fresh' ? (
                 <span className="session-item__fresh">{t('delegate.sidebar.fresh')}</span>
               ) : sidebarMark(session, fresh) === 'delegated' ? (
                 <span className="session-item__mark">
