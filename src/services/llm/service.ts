@@ -7,7 +7,7 @@ import { messageTokens } from '../turnUsage.ts'
 import { openPty, type TerminalEvents, type TerminalHandle } from '../opencodePty.ts'
 import { mcpToolOf, sanitizeMcpName, TurnScope, TurnTracker, type McpToolRef, type McpToolResolver, type TurnItem } from '../turnProgress.ts'
 import { awaitCaller, findCaller, ToolCalls, type ToolCaller } from '../toolCalls.ts'
-import { instructionsNote, projectInstructions } from '../instructions.ts'
+import { instructionsNote, projectInstructions, TODO_SYNC_RULE } from '../instructions.ts'
 import { carryOver, previousHistory, readPreviousMessages } from '../migrate.ts'
 import { historyMessages, interruptedError, modeOf } from '../history.ts'
 import { realDirectory } from '../projectPath.ts'
@@ -270,7 +270,8 @@ export class LlmService extends Service {
       const declined = new Set<string>()
       const userMessageId = messageId ?? this.newMessageId()
       const instructions = await projectInstructions(workdir)
-      const system = [instructions, context].filter(Boolean).join('\n\n')
+      // 할 일 동기화 규칙은 프로젝트 지시문 뒤에(뒤가 이긴다), 그 턴 맥락(context)은 그 뒤에 — 이슈 #406
+      const system = [instructions, TODO_SYNC_RULE, context].filter(Boolean).join('\n\n')
       // 레거시 전환 전에 쌓인 대화면 옛 글을 이 입력 앞에 한 번 넣는다 (migrate.ts, #21). 새로 만든 세션은 옛 기록이 없다
       if (sessionId) await carryOver(conn, id, workdir, { providerID: providerId, modelID: modelId }, userMessageId)
 

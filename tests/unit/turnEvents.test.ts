@@ -7,6 +7,7 @@ import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { ascendingId, connectionRefused, finishedTool, LlmService, MCP_TOOLS_MARKER, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
 import { interruptedError } from '../../src/services/history.ts'
+import { TODO_SYNC_RULE } from '../../src/services/instructions.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
@@ -723,15 +724,17 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     for (const url of legacy) expect(url, url).toContain(`directory=${encodeURIComponent(directory)}`)
   })
 
-  it('프로젝트 AGENTS.md 를 매 턴 system 으로 싣는다 (opencode 와 같은 "Instructions from:" 모양). 없으면 system 을 안 싣는다', async () => {
+  // 이슈 #406 — 지시문이 없어도 할 일 동기화 규칙은 매 턴 system 에 싣는다 (모델이 할 일을 만들고 갱신하지 않으면 할 일 줄이
+  // 0/7 에 멈춘다, 실측: 도구 134회 동안 todowrite 1회). 지시문이 있으면 규칙이 그 뒤에(뒤가 이긴다)
+  it('프로젝트 AGENTS.md 와 할 일 동기화 규칙을 매 턴 system 으로 싣는다 (규칙은 지시문 뒤). 지시문이 없으면 규칙만', async () => {
     const { llm } = await start(await fakeOpencode('done'))
     await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'no instructions' })
-    expect(prompts[0]).not.toHaveProperty('system')
+    expect(prompts[0]!['system']).toBe(TODO_SYNC_RULE)
     fs.writeFileSync(path.join(directory, 'AGENTS.md'), '# 규칙\n한국어로 답한다\n')
     try {
       await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'with instructions', sessionId: 'ses_1' })
       await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'every turn', sessionId: 'ses_1' })
-      for (const prompt of prompts.slice(1)) expect(prompt['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\n# 규칙\n한국어로 답한다\n`)
+      for (const prompt of prompts.slice(1)) expect(prompt['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\n# 규칙\n한국어로 답한다\n\n\n${TODO_SYNC_RULE}`)
     } finally {
       fs.rmSync(path.join(directory, 'AGENTS.md'))
     }
@@ -748,7 +751,7 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     try {
       items.length = 0
       await turn()
-      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.local.md')}\nmine\n`)
+      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.local.md')}\nmine\n\n\n${TODO_SYNC_RULE}`)
       expect(items[0]).toEqual({ kind: 'context', id: `${String(prompts[1]!['messageID'])}:instructions`, text: tr('chat.instructionsLocal', { files: 'AGENTS.local.md' }) })
     } finally {
       fs.rmSync(path.join(directory, 'AGENTS.local.md'))
@@ -760,13 +763,13 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     const { llm } = await start(await fakeOpencode('done'))
     const turn = (context?: string) => llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', images: [], context })
     await turn('branch: main')
-    expect(prompts[0]!['system']).toBe('branch: main')
+    expect(prompts[0]!['system']).toBe(`${TODO_SYNC_RULE}\n\nbranch: main`) // 규칙 뒤에 그 턴 맥락
     fs.writeFileSync(path.join(directory, 'AGENTS.md'), 'rules\n')
     try {
       await turn('branch: main')
       await turn()
-      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\nbranch: main`)
-      expect(prompts[2]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n`)
+      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\n${TODO_SYNC_RULE}\n\nbranch: main`)
+      expect(prompts[2]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\n${TODO_SYNC_RULE}`)
     } finally {
       fs.rmSync(path.join(directory, 'AGENTS.md'))
     }
