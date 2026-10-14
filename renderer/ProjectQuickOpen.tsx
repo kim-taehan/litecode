@@ -26,11 +26,9 @@ interface ProjectQuickOpenProps {
   onClose(returnFocus: boolean): void
   /** 전환 버튼 — 그 윗 mousedown 은 바깥 클릭으로 치지 않는다 (버튼의 click 이 스스로 토글하게) */
   switchButton?: RefObject<HTMLElement | null>
-  /** ⌘K 반복 신호 (#375) — 매 증가에 열렸을 때 순서(표시 순)의 다음 프로젝트로 이동·오픈. 0 = 없음.
-   *  패널은 열려 있는 채로 — Esc·바깥 클릭만으로 닫힌다 */
+  /** ⌘K 반복 신호 (#375·#379) — 매 증가에 강조(선택 행)가 열렸을 때 순서(표시 순)의 다음 프로젝트로.
+   *  실제로 열·닫는 것은 Enter(=행 선택)·Esc·바깥 클릭 */
   cycle: number
-  /** cycle 이 고른 프로젝트를 연다 (패널은 유지). promise 는 열림 끝 — 끝나면 하이라이트를 다시 맞춘다 */
-  onCycle(project: Project): Promise<void>
 }
 
 type Row = { kind: 'project'; project: Project } | { kind: 'folder' }
@@ -50,14 +48,15 @@ export function pinnedProjects(initial: Project[], live: Project[], needle: stri
  *  버튼 rect 로 좌표를 정하고(인라인 top/left) — 사이드바 폭·접힘(레일) 모두 버튼 기준으로 자동으로 따라간다.
  *  별도 검색칸 없이 타이핑한 즉시 목록이 거르고,
  *  ↑/↓ 로 이동(끝에서 처음으로), Enter 로 고르고, Esc 는 닫고 포커스를 전환 버튼으로 돌려준다.
- *  열려 있으면 ⌘K/Ctrl+K 가 다시 열렸을 때 순서(즐겨찾기 먼저)의 다음 프로젝트로 열며 이동(#375) —
- *  패널은 유지, 반복하면 계속 순환한다 (순환 규칙 + 스냅샷 이유는 projectCycle.ts).
+ *  열려 있으면 ⌘K/Ctrl+K 가 강조(선택 행)를 열렸을 때 순서(즐겨찾기 먼저)의 다음 프로젝트로 이동(#379) —
+ *  뒷 화면은 안 바뀌고, **Enter(=행 선택) 로 고른 프로젝트를 열고 패널을 닫아 확정**. 반복하면 계속 순환
+ *  (순환 규칙 + 스냅샷 이유는 projectCycle.ts).
  *  열려 있는 동안 목록 순서는 열렸을 때 순서 그대로 고정(#377) — 이동하는 것은 강조(✓·선택 행)뿐.
  *  즐겨찾기/최근 그룹 라벨은 없애고 즐겨찾기가 ★ 표시와 함께 먼저 보인다. 행 hover 액션(✎·★·×)과
  *  맨 아래 "폴더 열기" 행은 이전 팝오버와 같다. 바깥 클릭은 그냥 닫는다.
  *  (이전 팝오버와 마찬가지로 "창 포커스를 잃으면 닫기" 는 없다 — 같은 머신의 다른 창이 포커스를
  *  가져가면 실물 테스트 도중 닫혀 실패했다, 2026-09-30.) */
-export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose, switchButton, cycle, onCycle }: ProjectQuickOpenProps) {
+export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose, switchButton, cycle }: ProjectQuickOpenProps) {
   const t = useT()
   const [query, setQuery] = useState('')
   /** ↑/↓·마우스 hover 가 고른 행 — Enter 로 고른다 */
@@ -120,9 +119,9 @@ export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy,
     else onPick(row.project)
   }
 
-  // ⌘K 반복 (#375) — 열려 있는 동안 다음 프로젝트로. 커서·스냅샷은 이 패널(마운트)당 하나:
-  // 스냅샷은 열렸을 때의 **표시 순서**(즐겨찾기 먼저 — 보이는 행 순서 그대로), 커서는 거기서 현재 프로젝트 자리.
-  // 열면 최근 목록 맨 앞으로 올라오므로 live 순서로 셈하면 처음 두 개 사이에서 오간다 (projectCycle.ts).
+  // ⌘K 반복 (#379) — 강조(선택 행)만 다음 프로젝트로 이동, Enter(=행 선택) 로 확정·전환.
+  // 커서·스냅샷은 이 패널(마운트)당 하나: 스냅샷은 열렸을 때의 **표시 순서**(즐겨찾기 먼저 —
+  // 보이는 행 순서 그대로), 커서는 거기서 현재 프로젝트 자리. (projectCycle.ts)
   const orderRef = useRef<string[] | undefined>(undefined)
   if (orderRef.current === undefined) {
     const initial = initialProjectsRef.current
@@ -134,29 +133,19 @@ export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy,
   const cursorRef = useRef<ProjectCycle | undefined>(undefined)
   if (cursorRef.current === undefined) cursorRef.current = startProjectCycle(orderRef.current, current)
   const cycleSeenRef = useRef(cycle) // 마운트 때의 값 = 재마운트 시 같은 신호로 다시 도지 않게
-  const cyclingRef = useRef(false) // 열림 도중에 또 누르면 그건 미는 것
   const rowsRef = useRef(rows)
   rowsRef.current = rows
-  const onCycleRef = useRef(onCycle)
-  onCycleRef.current = onCycle
   useEffect(() => {
-    if (cycle === cycleSeenRef.current || cyclingRef.current) return
+    if (cycle === cycleSeenRef.current) return
     cycleSeenRef.current = cycle
     const step = nextProjectInCycle(cursorRef.current!, rowsRef.current.map((row) => (row.kind === 'project' ? row.project.path : '')))
     if (!step) return
     const rowIndex = rowsRef.current.findIndex((row) => row.kind === 'project' && row.project.path === step.path)
-    const target = rowIndex >= 0 ? rowsRef.current[rowIndex] : undefined
-    if (!target || target.kind !== 'project') return
-    cyclingRef.current = true
+    if (rowIndex < 0) return
     cursorRef.current = step.cycle
     setActive(rowIndex)
-    // 열림(프로젝트 갱신·목록 재렬서) 이 끝난 뒤 하이라이트를 고른 프로젝트가 지금 있는 행으로 다시 맞춘다
-    void onCycleRef.current(target.project).then(() => {
-      const after = rowsRef.current.findIndex((row) => row.kind === 'project' && row.project.path === target.project.path)
-      if (after >= 0) setActive(after)
-    }).catch(() => {}).finally(() => {
-      cyclingRef.current = false
-    })
+    // 화살표 키와 같은 길 — 포커스가 행 버튼·바깥에 있어도 탐색칸으로 돌려 Enter 로 바로 확정하게 한다
+    searchRef.current?.focus()
   }, [cycle])
 
   /** 탐색칸과 행 버튼 어느 쪽에 포커스가 있어도 같은 키를 쓴다 (행 버튼 포커스 시 포커스를 다시 탐색칸으로).
