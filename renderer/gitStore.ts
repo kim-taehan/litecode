@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import type { GitIgnored, GitView } from '../shared/git.ts'
+import type { GitIgnored, GitLogCommit, GitLogPage, GitLogPageQuery, GitView } from '../shared/git.ts'
 import { isFoldOpen, SECTION_UNTRACKED, toggleAllFolds, toggleFold, type Folds } from './gitTree.ts'
 
 // Git 상태의 화면 쪽 저장소 (이슈 #290) — 오른쪽 패널의 Git 탭(변경 수·목록)과 입력 카드의 브랜치 알약이 같은 값을 본다.
@@ -94,6 +94,74 @@ export function refreshIgnored(directory: string, read: (directory: string) => P
   )
 }
 
+// 기록 탭 페이징 (#400 #405) — 폴더(프로젝트)마다: 첫 페이지를 쓰고 내려가며 다음 페이지를 덧붙인다.
+// 다시 읽기(refreshLogGit)는 맨 처음부터 다시(레이인 상태는 GitLog 가 commits 처음부터 다시 계산한다)
+export interface GitLogView {
+  commits: GitLogCommit[]
+  hasMore: boolean
+  /** 다음 페이지를 읽고 있다 — 이어서 읽기는 한 번에 하나 */
+  reading: boolean
+}
+
+const logPages = new Map<string, GitLogPage>()
+const logAsked = new Map<string, number>()
+const logReading = new Set<string>()
+
+export function logGitOf(directory: string | undefined): GitLogView | undefined {
+  if (directory === undefined) return undefined
+  const page = logPages.get(directory)
+  if (!page) return undefined // 아직 읽기 시작한 적 없음
+  return { commits: page.commits, hasMore: page.hasMore, reading: logReading.has(directory) }
+}
+
+/** 첫 페이지를 안고 다시 읽는다 — 같은 폴더의 읽기는 마지막 요청의 답만 쓴다(그 사이 다시 읽으면 그 전 답은 버림) */
+export function refreshLogGit(directory: string, read: (directory: string, query?: GitLogPageQuery) => Promise<GitLogPage> = (d, q) => window.litecode.gitLogPage(d, q)): Promise<void> {
+  const seq = (logAsked.get(directory) ?? 0) + 1
+  logAsked.set(directory, seq)
+  logPages.set(directory, { commits: [], hasMore: false })
+  logReading.add(directory)
+  notify()
+  return read(directory).then(
+    (page) => {
+      if (logAsked.get(directory) !== seq) return
+      logPages.set(directory, page)
+      logReading.delete(directory)
+      notify()
+    },
+    () => {
+      if (logAsked.get(directory) !== seq) return
+      logReading.delete(directory)
+      notify()
+    },
+  )
+}
+
+/** 읽힌 것 뒤에 다음 페이지를 덧붙인다 — 이미 읽고 있거나 마감이면 아무것도 안 한다 */
+export function appendLogGit(directory: string, read: (directory: string, query?: GitLogPageQuery) => Promise<GitLogPage> = (d, q) => window.litecode.gitLogPage(d, q)): Promise<void> {
+  const page = logPages.get(directory)
+  if (!page || !page.hasMore || logReading.has(directory)) return Promise.resolve()
+  const skip = page.commits.length
+  const seq = logAsked.get(directory) ?? 0
+  logReading.add(directory)
+  notify()
+  return read(directory, { skip }).then(
+    (next) => {
+      if (logAsked.get(directory) !== seq) {
+        logReading.delete(directory)
+        return
+      }
+      logPages.set(directory, { commits: [...page.commits, ...next.commits], hasMore: next.hasMore })
+      logReading.delete(directory)
+      notify()
+    },
+    () => {
+      if (logAsked.get(directory) !== seq) return
+      logReading.delete(directory)
+      notify()
+    },
+  )
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
@@ -102,6 +170,11 @@ function subscribe(listener: () => void): () => void {
 export function useGitView(directory: string | undefined): GitView | undefined {
   useSyncExternalStore(subscribe, () => version, () => version)
   return gitViewOf(directory)
+}
+
+export function useLogGit(directory: string | undefined): GitLogView | undefined {
+  useSyncExternalStore(subscribe, () => version, () => version)
+  return logGitOf(directory)
 }
 
 /** App 이 한 번 건다 — 기능이 켜져 있고 프로젝트를 보고 있을 때 다시 읽는 때를 잇는다 */

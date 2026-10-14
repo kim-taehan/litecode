@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { FileDiff } from '../shared/ipc.ts'
-import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitIgnored, type GitLastCommit, type GitResult, type GitStash, type GitStatus } from '../shared/git.ts'
+import { gitWebUrl, type GitAction, type GitBranch, type GitFile, type GitIgnored, type GitLastCommit, type GitResult, type GitStash, type GitStatus } from '../shared/git.ts'
+import { BranchIcon } from './GitIcons.tsx'
+import { GitLog } from './GitLog.tsx'
 import { ago } from './ago.ts'
 import { branchMenuEnabled, branchMenuGroups, branchTrack, groupBranches, isBranchMenuKey, matchesQuery, popupShortcut, recentBranches, shortcutLabel, type BranchMenuItem, type BranchMenuTarget, type PopupShortcut } from './branchPopup.ts'
 import { focusComposerInput } from './composerFocus.ts'
@@ -10,7 +12,7 @@ import { useFeatures } from './featuresStore.ts'
 import { openFilePreview, openGitTab, type PanelState } from './filePreviewStore.ts'
 import { commitControls, commitNotice, commitThenPush } from './gitCommit.ts'
 import { DANGER_ITEMS, entryPaths, FILE_MENU, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel, menuVisible, type FileMenuItem } from './gitMenu.ts'
-import { changeCount, foldsOf, ignoredOf, ignoredShown, refreshGit, refreshIgnored, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown, useGitView } from './gitStore.ts'
+import { changeCount, foldsOf, ignoredOf, ignoredShown, refreshGit, refreshIgnored, refreshLogGit, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown, useGitView } from './gitStore.ts'
 import { buildTree, entryKind, entryStat, entryState, folderKey, groupState, isFoldOpen, SECTION_UNTRACKED, splitChanges, toggleAction, treeFolders, treeRows, type ChangeEntry, type CheckState, type TreeFolder } from './gitTree.ts'
 import { reason } from './ipcError.ts'
 import { useT } from './settingsStore.ts'
@@ -814,6 +816,11 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
         {sub === 'changes' && <FoldAllButton directory={directory} view={view} />}
         {sub === 'changes' && <ViewOptionsButton directory={directory} />}
         {sub === 'changes' && <StashButton directory={directory} view={view} stashes={stashes ?? []} onNotice={setNotice} />}
+        {sub === 'log' && (
+          <span className="git-sub__push">
+            <ReloadButton onClick={() => void refreshLogGit(directory)} />
+          </span>
+        )}
       </div>
       {notice && (
         <NoticeLine notice={notice} onClose={() => setNotice(undefined)}>
@@ -869,7 +876,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
             onFileAction={fileAction}
           />
         )}
-        {sub === 'log' && <LogView directory={directory} view={view} />}
+        {sub === 'log' && <GitLog directory={directory} view={view} />}
       </div>
       {sub === 'changes' && (
         <CommitBox
@@ -1718,46 +1725,7 @@ export function StashList({ stashes, busy, onApply, onDrop }: { stashes: GitStas
   )
 }
 
-// ── 기록 ──
 
-function LogView({ directory, view }: { directory: string; view: GitStatus }) {
-  const t = useT()
-  const [log, setLog] = useState<GitCommit[]>()
-  useEffect(() => {
-    let live = true
-    window.litecode.gitLog(directory).then(
-      (commits) => live && setLog(commits),
-      () => live && setLog([]),
-    )
-    return () => {
-      live = false
-    }
-  }, [directory, view])
-  if (log === undefined) return <p className="git-empty">{t('filePreview.loading')}</p>
-  if (log.length === 0) return <p className="git-empty">{t('git.logEmpty')}</p>
-  const now = Date.now()
-  return (
-    <ol className="git-log">
-      {log.map((commit, index) => (
-        <li key={commit.hash} className="git-log__item" data-head={index === 0 || undefined}>
-          <span className="git-log__graph" aria-hidden="true">
-            <i />
-            {index < log.length - 1 && <u />}
-          </span>
-          <span className="git-log__main">
-            <span className="git-log__subject">{commit.subject}</span>
-            <span className="git-log__meta">
-              <code>{commit.short}</code>
-              <span>{`${commit.author} · ${ago(commit.time, now)}`}</span>
-              {index === 0 && <span className="git-tag">HEAD</span>}
-              {!commit.pushed && <span className="git-tag git-tag--local">{t('git.notPushed')}</span>}
-            </span>
-          </span>
-        </li>
-      ))}
-    </ol>
-  )
-}
 
 // ── 확인 카드 (승인 카드 틀) ──
 
@@ -1913,13 +1881,4 @@ function ReloadButton({ onClick }: { onClick(): void }) {
   )
 }
 
-export function BranchIcon({ className = 'git-icon' }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="4.5" cy="3.5" r="1.5" />
-      <circle cx="4.5" cy="12.5" r="1.5" />
-      <circle cx="11.5" cy="5.5" r="1.5" />
-      <path d="M4.5 5V11M11.5 7C11.5 9.5 4.5 8.5 4.5 11" />
-    </svg>
-  )
-}
+
