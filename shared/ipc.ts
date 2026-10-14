@@ -23,7 +23,7 @@ import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, Spee
 import type { UpdateStatus } from './updates.ts'
 import type { Goal } from './goal.ts'
 import type { GoalReply } from '../src/services/goal.ts'
-import type { GitAction, GitBranch, GitCommit, GitResult, GitView } from './git.ts'
+import type { GitAction, GitBranch, GitCommit, GitLastCommit, GitResult, GitView } from './git.ts'
 import type { DelegationSent } from '../src/services/delegation.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -231,6 +231,8 @@ export const Channel = {
   GIT_BRANCHES: 'git:branches',
   /** 화면 → 메인 (directory) → string[] — 원격 브랜치 이름(`origin/x`, 원격의 HEAD 제외). 브랜치 팝업(#386) */
   GIT_REMOTE_BRANCHES: 'git:remote-branches',
+  /** 화면 → 메인 (directory) → GitLastCommit | undefined — 마지막 커밋의 전체 메시지·올렸는지 (#387 마지막 커밋 고치기). 첫 커밋 전이면 undefined */
+  GIT_LAST_COMMIT: 'git:last-commit',
   /** 화면 → 메인 (directory, GitAction) → GitResult — 바꾸는 작업 전부 */
   GIT_RUN: 'git:run',
   /** 화면 → 메인 (directory) — origin 주소를 https 로 바꿔 기본 브라우저로 연다. 못 바꾸면 false */
@@ -488,6 +490,7 @@ export interface LitecodeBridge {
   gitLog(directory: string): Promise<GitCommit[]>
   gitBranches(directory: string): Promise<GitBranch[]>
   gitRemoteBranches(directory: string): Promise<string[]>
+  gitLastCommit(directory: string): Promise<GitLastCommit | undefined>
   gitRun(directory: string, action: GitAction): Promise<GitResult<Record<string, unknown>>>
   openGitRemote(directory: string): Promise<boolean>
   onGitChanged(listener: (directory: string) => void): () => void

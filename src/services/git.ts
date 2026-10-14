@@ -1,6 +1,6 @@
 import { Context, Service } from 'cordis'
 import { execProgram } from './exec.ts'
-import type { GitAction, GitBranch, GitCommit, GitFailure, GitFile, GitFileKind, GitResult, GitStatus, GitView } from '../../shared/git.ts'
+import type { GitAction, GitBranch, GitCommit, GitFailure, GitFile, GitFileKind, GitLastCommit, GitResult, GitStatus, GitView } from '../../shared/git.ts'
 
 // Git (ctx.git, 이슈 #290 — 시안 _workspace/mock-git/Git.dc.html). 시스템 git 을 인자 배열로 띄운다(exec.ts execProgram — 셸 글 없음).
 // 화면(Git 탭)과 AI 도구(appMcp/tools/git.ts)가 같은 메서드를 쓴다. 엔진·Electron 을 모른다 — 폴더는 부르는 쪽이 준다(IPC 는 등록된 프로젝트만).
@@ -325,13 +325,45 @@ export class GitService extends Service {
       if (!message.trim()) throw new GitError('invalid', 'empty message')
       const staged = parseStatus(await this.must(root, [...READ_FLAGS, 'status', '--porcelain=v1', '-z'])).staged.length
       if (staged === 0) throw new GitError('nothing', 'nothing staged')
-      const result = await this.run(root, ['commit', '-q', '-F', '-'], { stdin: message })
-      if (result.code !== 0) {
-        const text = firstLines(result.stderr || result.stdout)
-        throw new GitError(/tell me who you are|empty ident|user\.email|user\.name/i.test(result.stderr) ? 'identity' : 'failed', text)
-      }
+      await this.commitWith(root, ['commit', '-q', '-F', '-'], message)
       return { short: (await this.must(root, ['rev-parse', '--short', 'HEAD'])).trim(), files: staged }
     })
+  }
+
+  /** 마지막 커밋 고치기 (#387) — stage 된 것을 합치고(없으면 메시지만) 메시지를 바꾼다. 원격 어디에도 없을 때만(undoCommit 과 같은 조건),
+   *  첫 커밋 전엔 nothing, 병합이 멈춘 동안엔 conflict. 강제 push 가 필요한 경우를 만들지 않는다 */
+  amend(directory: string, message: string): Promise<GitResult<{ short: string; files: number }>> {
+    return this.act(directory, async (root) => {
+      if (!message.trim()) throw new GitError('invalid', 'empty message')
+      if (!(await this.exists(root, 'HEAD'))) throw new GitError('nothing', 'no commits')
+      if (await this.exists(root, 'MERGE_HEAD')) throw new GitError('conflict', 'merging')
+      await this.checkNotPushed(root)
+      const staged = parseStatus(await this.must(root, [...READ_FLAGS, 'status', '--porcelain=v1', '-z'])).staged.length
+      await this.commitWith(root, ['commit', '-q', '--amend', '-F', '-'], message)
+      return { short: (await this.must(root, ['rev-parse', '--short', 'HEAD'])).trim(), files: staged }
+    })
+  }
+
+  /** 마지막 커밋의 전체 메시지와 올렸는지 (#387 — 고치기 체크의 미리 채움·막기). 첫 커밋 전이면 undefined */
+  async lastCommit(directory: string): Promise<GitLastCommit | undefined> {
+    const root = await this.root(directory)
+    if (!(await this.exists(root, 'HEAD'))) return undefined
+    const [message, pushed] = await Promise.all([this.must(root, [...READ_FLAGS, 'log', '-1', '--format=%B', 'HEAD']), this.run(root, ['branch', '-r', '--contains', 'HEAD'])])
+    return { message: message.replace(/\s+$/, ''), pushed: pushed.stdout.trim() !== '' }
+  }
+
+  private async commitWith(root: string, args: readonly string[], message: string): Promise<void> {
+    const result = await this.run(root, args, { stdin: message })
+    if (result.code !== 0) {
+      const text = firstLines(result.stderr || result.stdout)
+      throw new GitError(/tell me who you are|empty ident|user\.email|user\.name/i.test(result.stderr) ? 'identity' : 'failed', text)
+    }
+  }
+
+  /** HEAD 가 원격 브랜치 어디에 있으면 pushed */
+  private async checkNotPushed(root: string): Promise<void> {
+    const pushed = await this.run(root, ['branch', '-r', '--contains', 'HEAD'])
+    if (pushed.stdout.trim()) throw new GitError('pushed', pushed.stdout.trim())
   }
 
   private async checkBranchName(root: string, name: string): Promise<void> {
@@ -428,8 +460,7 @@ export class GitService extends Service {
   undoCommit(directory: string): Promise<GitResult<{ short: string }>> {
     return this.act(directory, async (root) => {
       if (!(await this.exists(root, 'HEAD'))) throw new GitError('nothing', 'no commits')
-      const pushed = await this.run(root, ['branch', '-r', '--contains', 'HEAD'])
-      if (pushed.stdout.trim()) throw new GitError('pushed', pushed.stdout.trim())
+      await this.checkNotPushed(root)
       const short = (await this.must(root, ['rev-parse', '--short', 'HEAD'])).trim()
       if (await this.exists(root, 'HEAD~1')) await this.must(root, ['reset', '-q', '--soft', 'HEAD~1'])
       else await this.must(root, ['update-ref', '-d', 'HEAD']) // 첫 커밋 — 브랜치를 커밋 전으로 (index 는 그대로)
@@ -511,6 +542,8 @@ export class GitService extends Service {
         return this.discard(directory, strings(action.paths))
       case 'commit':
         return this.commit(directory, String(action.message))
+      case 'amend':
+        return this.amend(directory, String(action.message))
       case 'createBranch':
         return this.createBranch(directory, name)
       case 'switchBranch':
