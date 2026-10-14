@@ -54,6 +54,13 @@ describe('ForwardSkillService', () => {
     }
   })
 
+  it('본문이 전송 후 read_project 로 모니터링해 이 대화에 결과를 보고하게 지시한다 (#355)', () => {
+    expect(FORWARD_SKILL_FILE).toContain('monitor the work from this conversation')
+    expect(FORWARD_SKILL_FILE).toContain('state: idle')
+    expect(FORWARD_SKILL_FILE).toContain('state: waiting for the user')
+    expect(FORWARD_SKILL_FILE).not.toContain('do not poll in a loop') // 옛 워크플로 — "확인해 드릴게요" 로 끝내는 것
+  })
+
   it('그사이 사용자가 고쳤으면(내용 다르면) 내려갈 때 지우지 않는다', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'litecode-forwardskill-'))
     try {

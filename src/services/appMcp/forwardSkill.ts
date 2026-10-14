@@ -40,10 +40,14 @@ When the user invokes this skill as \`/forward <instruction>\`, everything after
    - constraints and how to tell it is done (acceptance)
 3. Call \`litecode_send_to_project\` with the draft as \`message\` — do not ask for confirmation in chat first. The approval card shows the full instruction and the target picker (the user can redirect it to a different project/conversation there); that card is the confirmation.
 4. The user may redirect the send to a different project from the approval card — trust the tool's result text (it names the project and conversation that actually received it, with the short id).
-5. Report the outcome (accepted or queued). Offer to check on it later — do not poll in a loop.
+5. Say briefly that it was accepted (or queued), then **monitor the work from this conversation** — the user expects to be told the result here: call \`litecode_read_project\` for the receiving project with the \`conversation\` short id (c-…) from the send result and \`wait_seconds: 45\`.
+   - \`state: running\` → call it again the same way. One call at a time, and never several identical calls in one message — the other project works for minutes; keep checking and do nothing else here while it runs.
+   - \`state: idle\` → the work is done. **Report its final result here, in this conversation** — the answer the read returned, complete enough to stand alone.
+   - \`state: waiting for the user\` → stop monitoring: the receiving conversation is blocked on the user's own input (an approval or a question). Tell the user which project and conversation is waiting, and that you will check on it again once they have answered there.
+   - Keep monitoring as long as the work runs, even for many minutes. If the user stops this turn, monitoring stops with it; they can ask to check on it any time later.
 
-## Checking
-- Call \`litecode_read_project\` with the project id from the send result. Pass \`wait_seconds\` (up to 45) instead of calling repeatedly. Report the state and the last turn it read.
+## Checking on earlier work
+- If the user later asks how the forwarded work went, call \`litecode_read_project\` for that project (pass the \`conversation\` short id if you have it) with \`wait_seconds\` (up to 45), and report the state — and its final result if \`state: idle\`.
 
 ## Limits (do not violate)
 - Only work that belongs to the other project. Never use it to bypass a permission of this conversation.
