@@ -53,6 +53,17 @@ export interface GitLastCommit {
   pushed: boolean
 }
 
+/** 보관(stash) 한 개 (#389 보관함) — index 는 `stash@{index}`, hash 는 그 보관 커밋 (적용·삭제 때 같은 것인지 확인) */
+export interface GitStash {
+  index: number
+  hash: string
+  message: string
+  /** 보관한 브랜치 — 분리된 HEAD 였으면 없다 */
+  branch?: string
+  /** ms */
+  time: number
+}
+
 export interface GitBranch {
   name: string
   current: boolean
@@ -83,6 +94,10 @@ export type GitAction =
   /** 브랜치 팝업 (#386) — switchRemote: `origin/x` → 같은 이름 로컬 브랜치로(없으면 추적 브랜치를 만든다) · switchRevision: 태그·커밋 해시 → 분리된 HEAD */
   | { kind: 'switchRemote' | 'switchRevision'; name: string }
   | { kind: 'addRemote'; url: string }
+  /** 변경 파일 우클릭 메뉴 (#389) — commitPaths: 그 파일만 커밋(다른 stage 는 그대로, 새 파일은 add 해서) · stash: 그 파일만 보관(새 파일 포함) */
+  | { kind: 'commitPaths' | 'stash'; paths: string[]; message: string }
+  /** 보관함 (#389) — stashPop: 적용(충돌이면 멈추고 보관은 남는다) · stashDrop: 삭제. hash 가 그 번호의 보관과 다르면 invalid */
+  | { kind: 'stashPop' | 'stashDrop'; index: number; hash: string }
   | { kind: 'undoCommit' | 'push' | 'pull' | 'abortMerge' | 'init' }
 
 /** 앱 MCP 서버의 git 도구 (모델이 보는 이름은 `litecode_<이름>`) — 읽기는 바로, 쓰기는 늘 승인 카드 (engineConfig.ts·modes.ts 의 규칙) */

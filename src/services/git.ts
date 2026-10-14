@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { Context, Service } from 'cordis'
 import { execProgram } from './exec.ts'
-import type { GitAction, GitBranch, GitCommit, GitFailure, GitFile, GitFileKind, GitLastCommit, GitResult, GitStatus, GitView } from '../../shared/git.ts'
+import type { GitAction, GitBranch, GitCommit, GitFailure, GitFile, GitFileKind, GitLastCommit, GitResult, GitStash, GitStatus, GitView } from '../../shared/git.ts'
 
 // Git (ctx.git, 이슈 #290 — 시안 _workspace/mock-git/Git.dc.html). 시스템 git 을 인자 배열로 띄운다(exec.ts execProgram — 셸 글 없음).
 // 화면(Git 탭)과 AI 도구(appMcp/tools/git.ts)가 같은 메서드를 쓴다. 엔진·Electron 을 모른다 — 폴더는 부르는 쪽이 준다(IPC 는 등록된 프로젝트만).
@@ -148,6 +150,19 @@ export function parseNumstat(text: string): Map<string, { added: number; removed
   return stats
 }
 
+/** `git stash list --format=%H%x1f%gs%x1f%ct` → 보관 목록 (최근 먼저). %gs = `On <브랜치>: <메시지>` · `WIP on <브랜치>: <짧은 해시> <제목>` (메시지 없이 보관) */
+export function parseStashList(text: string): GitStash[] {
+  return text
+    .split('\n')
+    .filter(Boolean)
+    .map((line, index) => {
+      const [hash = '', subject = '', time = '0'] = line.split('\x1f')
+      const match = /^(?:WIP on|On) ([^:]+): (.*)$/s.exec(subject)
+      const branch = match?.[1]
+      return { index, hash, message: match ? match[2]! : subject, ...(branch && branch !== '(no branch)' && { branch }), time: Number(time) * 1000 }
+    })
+}
+
 const withStats = (files: GitFile[], stats: Map<string, { added: number; removed: number }>): GitFile[] => files.map((file) => ({ ...file, ...stats.get(file.path) }))
 
 export class GitService extends Service {
@@ -247,15 +262,18 @@ export class GitService extends Service {
     return result
   }
 
-  /** 파일 하나(또는 path 없이 전체)의 unified diff. staged 면 stage 된 쪽, 아니면 작업 트리 쪽(새 파일은 통째로 추가). 상한에서 자른다 */
-  async diff(directory: string, path?: string, staged = false): Promise<string> {
+  /** 파일 하나(또는 path 없이 전체)의 unified diff. staged 면 stage 된 쪽, 아니면 작업 트리 쪽(새 파일은 통째로 추가).
+   *  'head' 면 HEAD 대비 작업 트리(stage 된 것 + 안 된 것 — #389 패치로 복사), 첫 커밋 전이면 파일 통째. 상한에서 자른다 */
+  async diff(directory: string, path?: string, staged: boolean | 'head' = false): Promise<string> {
     const root = await this.root(directory)
-    const base = ['--literal-pathspecs', ...READ_FLAGS, 'diff', '--no-ext-diff', '--no-textconv', ...(staged ? ['--cached'] : [])]
-    let text = (await this.run(root, path ? [...base, '--', path] : base)).stdout
-    if (!text && path && !staged) {
-      // 새 파일(untracked) — 빈 것과 비교한다 (차이가 있으면 종료 코드 1)
-      const untracked = await this.run(root, ['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '--', path])
-      if (untracked.stdout.trim()) text = (await this.run(root, [...READ_FLAGS, 'diff', '--no-ext-diff', '--no-textconv', '--no-index', '--', '/dev/null', path])).stdout
+    const unborn = staged === 'head' && !(await this.exists(root, 'HEAD'))
+    const side = staged === true ? ['--cached'] : staged === 'head' && !unborn ? ['HEAD'] : []
+    const base = ['--literal-pathspecs', ...READ_FLAGS, 'diff', '--no-ext-diff', '--no-textconv', ...side]
+    let text = unborn ? '' : (await this.run(root, path ? [...base, '--', path] : base)).stdout
+    if (!text && path && staged !== true) {
+      // 새 파일(untracked, 또는 첫 커밋 전의 파일) — 빈 것과 비교한다 (차이가 있으면 종료 코드 1)
+      const untracked = unborn || (await this.run(root, ['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '--', path])).stdout.trim() !== ''
+      if (untracked) text = (await this.run(root, [...READ_FLAGS, 'diff', '--no-ext-diff', '--no-textconv', '--no-index', '--', '/dev/null', path])).stdout
     }
     return text.length > GIT_DIFF_MAX ? text.slice(0, GIT_DIFF_MAX) : text
   }
@@ -468,6 +486,95 @@ export class GitService extends Service {
     })
   }
 
+  // ── 변경 파일 우클릭 메뉴 (#389) ──
+
+  /** 그 경로들의 바뀐 것 (stage 된 것·안 된 것·새 파일) — 없으면 nothing */
+  private async changedAt(root: string, paths: readonly string[]): Promise<GitFile[]> {
+    if (paths.length === 0) throw new GitError('nothing', 'no paths')
+    const parsed = parseStatus(await this.must(root, ['--literal-pathspecs', ...READ_FLAGS, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...paths]))
+    const files = [...parsed.staged, ...parsed.changed]
+    if (files.length === 0) throw new GitError('nothing', 'no changes')
+    return files
+  }
+
+  /** 이 파일만 커밋 — `commit -- <경로>`(작업 트리의 내용 그대로, 다른 stage 는 건드리지 않는다). 새 파일은 먼저 add.
+   *  빈 메시지 invalid, 바뀐 게 없으면 nothing, 병합이 멈춘 동안엔 conflict (git 이 부분 커밋을 막는다) */
+  commitPaths(directory: string, paths: readonly string[], message: string): Promise<GitResult<{ short: string; files: number }>> {
+    return this.act(directory, async (root) => {
+      if (!message.trim()) throw new GitError('invalid', 'empty message')
+      if (await this.exists(root, 'MERGE_HEAD')) throw new GitError('conflict', 'merging')
+      const files = await this.changedAt(root, paths)
+      const untracked = files.filter((file) => file.kind === 'U').map((file) => file.path)
+      if (untracked.length > 0) await this.must(root, ['--literal-pathspecs', 'add', '--', ...untracked])
+      await this.commitWith(root, ['--literal-pathspecs', 'commit', '-q', '-F', '-', '--', ...paths], message)
+      return { short: (await this.must(root, ['rev-parse', '--short', 'HEAD'])).trim(), files: new Set(files.map((file) => file.path)).size }
+    })
+  }
+
+  /** 그 파일만 보관 — `stash push -u -- <경로>` (새 파일 포함, 다른 파일·stage 는 그대로). 메시지가 비면 git 기본 이름.
+   *  첫 커밋 전(git 이 보관을 못 한다)·바뀐 게 없으면 nothing */
+  stash(directory: string, paths: readonly string[], message: string): Promise<GitResult> {
+    return this.act(directory, async (root) => {
+      if (!(await this.exists(root, 'HEAD'))) throw new GitError('nothing', 'no commits')
+      await this.changedAt(root, paths)
+      const name = message.trim()
+      await this.must(root, ['--literal-pathspecs', 'stash', 'push', '-q', '-u', ...(name ? ['-m', name] : []), '--', ...paths])
+      return {}
+    })
+  }
+
+  /** 보관 목록 (최근 먼저) */
+  async stashes(directory: string): Promise<GitStash[]> {
+    const root = await this.root(directory)
+    return parseStashList(await this.must(root, [...READ_FLAGS, 'stash', 'list', '--format=%H%x1f%gs%x1f%ct']))
+  }
+
+  /** `stash@{index}` 가 지금도 그 해시인가 — 화면이 읽은 뒤 목록이 바뀌었으면(AI·터미널) invalid */
+  private async stashRef(root: string, index: number, hash: string): Promise<string> {
+    if (!Number.isInteger(index) || index < 0 || !/^[0-9a-f]{40,64}$/.test(hash)) throw new GitError('invalid', String(index))
+    const ref = `stash@{${index}}`
+    const found = await this.run(root, ['rev-parse', '-q', '--verify', ref])
+    if (found.code !== 0 || found.stdout.trim() !== hash) throw new GitError('invalid', ref)
+    return ref
+  }
+
+  /** 보관 적용 (pop) — 충돌이면 git 이 멈춘 그대로(보관은 남는다) conflict + 파일 목록. 지금 변경이 덮이면 overwrite */
+  stashPop(directory: string, index: number, hash: string): Promise<GitResult> {
+    return this.act(directory, async (root) => {
+      const ref = await this.stashRef(root, index, hash)
+      const result = await this.run(root, ['stash', 'pop', ref])
+      if (result.code === 0) return {}
+      const conflicts = parseStatus(await this.must(root, [...READ_FLAGS, 'status', '--porcelain=v1', '-z'])).conflicts.map((file) => file.path)
+      if (conflicts.length > 0) throw new GitError('conflict', firstLines(result.stdout + '\n' + result.stderr), conflicts)
+      if (/would be overwritten|already exists/i.test(result.stderr)) throw new GitError('overwrite', firstLines(result.stderr))
+      throw new GitError('failed', firstLines(result.stderr || result.stdout))
+    })
+  }
+
+  /** 보관 삭제 (drop) — 화면이 확인 카드로 먼저 묻는다 */
+  stashDrop(directory: string, index: number, hash: string): Promise<GitResult> {
+    return this.act(directory, async (root) => {
+      await this.must(root, ['stash', 'drop', '-q', await this.stashRef(root, index, hash)])
+      return {}
+    })
+  }
+
+  /** 파일 삭제 — 경로는 저장소 루트 기준, 프로젝트 폴더(directory) 안에 있는 파일만. 지우는 일은 부르는 쪽이(메인: 휴지통 shell.trashItem) */
+  trash(directory: string, file: string, remove: (absolute: string) => Promise<void>): Promise<GitResult> {
+    return this.act(directory, async (root) => {
+      const absolute = resolve(root, file)
+      const inside = relative(await fs.realpath(directory), absolute)
+      if (!file || isAbsolute(file) || file.split(/[\\/]/).includes('.git') || !inside || inside.startsWith('..') || isAbsolute(inside)) throw new GitError('invalid', file)
+      try {
+        await fs.lstat(absolute)
+      } catch {
+        throw new GitError('invalid', file)
+      }
+      await remove(absolute)
+      return {}
+    })
+  }
+
   private async remoteRun(root: string, args: readonly string[]): Promise<Run> {
     const result = await this.run(root, args, { timeoutMs: REMOTE_TIMEOUT_MS })
     if (result.missing) throw new GitError('missing', 'git not found')
@@ -556,6 +663,14 @@ export class GitService extends Service {
         return this.deleteBranch(directory, name)
       case 'addRemote':
         return this.addRemote(directory, String(action.url))
+      case 'commitPaths':
+        return this.commitPaths(directory, strings(action.paths), String(action.message))
+      case 'stash':
+        return this.stash(directory, strings(action.paths), String(action.message ?? ''))
+      case 'stashPop':
+        return this.stashPop(directory, Number(action.index), String(action.hash))
+      case 'stashDrop':
+        return this.stashDrop(directory, Number(action.index), String(action.hash))
       case 'undoCommit':
         return this.undoCommit(directory)
       case 'push':

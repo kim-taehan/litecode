@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { GitService, parseBranchLine, parseNumstat, parseStatus, remoteFailure } from '../../src/services/git.ts'
+import { GitService, parseBranchLine, parseNumstat, parseStashList, parseStatus, remoteFailure } from '../../src/services/git.ts'
 import { GitTools } from '../../src/services/appMcp/tools/git.ts'
 import type { AppMcpTool } from '../../src/services/appMcp/rpc.ts'
 import { GIT_READ_TOOLS, GIT_WRITE_TOOLS, gitApprovalText, gitWebUrl } from '../../shared/git.ts'
@@ -464,5 +464,187 @@ describe.skipIf(!hasGit)('GitService — 진짜 git', () => {
     expect(await git.push(dir)).toMatchObject({ ok: false, reason: 'rejected' })
     expect((await git.log(dir))[0]).toMatchObject({ subject: 'third', pushed: false })
     expect(await git.lastCommit(dir)).toEqual({ message: 'third', pushed: false })
+  })
+})
+
+describe('보관 목록 읽기 (#389)', () => {
+  it('stash list 의 글 → 번호·해시·메시지·브랜치·시각 (분리된 HEAD 는 브랜치 없음)', () => {
+    const text = ['a'.repeat(40) + '\x1fOn main: wip a\x1f1700000000', 'b'.repeat(40) + '\x1fWIP on feat/x: 1234abc first\x1f1700000100', 'c'.repeat(40) + '\x1fOn (no branch): 메시지: 콜론\x1f1700000200', ''].join('\n')
+    expect(parseStashList(text)).toEqual([
+      { index: 0, hash: 'a'.repeat(40), message: 'wip a', branch: 'main', time: 1700000000000 },
+      { index: 1, hash: 'b'.repeat(40), message: '1234abc first', branch: 'feat/x', time: 1700000100000 },
+      { index: 2, hash: 'c'.repeat(40), message: '메시지: 콜론', time: 1700000200000 },
+    ])
+    expect(parseStashList('')).toEqual([])
+  })
+})
+
+describe.skipIf(!hasGit)('GitService — 우클릭 메뉴 (#389)', () => {
+  const headFiles = (dir: string) => sh(dir, '-c', 'core.quotepath=false', 'show', '--name-only', '--format=', 'HEAD').trim().split('\n').filter(Boolean).sort()
+
+  it('이 파일만 커밋 — 그 파일만 커밋되고 다른 stage 는 그대로. 새 파일은 같은 호출에서 add, 지운 파일·일부 stage 도. 빈 메시지 invalid, 바뀐 게 없으면 nothing', async () => {
+    const { git, changed } = await start()
+    const dir = await repo()
+    await fs.writeFile(path.join(dir, 'a.txt'), 'A2\n')
+    await fs.writeFile(path.join(dir, 's.txt'), 's\n')
+    sh(dir, 'add', 's.txt')
+    await fs.writeFile(path.join(dir, 'n 한글.txt'), 'new\n')
+
+    expect(await git.commitPaths(dir, ['a.txt'], '   ')).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(await git.commitPaths(dir, ['nope.txt'], 'm')).toMatchObject({ ok: false, reason: 'nothing' })
+    expect(await git.commitPaths(dir, [], 'm')).toMatchObject({ ok: false, reason: 'nothing' })
+
+    const before = changed.length
+    expect(await git.perform(dir, { kind: 'commitPaths', paths: ['a.txt'], message: 'only a' })).toMatchObject({ ok: true, files: 1 })
+    expect(changed.length).toBeGreaterThan(before)
+    expect(headFiles(dir)).toEqual(['a.txt'])
+    expect(await git.view(dir)).toMatchObject({ staged: [{ path: 's.txt', kind: 'A' }], changed: [{ path: 'n 한글.txt', kind: 'U' }] })
+
+    expect(await git.commitPaths(dir, ['n 한글.txt'], 'new file')).toMatchObject({ ok: true, files: 1 })
+    expect(headFiles(dir)).toEqual(['n 한글.txt'])
+    expect(await git.view(dir)).toMatchObject({ staged: [{ path: 's.txt', kind: 'A' }], changed: [] })
+
+    // 일부만 stage 된 파일 — 작업 트리의 내용 그대로 (stage 된 쪽·안 된 쪽 합쳐서)
+    await fs.writeFile(path.join(dir, 'a.txt'), 'A3\n')
+    sh(dir, 'add', 'a.txt')
+    await fs.writeFile(path.join(dir, 'a.txt'), 'A4\n')
+    expect(await git.commitPaths(dir, ['a.txt'], 'a4')).toMatchObject({ ok: true })
+    expect(sh(dir, 'show', 'HEAD:a.txt')).toBe('A4\n')
+    expect(await git.view(dir)).toMatchObject({ staged: [{ path: 's.txt' }], changed: [] })
+
+    // 지운 파일
+    await fs.rm(path.join(dir, 'a.txt'))
+    expect(await git.commitPaths(dir, ['a.txt'], 'remove a')).toMatchObject({ ok: true })
+    expect(sh(dir, '-c', 'core.quotepath=false', 'ls-tree', '--name-only', 'HEAD').trim().split('\n').sort()).toEqual(['n 한글.txt'])
+    expect(await git.view(dir)).toMatchObject({ staged: [{ path: 's.txt', kind: 'A' }], changed: [] })
+  })
+
+  it('이 파일만 커밋 — 첫 커밋 전에도 (다른 stage 는 남는다)', async () => {
+    const { git } = await start()
+    const fresh = await folder('fresh')
+    sh(fresh, 'init', '-q')
+    await fs.writeFile(path.join(fresh, 'x.txt'), 'x\n')
+    await fs.writeFile(path.join(fresh, 'y.txt'), 'y\n')
+    sh(fresh, 'add', 'y.txt')
+    expect(await git.commitPaths(fresh, ['x.txt'], 'first x')).toMatchObject({ ok: true, files: 1 })
+    expect(headFiles(fresh)).toEqual(['x.txt'])
+    expect(await git.view(fresh)).toMatchObject({ hasCommits: true, staged: [{ path: 'y.txt', kind: 'A' }], changed: [] })
+  })
+
+  it('보관 — 그 파일만(다른 stage 는 그대로), 새 파일도. 목록은 최근 먼저. 바뀐 게 없거나 첫 커밋 전이면 nothing', async () => {
+    const { git } = await start()
+    const fresh = await folder('fresh')
+    sh(fresh, 'init', '-q')
+    await fs.writeFile(path.join(fresh, 'x.txt'), 'x\n')
+    expect(await git.stash(fresh, ['x.txt'], 'm')).toMatchObject({ ok: false, reason: 'nothing' })
+    expect(await git.stashes(fresh)).toEqual([])
+
+    const dir = await repo()
+    await fs.writeFile(path.join(dir, 'b.txt'), 'b\n')
+    sh(dir, 'add', 'b.txt')
+    sh(dir, 'commit', '-qm', 'b')
+    expect(await git.stash(dir, ['a.txt'], 'm')).toMatchObject({ ok: false, reason: 'nothing' })
+    await fs.writeFile(path.join(dir, 'a.txt'), 'A2\n')
+    await fs.writeFile(path.join(dir, 'b.txt'), 'B2\n')
+    sh(dir, 'add', 'b.txt')
+    expect(await git.perform(dir, { kind: 'stash', paths: ['a.txt'], message: 'wip a' })).toEqual({ ok: true })
+    expect(await fs.readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('one\ntwo\n')
+    expect(await git.view(dir)).toMatchObject({ staged: [{ path: 'b.txt', kind: 'M' }], changed: [] })
+
+    await fs.writeFile(path.join(dir, 'n.txt'), 'new\n')
+    expect(await git.stash(dir, ['n.txt'], '')).toEqual({ ok: true })
+    await expect(fs.access(path.join(dir, 'n.txt'))).rejects.toThrow()
+    const list = await git.stashes(dir)
+    expect(list.map((entry) => [entry.index, entry.branch])).toEqual([
+      [0, 'main'],
+      [1, 'main'],
+    ])
+    expect(list[0]!.message).toMatch(/ b$/) // 메시지 없이 보관 → git 기본 (짧은 해시 + 커밋 제목)
+    expect(list[1]).toMatchObject({ message: 'wip a' })
+    expect(list[1]!.hash).toMatch(/^[0-9a-f]{40}$/)
+    expect(list[1]!.time).toBeGreaterThan(0)
+  })
+
+  it('보관 적용(pop) — 되살리고 목록에서 빠진다. 충돌이면 멈춘 채 conflict 이고 보관은 남는다, 덮이면 overwrite. 삭제(drop). 해시가 다르면 invalid', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    await fs.writeFile(path.join(dir, 'n.txt'), 'new\n')
+    await git.stash(dir, ['n.txt'], 'new file')
+    await fs.writeFile(path.join(dir, 'a.txt'), 'mine\n')
+    await git.stash(dir, ['a.txt'], 'mine')
+    let list = await git.stashes(dir)
+    expect(list.map((entry) => entry.message)).toEqual(['mine', 'new file'])
+
+    // 해시가 맞지 않으면(그사이 목록이 바뀜) 아무것도 안 한다
+    expect(await git.stashPop(dir, 1, list[0]!.hash)).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(await git.stashDrop(dir, -1, list[0]!.hash)).toMatchObject({ ok: false, reason: 'invalid' })
+
+    // 새 파일 되살리기
+    expect(await git.perform(dir, { kind: 'stashPop', index: 1, hash: list[1]!.hash })).toEqual({ ok: true })
+    expect(await fs.readFile(path.join(dir, 'n.txt'), 'utf8')).toBe('new\n')
+    list = await git.stashes(dir)
+    expect(list.map((entry) => entry.message)).toEqual(['mine'])
+
+    // 덮이면 overwrite — 보관은 남고 작업 트리 그대로
+    await fs.writeFile(path.join(dir, 'a.txt'), 'local\n')
+    expect(await git.stashPop(dir, 0, list[0]!.hash)).toMatchObject({ ok: false, reason: 'overwrite' })
+    expect(await fs.readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('local\n')
+    expect(await git.stashes(dir)).toHaveLength(1)
+
+    // 충돌 — 같은 줄을 다르게 커밋한 뒤 적용
+    sh(dir, 'commit', '-qam', 'theirs')
+    expect(await git.stashPop(dir, 0, list[0]!.hash)).toMatchObject({ ok: false, reason: 'conflict', conflicts: ['a.txt'] })
+    expect(await git.stashes(dir)).toHaveLength(1)
+    expect(await git.view(dir)).toMatchObject({ conflicts: [{ path: 'a.txt', kind: 'C' }] })
+    sh(dir, 'checkout', '-q', 'HEAD', '--', 'a.txt')
+
+    expect(await git.perform(dir, { kind: 'stashDrop', index: 0, hash: list[0]!.hash })).toEqual({ ok: true })
+    expect(await git.stashes(dir)).toEqual([])
+  })
+
+  it('패치 — HEAD 대비 (stage 된 것 + 안 된 것), 새 파일은 통째로, 첫 커밋 전 stage 된 파일도', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    await fs.writeFile(path.join(dir, 'a.txt'), 'one\nTWO\n')
+    sh(dir, 'add', 'a.txt')
+    await fs.writeFile(path.join(dir, 'a.txt'), 'ONE\nTWO\n')
+    const patch = await git.diff(dir, 'a.txt', 'head')
+    expect(patch).toContain('-one')
+    expect(patch).toContain('-two')
+    expect(patch).toContain('+ONE')
+    expect(patch).toContain('+TWO')
+    await fs.writeFile(path.join(dir, 'n.txt'), 'hello\n')
+    expect(await git.diff(dir, 'n.txt', 'head')).toContain('+hello')
+
+    const fresh = await folder('fresh')
+    sh(fresh, 'init', '-q')
+    await fs.writeFile(path.join(fresh, 'x.txt'), 'x\n')
+    sh(fresh, 'add', 'x.txt')
+    expect(await git.diff(fresh, 'x.txt', 'head')).toContain('+x')
+  })
+
+  it('삭제 — 프로젝트 안 파일만 지우는 함수에 넘기고 git/changed. 밖·없는 파일은 invalid', async () => {
+    const { git, changed } = await start()
+    const dir = await repo()
+    await fs.mkdir(path.join(dir, 'sub'))
+    await fs.writeFile(path.join(dir, 'sub', 'f.txt'), 'f\n')
+    await fs.writeFile(path.join(dir, 'root.txt'), 'r\n')
+    const removed: string[] = []
+    const remove = async (file: string) => {
+      removed.push(file)
+      await fs.rm(file)
+    }
+    const before = changed.length
+    expect(await git.trash(dir, 'sub/f.txt', remove)).toEqual({ ok: true })
+    expect(removed).toEqual([path.join(dir, 'sub', 'f.txt')])
+    expect(changed.length).toBeGreaterThan(before)
+    for (const bad of ['../x', 'nope.txt', '', '.']) expect(await git.trash(dir, bad, remove)).toMatchObject({ ok: false, reason: 'invalid' })
+    // 프로젝트가 저장소의 하위 폴더면 그 밖(저장소 루트의 파일)은 못 지운다 — 경로는 저장소 루트 기준
+    await fs.writeFile(path.join(dir, 'sub', 'g.txt'), 'g\n')
+    const sub = path.join(dir, 'sub')
+    expect(await git.trash(sub, 'root.txt', remove)).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(await git.trash(sub, 'sub/g.txt', remove)).toEqual({ ok: true })
+    expect(removed).toHaveLength(2)
+    await fs.access(path.join(dir, 'root.txt'))
   })
 })

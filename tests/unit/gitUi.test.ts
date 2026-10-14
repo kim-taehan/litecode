@@ -457,3 +457,139 @@ describe('커밋 영역 — 정적 그림 (시안 ①)', () => {
     expect(noRemote).toMatch(/<button type="button" class="attention-card__button" disabled="" title="원격 주소\(origin\)가 없어 올릴 수 없습니다[^"]*">커밋하고 올리기<\/button>/)
   })
 })
+
+// ── 변경 파일 우클릭 메뉴·보관함 (#389, 시안 ① Main.dc.html 의 .menu · .file.sel · 보관함 N) ──
+
+const { FILE_MENU, DANGER_ITEMS, entryPaths, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel } = await import('../../renderer/gitMenu.ts')
+const { FileMenu, StashList, ConfirmCard } = await import('../../renderer/Git.tsx')
+
+describe('우클릭 메뉴 — 순수 규칙', () => {
+  it('항목 순서·구분선은 시안 그대로 (커밋·되돌리기 | 변경 보기·미리보기 | 패치·보관 | 삭제), 삭제만 위험', () => {
+    expect(FILE_MENU).toEqual([['commitFile', 'discard'], ['showDiff', 'preview'], ['copyPatch', 'stash'], ['trash']])
+    expect([...DANGER_ITEMS]).toEqual(['trash'])
+  })
+
+  it('단축키 글자 — mac 은 ⌥⌘Z·⌘D·⌘↓, 그 밖은 Ctrl. 나머지 항목은 없음', () => {
+    expect(['commitFile', 'discard', 'showDiff', 'preview', 'copyPatch', 'stash', 'trash'].map((item) => menuShortcutLabel(item as never, true))).toEqual([undefined, '⌥⌘Z', '⌘D', '⌘↓', undefined, undefined, undefined])
+    expect(menuShortcutLabel('discard', false)).toBe('Ctrl+Alt+Z')
+    expect(menuShortcutLabel('showDiff', false)).toBe('Ctrl+D')
+    expect(menuShortcutLabel('preview', false)).toBe('Ctrl+↓')
+  })
+
+  it('단축키 — 물리 키(code)로, mac 은 ⌘ · 그 밖은 Ctrl. Shift 가 섞이면 아님. 메뉴 키 = ContextMenu·Shift+F10', () => {
+    const key = (extra: Partial<Parameters<typeof menuShortcut>[0]>) => ({ code: '', key: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...extra })
+    expect(menuShortcut(key({ code: 'KeyZ', key: 'Ω', metaKey: true, altKey: true }), true)).toBe('discard')
+    expect(menuShortcut(key({ code: 'KeyZ', metaKey: true }), true)).toBeUndefined() // ⌘Z 는 되돌리기가 아니다
+    expect(menuShortcut(key({ code: 'KeyD', key: 'ㅇ', metaKey: true }), true)).toBe('showDiff')
+    expect(menuShortcut(key({ key: 'ArrowDown', code: 'ArrowDown', metaKey: true }), true)).toBe('preview')
+    expect(menuShortcut(key({ code: 'KeyD', ctrlKey: true }), true)).toBeUndefined()
+    expect(menuShortcut(key({ code: 'KeyD', ctrlKey: true }), false)).toBe('showDiff')
+    expect(menuShortcut(key({ code: 'KeyZ', ctrlKey: true, altKey: true }), false)).toBe('discard')
+    expect(menuShortcut(key({ code: 'KeyD', metaKey: true, shiftKey: true }), true)).toBeUndefined()
+    expect(isMenuKey({ key: 'ContextMenu', shiftKey: false })).toBe(true)
+    expect(isMenuKey({ key: 'F10', shiftKey: true })).toBe(true)
+    expect(isMenuKey({ key: 'F10', shiftKey: false })).toBe(false)
+  })
+
+  it('누를 수 있나 — 되돌리기는 작업 트리 변경이 있을 때, 지운 파일은 미리보기·삭제 없음, 병합 중엔 커밋·보관 없음, 첫 커밋 전엔 보관 없음', () => {
+    const ok = { merging: false, hasCommits: true }
+    const stagedOnly = { path: 'a', staged: { path: 'a', kind: 'M' as const } }
+    const deleted = { path: 'd', changed: { path: 'd', kind: 'D' as const } }
+    expect(menuEnabled('discard', stagedOnly, ok)).toBe(false)
+    expect(menuEnabled('discard', deleted, ok)).toBe(true)
+    expect(menuEnabled('preview', deleted, ok)).toBe(false)
+    expect(menuEnabled('trash', deleted, ok)).toBe(false)
+    expect(menuEnabled('preview', stagedOnly, ok)).toBe(true)
+    expect(menuEnabled('commitFile', stagedOnly, { merging: true, hasCommits: true })).toBe(false)
+    expect(menuEnabled('stash', stagedOnly, { merging: true, hasCommits: true })).toBe(false)
+    expect(menuEnabled('stash', stagedOnly, { merging: false, hasCommits: false })).toBe(false)
+    expect(menuEnabled('commitFile', stagedOnly, { merging: false, hasCommits: false })).toBe(true)
+    expect(menuEnabled('copyPatch', deleted, ok)).toBe(true)
+    // 이름 바꾼 파일은 옛 경로도 같이
+    expect(entryPaths({ path: 'new.ts', staged: { path: 'new.ts', kind: 'R', from: 'old.ts' } })).toEqual(['new.ts', 'old.ts'])
+    expect(entryPaths(stagedOnly)).toEqual(['a'])
+  })
+})
+
+describe('우클릭 메뉴 — 정적 그림 (시안 ① .menu)', () => {
+  const entry = { path: 'renderer/Git.tsx', staged: { path: 'renderer/Git.tsx', kind: 'M' as const }, changed: { path: 'renderer/Git.tsx', kind: 'M' as const } }
+  const menu = (extra: Partial<Parameters<typeof FileMenu>[0]> = {}) => html(createElement(FileMenu, { entry, view: status(), mac: true, at: { left: 10, top: 20 }, onPick() {}, onClose() {}, ...extra }))
+
+  it('항목·구분선·단축키 글자가 시안 순서, 삭제는 위험 색, .gitignore 항목은 아직 없다(#390)', () => {
+    const out = menu()
+    expect(out).toMatch(/^<div class="git-menu" role="menu" aria-label="Git.tsx 메뉴" style="left:10px;top:20px">/)
+    const text = out
+      .replace(/<div class="git-menu__sep" role="separator"><\/div>/g, '|')
+      .replace(/<span class="git-menu__sc">([^<]*)<\/span>/g, '[$1]')
+      .replace(/<[^>]+>/g, '')
+    expect(text).toBe('이 파일만 커밋…되돌리기…[⌥⌘Z]|변경 보기[⌘D]파일 미리보기로 열기[⌘↓]|패치로 복사보관(stash)…|삭제…')
+    expect(out).toMatch(/<button type="button" role="menuitem" class="git-menu__item" data-danger="true"[^>]*>삭제…<\/button>/)
+    expect(out).not.toContain('gitignore')
+    expect(menu({ mac: false })).toContain('<span class="git-menu__sc">Ctrl+Alt+Z</span>')
+  })
+
+  it('못 누르는 항목은 disabled — 지운 파일은 미리보기·삭제, stage 만 된 파일은 되돌리기', () => {
+    const deleted = menu({ entry: { path: 'gone.ts', changed: { path: 'gone.ts', kind: 'D' } } })
+    expect(deleted).toMatch(/disabled=""[^>]*>파일 미리보기로 열기/)
+    expect(deleted).toMatch(/disabled=""[^>]*>삭제…/)
+    expect(deleted).not.toMatch(/disabled=""[^>]*>되돌리기…/)
+    const stagedOnly = menu({ entry: { path: 'a.ts', staged: { path: 'a.ts', kind: 'M' } } })
+    expect(stagedOnly).toMatch(/disabled=""[^>]*>되돌리기…/)
+  })
+})
+
+describe('보관함 (#389) — 정적 그림', () => {
+  it('하위 탭 줄 오른쪽 — 모두 접기·펴기 다음에 보관함 N (변경 탭에서만)', async () => {
+    const directory = await withView(status())
+    const out = html(createElement(GitPanel, { directory }))
+    expect(out).toMatch(/aria-label="모두 접기·펴기"[^]*<\/button><div class="git-stash"><button type="button" class="git-sub__tool git-stash__button" aria-label="보관\(stash\) 목록" aria-haspopup="dialog" aria-expanded="false"[^>]*>보관함 0<\/button><\/div><\/div>/)
+  })
+
+  it('목록 — 줄마다 메시지·브랜치·시각과 [적용]·[삭제], 없으면 빈 글', () => {
+    const now = Date.now()
+    const out = html(
+      createElement(StashList, {
+        stashes: [
+          { index: 0, hash: 'a'.repeat(40), message: 'wip a', branch: 'main', time: now - 120_000 },
+          { index: 1, hash: 'b'.repeat(40), message: '분리된 HEAD 에서', time: now - 7_200_000 },
+        ],
+        busy: false,
+        onApply() {},
+        onDrop() {},
+      }),
+    )
+    expect(out).toContain('<div class="branch-pop__label">보관(stash) 목록</div>')
+    expect(out).toMatch(/<span class="git-stash__message" title="wip a">wip a<\/span><span class="git-stash__meta">main · [^<]+<\/span>/)
+    expect(out).toMatch(/<span class="git-stash__message"[^>]*>분리된 HEAD 에서<\/span><span class="git-stash__meta">[^·<]+<\/span>/)
+    expect(out.match(/>적용<\/button>/g)).toHaveLength(2)
+    expect(out.match(/>삭제<\/button>/g)).toHaveLength(2)
+    expect(out.indexOf('wip a')).toBeLessThan(out.indexOf('분리된 HEAD 에서'))
+    expect(html(createElement(StashList, { stashes: [], busy: false, onApply() {}, onDrop() {} }))).toContain('보관한 것이 없습니다')
+  })
+})
+
+describe('메뉴의 확인 카드 (승인 카드 틀)', () => {
+  const entry = { path: 'src/a.ts', changed: { path: 'src/a.ts', kind: 'M' as const } }
+  const card = (confirm: Parameters<typeof ConfirmCard>[0]['confirm']) => html(createElement(ConfirmCard, { confirm, view: status(), busy: false, onCancel() {}, onAccept: async () => {} }))
+
+  it('이 파일만 커밋 — 파일·메시지 칸, 메시지가 비면 커밋 버튼이 꺼진다', () => {
+    const out = card({ kind: 'commitFile', entry })
+    expect(out).toContain('이 파일만 커밋')
+    expect(out).toContain('src/a.ts 만 커밋합니다')
+    expect(out).toContain('aria-label="커밋 메시지"')
+    expect(out).toMatch(/class="attention-card__button attention-card__button--primary" disabled="">커밋<\/button>/)
+  })
+
+  it('보관 — 메시지는 없어도 된다(버튼 켜짐), 삭제 — 휴지통·위험 버튼, 보관 삭제 — 위험 버튼', () => {
+    const stash = card({ kind: 'stash', entry })
+    expect(stash).toContain('aria-label="보관 메시지 (없어도 됩니다)"')
+    expect(stash).toMatch(/class="attention-card__button attention-card__button--primary">보관<\/button>/)
+    const trash = card({ kind: 'trash', entry })
+    expect(trash).toContain('data-tone="danger"')
+    expect(trash).toContain('src/a.ts 을 휴지통으로 옮깁니다.')
+    expect(trash).toMatch(/attention-card__button--danger">삭제<\/button>/)
+    const drop = card({ kind: 'dropStash', stash: { index: 0, hash: 'a'.repeat(40), message: 'wip a', time: 0 } })
+    expect(drop).toContain('보관 &quot;wip a&quot; 를 지웁니다.')
+    expect(drop).toMatch(/attention-card__button--danger">삭제<\/button>/)
+  })
+})
