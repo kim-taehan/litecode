@@ -125,6 +125,7 @@ export const en = {
   'todo.empty': 'List cleared',
   'todo.now': 'Now: {text}',
   'todo.stalled': 'Paused: {text}',
+  'todo.dismiss': 'Dismiss to-do bar',
   'todo.status.pending': 'Pending',
   'todo.status.active': 'In progress',
   'todo.status.stalled': 'Paused',

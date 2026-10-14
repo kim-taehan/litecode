@@ -132,6 +132,7 @@ export const ko = {
   'todo.empty': '목록 비움',
   'todo.now': '지금: {text}',
   'todo.stalled': '멈춤: {text}',
+  'todo.dismiss': '할 일 줄 닫기',
   'todo.status.pending': '대기',
   'todo.status.active': '진행 중',
   'todo.status.stalled': '멈춤',

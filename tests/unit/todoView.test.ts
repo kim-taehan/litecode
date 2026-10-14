@@ -117,6 +117,13 @@ describe('화면', () => {
     expect(live).toContain('지금: edit b.txt')
   })
 
+  it('입력 카드 위: 닫기 버튼은 턴이 안 돌 때만 — 도는 동안엔 없다', () => {
+    const stalled = renderToStaticMarkup(createElement(TodoDock, { messages: [user, answer(write('m:p1', list))], progress: undefined, running: false }))
+    expect(stalled).toContain('todo-dock__dismiss')
+    const live = renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: [write('m:p1', list)], running: true }))
+    expect(live).not.toContain('todo-dock__dismiss')
+  })
+
   it('입력 카드 위: 목록이 없거나 다 끝났으면 아무것도 그리지 않는다', () => {
     expect(renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: undefined, running: false }))).toBe('')
     expect(renderToStaticMarkup(createElement(TodoDock, { messages: [user, answer(write('a', [todo('x', 'done')]))], progress: undefined, running: false }))).toBe('')

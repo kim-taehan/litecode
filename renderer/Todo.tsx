@@ -86,28 +86,40 @@ interface TodoDockProps {
 /** 입력 카드 위 줄. memo — 입력창에 글자를 칠 때마다 App 이 다시 그려져도 목록이 그대로면 다시 그리지 않는다 */
 export const TodoDock = memo(function TodoDock({ messages, progress, running }: TodoDockProps) {
   const [open, setOpen] = useState(false)
+  const [dismissed, setDismissed] = useState<string>()
   const t = useT()
   const todos = useMemo(() => currentTodos(messages, progress), [messages, progress])
   const view = todoDock(todos, running)
-  if (!view) return null
+  // 낡은 목록 치우기 — 턴이 안 도는데 남은 줄만 닫을 수 있다. 닫은 건 그 목록 내용으로 기억해, AI 가 목록을 다시 쓰면(내용이 바뀌면) 다시 뜬다. 엔진 값은 안 건드린다
+  const listKey = JSON.stringify(todos)
+  if (!view || dismissed === listKey) return null
   return (
     <section className="todo-dock" aria-label={t('todo.title')}>
-      <button type="button" className="todo-dock__head" aria-expanded={open} onClick={() => setOpen((now) => !now)}>
-        <ListIcon className="todo-dock__icon" />
-        <span className="todo-dock__title">{t('todo.title')}</span>
-        <span className="todo-dock__count">
-          {view.done}/{view.total}
-        </span>
-        {view.current && !view.current.stalled && <span className="todo-dock__pulse" aria-hidden="true" />}
-        {view.current && (
-          <span className="todo-dock__current" data-stalled={view.current.stalled || undefined}>
-            {t(view.current.stalled ? 'todo.stalled' : 'todo.now', { text: view.current.text })}
+      <div className="todo-dock__bar">
+        <button type="button" className="todo-dock__head" aria-expanded={open} onClick={() => setOpen((now) => !now)}>
+          <ListIcon className="todo-dock__icon" />
+          <span className="todo-dock__title">{t('todo.title')}</span>
+          <span className="todo-dock__count">
+            {view.done}/{view.total}
           </span>
+          {view.current && !view.current.stalled && <span className="todo-dock__pulse" aria-hidden="true" />}
+          {view.current && (
+            <span className="todo-dock__current" data-stalled={view.current.stalled || undefined}>
+              {t(view.current.stalled ? 'todo.stalled' : 'todo.now', { text: view.current.text })}
+            </span>
+          )}
+          <svg className="todo-dock__chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 10L8 6L12 10" />
+          </svg>
+        </button>
+        {!running && (
+          <button type="button" className="todo-dock__dismiss" aria-label={t('todo.dismiss')} title={t('todo.dismiss')} onClick={() => setDismissed(listKey)}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+              <path d="M4 4L12 12M12 4L4 12" />
+            </svg>
+          </button>
         )}
-        <svg className="todo-dock__chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 10L8 6L12 10" />
-        </svg>
-      </button>
+      </div>
       {open && <TodoList rows={view.rows} live />}
     </section>
   )
