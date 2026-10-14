@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import type { Attention } from '../../shared/contract.ts'
 import type { GitBranch, GitStatus, GitView } from '../../shared/git.ts'
-import { changeCount, gitViewOf, refreshGit, toggleAllGitFolds, toggleGitFold } from '../../renderer/gitStore.ts'
+import { changeCount, gitViewOf, ignoredShown, refreshGit, refreshIgnored, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown } from '../../renderer/gitStore.ts'
 import { SECTION_UNTRACKED } from '../../renderer/gitTree.ts'
 import { GIT_TAB, getPanelState, openFilePreview, openGitTab, selectTab } from '../../renderer/filePreviewStore.ts'
 
@@ -463,12 +463,12 @@ describe('커밋 영역 — 정적 그림 (시안 ①)', () => {
 
 // ── 변경 파일 우클릭 메뉴·보관함 (#389, 시안 ① Main.dc.html 의 .menu · .file.sel · 보관함 N) ──
 
-const { FILE_MENU, DANGER_ITEMS, entryPaths, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel } = await import('../../renderer/gitMenu.ts')
-const { FileMenu, StashList, ConfirmCard } = await import('../../renderer/Git.tsx')
+const { FILE_MENU, DANGER_ITEMS, entryPaths, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel, menuVisible } = await import('../../renderer/gitMenu.ts')
+const { FileMenu, StashList, ConfirmCard, ViewOptionsMenu } = await import('../../renderer/Git.tsx')
 
 describe('우클릭 메뉴 — 순수 규칙', () => {
-  it('항목 순서·구분선은 시안 그대로 (커밋·되돌리기 | 변경 보기·미리보기 | 패치·보관 | 삭제), 삭제만 위험', () => {
-    expect(FILE_MENU).toEqual([['commitFile', 'discard'], ['showDiff', 'preview'], ['copyPatch', 'stash'], ['trash']])
+  it('항목 순서·구분선은 시안 그대로 (커밋·되돌리기 | 변경 보기·미리보기 | 패치·보관·.gitignore·exclude (#390) | 삭제), 삭제만 위험', () => {
+    expect(FILE_MENU).toEqual([['commitFile', 'discard'], ['showDiff', 'preview'], ['copyPatch', 'stash', 'ignore', 'exclude'], ['trash']])
     expect([...DANGER_ITEMS]).toEqual(['trash'])
   })
 
@@ -512,13 +512,26 @@ describe('우클릭 메뉴 — 순수 규칙', () => {
     expect(entryPaths({ path: 'new.ts', staged: { path: 'new.ts', kind: 'R', from: 'old.ts' } })).toEqual(['new.ts', 'old.ts'])
     expect(entryPaths(stagedOnly)).toEqual(['a'])
   })
+
+  it('무시에 추가 두 항목은 새 파일(U)에서만 보인다 — 추적 중·stage 된 파일은 무시해도 계속 추적된다 (IntelliJ, #390)', () => {
+    const untracked = { path: 'n.txt', changed: { path: 'n.txt', kind: 'U' as const } }
+    const added = { path: 'n.txt', staged: { path: 'n.txt', kind: 'A' as const } }
+    const modified = { path: 'a', changed: { path: 'a', kind: 'M' as const } }
+    for (const item of ['ignore', 'exclude'] as const) {
+      expect(menuVisible(item, untracked)).toBe(true)
+      expect(menuVisible(item, added)).toBe(false)
+      expect(menuVisible(item, modified)).toBe(false)
+    }
+    expect(menuVisible('trash', untracked)).toBe(true)
+    expect(menuVisible('commitFile', modified)).toBe(true)
+  })
 })
 
 describe('우클릭 메뉴 — 정적 그림 (시안 ① .menu)', () => {
   const entry = { path: 'renderer/Git.tsx', staged: { path: 'renderer/Git.tsx', kind: 'M' as const }, changed: { path: 'renderer/Git.tsx', kind: 'M' as const } }
   const menu = (extra: Partial<Parameters<typeof FileMenu>[0]> = {}) => html(createElement(FileMenu, { entry, view: status(), mac: true, at: { left: 10, top: 20 }, onPick() {}, onClose() {}, ...extra }))
 
-  it('항목·구분선·단축키 글자가 시안 순서, 삭제는 위험 색, .gitignore 항목은 아직 없다(#390)', () => {
+  it('항목·구분선·단축키 글자가 시안 순서, 삭제는 위험 색, 추적 중인 파일엔 .gitignore 항목이 없다(#390)', () => {
     const out = menu()
     expect(out).toMatch(/^<div class="git-menu" role="menu" aria-label="Git.tsx 메뉴" style="left:10px;top:20px">/)
     const text = out
@@ -529,6 +542,15 @@ describe('우클릭 메뉴 — 정적 그림 (시안 ① .menu)', () => {
     expect(out).toMatch(/<button type="button" role="menuitem" class="git-menu__item" data-danger="true"[^>]*>삭제…<\/button>/)
     expect(out).not.toContain('gitignore')
     expect(menu({ mac: false })).toContain('<span class="git-menu__sc">Ctrl+Alt+Z</span>')
+  })
+
+  it('새 파일이면 셋째 묶음 끝에 .gitignore 에 추가 · .git/info/exclude 에 추가 (단축키 없음)', () => {
+    const out = menu({ entry: { path: 'scripts/tmp-probe.mjs', changed: { path: 'scripts/tmp-probe.mjs', kind: 'U' } } })
+    const text = out
+      .replace(/<div class="git-menu__sep" role="separator"><\/div>/g, '|')
+      .replace(/<span class="git-menu__sc">([^<]*)<\/span>/g, '[$1]')
+      .replace(/<[^>]+>/g, '')
+    expect(text).toBe('이 파일만 커밋…되돌리기…[⌥⌘Z]|변경 보기[⌘D]파일 미리보기로 열기[⌘↓]|패치로 복사보관(stash)….gitignore 에 추가.git/info/exclude 에 추가|삭제…')
   })
 
   it('못 누르는 항목은 disabled — 지운 파일은 미리보기·삭제, stage 만 된 파일은 되돌리기', () => {
@@ -542,10 +564,10 @@ describe('우클릭 메뉴 — 정적 그림 (시안 ① .menu)', () => {
 })
 
 describe('보관함 (#389) — 정적 그림', () => {
-  it('하위 탭 줄 오른쪽 — 모두 접기·펴기 다음에 보관함 N (변경 탭에서만)', async () => {
+  it('하위 탭 줄 오른쪽 — 모두 접기·펴기 · 보기 옵션(#390) 다음에 보관함 N (변경 탭에서만)', async () => {
     const directory = await withView(status())
     const out = html(createElement(GitPanel, { directory }))
-    expect(out).toMatch(/aria-label="모두 접기·펴기"[^]*<\/button><div class="git-stash"><button type="button" class="git-sub__tool git-stash__button" aria-label="보관\(stash\) 목록" aria-haspopup="dialog" aria-expanded="false"[^>]*>보관함 0<\/button><\/div><\/div>/)
+    expect(out).toMatch(/aria-label="모두 접기·펴기"[^]*<\/button><\/div><div class="git-stash"><button type="button" class="git-sub__tool git-stash__button" aria-label="보관\(stash\) 목록" aria-haspopup="dialog" aria-expanded="false"[^>]*>보관함 0<\/button><\/div><\/div>/)
   })
 
   it('목록 — 줄마다 메시지·브랜치·시각과 [적용]·[삭제], 없으면 빈 글', () => {
@@ -594,5 +616,54 @@ describe('메뉴의 확인 카드 (승인 카드 틀)', () => {
     const drop = card({ kind: 'dropStash', stash: { index: 0, hash: 'a'.repeat(40), message: 'wip a', time: 0 } })
     expect(drop).toContain('보관 &quot;wip a&quot; 를 지웁니다.')
     expect(drop).toMatch(/attention-card__button--danger">삭제<\/button>/)
+  })
+})
+
+describe('무시된 파일 보기 (#390, IntelliJ 의 보기 옵션)', () => {
+  const ignored = [
+    { path: 'node_modules/', source: '.gitignore', line: 3, pattern: 'node_modules/' },
+    { path: '.env.local', source: '.gitignore', line: 12, pattern: '.env.local' },
+  ]
+
+  it('하위 탭 줄 — 모두 접기·펴기 옆 눈 아이콘(보기 옵션, 메뉴 단추). 꺼짐이 기본 — 무시된 줄이 없고 목록을 읽지 않는다', async () => {
+    const directory = await withView(status())
+    const read = vi.fn(async () => ignored)
+    const out = html(createElement(GitPanel, { directory }))
+    expect(out).toMatch(/aria-label="모두 접기·펴기"[^]*<\/button><div class="git-view"><button type="button" class="git-sub__tool git-view__button" aria-label="보기 옵션" title="보기 옵션" aria-haspopup="menu" aria-expanded="false">[^]*<\/button><\/div><div class="git-stash">/)
+    expect(ignoredShown(directory)).toBe(false)
+    expect(out).not.toContain('git-file--ignored')
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('보기 옵션 메뉴 — 무시된 파일 보기 체크 항목(aria-checked)', () => {
+    const off = html(createElement(ViewOptionsMenu, { shown: false, onToggle() {} }))
+    expect(off).toMatch(/<div class="git-menu git-view__menu" role="menu" aria-label="보기 옵션"><button type="button" role="menuitemcheckbox" class="git-menu__item" aria-checked="false">[^]*무시된 파일 보기<\/button><\/div>/)
+    expect(html(createElement(ViewOptionsMenu, { shown: true, onToggle() {} }))).toContain('aria-checked="true"')
+  })
+
+  it('켜면 새 파일 구역 안에 흐린 줄로 같이 (– 글자·경로, 규칙은 title). 켜기는 프로젝트마다, 켤 때 새 파일 구역을 편다', async () => {
+    const directory = await withView(status({ staged: [], changed: [{ path: 'docs/a.md', kind: 'U' }] }))
+    toggleIgnoredShown(directory)
+    expect(ignoredShown(directory)).toBe(true)
+    expect(ignoredShown(`${directory}-other`)).toBe(false)
+    await refreshIgnored(directory, async () => ignored)
+    const out = html(createElement(GitPanel, { directory }))
+    expect(out).toContain('새 파일 <span class="git-sec__n">1개 · 아직 git 이 모르는 파일</span>') // 개수는 새 파일만
+    expect(out).toMatch(/<li class="git-file git-file--ignored" data-git-kind="I"><div class="git-file__row" style="padding-left:26px" title="\.gitignore:3 의 node_modules\/ 로 무시됨"><span class="git-ignored__pad"><\/span><span class="git-kind" data-kind="I" aria-hidden="true">–<\/span><span class="git-file__name">node_modules\/<\/span><\/div><\/li>/)
+    expect(out).toContain('<span class="git-file__name">.env.local</span>')
+    expect(out.indexOf('>a.md<')).toBeLessThan(out.indexOf('node_modules/'))
+    // 끄면 다시 없다
+    toggleIgnoredShown(directory)
+    expect(html(createElement(GitPanel, { directory }))).not.toContain('git-file--ignored')
+  })
+
+  it('새 파일이 없어도 켜져 있고 무시된 것이 있으면 새 파일 구역이 보인다(그 구역 체크는 꺼짐)', async () => {
+    const directory = await withView(status({ staged: [], changed: [] }))
+    toggleIgnoredShown(directory)
+    await refreshIgnored(directory, async () => ignored)
+    const out = html(createElement(GitPanel, { directory }))
+    expect(out).toMatch(/<div class="git-sec git-sec--untracked"><input type="checkbox" class="git-check" data-state="off" disabled=""[^>]*aria-label="새 파일 모두 스테이지"\/>/)
+    expect(out).toContain('git-file--ignored')
+    expect(out).not.toContain('깨끗합니다')
   })
 })

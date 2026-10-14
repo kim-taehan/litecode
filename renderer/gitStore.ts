@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import type { GitView } from '../shared/git.ts'
-import { toggleAllFolds, toggleFold, type Folds } from './gitTree.ts'
+import type { GitIgnored, GitView } from '../shared/git.ts'
+import { isFoldOpen, SECTION_UNTRACKED, toggleAllFolds, toggleFold, type Folds } from './gitTree.ts'
 
 // Git 상태의 화면 쪽 저장소 (이슈 #290) — 오른쪽 패널의 Git 탭(변경 수·목록)과 입력 카드의 브랜치 알약이 같은 값을 본다.
 // 파일 워처는 없다: 다시 읽는 때는 ① 메인이 git:changed 를 알릴 때(화면·AI 도구의 작업 뒤) ② 턴이 끝날 때 ③ 창이 앞으로 올 때 ④ 패널을 열 때(Git.tsx).
@@ -56,6 +56,42 @@ export function toggleGitFold(directory: string, key: string): void {
 export function toggleAllGitFolds(directory: string, keys: readonly string[]): void {
   folds.set(directory, toggleAllFolds(folds.get(directory), keys))
   notify()
+}
+
+// 무시된 파일 보기 (#390, IntelliJ 의 보기 옵션 Show Ignored Files) — 폴더(프로젝트)마다 켜고 끈다(꺼짐이 기본, 앱을 다시 켜면 꺼짐).
+// 목록은 켜져 있을 때만 읽는다(ChangesView) — 늦게 온 옛 답은 버린다
+const ignoredOn = new Set<string>()
+const ignoredLists = new Map<string, GitIgnored[]>()
+const ignoredAsked = new Map<string, number>()
+
+export function ignoredShown(directory: string): boolean {
+  return ignoredOn.has(directory)
+}
+
+/** 켜고 끈다 — 켤 때 새 파일 구역이 접혀 있으면 편다(무시된 줄은 그 구역 안에 보인다) */
+export function toggleIgnoredShown(directory: string): void {
+  if (ignoredOn.delete(directory)) return notify()
+  ignoredOn.add(directory)
+  const current = folds.get(directory)
+  if (!isFoldOpen(current, SECTION_UNTRACKED)) folds.set(directory, toggleFold(current, SECTION_UNTRACKED))
+  notify()
+}
+
+export function ignoredOf(directory: string): GitIgnored[] | undefined {
+  return ignoredLists.get(directory)
+}
+
+export function refreshIgnored(directory: string, read: (directory: string) => Promise<GitIgnored[]> = (dir) => window.litecode.gitIgnored(dir)): Promise<void> {
+  const seq = (ignoredAsked.get(directory) ?? 0) + 1
+  ignoredAsked.set(directory, seq)
+  return read(directory).then(
+    (list) => {
+      if (ignoredAsked.get(directory) !== seq) return
+      ignoredLists.set(directory, list)
+      notify()
+    },
+    () => {},
+  )
 }
 
 function subscribe(listener: () => void): () => void {

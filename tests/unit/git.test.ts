@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GitService, parseBranchLine, parseNumstat, parseStashList, parseStatus, remoteFailure } from '../../src/services/git.ts'
 import { GitTools } from '../../src/services/appMcp/tools/git.ts'
 import type { AppMcpTool } from '../../src/services/appMcp/rpc.ts'
-import { GIT_READ_TOOLS, GIT_WRITE_TOOLS, gitApprovalText, gitWebUrl } from '../../shared/git.ts'
+import { GIT_READ_TOOLS, GIT_WRITE_TOOLS, gitApprovalText, gitWebUrl, ignoreLine } from '../../shared/git.ts'
 
 // ctx.git (이슈 #290) — 임시 폴더의 진짜 git 저장소로 댄다. 원격은 로컬 bare 저장소. git 이 없는 기계면 건너뛴다.
 // 사용자 git 설정이 끼지 않게 전역 설정을 임시 파일로 바꾼다 (이름·이메일·기본 브랜치 main)
@@ -646,5 +646,98 @@ describe.skipIf(!hasGit)('GitService — 우클릭 메뉴 (#389)', () => {
     expect(await git.trash(sub, 'sub/g.txt', remove)).toEqual({ ok: true })
     expect(removed).toHaveLength(2)
     await fs.access(path.join(dir, 'root.txt'))
+  })
+})
+
+// ── .gitignore 연계 (#390, IntelliJ 방식) — 판정은 git 에 맡긴다 (check-ignore·ls-files). 쓰기는 새 파일 경로 한 줄 덧붙이기 ──
+
+describe('무시 줄 (#390) — 순수 규칙', () => {
+  it('그 경로 그대로 — 루트 파일은 / 로 고정(다른 폴더의 같은 이름까지 가리지 않게), 폴더는 폴더/', () => {
+    expect(ignoreLine('scripts/tmp-probe.mjs')).toBe('scripts/tmp-probe.mjs')
+    expect(ignoreLine('.env.local')).toBe('/.env.local')
+    expect(ignoreLine('build/')).toBe('/build/')
+    expect(ignoreLine('a/b/')).toBe('a/b/')
+  })
+
+  it('특수문자 이스케이프 — * ? [ ] \\ 는 앞에 \\, 맨 앞 ! # 는 \\, 끝 공백은 \\ 공백', () => {
+    expect(ignoreLine('x[1]*?.txt')).toBe('/x\\[1\\]\\*\\?.txt')
+    expect(ignoreLine('b\\c')).toBe('/b\\\\c')
+    expect(ignoreLine('!b/x')).toBe('\\!b/x')
+    expect(ignoreLine('#h/x')).toBe('\\#h/x')
+    expect(ignoreLine('!b')).toBe('/!b') // / 로 시작하면 ! 는 글자 그대로
+    expect(ignoreLine('tail  ')).toBe('/tail\\ \\ ')
+  })
+})
+
+describe.skipIf(!hasGit)('GitService — .gitignore 연계 (#390)', () => {
+  it('무시 목록 — 폴더 단위로 접고(node_modules 안을 열지 않는다), 규칙 파일:줄·패턴. 중첩 .gitignore·info/exclude, 부정 패턴(!)은 빠진다', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    await fs.writeFile(path.join(dir, '.gitignore'), 'node_modules/\n*.log\n# c\n!keep.log\n.env.local\n')
+    await fs.writeFile(path.join(dir, '.git', 'info', 'exclude'), 'secret.txt\n')
+    for (const file of ['node_modules/x/a.js', 'node_modules/y/b.js', 'logs/a.log', 'logs/b.log', 'mixed/a.log', 'mixed/b.txt', 'keep.log', 'x.log', '.env.local', 'secret.txt', 'sub/deep/y.tmp', 'sub/z.txt']) {
+      await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true })
+      await fs.writeFile(path.join(dir, file), 'x\n')
+    }
+    await fs.writeFile(path.join(dir, 'sub', '.gitignore'), '*.tmp\n')
+    expect(await git.ignored(dir)).toEqual([
+      { path: '.env.local', source: '.gitignore', line: 5, pattern: '.env.local' },
+      { path: 'logs/', source: '.gitignore', line: 2, pattern: '*.log' }, // 안이 모두 같은 규칙 → 폴더 한 줄
+      { path: 'mixed/a.log', source: '.gitignore', line: 2, pattern: '*.log' }, // 무시 안 된 파일이 섞인 폴더는 파일로
+      { path: 'node_modules/', source: '.gitignore', line: 1, pattern: 'node_modules/' },
+      { path: 'secret.txt', source: '.git/info/exclude', line: 1, pattern: 'secret.txt' },
+      { path: 'sub/deep/', source: 'sub/.gitignore', line: 1, pattern: '*.tmp' },
+      { path: 'x.log', source: '.gitignore', line: 2, pattern: '*.log' },
+    ])
+    // 무시된 것이 없으면 빈 목록
+    expect(await git.ignored(await repo())).toEqual([])
+  })
+
+  it('.gitignore 에 추가 — 없으면 만들고, 있으면 덧붙인다(마지막 줄바꿈이 없으면 먼저). 같은 줄이 있으면 nothing. 새 파일은 목록에서 빠지고 무시 목록에 든다', async () => {
+    const { git, changed } = await start()
+    const dir = await repo()
+    await fs.mkdir(path.join(dir, 'scripts'))
+    await fs.writeFile(path.join(dir, 'scripts', 'tmp-probe.mjs'), 'x\n')
+    await fs.writeFile(path.join(dir, 'scripts', 'other.mjs'), 'x\n')
+    await fs.writeFile(path.join(dir, 'root.txt'), 'x\n')
+    const before = changed.length
+    expect(await git.addIgnore(dir, 'scripts/tmp-probe.mjs', 'gitignore')).toEqual({ ok: true, file: '.gitignore', line: 'scripts/tmp-probe.mjs' })
+    expect(changed.length).toBeGreaterThan(before)
+    expect(await fs.readFile(path.join(dir, '.gitignore'), 'utf8')).toBe('scripts/tmp-probe.mjs\n')
+    const view = await git.view(dir)
+    expect(view.state === 'ok' && view.changed.map((file) => file.path)).toEqual(['.gitignore', 'root.txt', 'scripts/other.mjs'])
+
+    // 같은 줄 → nothing (파일 그대로)
+    expect(await git.perform(dir, { kind: 'addIgnore', path: 'scripts/tmp-probe.mjs', where: 'gitignore' })).toMatchObject({ ok: false, reason: 'nothing' })
+    expect(await fs.readFile(path.join(dir, '.gitignore'), 'utf8')).toBe('scripts/tmp-probe.mjs\n')
+
+    // 마지막 줄바꿈이 없는 파일 — 기존 내용은 그대로, 줄바꿈을 먼저
+    await fs.writeFile(path.join(dir, '.gitignore'), '# 팀 규칙\nscripts/tmp-probe.mjs')
+    expect(await git.perform(dir, { kind: 'addIgnore', path: 'root.txt', where: 'gitignore' })).toMatchObject({ ok: true, line: '/root.txt' })
+    expect(await fs.readFile(path.join(dir, '.gitignore'), 'utf8')).toBe('# 팀 규칙\nscripts/tmp-probe.mjs\n/root.txt\n')
+    expect((await git.ignored(dir)).map((entry) => [entry.path, entry.line])).toEqual([
+      ['root.txt', 3],
+      ['scripts/tmp-probe.mjs', 2],
+    ])
+  })
+
+  it('.git/info/exclude 에 추가 — .gitignore 는 건드리지 않는다. 특수문자 이름도 그 파일만 가린다', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    await fs.writeFile(path.join(dir, '!bang [1].txt'), 'x\n')
+    await fs.writeFile(path.join(dir, '!bang 1.txt'), 'x\n')
+    expect(await git.addIgnore(dir, '!bang [1].txt', 'exclude')).toEqual({ ok: true, file: '.git/info/exclude', line: '/!bang \\[1\\].txt' })
+    expect(await fs.readFile(path.join(dir, '.git', 'info', 'exclude'), 'utf8')).toMatch(/\n\/!bang \\\[1\\\]\.txt\n$/)
+    await expect(fs.access(path.join(dir, '.gitignore'))).rejects.toThrow()
+    expect(await git.ignored(dir)).toEqual([{ path: '!bang [1].txt', source: '.git/info/exclude', line: expect.any(Number), pattern: '/!bang \\[1\\].txt' }])
+  })
+
+  it('저장소 밖·.git 안·빈 경로·줄바꿈·모르는 저장 위치는 invalid — 아무것도 쓰지 않는다', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    for (const bad of ['../x', '/etc/passwd', '.git/config', 'sub/.git/x', '', 'a\nb'])
+      expect(await git.perform(dir, { kind: 'addIgnore', path: bad, where: 'gitignore' })).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(await git.perform(dir, { kind: 'addIgnore', path: 'a.txt', where: 'elsewhere' as 'gitignore' })).toMatchObject({ ok: false, reason: 'invalid' })
+    await expect(fs.access(path.join(dir, '.gitignore'))).rejects.toThrow()
   })
 })

@@ -64,6 +64,29 @@ export interface GitStash {
   time: number
 }
 
+/** 무시된 것 한 줄 (#390 .gitignore 연계) — path 는 저장소 루트 기준(폴더는 `/` 로 끝난다). 어느 규칙이 가렸는지는 git check-ignore 의 답:
+ *  source = 규칙 파일(루트 기준 — `.gitignore`·`sub/.gitignore`·`.git/info/exclude`, 전역 설정이면 절대 경로), line = 줄 번호, pattern = 그 줄 */
+export interface GitIgnored {
+  path: string
+  source: string
+  line: number
+  pattern: string
+}
+
+/** 무시에 추가할 파일 (#390, IntelliJ 의 Add to .gitignore · Add to .git/info/exclude) */
+export type GitIgnoreWhere = 'gitignore' | 'exclude'
+
+/** 새 파일 경로(저장소 루트 기준, 폴더는 `/` 로 끝남) → .gitignore 에 쓸 한 줄 (#390). 경로 그대로 쓰되:
+ *  - 그 자리에만 걸리게 — 중간에 `/` 가 없으면 맨 앞에 `/` (git: 앞·가운데에 / 가 있으면 .gitignore 자리 기준, 없으면 아무 깊이의 같은 이름까지 가린다)
+ *  - `* ? [ ] \` 는 앞에 `\`, (앞에 / 가 없을 때) 맨 앞 `!`·`#` 는 `\`, 끝 공백은 `\ ` (git 이 끝 공백을 지운다) */
+export function ignoreLine(path: string): string {
+  const folder = path.endsWith('/')
+  const target = folder ? path.slice(0, -1) : path
+  const text = target.replace(/[*?[\]\\]/g, '\\$&')
+  const anchored = target.includes('/') ? text.replace(/^[!#]/, '\\$&') : `/${text}`
+  return folder ? `${anchored}/` : anchored.replace(/ +$/, (spaces) => '\\ '.repeat(spaces.length))
+}
+
 export interface GitBranch {
   name: string
   current: boolean
@@ -98,6 +121,8 @@ export type GitAction =
   | { kind: 'commitPaths' | 'stash'; paths: string[]; message: string }
   /** 보관함 (#389) — stashPop: 적용(충돌이면 멈추고 보관은 남는다) · stashDrop: 삭제. hash 가 그 번호의 보관과 다르면 invalid */
   | { kind: 'stashPop' | 'stashDrop'; index: number; hash: string }
+  /** 무시에 추가 (#390) — 새 파일 path(저장소 루트 기준)의 ignoreLine 한 줄을 where 파일 끝에 덧붙인다 */
+  | { kind: 'addIgnore'; path: string; where: GitIgnoreWhere }
   | { kind: 'undoCommit' | 'push' | 'pull' | 'abortMerge' | 'init' }
 
 /** 앱 MCP 서버의 git 도구 (모델이 보는 이름은 `litecode_<이름>`) — 읽기는 바로, 쓰기는 늘 승인 카드 (engineConfig.ts·modes.ts 의 규칙) */
