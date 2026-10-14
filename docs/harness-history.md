@@ -20,3 +20,4 @@
 | 2026-10-03 | 실물 테스트를 과정에서 뺀다 — 새로 안 쓰고 안 돌린다, 머지 기준은 typecheck·단위 | skills/litecode-build, agents/litecode-dev, CLAUDE.md | 사용자 "실물 테스트를 빼자" (전체 한 번 8~9분, 머지마다) |
 | 2026-10-02 | 디자인 이야기는 전부 HTML 시안(Artifact 캔버스)으로 — 구현자에겐 "시안: <링크>" | skills/litecode-build, agents/litecode-dev | 사용자 "모든 디자인은 html 시안으로 말한다" |
 | 2026-10-02 | 실물 테스트 전체는 리더만 머지 전에 — 구현자는 자기 실물 파일만 | skills/litecode-build, agents/litecode-dev | 사용자 "실물 테스트는 니가 하는걸로 하자" (에이전트 50분대, 전체를 두 번 돌림) |
+| 2026-10-14 | YAGNI 규칙 — "아마 나중에 필요할" 옵션·추상화·설정은 만들지 않고, 지금 요청·성공 기준에 필요한 것만 | agents/litecode-dev, skills/litecode-build | 사용자 지시 |
