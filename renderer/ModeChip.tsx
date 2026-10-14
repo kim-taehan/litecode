@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Mode } from '../shared/ipc.ts'
+import { focusComposerInput } from './composerFocus.ts'
 import { CYCLE_MODES, MODES } from '../shared/modes.ts'
 import { useT } from './settingsStore.ts'
 import { useFocusTrap } from './focusTrap.ts'
@@ -49,7 +50,7 @@ export function ModeChip({ value, locked, onChange }: ModeChipProps) {
     const list = rows()
     ;(list.find((row) => row.getAttribute('aria-checked') === 'true') ?? list[0])?.focus()
     const outside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+      if (!rootRef.current?.contains(event.target as Node)) close()
     }
     document.addEventListener('pointerdown', outside)
     return () => document.removeEventListener('pointerdown', outside)
@@ -61,7 +62,7 @@ export function ModeChip({ value, locked, onChange }: ModeChipProps) {
 
   function close(): void {
     setOpen(false)
-    triggerRef.current?.focus()
+    if (!focusComposerInput()) triggerRef.current?.focus() // 닫히면 입력창으로 — 없으면(컴포저 안 보이는 화면) 버튼으로
   }
 
   function choose(mode: Mode): void {
@@ -136,12 +137,12 @@ export function ModeChip({ value, locked, onChange }: ModeChipProps) {
         <ConfirmFullAccess
           onCancel={() => {
             setConfirming(false)
-            triggerRef.current?.focus()
+            if (!focusComposerInput()) triggerRef.current?.focus() // 닫히면 입력창으로
           }}
           onConfirm={() => {
             setConfirming(false)
             onChange('full')
-            triggerRef.current?.focus()
+            if (!focusComposerInput()) triggerRef.current?.focus() // 닫히면 입력창으로
           }}
         />
       )}

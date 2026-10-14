@@ -94,6 +94,8 @@ async function send(text: string): Promise<void> {
 async function pickMode(name: string): Promise<void> {
   await chip().click()
   await page.locator('.mode-menu').getByRole('menuitemradio', { name }).click()
+  // 팝업(모드 칩)이 닫히면 포커스는 다시 입력창으로 (이슈 #374)
+  await expect.poll(() => input().evaluate((el) => el === document.activeElement), { timeout: 5_000 }).toBe(true)
 }
 
 /** 그 대화를 열고 내용을 다 불러올 때까지 — 불러오는 중엔 보내기가 막힌다 */

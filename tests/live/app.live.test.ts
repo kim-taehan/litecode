@@ -720,6 +720,23 @@ describe('설정 > 모델', () => {
     await expect.poll(() => page.locator('.main__header').textContent(), { timeout: 5_000 }).toBe('새 대화') // 빈 새 대화가 새로 생겨서
     expect(await page.evaluate(() => document.activeElement?.classList.contains('composer__input'))).toBe(true)
   })
+
+  // 이슈 #374 — 세션 이동에 포커스: 다른 대화 행을 클릭하거나 ⌘↑/⌘↓ 로 이동하면 키가 옛 화면에 남아 마우스를 다시 대야
+  // 하므로 입력창으로 간다 (#343 의 새 대화 버튼을 잇는 길)
+  it('다른 대화 행 클릭·⌘↓ 이동에 입력창 포커스가 자동으로 간다 (#374)', async () => {
+    const inputFocused = () => page.evaluate(() => document.activeElement?.classList.contains('composer__input') ?? false)
+    const header = () => page.locator('.main__header').textContent()
+    await send('세션 이동 포커스 확인') // 지금 대화가 목록에 남는다 — 그로 부터는 다른 대화를 볼 수 있다
+    const other = page.locator('.session-item:not(.session-item--active)').first()
+    const otherTitle = (await other.locator('.session-item__title').textContent())!.trim()
+    await other.locator('.session-item__main').click()
+    await expect.poll(header, { timeout: 5_000 }).toBe(otherTitle)
+    await expect.poll(inputFocused, { timeout: 5_000 }).toBe(true) // 마우스로 이동해도 입력창
+
+    await page.keyboard.press('Meta+ArrowDown') // 키로 이동해도 입력창
+    await expect.poll(header, { timeout: 5_000 }).not.toBe(otherTitle)
+    await expect.poll(inputFocused, { timeout: 5_000 }).toBe(true)
+  })
 })
 
 // 2a 엔진 연결 (_workspace/00_request.md 성공 기준 1~6) — 앱이 스스로 띄운 opencode 로 설정 화면의 provider 가 대화한다.
@@ -1169,9 +1186,10 @@ describe('모델 선택', () => {
     await menu().getByRole('menuitemradio', { name: 'Echo B' }).click()
     await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
     expect(await composerModel()).toBe('Echo B')
-    expect(await trigger().evaluate((el) => el === document.activeElement)).toBe(true) // 고르면 포커스는 드롭다운 버튼으로
+    expect(await page.locator('.composer__input').evaluate((el) => el === document.activeElement)).toBe(true) // 고르면 포커스는 다시 입력창으로 (#374)
 
     // 키보드: Enter 로 열고 ↑ 로 옮겨 Enter 로 고른다. Esc 는 고르지 않고 닫는다
+    await trigger().focus() // 앞 선택으로 포커스가 입력창에 갔으므로 버튼으로 다시
     await page.keyboard.press('Enter')
     await menu().waitFor({ timeout: 5_000 })
     expect(await focused()).toBe('Echo B')
@@ -1181,6 +1199,8 @@ describe('모델 선택', () => {
     await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
     expect(await composerModel()).toBe('Echo B')
     expect(await page.locator('.composer').count()).toBe(1) // Esc 가 다른 것(대화 화면)까지 닫지 않는다
+    expect(await page.locator('.composer__input').evaluate((el) => el === document.activeElement)).toBe(true) // Esc 로 닫아도 입력창 (#374)
+    await trigger().focus()
     await page.keyboard.press('Enter')
     await menu().waitFor({ timeout: 5_000 })
     await page.keyboard.press('ArrowUp')

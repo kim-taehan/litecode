@@ -294,6 +294,23 @@ export function App() {
       return started.ok ? undefined : started.error
     },
   })
+  // 세션 이동에 입력창 포커스 (이슈 #374) — 사이드바 대화 행 클릭·⌘↑/⌘↓·알림으로 대화 열기, 어느 길로 오든
+  // 키가 옛 화면에 남아 있으면 마우스를 다시 대야 하므로 입력창에게 건다. 첫 출현(앱 기동)은 이동이 아니라서 그대로 둔다.
+  // 판(aria-modal)·프로젝트 빠른 열기가 열려 있으면 포커스를 가져가지 않는다 — ⌘N·⌘↑/⌘↓ 과 같은 전역 키 규칙.
+  // (빠른 열기로 프로젝트만 바꾼 것은 입력 창이 없는 그 패널이 닫히면 전환 버튼이 키를 가지므로 여기서 포기한다)
+  // 추론 과정(#364) 탭에는 입력 창이 없다 — 그 탭에서 오면 대화 탭으로 돌아온 다음 그리기에 건다 (view 의존)
+  const prevActiveId = useRef<string | undefined>(undefined)
+  const composerFocusId = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    const id = active?.id
+    if (id !== undefined && prevActiveId.current !== undefined && id !== prevActiveId.current) composerFocusId.current = id
+    prevActiveId.current = id
+    if (composerFocusId.current !== id || (trajectoryOn && view === 'trajectory')) return
+    composerFocusId.current = undefined
+    if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+    trigger.inputRef.current?.focus()
+  }, [active?.id, view, trajectoryOn])
+
   /** 지금 대화의 목표 (이슈 #285) — 입력 카드 위 줄 */
   const goal = useGoal(features.has('goal'), active?.id)
   // Git 상태 다시 읽기 (이슈 #290) — 작업 뒤·턴 끝·창 포커스. 탭 숫자와 브랜치 알약이 같은 값을 본다
