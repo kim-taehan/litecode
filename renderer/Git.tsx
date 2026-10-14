@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { FileDiff } from '../shared/ipc.ts'
-import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitLastCommit, type GitResult, type GitStatus } from '../shared/git.ts'
+import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitLastCommit, type GitResult, type GitStash, type GitStatus } from '../shared/git.ts'
 import { ago } from './ago.ts'
 import { branchTrack, groupBranches, matchesQuery, popupShortcut, recentBranches, shortcutLabel, type PopupShortcut } from './branchPopup.ts'
 import { focusComposerInput } from './composerFocus.ts'
@@ -9,6 +9,7 @@ import { DiffCard } from './DiffCard.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { openFilePreview, openGitTab, type PanelState } from './filePreviewStore.ts'
 import { commitControls, commitNotice, commitThenPush } from './gitCommit.ts'
+import { DANGER_ITEMS, entryPaths, FILE_MENU, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel, type FileMenuItem } from './gitMenu.ts'
 import { changeCount, foldsOf, refreshGit, toggleAllGitFolds, toggleGitFold, useGitView } from './gitStore.ts'
 import { buildTree, entryKind, entryStat, entryState, folderKey, groupState, isFoldOpen, SECTION_UNTRACKED, splitChanges, toggleAction, treeFolders, treeRows, type ChangeEntry, type CheckState, type TreeFolder } from './gitTree.ts'
 import { reason } from './ipcError.ts'
@@ -29,6 +30,9 @@ type Confirm =
   | { kind: 'discard'; file: GitFile }
   | { kind: 'delete'; branch: GitBranch }
   | { kind: 'remote'; then?: 'push' | 'pull' }
+  /** 변경 파일 우클릭 메뉴 (#389) — 이 파일만 커밋·보관은 메시지 칸, 삭제(휴지통)·보관 삭제는 경고 */
+  | { kind: 'commitFile' | 'stash' | 'trash'; entry: ChangeEntry }
+  | { kind: 'dropStash'; stash: GitStash }
 type Notice = { tone: 'ok' | 'error'; text: string; detail?: string; undo?: boolean; remote?: boolean }
 
 const drafts = new Map<string, string>()
@@ -529,6 +533,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
   // 마지막 커밋 고치기 (#387) — 체크하면 마지막 커밋 메시지를 채우고, 풀면 체크 전 초안으로 돌린다
   const [amend, setAmend] = useState(false)
   const [last, setLast] = useState<GitLastCommit>()
+  const [stashes, setStashes] = useState<GitStash[]>()
   const draftBeforeAmend = useRef('')
   const hasCommits = view?.state === 'ok' && view.hasCommits
 
@@ -536,7 +541,20 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
   useEffect(() => {
     setAmend(false)
     setLast(undefined)
+    setStashes(undefined)
   }, [directory])
+  // 보관함 (#389) — 변경 탭에서 상태가 바뀔 때마다 다시 읽는다 (보관은 AI·터미널에서도 바뀐다)
+  useEffect(() => {
+    if (sub !== 'changes' || view?.state !== 'ok') return
+    let live = true
+    window.litecode.gitStashes(directory).then(
+      (list) => live && setStashes(list),
+      () => {},
+    )
+    return () => {
+      live = false
+    }
+  }, [directory, view, sub])
   useEffect(() => {
     // 다시 읽는 동안 옛 값을 둔다 — 지우면 체크·버튼 글이 깜빡인다
     if (!hasCommits) setLast(undefined)
@@ -628,6 +646,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
           ))}
         </div>
         {sub === 'changes' && <FoldAllButton directory={directory} view={view} />}
+        {sub === 'changes' && <StashButton directory={directory} view={view} stashes={stashes ?? []} onNotice={setNotice} />}
       </div>
       {notice && (
         <NoticeLine notice={notice} onClose={() => setNotice(undefined)}>
@@ -680,6 +699,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
             busy={busy}
             onRun={run}
             onDiscard={(file) => setConfirm({ kind: 'discard', file })}
+            onFileAction={fileAction}
           />
         )}
         {sub === 'log' && <LogView directory={directory} view={view} />}
@@ -719,6 +739,41 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
     setNotice(commitNotice(t, outcome))
   }
 
+  /** 우클릭 메뉴의 항목 (#389) — 변경 보기는 ChangesView 가 직접 편다. 커밋·보관·삭제·되돌리기는 확인 카드부터 */
+  function fileAction(item: FileMenuItem, entry: ChangeEntry): void {
+    setNotice(undefined)
+    if (item === 'commitFile' || item === 'stash' || item === 'trash') setConfirm({ kind: item, entry })
+    else if (item === 'discard' && entry.changed) setConfirm({ kind: 'discard', file: entry.changed })
+    else if (item === 'preview') openFilePreview(directory, entry.path)
+    else if (item === 'copyPatch') void copyPatch(entry)
+  }
+
+  /** 패치로 복사 — HEAD 대비(stage 된 것 + 안 된 것, 새 파일은 통째) diff 를 클립보드에 */
+  async function copyPatch(entry: ChangeEntry): Promise<void> {
+    try {
+      const patch = await window.litecode.gitDiff(directory, entry.path, 'head')
+      if (!patch) return setNotice({ tone: 'error', text: t('git.patchEmpty') })
+      await navigator.clipboard.writeText(patch)
+      setNotice({ tone: 'ok', text: t('git.patchCopied') })
+    } catch (error) {
+      setNotice({ tone: 'error', text: t('git.error.failed'), detail: reason(error) })
+    }
+  }
+
+  /** 파일 삭제 — 휴지통으로 (메인 shell.trashItem, 프로젝트 안 파일만) */
+  async function trash(file: string): Promise<void> {
+    setBusy(true)
+    try {
+      const result = await window.litecode.gitTrash(directory, file)
+      setNotice(result.ok ? { tone: 'ok', text: t('git.trashed', { file }) } : { tone: 'error', text: t(`git.error.${result.reason}`), detail: result.message })
+    } catch (error) {
+      setNotice({ tone: 'error', text: t('git.error.failed'), detail: reason(error) })
+    } finally {
+      setBusy(false)
+      void refreshGit(directory)
+    }
+  }
+
   async function remote(kind: 'push' | 'pull'): Promise<void> {
     const result = await run<{ branch?: string }>({ kind })
     if (!result?.ok) return
@@ -739,6 +794,17 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
     if (current.kind === 'switch') return void (await run({ kind: 'switchBranch', name: current.name }))
     if (current.kind === 'discard') return void (await run({ kind: 'discard', paths: [current.file.path] }))
     if (current.kind === 'delete') return void (await run({ kind: 'deleteBranch', name: current.branch.name }))
+    if (current.kind === 'commitFile') {
+      const done = await run<{ short: string; files: number }>({ kind: 'commitPaths', paths: entryPaths(current.entry), message: value ?? '' })
+      if (done?.ok) setNotice({ tone: 'ok', text: t('git.committed', { hash: done.short, count: done.files }), undo: true })
+      return
+    }
+    if (current.kind === 'stash') {
+      const done = await run({ kind: 'stash', paths: entryPaths(current.entry), message: value ?? '' })
+      if (done?.ok) setNotice({ tone: 'ok', text: t('git.stashed', { file: current.entry.path }) })
+      return
+    }
+    if (current.kind === 'trash') return trash(current.entry.path)
   }
 }
 
@@ -853,14 +919,54 @@ function ChangesView({
   busy,
   onRun,
   onDiscard,
+  onFileAction,
 }: {
   directory: string
   view: GitStatus
   busy: boolean
   onRun(action: GitAction): Promise<unknown>
   onDiscard(file: GitFile): void
+  onFileAction(item: FileMenuItem, entry: ChangeEntry): void
 }) {
   const t = useT()
+  const mac = navigator.platform.startsWith('Mac')
+  // diff 를 펼친 파일·고른 줄(시안 .file.sel)·우클릭 메뉴 (#389) — 메뉴의 '변경 보기' 가 그 줄의 diff 를 편다
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
+  const [selected, setSelected] = useState<string>()
+  const [menu, setMenu] = useState<{ entry: ChangeEntry; at: { left: number; top: number }; trigger: HTMLElement | null }>()
+  useEffect(() => {
+    setOpened(new Set())
+    setSelected(undefined)
+    setMenu(undefined)
+  }, [directory])
+  const toggleOpen = (path: string, open?: boolean): void =>
+    setOpened((now) => {
+      const next = new Set(now)
+      if (open ?? !now.has(path)) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  const pick = (item: FileMenuItem, entry: ChangeEntry): void => {
+    if (!menuEnabled(item, entry, view)) return
+    if (item === 'showDiff') toggleOpen(entry.path, true)
+    else onFileAction(item, entry)
+  }
+  const closeMenu = (): void => {
+    menu?.trigger?.focus()
+    setMenu(undefined)
+  }
+  const rows: FileRowControls = {
+    mac,
+    opened,
+    selected,
+    onToggleOpen: (path) => toggleOpen(path),
+    onSelect: setSelected,
+    onMenu: (entry, at, trigger) => {
+      setSelected(entry.path)
+      setMenu({ entry, at, trigger })
+    },
+    onPick: pick,
+  }
   const conflicts = view.conflicts
   const { tracked, untracked } = useMemo(() => {
     const split = splitChanges(view)
@@ -876,7 +982,7 @@ function ChangesView({
           <div className="attention-card git-confirm" data-tone="danger" role="alert">
             <div className="attention-card__strip">
               <span className="attention-card__dot" aria-hidden="true" />
-              {t('git.conflictTitle', { count: conflicts.length })}
+              {t(view.merging ? 'git.conflictTitle' : 'git.conflictFiles', { count: conflicts.length })}
             </div>
             <div className="attention-card__body">
               {conflicts.map((file) => (
@@ -884,7 +990,7 @@ function ChangesView({
                   {`U ${file.path}`}
                 </button>
               ))}
-              <span className="git-card__note">{t('git.conflictNote')}</span>
+              <span className="git-card__note">{t(view.merging ? 'git.conflictNote' : 'git.conflictNoteFiles')}</span>
             </div>
             <div className="attention-card__actions">
               {conflicts[0] && (
@@ -908,7 +1014,7 @@ function ChangesView({
             <Check state={groupState(tracked.all)} label={t('git.stageChanges')} busy={busy} onToggle={stage(tracked.all)} />
             {t('git.changes')} <span className="git-sec__n">{t('git.fileCount', { count: tracked.all.length })}</span>
           </div>
-          <Tree directory={directory} section="c" root={tracked} busy={busy} onRun={onRun} onDiscard={onDiscard} />
+          <Tree directory={directory} section="c" root={tracked} busy={busy} onRun={onRun} onDiscard={onDiscard} rows={rows} />
         </>
       )}
       {untracked.all.length > 0 && (
@@ -922,10 +1028,120 @@ function ChangesView({
               {t('git.untracked')} <span className="git-sec__n">{t('git.untrackedNote', { count: untracked.all.length })}</span>
             </button>
           </div>
-          {untrackedOpen && <Tree directory={directory} section="u" root={untracked} busy={busy} onRun={onRun} onDiscard={onDiscard} />}
+          {untrackedOpen && <Tree directory={directory} section="u" root={untracked} busy={busy} onRun={onRun} onDiscard={onDiscard} rows={rows} />}
         </>
       )}
+      {menu && (
+        <FileMenu
+          entry={menu.entry}
+          view={view}
+          mac={mac}
+          at={menu.at}
+          onClose={closeMenu}
+          onPick={(item) => {
+            closeMenu()
+            pick(item, menu.entry)
+          }}
+        />
+      )}
     </>
+  )
+}
+
+/** 파일 줄이 ChangesView 와 나누는 것 (#389) — diff 펼침·고른 줄·우클릭 메뉴·단축키 */
+interface FileRowControls {
+  mac: boolean
+  opened: ReadonlySet<string>
+  selected: string | undefined
+  onToggleOpen(path: string): void
+  onSelect(path: string): void
+  onMenu(entry: ChangeEntry, at: { left: number; top: number }, trigger: HTMLElement | null): void
+  onPick(item: FileMenuItem, entry: ChangeEntry): void
+}
+
+/** 변경 파일 우클릭 메뉴 (#389, 시안 ① .menu — 236 폭·10 모서리·5 여백, 항목 26·구분선 .5px, 오른쪽 단축키 글자, 삭제는 빨강).
+ *  마우스 자리(키보드로 열면 줄 아래)에 fixed 로 뜨고 창 밖으로 나가지 않게 당긴다. 동작은 + 메뉴(PlusMenu)와 같다:
+ *  Esc·바깥 누르기·Tab 으로 닫히고(포커스는 그 줄로), 화살표로 이동. 열린 동안 단축키도 그 항목을 고른다 */
+export function FileMenu({
+  entry,
+  view,
+  mac,
+  at,
+  onPick,
+  onClose,
+}: {
+  entry: ChangeEntry
+  view: Pick<GitStatus, 'merging' | 'hasCommits'>
+  mac: boolean
+  at: { left: number; top: number }
+  onPick(item: FileMenuItem): void
+  onClose(): void
+}) {
+  const t = useT()
+  const ref = useRef<HTMLDivElement>(null)
+  const [place, setPlace] = useState(at)
+  const items = (): HTMLElement[] => [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [])]
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useLayoutEffect(() => {
+    const rect = ref.current?.getBoundingClientRect()
+    if (!rect) return
+    setPlace({ left: Math.max(4, Math.min(at.left, window.innerWidth - rect.width - 4)), top: Math.max(4, Math.min(at.top, window.innerHeight - rect.height - 4)) })
+  }, [at.left, at.top])
+
+  useEffect(() => {
+    items()[0]?.focus()
+    const outside = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) closeRef.current()
+    }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [])
+
+  function onKeyDown(event: ReactKeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+      return
+    }
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      onClose()
+      return
+    }
+    const shortcut = event.nativeEvent.isComposing ? undefined : menuShortcut(event, mac)
+    if (shortcut) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (menuEnabled(shortcut, entry, view)) onPick(shortcut)
+      return
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    const list = items()
+    const index = list.indexOf(document.activeElement as HTMLElement)
+    list[(index + (event.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus()
+  }
+
+  return (
+    <div className="git-menu" role="menu" aria-label={t('git.menu.label', { file: splitPath(entry.path).name })} style={{ left: place.left, top: place.top }} ref={ref} onKeyDown={onKeyDown}>
+      {FILE_MENU.map((group, index) => (
+        <Fragment key={index}>
+          {index > 0 && <div className="git-menu__sep" role="separator" />}
+          {group.map((item) => {
+            const shortcut = menuShortcutLabel(item, mac)
+            return (
+              <button key={item} type="button" role="menuitem" className="git-menu__item" data-danger={DANGER_ITEMS.has(item) || undefined} disabled={!menuEnabled(item, entry, view)} onClick={() => onPick(item)}>
+                {t(`git.menu.${item}`)}
+                {shortcut && <span className="git-menu__sc">{shortcut}</span>}
+              </button>
+            )
+          })}
+        </Fragment>
+      ))}
+    </div>
   )
 }
 
@@ -965,6 +1181,7 @@ function Tree({
   busy,
   onRun,
   onDiscard,
+  rows: controls,
 }: {
   directory: string
   section: 'c' | 'u'
@@ -972,6 +1189,7 @@ function Tree({
   busy: boolean
   onRun(action: GitAction): Promise<unknown>
   onDiscard(file: GitFile): void
+  rows: FileRowControls
 }) {
   const t = useT()
   const folds = foldsOf(directory)
@@ -980,7 +1198,7 @@ function Tree({
     <ul className="git-tree">
       {rows.map((row) => {
         if (row.kind === 'file')
-          return <FileRow key={row.entry.path} directory={directory} entry={row.entry} depth={row.depth} busy={busy} onRun={onRun} onDiscard={onDiscard} />
+          return <FileRow key={row.entry.path} directory={directory} entry={row.entry} depth={row.depth} busy={busy} onRun={onRun} onDiscard={onDiscard} controls={controls} />
         const { folder } = row
         return (
           <li key={`dir:${folder.path}`} className="git-dir" style={{ paddingLeft: indent(row.depth) }}>
@@ -1000,10 +1218,27 @@ function Tree({
 }
 
 /** 파일 한 줄 (시안 .file) — 체크(stage)·상태 글자·이름·+N −N, 누르면 그 아래에 diff. 작업 트리 쪽 변경이 있으면 되돌리기 버튼.
- *  일부만 stage 된 파일은 diff 를 두 쪽(stage 된 것·안 된 것) 다 보인다 */
-function FileRow({ directory, entry, depth, busy, onRun, onDiscard }: { directory: string; entry: ChangeEntry; depth: number; busy: boolean; onRun(action: GitAction): Promise<unknown>; onDiscard(file: GitFile): void }) {
+ *  일부만 stage 된 파일은 diff 를 두 쪽(stage 된 것·안 된 것) 다 보인다.
+ *  #389: 누르거나 포커스가 들면 고른 줄(시안 .file.sel), 우클릭·ContextMenu 키·Shift+F10 → 메뉴, 고른 줄에서 메뉴의 단축키(⌥⌘Z·⌘D·⌘↓) */
+function FileRow({
+  directory,
+  entry,
+  depth,
+  busy,
+  onRun,
+  onDiscard,
+  controls,
+}: {
+  directory: string
+  entry: ChangeEntry
+  depth: number
+  busy: boolean
+  onRun(action: GitAction): Promise<unknown>
+  onDiscard(file: GitFile): void
+  controls: FileRowControls
+}) {
   const t = useT()
-  const [open, setOpen] = useState(false)
+  const open = controls.opened.has(entry.path)
   const [patches, setPatches] = useState<string[]>()
   const { name } = splitPath(entry.path)
   const kind = entryKind(entry)
@@ -1030,9 +1265,33 @@ function FileRow({ directory, entry, depth, busy, onRun, onDiscard }: { director
   const from = entry.staged?.from
   return (
     <li className="git-file" data-git-kind={kind}>
-      <div className="git-file__row" style={{ paddingLeft: indent(depth) }}>
+      <div
+        className="git-file__row"
+        data-selected={controls.selected === entry.path || undefined}
+        style={{ paddingLeft: indent(depth) }}
+        onMouseDown={() => controls.onSelect(entry.path)}
+        onFocus={() => controls.onSelect(entry.path)}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          controls.onMenu(entry, { left: event.clientX, top: event.clientY }, event.currentTarget.querySelector<HTMLElement>('.git-file__toggle'))
+        }}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return
+          if (isMenuKey(event)) {
+            event.preventDefault()
+            const rect = event.currentTarget.getBoundingClientRect()
+            controls.onMenu(entry, { left: rect.left + indent(depth), top: rect.bottom }, event.currentTarget.querySelector<HTMLElement>('.git-file__toggle'))
+            return
+          }
+          const item = menuShortcut(event, controls.mac)
+          if (!item) return
+          event.preventDefault()
+          event.stopPropagation()
+          controls.onPick(item, entry)
+        }}
+      >
         <Check state={entryState(entry)} label={t('git.stageFile', { file: entry.path })} busy={busy} onToggle={() => void onRun(toggleAction([entry]))} />
-        <button type="button" className="git-file__toggle" aria-expanded={open} title={from ? `${from} → ${entry.path}` : entry.path} onClick={() => setOpen((now) => !now)}>
+        <button type="button" className="git-file__toggle" aria-expanded={open} title={from ? `${from} → ${entry.path}` : entry.path} onClick={() => controls.onToggleOpen(entry.path)}>
           <span className="git-kind" data-kind={kind} aria-hidden="true">
             {kind}
           </span>
@@ -1059,6 +1318,146 @@ function FileRow({ directory, entry, depth, busy, onRun, onDiscard }: { director
         </div>
       )}
     </li>
+  )
+}
+
+// ── 보관함 (#389, 시안 ① 하위 탭 줄의 `보관함 N`) ──
+// 누르면 버튼 아래로 보관 목록 팝업. 시안에 팝업 모양이 없어 브랜치 팝업(#386 .branch-pop)의 틀을 따른다:
+// 줄 = 메시지·브랜치·시각 + [적용]·[삭제]. 적용 = stash pop(충돌이면 멈춘 채 알리고 보관은 남는다), 삭제 = 확인 카드(팝업 안) → stash drop.
+// 실패는 팝업 위 한 줄. Esc·바깥으로 닫히고 포커스는 버튼으로
+
+function StashButton({ directory, view, stashes, onNotice }: { directory: string; view: GitStatus; stashes: GitStash[]; onNotice(notice: Notice): void }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const outside = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [open])
+  useEffect(() => setOpen(false), [directory])
+
+  function close(): void {
+    setOpen(false)
+    buttonRef.current?.focus()
+  }
+
+  return (
+    <div className="git-stash" ref={wrapRef}>
+      <button type="button" className="git-sub__tool git-stash__button" aria-label={t('git.stashList')} aria-haspopup="dialog" aria-expanded={open} ref={buttonRef} onClick={() => (open ? close() : setOpen(true))}>
+        {t('git.stashButton', { count: stashes.length })}
+      </button>
+      {open && <StashPopup directory={directory} view={view} stashes={stashes} onClose={close} onNotice={onNotice} />}
+    </div>
+  )
+}
+
+function StashPopup({ directory, view, stashes, onClose, onNotice }: { directory: string; view: GitStatus; stashes: GitStash[]; onClose(): void; onNotice(notice: Notice): void }) {
+  const t = useT()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<{ text: string; detail?: string }>()
+  const [confirm, setConfirm] = useState<Confirm>()
+  const popRef = useRef<HTMLDivElement>(null)
+
+  // 열면 첫 [적용], 확인 카드면 삭제 버튼 — 누른 줄이 사라져도 Esc 가 팝업에 닿게
+  useEffect(() => {
+    popRef.current?.querySelector<HTMLElement>(confirm ? '.attention-card__button--danger' : '.git-stash__apply:not(:disabled)')?.focus()
+  }, [confirm])
+
+  async function run(action: GitAction): Promise<boolean> {
+    setBusy(true)
+    setError(undefined)
+    try {
+      const result = await window.litecode.gitRun(directory, action)
+      if (!result.ok) setError({ text: result.reason === 'conflict' ? t('git.stashConflict') : t(`git.error.${result.reason}`), detail: result.message })
+      return result.ok
+    } catch (failure) {
+      setError({ text: t('git.error.failed'), detail: reason(failure) })
+      return false
+    } finally {
+      setBusy(false)
+      void refreshGit(directory)
+    }
+  }
+
+  async function apply(stash: GitStash): Promise<void> {
+    if (!(await run({ kind: 'stashPop', index: stash.index, hash: stash.hash }))) return
+    onNotice({ tone: 'ok', text: t('git.stashApplied') })
+    onClose()
+  }
+
+  async function accept(): Promise<void> {
+    if (confirm?.kind !== 'dropStash') return
+    const { stash } = confirm
+    setConfirm(undefined)
+    await run({ kind: 'stashDrop', index: stash.index, hash: stash.hash })
+  }
+
+  function onKeyDown(event: ReactKeyboardEvent): void {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    if (confirm) setConfirm(undefined)
+    else onClose()
+  }
+
+  return (
+    <div className="branch-pop git-stash__pop" role="dialog" aria-label={t('git.stashList')} ref={popRef} onKeyDown={onKeyDown}>
+      {error && (
+        <p className="branch-pop__error" role="alert" title={error.detail}>
+          {error.text}
+        </p>
+      )}
+      {confirm ? (
+        <ConfirmCard confirm={confirm} view={view} busy={busy} onCancel={() => setConfirm(undefined)} onAccept={accept} />
+      ) : (
+        <StashList
+          stashes={stashes}
+          busy={busy}
+          onApply={(stash) => void apply(stash)}
+          onDrop={(stash) => {
+            setError(undefined)
+            setConfirm({ kind: 'dropStash', stash })
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** 보관 목록 — 최근 먼저, 줄마다 메시지·브랜치·시각 + [적용]·[삭제] */
+export function StashList({ stashes, busy, onApply, onDrop }: { stashes: GitStash[]; busy: boolean; onApply(stash: GitStash): void; onDrop(stash: GitStash): void }) {
+  const t = useT()
+  const now = Date.now()
+  return (
+    <>
+      <div className="branch-pop__label">{t('git.stashList')}</div>
+      {stashes.length === 0 ? (
+        <p className="branch-pop__empty">{t('git.stashEmpty')}</p>
+      ) : (
+        stashes.map((stash) => (
+          <div key={stash.hash} className="git-stash__row">
+            <span className="git-stash__text">
+              <span className="git-stash__message" title={stash.message}>
+                {stash.message}
+              </span>
+              <span className="git-stash__meta">{[stash.branch, ago(stash.time, now)].filter(Boolean).join(' · ')}</span>
+            </span>
+            <button type="button" className="file-preview__toggle git-stash__apply" disabled={busy} onClick={() => onApply(stash)}>
+              {t('git.stashApply')}
+            </button>
+            <button type="button" className="file-preview__toggle git-stash__drop" disabled={busy} onClick={() => onDrop(stash)}>
+              {t('git.delete')}
+            </button>
+          </div>
+        ))
+      )}
+    </>
   )
 }
 
@@ -1208,35 +1607,49 @@ function branchMeta(branch: GitBranch, now: number, t: Translate): string {
 
 // ── 확인 카드 (승인 카드 틀) ──
 
-function ConfirmCard({ confirm, view, busy, onCancel, onAccept }: { confirm: Confirm; view: GitStatus; busy: boolean; onCancel(): void; onAccept(value?: string): Promise<void> }) {
+export function ConfirmCard({ confirm, view, busy, onCancel, onAccept }: { confirm: Confirm; view: GitStatus; busy: boolean; onCancel(): void; onAccept(value?: string): Promise<void> }) {
   const t = useT()
-  const [url, setUrl] = useState('')
-  const danger = confirm.kind === 'discard' || (confirm.kind === 'delete' && confirm.branch.unmerged > 0)
+  const [value, setValue] = useState('')
+  const danger = confirm.kind === 'discard' || confirm.kind === 'trash' || confirm.kind === 'dropStash' || (confirm.kind === 'delete' && confirm.branch.unmerged > 0)
+  /** 글 칸이 있는 카드 — 원격 주소·커밋 메시지는 비면 못 누른다, 보관 메시지는 없어도 된다 */
+  const needsValue = confirm.kind === 'remote' || confirm.kind === 'commitFile'
+  const hasInput = needsValue || confirm.kind === 'stash'
   const changed = view.staged.length + view.changed.length
-  const title =
-    confirm.kind === 'switch'
-      ? t('git.switchTitle')
-      : confirm.kind === 'push'
-        ? t('git.pushTitle')
-        : confirm.kind === 'pull'
-          ? t('git.pullTitle')
-          : confirm.kind === 'discard'
-            ? t('git.discardTitle')
-            : confirm.kind === 'delete'
-              ? t('git.deleteTitle')
-              : t('git.noRemoteTitle')
-  const action =
-    confirm.kind === 'switch'
-      ? t('git.switch')
-      : confirm.kind === 'push'
-        ? t('git.push')
-        : confirm.kind === 'pull'
-          ? t('git.pull')
-          : confirm.kind === 'discard'
-            ? t('git.discard')
-            : confirm.kind === 'delete'
-              ? t('git.delete')
-              : t('git.addRemote')
+  const title = t(
+    (
+      {
+        switch: 'git.switchTitle',
+        push: 'git.pushTitle',
+        pull: 'git.pullTitle',
+        discard: 'git.discardTitle',
+        delete: 'git.deleteTitle',
+        remote: 'git.noRemoteTitle',
+        commitFile: 'git.commitFileTitle',
+        stash: 'git.stashTitle',
+        trash: 'git.trashTitle',
+        dropStash: 'git.stashDropTitle',
+      } as const
+    )[confirm.kind],
+  )
+  const action = t(
+    (
+      {
+        switch: 'git.switch',
+        push: 'git.push',
+        pull: 'git.pull',
+        discard: 'git.discard',
+        delete: 'git.delete',
+        remote: 'git.addRemote',
+        commitFile: 'git.commitFileAction',
+        stash: 'git.stashAction',
+        trash: 'git.delete',
+        dropStash: 'git.delete',
+      } as const
+    )[confirm.kind],
+  )
+  const submit = (event: ReactKeyboardEvent): void => {
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing && !busy && (!needsValue || value.trim())) void onAccept(value)
+  }
   let body: ReactNode
   if (confirm.kind === 'switch')
     body = (
@@ -1280,6 +1693,16 @@ function ConfirmCard({ confirm, view, busy, onCancel, onAccept }: { confirm: Con
   else if (confirm.kind === 'discard') body = <span>{t(confirm.file.kind === 'U' ? 'git.discardNew' : 'git.discardBody', { file: confirm.file.path })}</span>
   else if (confirm.kind === 'delete')
     body = <span>{confirm.branch.unmerged > 0 ? t('git.deleteUnmerged', { branch: confirm.branch.name, count: confirm.branch.unmerged }) : t('git.deleteMerged', { branch: confirm.branch.name })}</span>
+  else if (confirm.kind === 'commitFile' || confirm.kind === 'stash') {
+    const label = t(confirm.kind === 'commitFile' ? 'git.commitLabel' : 'git.stashLabel')
+    body = (
+      <>
+        <span>{t(confirm.kind === 'commitFile' ? 'git.commitFileBody' : 'git.stashBody', { file: confirm.entry.path })}</span>
+        <input className="git-input" aria-label={label} placeholder={confirm.kind === 'commitFile' ? t('git.commitPlaceholder') : label} value={value} autoFocus onChange={(event) => setValue(event.target.value)} onKeyDown={submit} />
+      </>
+    )
+  } else if (confirm.kind === 'trash') body = <span>{t('git.trashBody', { file: confirm.entry.path })}</span>
+  else if (confirm.kind === 'dropStash') body = <span>{t('git.stashDropBody', { message: confirm.stash.message })}</span>
   else
     body = (
       <>
@@ -1288,10 +1711,10 @@ function ConfirmCard({ confirm, view, busy, onCancel, onAccept }: { confirm: Con
           className="git-input git-mono"
           aria-label={t('git.remoteLabel')}
           placeholder="https://…/repo.git"
-          value={url}
+          value={value}
           autoFocus
-          onChange={(event) => setUrl(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && url.trim() && void onAccept(url)}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={submit}
         />
       </>
     )
@@ -1309,8 +1732,8 @@ function ConfirmCard({ confirm, view, busy, onCancel, onAccept }: { confirm: Con
         <button
           type="button"
           className={`attention-card__button ${danger ? 'attention-card__button--danger' : 'attention-card__button--primary'}`}
-          disabled={busy || (confirm.kind === 'remote' && !url.trim())}
-          onClick={() => void onAccept(confirm.kind === 'remote' ? url : undefined)}
+          disabled={busy || (needsValue && !value.trim())}
+          onClick={() => void onAccept(hasInput ? value : undefined)}
         >
           {action}
         </button>

@@ -23,7 +23,7 @@ import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, Spee
 import type { UpdateStatus } from './updates.ts'
 import type { Goal } from './goal.ts'
 import type { GoalReply } from '../src/services/goal.ts'
-import type { GitAction, GitBranch, GitCommit, GitLastCommit, GitResult, GitView } from './git.ts'
+import type { GitAction, GitBranch, GitCommit, GitLastCommit, GitResult, GitStash, GitView } from './git.ts'
 import type { DelegationSent } from '../src/services/delegation.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -223,7 +223,7 @@ export const Channel = {
   GOAL_CHANGED: 'goal:changed',
   /** Git(ctx.git, 이슈 #290) — 기능 `git` 이 켜졌을 때만 있다. 화면 → 메인 (directory) → GitView. directory 는 등록된 프로젝트여야 한다 */
   GIT_VIEW: 'git:view',
-  /** 화면 → 메인 (directory, path, staged) → unified diff */
+  /** 화면 → 메인 (directory, path, staged) → unified diff. staged 가 'head' 면 HEAD 대비(stage 된 것 + 안 된 것, #389 패치로 복사) */
   GIT_DIFF: 'git:diff',
   /** 화면 → 메인 (directory) → GitCommit[] */
   GIT_LOG: 'git:log',
@@ -233,6 +233,10 @@ export const Channel = {
   GIT_REMOTE_BRANCHES: 'git:remote-branches',
   /** 화면 → 메인 (directory) → GitLastCommit | undefined — 마지막 커밋의 전체 메시지·올렸는지 (#387 마지막 커밋 고치기). 첫 커밋 전이면 undefined */
   GIT_LAST_COMMIT: 'git:last-commit',
+  /** 화면 → 메인 (directory) → GitStash[] — 보관(stash) 목록, 최근 먼저 (#389 보관함) */
+  GIT_STASHES: 'git:stashes',
+  /** 화면 → 메인 (directory, path) → GitResult — 변경 파일 삭제(휴지통 shell.trashItem, #389). path 는 저장소 루트 기준, 프로젝트 안 파일만 */
+  GIT_TRASH: 'git:trash',
   /** 화면 → 메인 (directory, GitAction) → GitResult — 바꾸는 작업 전부 */
   GIT_RUN: 'git:run',
   /** 화면 → 메인 (directory) — origin 주소를 https 로 바꿔 기본 브라우저로 연다. 못 바꾸면 false */
@@ -486,11 +490,13 @@ export interface LitecodeBridge {
   onGoalChanged(listener: (conversationId: string, goal: Goal | null) => void): () => void
   /** Git (ctx.git, 이슈 #290) — **기능 `git` 이 켜져 있을 때만 부른다**. directory 는 등록된 프로젝트 (아니면 거절) */
   gitView(directory: string): Promise<GitView>
-  gitDiff(directory: string, path: string, staged: boolean): Promise<string>
+  gitDiff(directory: string, path: string, staged: boolean | 'head'): Promise<string>
   gitLog(directory: string): Promise<GitCommit[]>
   gitBranches(directory: string): Promise<GitBranch[]>
   gitRemoteBranches(directory: string): Promise<string[]>
   gitLastCommit(directory: string): Promise<GitLastCommit | undefined>
+  gitStashes(directory: string): Promise<GitStash[]>
+  gitTrash(directory: string, path: string): Promise<GitResult>
   gitRun(directory: string, action: GitAction): Promise<GitResult<Record<string, unknown>>>
   openGitRemote(directory: string): Promise<boolean>
   onGitChanged(listener: (directory: string) => void): () => void
