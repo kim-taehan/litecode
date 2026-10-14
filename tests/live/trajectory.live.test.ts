@@ -204,6 +204,8 @@ describe('Trajectory 탭', () => {
 
     await page.locator('.session-item', { hasText: '[bash:echo traj-ok]' }).locator('.session-item__main').click()
     expect(await tab('Chat').getAttribute('aria-selected')).toBe('true')
+    // 이동하자 돌아온 입력 카드로 포커스도 간다 (이슈 #374) — view 리셋 그리기 뒤에야 포커스가 생길 수 있어 poll
+    await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('composer__input') ?? false), { timeout: 5_000 }).toBe(true)
     await expect.poll(() => replies().count(), { timeout: 10_000 }).toBe(4)
   })
 
