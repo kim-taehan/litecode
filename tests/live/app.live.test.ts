@@ -563,6 +563,8 @@ describe('설정 > 모델', () => {
     await openSettings()
     await page.keyboard.press('Escape')
     await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+    // 설정창이 닫히면 포커스는 다시 입력창으로 (이슈 #382)
+    await expect.poll(() => page.locator('.composer__input').evaluate((el) => el === document.activeElement), { timeout: 5_000 }).toBe(true)
   })
 
   // dsh ui-sidebar 설정 줄(.trigger)과 같은 모양 — 사용자: "설정이 너무 작다" (2026-10-01 캡처), 사이드바 dsh 값 라운드(2026-10-02)에서 42px·16px 톱니로

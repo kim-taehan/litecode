@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AttachmentKind, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
 import { titleFrom } from '../shared/chat.ts'
 import { applyHistory, applyLive } from './chatState.ts'
+import { focusComposerInput } from './composerFocus.ts'
 import { useFollowBottom } from './Minimap.tsx'
 import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
@@ -97,10 +98,11 @@ export function App() {
   const listRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLButtonElement>(null)
-  // 닫으면 포커스를 설정 버튼으로 돌려준다. 모달의 Esc 구독이 매 렌더 다시 걸리지 않게 참조를 고정한다
+  // 닫으면 포커스는 입력창으로 (이슈 #382) — 입력 카드가 안 보이는 화면(추론 과정 탭)이면 설정 버튼으로.
+  // 모달의 Esc 구독이 매 렌더 다시 걸리지 않게 참조를 고정한다
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)
-    settingsRef.current?.focus()
+    if (!focusComposerInput()) settingsRef.current?.focus()
   }, [])
 
   /** 첫 목록을 다 올렸나 — 그 전에 온 알림 열기 신호는 첫 목록 뒤에 당겨 간다 */
