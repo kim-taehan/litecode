@@ -4,11 +4,13 @@
 // view 가 바뀜) + 마운트(패널 열림). 다시 읽으면 commits 가 처음부터라 레이인 상태도 처음부터 다시 계산된다.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { GitLogCommit, GitStatus } from '../shared/git.ts'
+import type { GitBranch, GitLogCommit, GitStatus } from '../shared/git.ts'
 import { BranchIcon, TagIcon } from './GitIcons.tsx'
 import { LANE_CAP, laneColor, layoutGraph, type GraphRow } from './gitGraph.ts'
+import { isLogFilterActive } from './logFilter.ts'
 import { logChips, logWhen } from './logLine.ts'
-import { appendLogGit, refreshLogGit, useLogGit } from './gitStore.ts'
+import { LogFilterBar } from './LogFilterBar.tsx'
+import { appendLogGit, refreshLogGit, setLogFilter, useLogFilter, useLogGit } from './gitStore.ts'
 import { useT } from './settingsStore.ts'
 
 /** 줄 높이 (시안 ⑤) */
@@ -23,13 +25,28 @@ const BUFFER = 10
 export function GitLog({ directory, view, now = Date.now() }: { directory: string; view: GitStatus; now?: number }) {
   const t = useT()
   const log = useLogGit(directory)
+  const filter = useLogFilter(directory)
   const [scrollTop, setScrollTop] = useState(0)
   const [height, setHeight] = useState(0)
   const boxRef = useRef<HTMLDivElement>(null)
+  // 필터 바용 목록 — 브랜치·원격은 git 이 알려 주고, 사용자는 최근 커밋에서
+  const [branches, setBranches] = useState<GitBranch[]>()
+  const [remotes, setRemotes] = useState<string[]>([])
+  const [authors, setAuthors] = useState<string[]>()
 
   // view 바뀜 = 다시 읽는 때(git:changed·턴 끝·포커스·패널 열기 때 gitStore 가 다시 읽는다) + 마운트(패널 열림)
   useEffect(() => {
     void refreshLogGit(directory)
+  }, [directory, view])
+
+  useEffect(() => {
+    let live = true
+    window.litecode.gitBranches(directory).then((list) => live && setBranches(list), () => live && setBranches([]))
+    window.litecode.gitRemoteBranches(directory).then((list) => live && setRemotes(list), () => live && setRemotes([]))
+    window.litecode.gitLogAuthors(directory).then((list) => live && setAuthors(list), () => live && setAuthors([]))
+    return () => {
+      live = false
+    }
   }, [directory, view])
 
   // 보이는 줄 범위는 박스 높이에 의존 — 마운트 때(그리고 줄이 생기는 때) 재는 것
@@ -40,8 +57,10 @@ export function GitLog({ directory, view, now = Date.now() }: { directory: strin
   }, [n0])
 
   const commits = log?.commits ?? []
-  // commits 이 바뀌면(첫 페이지·덧붙인 페이지·다시 읽기) 그래프를 처음부터 다시 — 레이인 상태가 여기 있다
-  const rows = useMemo(() => layoutGraph(commits).rows, [commits])
+  // commits 이 바뀌면(첫 페이지·덧붙인 페이지·다시 읽기) 그래프를 처음부터 다시 — 레이인 상태가 여기 있다.
+  // 필터가 켜 있으면 부모가 목록에서 빠질 수 있으니 레인 폭을 상한으로 막는다(#409)
+  const filtered = isLogFilterActive(filter)
+  const rows = useMemo(() => layoutGraph(commits, undefined, filtered ? { maxLanes: LANE_CAP * 2 } : undefined).rows, [commits, filtered])
   const n = commits.length
   const reading = Boolean(log?.reading)
 
@@ -53,23 +72,34 @@ export function GitLog({ directory, view, now = Date.now() }: { directory: strin
   const to = Math.min(n, Math.ceil((scrollTop + height) / LOG_ROW_H) + BUFFER)
   const slice = commits.slice(from, to)
   return (
-    <div
-      ref={boxRef}
-      className="git-log2"
-      onScroll={(e) => {
-        const box = e.currentTarget
-        setScrollTop(box.scrollTop)
-        setHeight((h) => (h === box.clientHeight ? h : box.clientHeight))
-        if (box.scrollTop + box.clientHeight > n * LOG_ROW_H - 3 * LOG_ROW_H) void appendLogGit(directory)
-      }}
-    >
-      <div style={{ height: n * LOG_ROW_H, position: 'relative' }}>
-        <div style={{ position: 'absolute', top: from * LOG_ROW_H, left: 0, right: 0 }}>
-          <ol className="git-log2__list">
-            {slice.map((commit, i) => (
-              <LogRow key={commit.hash} commit={commit} row={rows[from + i]!} now={now} />
-            ))}
-          </ol>
+    <div className="git-log2">
+      <LogFilterBar
+        key={directory} // 프로젝트이 바뀌면(칸의 디바운스 타이머가 새 프로젝트에 쓰이는 것 막기) 새로 시작
+        filter={filter}
+        currentBranch={view.branch ?? ''}
+        branches={branches}
+        remotes={remotes}
+        authors={authors}
+        onChange={(patch) => void setLogFilter(directory, patch)}
+      />
+      <div
+        ref={boxRef}
+        className="git-log2__scroll"
+        onScroll={(e) => {
+          const box = e.currentTarget
+          setScrollTop(box.scrollTop)
+          setHeight((h) => (h === box.clientHeight ? h : box.clientHeight))
+          if (box.scrollTop + box.clientHeight > n * LOG_ROW_H - 3 * LOG_ROW_H) void appendLogGit(directory)
+        }}
+      >
+        <div style={{ height: n * LOG_ROW_H, position: 'relative' }}>
+          <div style={{ position: 'absolute', top: from * LOG_ROW_H, left: 0, right: 0 }}>
+            <ol className="git-log2__list">
+              {slice.map((commit, i) => (
+                <LogRow key={commit.hash} commit={commit} row={rows[from + i]!} now={now} />
+              ))}
+            </ol>
+          </div>
         </div>
       </div>
     </div>

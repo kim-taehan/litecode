@@ -65,12 +65,27 @@ export interface GitLogPage {
   hasMore: boolean
 }
 
-/** 기록 탭 페이징 읽기 (#400) — P1 은 skip·limit 만 (검색·필터는 P3 에 같은 인자에 더한다) */
+/** 기록 탭 페이징 읽기 (#400) — skip·limit + 필터(#409). 필터가 있으면 '올리지 않음' 집합도 같은 필터로 */
 export interface GitLogPageQuery {
   /** 최근 쪽에서 몇 개를 거를 가 */
   skip?: number
   /** 페이지 크기 (기본 200) */
   limit?: number
+  /** 검색 텍스트 — 해시처럼 보이면(16진 4~40자) rev-parse 로 그 커밋을 해석해 그 역사를 본다. 아니면 `--grep` */
+  text?: string
+  /** `.*` 토글 — 텍스트를 패턴으로(`-E`), 꺼지면 고정 문자열(`-F`) */
+  regex?: boolean
+  /** `Cc` 토글 — 대소문자 구분(기본 true), 꺼지면 `--regexp-ignore-case` */
+  caseSensitive?: boolean
+  /** 브랜치 — `all` = `--all`, 로컬 브랜치 이름, 원격 브랜치(`origin/x`). 비어 있으면 HEAD */
+  branch?: string
+  /** 작성자 (`--author`) */
+  author?: string
+  /** 날짜 범위 — 로컬 시각 `YYYY-MM-DD HH:MM:SS` (`--since`/`--until`) */
+  since?: string
+  until?: string
+  /** 경로(`-- <경로>`, literal-pathspecs) */
+  paths?: string[]
 }
 
 /** 마지막 커밋 (#387 마지막 커밋 고치기) — 전체 메시지와 올렸는지 */

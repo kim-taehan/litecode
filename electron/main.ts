@@ -595,13 +595,25 @@ function gitBridge(ctx: Context): void {
   handle(ctx, Channel.GIT_LOG_PAGE, async (_event, directory: unknown, query: unknown) => {
     const record = query && typeof query === 'object' ? (query as Record<string, unknown>) : {}
     const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined)
+    const str = (value: unknown) => (typeof value === 'string' && value.length <= 500 ? value : undefined)
     const page: GitLogPageQuery = {}
     const skip = num(record['skip'])
     if (skip !== undefined) page.skip = skip
     const limit = num(record['limit'])
     if (limit !== undefined) page.limit = limit
+    for (const key of ['text', 'branch', 'author', 'since', 'until'] as const) {
+      const value = str(record[key])
+      if (value !== undefined) page[key] = value
+    }
+    page.regex = record['regex'] === true
+    page.caseSensitive = record['caseSensitive'] === true
+    if (Array.isArray(record['paths'])) {
+      const paths = (record['paths'] as unknown[]).filter((value): value is string => typeof value === 'string' && value.length <= 500).slice(0, 50)
+      if (paths.length > 0) page.paths = paths
+    }
     return ctx.git.logPage(await project(directory), page)
   })
+  handle(ctx, Channel.GIT_LOG_AUTHORS, async (_event, directory: unknown) => ctx.git.logAuthors(await project(directory)))
   handle(ctx, Channel.GIT_BRANCHES, async (_event, directory: unknown) => ctx.git.branches(await project(directory)))
   handle(ctx, Channel.GIT_REMOTE_BRANCHES, async (_event, directory: unknown) => ctx.git.remoteBranches(await project(directory)))
   handle(ctx, Channel.GIT_LAST_COMMIT, async (_event, directory: unknown) => ctx.git.lastCommit(await project(directory)))

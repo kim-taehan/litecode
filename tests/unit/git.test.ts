@@ -626,6 +626,90 @@ describe.skipIf(!hasGit)('GitService — 기록 페이징 logPage (#400 #403)', 
   })
 })
 
+describe.skipIf(!hasGit)('GitService — 기록 필터 logPage (#409)', () => {
+  /** 저자·날짜·파일로 커밋 — --since 는 커밋 날짜를 본다 */
+  async function authored(dir: string, msg: string, author: string, date: string, file: string, content: string): Promise<void> {
+    await fs.writeFile(path.join(dir, file), content)
+    sh(dir, 'add', file)
+    execFileSync('git', ['-c', `user.name=${author}`, '-c', 'user.email=t@example.com', 'commit', '-q', '-m', msg], {
+      cwd: dir,
+      stdio: 'ignore',
+      env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+    })
+  }
+
+  async function fixture(): Promise<string> {
+    const dir = await repo() // 'first' (a.txt, 저자 Tester)
+    await authored(dir, 'Alpha change', 'Alpha', '2026-10-10T10:00:00 +0900', 'b.txt', 'b\n')
+    await authored(dir, 'beta change', 'Beta', '2026-10-11T10:00:00 +0900', 'c.txt', 'c\n')
+    await authored(dir, 'GAMMA tweak', 'Gamma', '2026-10-12T10:00:00 +0900', 'd.txt', 'd\n')
+    sh(dir, 'checkout', '-q', '-b', 'feat')
+    await authored(dir, 'feat work', 'Alpha', '2026-10-13T10:00:00 +0900', 'e.txt', 'e\n')
+    sh(dir, 'checkout', '-q', 'main')
+    return dir
+  }
+
+  const subjects = (page: Awaited<ReturnType<GitService['logPage']>>) => page.commits.map((m) => m.subject)
+
+  it('검색 — 고정 문자열(기본), `Cc` 끄면 대소문자 무시, `.*` 은 패턴', async () => {
+    const { git } = await start()
+    const dir = await fixture()
+    expect(subjects(await git.logPage(dir, { text: 'Alpha' }))).toEqual(['Alpha change'])
+    expect(subjects(await git.logPage(dir, { text: 'ALPHA' }))).toEqual([]) // 기본 = 대소문자 구분
+    expect(subjects(await git.logPage(dir, { text: 'alpha', caseSensitive: false }))).toEqual(['Alpha change'])
+    expect(subjects(await git.logPage(dir, { text: '^GAMMA' }))).toEqual([]) // 고정이라 ^ 가 글자
+    expect(subjects(await git.logPage(dir, { text: '^gamma', regex: true, caseSensitive: false }))).toEqual(['GAMMA tweak'])
+  })
+
+  it('해시 같은 검색 — rev-parse 로 해석해 그 커밋의 역사를 (짧은 해시도)', async () => {
+    const { git } = await start()
+    const dir = await fixture()
+    const all = await git.logPage(dir)
+    const gamma = all.commits.find((m) => m.subject === 'GAMMA tweak')!
+    const page = await git.logPage(dir, { text: gamma.short })
+    expect(page.commits[0].hash).toBe(gamma.hash)
+    expect(subjects(page)).toEqual(['GAMMA tweak', 'beta change', 'Alpha change', 'first'])
+    // 해석 안 되는 16진 4자 이상은 그냥 검색으로(검색 결과가 없으면 아무것도)
+    expect(subjects(await git.logPage(dir, { text: 'ffabcd0' }))).toEqual([])
+  })
+
+  // fixture: main = first → Alpha change → beta change → GAMMA tweak, feat = GAMMA 에서 갈라져 feat work (5개)
+  it('브랜치 — 그 브랜치의 역사만, all 은 전부, 원격 브랜치도', async () => {
+    const { git } = await start()
+    const dir = await fixture()
+    const bare = path.join(await folder('remote'), 'r.git')
+    sh(tmp, 'init', '-q', '--bare', bare)
+    sh(dir, 'remote', 'add', 'origin', bare)
+    sh(dir, 'push', '-q', 'origin', 'main')
+    expect(new Set(subjects(await git.logPage(dir, { branch: 'feat' })))).toEqual(new Set(['feat work', 'GAMMA tweak', 'beta change', 'Alpha change', 'first']))
+    expect(subjects(await git.logPage(dir, { branch: 'main' }))).toEqual(['GAMMA tweak', 'beta change', 'Alpha change', 'first'])
+    expect(new Set(subjects(await git.logPage(dir, { branch: 'all' })))).toEqual(new Set(['GAMMA tweak', 'beta change', 'feat work', 'Alpha change', 'first']))
+    expect(new Set(subjects(await git.logPage(dir, { branch: 'origin/main' })))).toEqual(new Set(['GAMMA tweak', 'beta change', 'Alpha change', 'first']))
+    // 없는 브랜치면(사라진 원격 따위) 무시 = HEAD 가보
+    expect(new Set(subjects(await git.logPage(dir, { branch: 'gone' })))).toEqual(new Set(await git.logPage(dir).then((p) => subjects(p))))
+  })
+
+  it('사용자·날짜·경로 — 각각과 조합, 같은 필터로 “올리지 않음” 집합도', async () => {
+    const { git } = await start()
+    const dir = await fixture()
+    expect(new Set(subjects(await git.logPage(dir, { author: 'Alpha', branch: 'all' })))).toEqual(new Set(['feat work', 'Alpha change']))
+    expect(new Set(subjects(await git.logPage(dir, { since: '2026-10-12 00:00:00' })))).toEqual(new Set(['GAMMA tweak']))
+    expect(new Set(subjects(await git.logPage(dir, { since: '2026-10-12 00:00:00', branch: 'all' })))).toEqual(new Set(['GAMMA tweak', 'feat work']))
+    expect(subjects(await git.logPage(dir, { paths: ['b.txt'] }))).toEqual(['Alpha change']) // 경로가 바뀌지 않은 커밋은 없다
+    expect(subjects(await git.logPage(dir, { branch: 'main', paths: ['c.txt'] }))).toEqual(['beta change'])
+    expect(subjects(await git.logPage(dir, { branch: 'main', paths: ['c.txt', 'd.txt'] }))).toEqual(['GAMMA tweak', 'beta change'])
+    // '올리지 않음' 도 같은 범위 — 올리지 않은 저장소이므로 전부 false
+    const page = await git.logPage(dir, { branch: 'feat' })
+    expect(page.commits.every((m) => m.pushed === false)).toBe(true)
+  })
+
+  it('사용자 목록 — 최근 200개(모든 브랜치) 작성자 중복 제거, 이름순', async () => {
+    const { git } = await start()
+    const dir = await fixture()
+    expect(await git.logAuthors(dir)).toEqual(['Alpha', 'Beta', 'Gamma', 'Tester'])
+  })
+})
+
 describe('보관 목록 읽기 (#389)', () => {
   it('stash list 의 글 → 번호·해시·메시지·브랜치·시각 (분리된 HEAD 는 브랜치 없음)', () => {
     const text = ['a'.repeat(40) + '\x1fOn main: wip a\x1f1700000000', 'b'.repeat(40) + '\x1fWIP on feat/x: 1234abc first\x1f1700000100', 'c'.repeat(40) + '\x1fOn (no branch): 메시지: 콜론\x1f1700000200', ''].join('\n')

@@ -341,14 +341,48 @@ export class GitService extends Service {
    *  rev-list 의 안 올린 해시 집합(상한 skip+limit)으로 한 번에 판정한다(페이지마다 재계산 안 함).
    *  limit+1 개를 읽어 hasMore 를 판정한다. 순서(최근→옛순)는 git log --graph 와 같은 --topo-order — 그래프가
    *  갈라지는 모양(첫 부모 줄)이 정돈된다(큰 저장소 속도 문제는 #403 확인 항목). AI 도구의 git_log 는 별개 log 를 쓴다 */
+  /** 기록 필터를 git 인자로 (#400 #409) — rev(브랜치·해시) 와 플래그(검색·작성자·날짜)·경로. `git log`·`rev-list` 가 같은 인자를 쓴다.
+   *  브랜치가 안 열리면(없어진 원격 따위) rev-parse 로 미리 보고, 없는 것은 뺀다(전체로) */
+  private async logRevisionArgs(root: string, query: GitLogPageQuery): Promise<{ revs: string[]; flags: string[]; paths: string[]; all: boolean }> {
+    const revs: string[] = []
+    const flags: string[] = []
+    let all = false
+    const branch = (query.branch ?? '').trim()
+    if (branch === 'all') all = true
+    else if (branch) {
+      const ref = branch.includes('/') ? `refs/remotes/${branch}` : `refs/heads/${branch}`
+      if ((await this.run(root, ['rev-parse', '--verify', '--quiet', ref])).stdout.trim()) revs.push(ref)
+    }
+    const text = (query.text ?? '').trim()
+    if (text) {
+      const asHash = /^[0-9a-f]{4,40}$/i.test(text)
+      const hash = asHash ? (await this.run(root, ['rev-parse', '--verify', '--quiet', `${text}^{commit}`])).stdout.trim() : ''
+      if (asHash && hash) revs.push(hash)
+      else {
+        if (query.caseSensitive === false) flags.push('--regexp-ignore-case')
+        flags.push(query.regex ? '-E' : '-F', '--grep', text)
+      }
+    }
+    const author = (query.author ?? '').trim()
+    if (author) flags.push(`--author=${author}`)
+    if (query.since) flags.push(`--since=${query.since}`)
+    if (query.until) flags.push(`--until=${query.until}`)
+    const paths = (query.paths ?? []).map((path) => path.trim()).filter(Boolean)
+    return { revs, flags, paths, all }
+  }
+
   async logPage(directory: string, query: GitLogPageQuery = {}): Promise<GitLogPage> {
     const root = await this.root(directory)
     if (!(await this.exists(root, 'HEAD'))) return { commits: [], hasMore: false }
     const skip = Math.min(LOG_PAGE_MAX * 1000, Math.max(0, Math.trunc(query.skip || 0)))
     const limit = Math.min(LOG_PAGE_MAX, Math.max(1, Math.trunc(query.limit || LOG_PAGE_SIZE)))
+    const { revs, flags, paths, all } = await this.logRevisionArgs(root, query)
+    // rev·--all 이 없으면 git log 은 HEAD 로 보지만 rev-list 는 시작점이 없어 빈 것 — HEAD 를 명시
+    const base = [...(all ? ['--all'] : []), ...flags, ...revs, ...(all || revs.length > 0 ? [] : ['HEAD'])]
+    const pathTail = paths.length > 0 ? ['--', ...paths] : []
     const [out, unpushed, remotes] = await Promise.all([
-      this.must(root, [...READ_FLAGS, 'log', '--topo-order', `--skip=${skip}`, `-n${limit + 1}`, '--format=%H%x1f%P%x1f%h%x1f%D%x1f%s%x1f%an%x1f%at%x1e']),
-      this.run(root, ['rev-list', `-n${skip + limit}`, 'HEAD', '--not', '--remotes']),
+      this.must(root, [...READ_FLAGS, 'log', '--topo-order', `--skip=${skip}`, `-n${limit + 1}`, ...base, '--format=%H%x1f%P%x1f%h%x1f%D%x1f%s%x1f%an%x1f%at%x1e', ...pathTail]),
+      this.run(root, ['rev-list', `-n${skip + limit}`, ...base, '--not', '--remotes', ...pathTail]),
       this.run(root, ['remote']),
     ])
     const local = new Set(unpushed.stdout.split('\n').filter(Boolean))
@@ -368,6 +402,14 @@ export class GitService extends Service {
       }
     })
     return { commits, hasMore: records.length > limit }
+  }
+
+  /** 기록 필터의 사용자 목록 (#409) — 최근 200개(모든 브랜치) 작성자를 이름순으로 중복 제거 */
+  async logAuthors(directory: string): Promise<string[]> {
+    const root = await this.root(directory)
+    if (!(await this.exists(root, 'HEAD'))) return []
+    const out = await this.must(root, [...READ_FLAGS, 'log', '--all', '-n200', '--format=%an'])
+    return [...new Set(out.split('\n').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))
   }
 
   async branches(directory: string): Promise<GitBranch[]> {
