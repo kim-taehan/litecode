@@ -580,6 +580,17 @@ describe('설정 > 모델', () => {
     await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
   })
 
+  // 한국어(두벌식) 입력 체계 — 콤마 물리 키가 key="." 으로 올 수 있어 핸들러는 물리 키(event.code) 로 본다
+  it('입력 체계에 상관없이 콤마 물리 키 + Cmd 로도 설정 판이 열린다 (#384)', async () => {
+    expect(await dialog().count()).toBe(0)
+    await page.evaluate(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Comma', key: '.', metaKey: true, bubbles: true, cancelable: true }))
+    })
+    await dialog().waitFor({ timeout: 5_000 })
+    await page.keyboard.press('Escape')
+    await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+  })
+
   // dsh ui-sidebar 설정 줄(.trigger)과 같은 모양 — 사용자: "설정이 너무 작다" (2026-10-01 캡처), 사이드바 dsh 값 라운드(2026-10-02)에서 42px·16px 톱니로
   it('설정 버튼은 dsh 사이드바 설정 줄 모양이다 — 42px 줄·12px 모서리·14px 글자·16px 톱니, 위 구분선 없음', async () => {
     const button = settingsButton()

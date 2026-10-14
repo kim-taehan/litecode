@@ -480,10 +480,12 @@ export function App() {
   }, [])
 
   // ⌘, / Ctrl+, — 설정 판 열기 (이슈 #384). macOS 의 설정 표준 키 — 모든 앱이 쓰니까 배울 필요 없이 누른다.
-  // 열면 닫는 것은 ×/Esc (닫히면 포커스는 #382 대로)
+  // 열면 닫는 것은 ×/Esc (닫히면 포커스는 #382 대로).
+  // 키를 문자(',') 가 아니라 물리 키(event.code 'Comma') 로 본다 — 한국어(두벌식) 입력 체계에서
+  // 콤마 물리 키가 event.key= '.' 으로 올 수 있기 때문
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key !== ',') return
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.code !== 'Comma') return
       // 판(aria-modal) 이나 프로젝트 전환(빠른 열기) 이 열려 있으면 물러난다 (⌘N 과 같은 전역 키 규칙)
       if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
       event.preventDefault()
