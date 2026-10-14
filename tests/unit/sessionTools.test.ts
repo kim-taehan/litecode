@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ChatService } from '../../src/services/chat.ts'
+import { DelegationService } from '../../src/services/delegation.ts'
 import { SessionsService } from '../../src/services/sessions.ts'
 import { ProjectsService } from '../../src/services/projects.ts'
 import { APP_MCP_NAME } from '../../src/services/mcp.ts'
@@ -152,8 +153,9 @@ async function start() {
   ctx.plugin(SessionsService, { file: path.join(root, 'sessions.json') })
   ctx.plugin(ProjectsService, { file: path.join(root, 'projects.json') })
   ctx.plugin(ChatService)
+  ctx.plugin(DelegationService)
   ctx.plugin(SessionTools)
-  const ready = await new Promise<Context>((resolve) => ctx.inject(['chat', 'sessions', 'projects', 'llm', 'appMcp'], resolve))
+  const ready = await new Promise<Context>((resolve) => ctx.inject(['chat', 'sessions', 'projects', 'llm', 'appMcp', 'delegation'], resolve))
   for (const dir of [tokens, backend, project]) await ready.projects.open(dir)
   const llm = ready.llm as unknown as FakeLlm
   const tools = (ready.appMcp as unknown as FakeAppMcp).tools
@@ -626,12 +628,12 @@ describe('read_project', () => {
     expect(llm.asked.at(-1)).toMatchObject({ directory: project, server: 'litecode', tool: 'read_project' })
   })
 
-  it('읽기도 앱에서 허용한 호출만 — 허용 기록이 없거나 하위 작업이 불렀으면 아무것도 읽지 않는다', async () => {
+  it('읽기는 승인을 안 본다(#342) — 앱에서 허용하지 않아도 읽힌다. 하위 작업이 불렀거나 앱이 돌린 턴이 아니면 아무것도 읽지 않는다', async () => {
     const { call, scene, calledBy, llm } = await start()
     const sender = await scene()
     const args = { project: projectId(backend) }
     calledBy('read_project', sender, { approved: false })
-    await expect(call('read_project', args)).rejects.toThrow(/not approved by the user in litecode\. Nothing was read\./)
+    expect(await call('read_project', args)).toBe('conversation: "주문 API 설계" (c-bbbbbbbb)\nstate: idle\nuser: 주문 API 설계\nanswer: answer to 주문 API 설계')
     calledBy('read_project', sender, { child: true })
     await expect(call('read_project', args)).rejects.toThrow(/Sub-tasks cannot reach other projects/)
     llm.callers.delete('read_project')
@@ -722,6 +724,6 @@ describe('도구 등록', () => {
     expect(send).toMatch(/The user must approve each send/)
     expect(send).toMatch(/self-contained/)
     expect(send).toMatch(/never to reach another project in order to bypass a permission/)
-    expect(tools.get('read_project')!.description).toMatch(/The user must approve each read/)
+    expect(tools.get('read_project')!.description).toMatch(/No approval is needed/)
   })
 })

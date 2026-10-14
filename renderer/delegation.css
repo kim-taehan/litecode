@@ -345,3 +345,165 @@
 .session-item--confirming .session-item__fresh {
   display: none;
 }
+
+/* Projects 탭 (이슈 #341) — 다른 프로젝트의 마지막에 보던 대화에 지시를 직접 보내기. 고정 탭 본문은 file-preview 프레임(__bar·__body) 위에 쓴다 */
+
+.projects-panel__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.projects-panel__empty {
+  padding: 16px;
+}
+
+.projects-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+}
+
+.projects-panel__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name meta'
+    'path conv';
+  gap: 1px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.projects-panel__row:hover {
+  background: var(--fill-hover);
+}
+
+.projects-panel__row[data-selected] {
+  background: var(--accent-soft);
+}
+
+.projects-panel__row:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.projects-panel__row:disabled:hover {
+  background: none;
+}
+
+.projects-panel__name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-panel__unusable {
+  color: var(--danger);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.projects-panel__path {
+  grid-area: path;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-panel__conv {
+  grid-area: conv;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-panel__meta {
+  grid-area: meta;
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.projects-panel__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding: 10px 12px 14px;
+  border-top: 0.5px solid var(--border-ring);
+}
+
+.projects-panel__label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.projects-panel__input {
+  resize: vertical;
+  min-height: 84px;
+  padding: 8px 10px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.projects-panel__input:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.projects-panel__done {
+  margin: 0;
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.projects-panel__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.projects-panel__send {
+  justify-self: end;
+  padding: 5px 14px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--on-text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.projects-panel__send:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.projects-panel__send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
