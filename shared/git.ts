@@ -46,6 +46,13 @@ export interface GitCommit {
   pushed: boolean
 }
 
+/** 마지막 커밋 (#387 마지막 커밋 고치기) — 전체 메시지와 올렸는지 */
+export interface GitLastCommit {
+  message: string
+  /** 원격 브랜치 어디에 있다 — 고칠 수 없다 */
+  pushed: boolean
+}
+
 export interface GitBranch {
   name: string
   current: boolean
@@ -70,6 +77,8 @@ export type GitResult<T extends object = object> = ({ ok: true } & T) | { ok: fa
 export type GitAction =
   | { kind: 'stage' | 'unstage' | 'discard'; paths: string[] }
   | { kind: 'commit'; message: string }
+  /** 마지막 커밋 고치기 (#387) — stage 된 것을 합치고 메시지를 바꾼다. 원격 어디에도 없는 커밋만 (아니면 pushed) */
+  | { kind: 'amend'; message: string }
   | { kind: 'createBranch' | 'switchBranch' | 'deleteBranch'; name: string }
   /** 브랜치 팝업 (#386) — switchRemote: `origin/x` → 같은 이름 로컬 브랜치로(없으면 추적 브랜치를 만든다) · switchRevision: 태그·커밋 해시 → 분리된 HEAD */
   | { kind: 'switchRemote' | 'switchRevision'; name: string }

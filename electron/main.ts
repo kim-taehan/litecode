@@ -593,6 +593,7 @@ function gitBridge(ctx: Context): void {
   handle(ctx, Channel.GIT_LOG, async (_event, directory: unknown) => ctx.git.log(await project(directory)))
   handle(ctx, Channel.GIT_BRANCHES, async (_event, directory: unknown) => ctx.git.branches(await project(directory)))
   handle(ctx, Channel.GIT_REMOTE_BRANCHES, async (_event, directory: unknown) => ctx.git.remoteBranches(await project(directory)))
+  handle(ctx, Channel.GIT_LAST_COMMIT, async (_event, directory: unknown) => ctx.git.lastCommit(await project(directory)))
   handle(ctx, Channel.GIT_RUN, async (_event, directory: unknown, action: GitAction) => ctx.git.perform(await project(directory), action))
   handle(ctx, Channel.GIT_OPEN_REMOTE, async (_event, directory: unknown) => {
     const view = await ctx.git.view(await project(directory))

@@ -93,7 +93,7 @@ describe('GitPanel — 정적 그림', () => {
     expect(out).toContain('+12 −48')
     expect(out).toContain('새 파일')
     expect(out).toMatch(/data-kind="U"/)
-    expect(out).toMatch(/<button type="button" class="attention-card__button attention-card__button--primary" disabled="">커밋 \(1\)<\/button>/)
+    expect(out).toMatch(/<button type="button" class="attention-card__button attention-card__button--primary" disabled="">1개 파일 커밋<\/button>/)
     // 되돌리기 버튼은 변경 쪽에만 (스테이지 줄엔 없다)
     expect(out).toContain('docs/status.md 변경 되돌리기')
     expect(out).not.toContain('src/a.ts 변경 되돌리기')
@@ -295,5 +295,113 @@ describe('브랜치 팝업 — 정적 그림', () => {
     expect(pill).toContain('분리된 HEAD')
     expect(pill).toContain('aria-haspopup="dialog"')
     expect(pill).toContain('aria-expanded="false"')
+  })
+})
+
+// ── 커밋 영역 (이슈 #387, 시안 Git 탭 재설계 ① Main.dc.html 맨 아래) ──
+
+const { commitControls, commitThenPush, commitNotice } = await import('../../renderer/gitCommit.ts')
+const { CommitBox } = await import('../../renderer/Git.tsx')
+const tko = (key: MessageKey, vars?: Record<string, string | number>) => translate('ko', key, vars)
+
+describe('커밋 영역 — 순수 규칙', () => {
+  const last = { message: 'fix(git): 로그\n\n본문', pushed: false }
+
+  it('고치기 체크 — 첫 커밋 전·병합 중·이미 올린 커밋이면 막고 이유, 마지막 커밋을 읽기 전엔 막되 이유 없음', () => {
+    expect(commitControls(status(), last, false, '', false)).toMatchObject({ amendable: true, amendBlock: undefined })
+    expect(commitControls(status({ hasCommits: false }), undefined, false, '', false)).toMatchObject({ amendable: false, amendBlock: 'noCommits' })
+    expect(commitControls(status({ merging: true }), last, false, '', false)).toMatchObject({ amendable: false, amendBlock: 'merging' })
+    expect(commitControls(status(), { ...last, pushed: true }, false, '', false)).toMatchObject({ amendable: false, amendBlock: 'pushed' })
+    expect(commitControls(status(), undefined, false, '', false)).toMatchObject({ amendable: false, amendBlock: undefined })
+  })
+
+  it('주 버튼 — 메시지 + stage 가 있어야, 고치기면 stage 없이도(메시지만). 막힌 고치기 체크는 꺼진 것으로 본다. 작업 중이면 못 누른다', () => {
+    expect(commitControls(status(), last, false, 'msg', false)).toMatchObject({ amending: false, canCommit: true })
+    expect(commitControls(status(), last, false, '  ', false).canCommit).toBe(false)
+    expect(commitControls(status({ staged: [] }), last, false, 'msg', false).canCommit).toBe(false)
+    expect(commitControls(status({ staged: [] }), last, true, 'msg', false)).toMatchObject({ amending: true, canCommit: true })
+    expect(commitControls(status({ staged: [] }), { ...last, pushed: true }, true, 'msg', false)).toMatchObject({ amending: false, canCommit: false })
+    expect(commitControls(status(), last, false, 'msg', true).canCommit).toBe(false)
+  })
+
+  it('올리기 버튼 — 주 버튼과 같은 조건 + 원격(origin)·브랜치가 있어야. 없으면 이유', () => {
+    expect(commitControls(status(), last, false, 'msg', false)).toMatchObject({ canPush: true, pushBlock: undefined })
+    expect(commitControls(status({ remote: undefined }), last, false, 'msg', false)).toMatchObject({ canPush: false, pushBlock: 'no-remote' })
+    expect(commitControls(status({ branch: undefined }), last, false, 'msg', false)).toMatchObject({ canPush: false, pushBlock: 'detached' })
+    expect(commitControls(status(), last, false, '', false)).toMatchObject({ canPush: false, pushBlock: undefined })
+  })
+
+  it('흐름 — 커밋(또는 고치기) 뒤 올리기, 커밋이 실패하면 올리지 않는다', async () => {
+    const calls: string[] = []
+    const ok = async (action: { kind: string }) => (calls.push(action.kind), action.kind === 'push' ? { ok: true as const, branch: 'main' } : { ok: true as const, short: 'abc1234', files: 2 })
+    expect(await commitThenPush(ok, 'm', false, false)).toEqual({ short: 'abc1234', files: 2, amend: false })
+    expect(calls).toEqual(['commit'])
+    calls.length = 0
+    expect(await commitThenPush(ok, 'm', true, true)).toEqual({ short: 'abc1234', files: 2, amend: true, push: { ok: true, branch: 'main' } })
+    expect(calls).toEqual(['amend', 'push'])
+    calls.length = 0
+    const fail = async (action: { kind: string }) => (calls.push(action.kind), { ok: false as const, reason: 'nothing' as const, message: 'x' })
+    expect(await commitThenPush(fail, 'm', false, true)).toBeUndefined()
+    expect(calls).toEqual(['commit'])
+  })
+
+  it('한 줄 — 커밋만은 실행 취소, 고치기는 실행 취소 없음, 올렸으면 원격 열기, 거절이면 커밋은 남았다 + 이유, 인증·연결은 커밋 줄(상태 카드가 따로)', () => {
+    const base = { short: 'abc1234', files: 2, amend: false }
+    expect(commitNotice(tko, base)).toEqual({ tone: 'ok', text: '커밋 abc1234 · 파일 2개', undo: true })
+    expect(commitNotice(tko, { ...base, amend: true })).toEqual({ tone: 'ok', text: '커밋 abc1234 을 고쳤습니다', undo: false })
+    expect(commitNotice(tko, { ...base, push: { ok: true, branch: 'main' } })).toEqual({ tone: 'ok', text: '커밋 abc1234 을 main 에 올렸습니다', remote: true })
+    const rejected = commitNotice(tko, { ...base, push: { ok: false, reason: 'rejected', message: '! [rejected]' } })
+    expect(rejected).toMatchObject({ tone: 'error', detail: '! [rejected]' })
+    expect(rejected.text).toContain('커밋 abc1234 은 남았지만 올리지 못했습니다')
+    expect(rejected.text).toContain('원격에 새 커밋이 있습니다')
+    for (const reason of ['auth', 'network'] as const) expect(commitNotice(tko, { ...base, push: { ok: false, reason, message: '' } })).toEqual({ tone: 'ok', text: '커밋 abc1234 · 파일 2개', undo: true })
+  })
+})
+
+describe('커밋 영역 — 정적 그림 (시안 ①)', () => {
+  const box = (extra: Partial<Parameters<typeof CommitBox>[0]> = {}) =>
+    html(
+      createElement(CommitBox, {
+        view: status({ staged: [{ path: 'a', kind: 'M' }, { path: 'b', kind: 'M' }] }),
+        last: { message: 'old', pushed: false },
+        message: 'fix(git): 로그에 부모·ref 를 더한다',
+        amend: false,
+        busy: false,
+        mac: true,
+        onMessage() {},
+        onAmend() {},
+        onCommit() {},
+        ...extra,
+      }),
+    )
+
+  it('메시지 칸 + 둘째 줄 자리 표시, 고치기 체크(올리기 전만)·⌘↵, 두 버튼 — N개 파일 커밋(주)·커밋하고 올리기', () => {
+    const out = box()
+    expect(out).toContain('aria-label="커밋 메시지"')
+    expect(out).toContain('변경 이유를 한 줄 더…')
+    expect(out).toMatch(/<input type="checkbox"[^>]*>마지막 커밋 고치기 <span class="git-commit__note">\(올리기 전만\)<\/span>/)
+    expect(out).toContain('title="아직 안 올린 마지막 커밋만 고칠 수 있어요"')
+    expect(out).toContain('>⌘↵</span>')
+    expect(out).toMatch(/class="attention-card__button attention-card__button--primary">2개 파일 커밋<\/button><button type="button" class="attention-card__button"[^>]*>커밋하고 올리기<\/button>/)
+    expect(box({ mac: false })).toContain('>Ctrl+↵</span>')
+    // 둘째 줄을 쓰기 시작하면 자리 표시가 사라진다
+    expect(box({ message: '제목\n본문' })).not.toContain('변경 이유를 한 줄 더…')
+  })
+
+  it('고치기 체크하면 버튼이 커밋 고치기·고치고 올리기 (stage 없이도 누를 수 있다)', () => {
+    const out = box({ amend: true, view: status({ staged: [] }) })
+    expect(out).toMatch(/<input type="checkbox"[^>]*checked=""/)
+    expect(out).toMatch(/class="attention-card__button attention-card__button--primary">커밋 고치기<\/button>/)
+    expect(out).toMatch(/class="attention-card__button"[^>]*>고치고 올리기<\/button>/)
+  })
+
+  it('이미 올린 커밋이면 체크가 꺼지고 이유, 원격이 없으면 올리기 버튼이 꺼지고 이유', () => {
+    const pushed = box({ amend: true, last: { message: 'old', pushed: true } })
+    expect(pushed).toMatch(/<input type="checkbox"[^>]*disabled=""/)
+    expect(pushed).not.toMatch(/checked=""/)
+    expect(pushed).toContain('title="마지막 커밋을 이미 올려서 고칠 수 없습니다"')
+    expect(pushed).toContain('>2개 파일 커밋</button>')
+    const noRemote = box({ view: status({ remote: undefined }) })
+    expect(noRemote).toMatch(/<button type="button" class="attention-card__button" disabled="" title="원격 주소\(origin\)가 없어 올릴 수 없습니다[^"]*">커밋하고 올리기<\/button>/)
   })
 })

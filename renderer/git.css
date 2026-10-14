@@ -251,21 +251,45 @@
   padding: 10px 12px 12px;
   border-top: 0.5px solid var(--border-light);
 }
-.git-commit__input {
-  resize: none;
-  padding: 8px 10px;
-  border: 0.5px solid var(--border-ring);
-  border-radius: 10px;
-  outline: none;
+/* #387 시안 ① 맨 아래 — 메시지 칸(12 모서리·.5px 테두리·최소 84), 둘째 줄 자리 표시, 고치기 체크 줄(12px)·⌘↵(11px mono), 두 버튼(반씩·9 모서리·32 높이) */
+.git-commit__box {
+  position: relative;
+  display: flex;
+  min-height: 84px;
+  border-radius: 12px;
   background: var(--surface);
+  box-shadow: 0 0 0 0.5px var(--border-ring);
+}
+.git-commit__box:focus-within { box-shadow: 0 0 0 1px var(--accent); }
+.git-commit__input {
+  flex: 1;
+  resize: none;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 12px;
+  outline: none;
+  background: transparent;
   color: var(--text);
   font: inherit;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 19px;
 }
-.git-commit__input:focus { border-color: var(--accent); }
-.git-commit__row { display: flex; gap: 6px; justify-content: flex-end; }
-.git-commit__row .attention-card__button { height: 30px; font-size: 13px; }
+.git-commit__input::placeholder { color: var(--text-caption); }
+.git-commit__more {
+  position: absolute;
+  top: 30px; /* 위 여백 9 + 첫 줄 19 + 2 */
+  left: 11px;
+  color: var(--text-caption);
+  font-size: 12px;
+  pointer-events: none;
+}
+.git-commit__row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.git-commit__amend { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.git-commit__amend:has(input:disabled) { opacity: 0.6; }
+.git-commit__note { color: var(--text-caption); }
+.git-commit__key { color: var(--text-caption); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.git-commit__buttons { display: flex; gap: 8px; }
+.git-commit__buttons .attention-card__button { flex: 1; height: auto; min-height: 32px; padding: 6px 12px; border-radius: 9px; font-size: 12.5px; }
 
 /* ── 브랜치 팝업 (이슈 #386, 시안 Git 탭 재설계 ② Branch.dc.html) — 340 폭·14 모서리·6 안쪽 여백, 줄 28. 입력 카드(.composer__box) 위에 뜬다 ── */
 .git-pill-wrap {

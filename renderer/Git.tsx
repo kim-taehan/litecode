@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { FileDiff } from '../shared/ipc.ts'
-import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitResult, type GitStatus } from '../shared/git.ts'
+import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitLastCommit, type GitResult, type GitStatus } from '../shared/git.ts'
 import { ago } from './ago.ts'
 import { branchTrack, groupBranches, matchesQuery, popupShortcut, recentBranches, shortcutLabel, type PopupShortcut } from './branchPopup.ts'
 import { focusComposerInput } from './composerFocus.ts'
@@ -8,6 +8,7 @@ import { splitPath } from './changedFiles.ts'
 import { DiffCard } from './DiffCard.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { openFilePreview, openGitTab, type PanelState } from './filePreviewStore.ts'
+import { commitControls, commitNotice, commitThenPush } from './gitCommit.ts'
 import { changeCount, refreshGit, useGitView } from './gitStore.ts'
 import { reason } from './ipcError.ts'
 import { useT, type Translate } from './settingsStore.ts'
@@ -524,8 +525,30 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
     drafts.set(directory, text)
     setMessageState(text)
   }
+  // 마지막 커밋 고치기 (#387) — 체크하면 마지막 커밋 메시지를 채우고, 풀면 체크 전 초안으로 돌린다
+  const [amend, setAmend] = useState(false)
+  const [last, setLast] = useState<GitLastCommit>()
+  const draftBeforeAmend = useRef('')
+  const hasCommits = view?.state === 'ok' && view.hasCommits
 
   useEffect(() => void refreshGit(directory), [directory])
+  useEffect(() => {
+    setAmend(false)
+    setLast(undefined)
+  }, [directory])
+  useEffect(() => {
+    // 다시 읽는 동안 옛 값을 둔다 — 지우면 체크·버튼 글이 깜빡인다
+    if (!hasCommits) setLast(undefined)
+    if (sub !== 'changes' || !hasCommits) return
+    let live = true
+    window.litecode.gitLastCommit(directory).then(
+      (commit) => live && setLast(commit),
+      () => {},
+    )
+    return () => {
+      live = false
+    }
+  }, [directory, view, sub, hasCommits])
   useEffect(() => {
     if (gitSub) setSub(gitSub.sub)
   }, [gitSub?.seq])
@@ -659,42 +682,37 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
         {sub === 'branches' && <BranchesView directory={directory} view={view} busy={busy} onRun={run} onSwitch={(name) => setConfirm({ kind: 'switch', name })} onDelete={(branch) => setConfirm({ kind: 'delete', branch })} />}
       </div>
       {sub === 'changes' && (
-        <div className="git-commit">
-          <textarea
-            className="git-commit__input"
-            aria-label={t('git.commitLabel')}
-            placeholder={t('git.commitPlaceholder')}
-            value={message}
-            rows={3}
-            onChange={(event) => setMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                void commit()
-              }
-            }}
-          />
-          <div className="git-commit__row">
-            <button
-              type="button"
-              className="attention-card__button attention-card__button--primary"
-              disabled={busy || view.staged.length === 0 || !message.trim()}
-              onClick={() => void commit()}
-            >
-              {t('git.commit', { count: view.staged.length })}
-            </button>
-          </div>
-        </div>
+        <CommitBox
+          view={view}
+          last={last}
+          message={message}
+          amend={amend}
+          busy={busy}
+          mac={navigator.platform.startsWith('Mac')}
+          onMessage={setMessage}
+          onAmend={(checked) => {
+            setAmend(checked)
+            if (checked) {
+              draftBeforeAmend.current = message
+              if (last) setMessage(last.message)
+            } else setMessage(draftBeforeAmend.current)
+          }}
+          onCommit={(push) => void commit(push)}
+        />
       )}
     </div>
   )
 
-  async function commit(): Promise<void> {
-    if (busy || view?.state !== 'ok' || view.staged.length === 0 || !message.trim()) return
-    const result = await run<{ short: string; files: number }>({ kind: 'commit', message })
-    if (!result?.ok) return
+  /** 커밋(고치기) — push 면 이어서 올린다 (#387). 올리기가 실패해도 커밋은 남고, 한 줄이 그 사실과 이유를 말한다 */
+  async function commit(push: boolean): Promise<void> {
+    if (view?.state !== 'ok') return
+    const controls = commitControls(view, last, amend, message, busy)
+    if (!(push ? controls.canPush : controls.canCommit)) return
+    const outcome = await commitThenPush((action) => run(action), message, controls.amending, push)
+    if (!outcome) return
     setMessage('')
-    setNotice({ tone: 'ok', text: t('git.committed', { hash: result.short, count: result.files }), undo: true })
+    setAmend(false)
+    setNotice(commitNotice(t, outcome))
   }
 
   async function remote(kind: 'push' | 'pull'): Promise<void> {
@@ -718,6 +736,79 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
     if (current.kind === 'discard') return void (await run({ kind: 'discard', paths: [current.file.path] }))
     if (current.kind === 'delete') return void (await run({ kind: 'deleteBranch', name: current.branch.name }))
   }
+}
+
+/** 커밋 영역 (#387, 시안 ① 맨 아래) — 메시지 칸(제목 줄 + 둘째 줄 자리 표시) · 마지막 커밋 고치기 체크(올리기 전만)와 ⌘↵ · 두 버튼(주: 커밋, 커밋하고 올리기).
+ *  막힌 체크·버튼은 이유를 title 로 (시안의 체크 줄도 title). ⌘/Ctrl+Enter = 주 버튼 */
+export function CommitBox({
+  view,
+  last,
+  message,
+  amend,
+  busy,
+  mac,
+  onMessage,
+  onAmend,
+  onCommit,
+}: {
+  view: GitStatus
+  last: GitLastCommit | undefined
+  message: string
+  amend: boolean
+  busy: boolean
+  mac: boolean
+  onMessage(text: string): void
+  onAmend(checked: boolean): void
+  onCommit(push: boolean): void
+}) {
+  const t = useT()
+  const controls = commitControls(view, last, amend, message, busy)
+  return (
+    <div className="git-commit">
+      <div className="git-commit__box">
+        <textarea
+          className="git-commit__input"
+          aria-label={t('git.commitLabel')}
+          placeholder={t('git.commitPlaceholder')}
+          value={message}
+          rows={3}
+          onChange={(event) => onMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              onCommit(false)
+            }
+          }}
+        />
+        {!message.includes('\n') && (
+          <span className="git-commit__more" aria-hidden="true">
+            {t('git.commitMore')}
+          </span>
+        )}
+      </div>
+      <div className="git-commit__row">
+        <label className="git-commit__amend" title={controls.amendBlock ? t(`git.amendBlock.${controls.amendBlock}`) : t('git.amendTitle')}>
+          <input type="checkbox" className="git-check" checked={controls.amending} disabled={busy || !controls.amendable} onChange={(event) => onAmend(event.target.checked)} />
+          {t('git.amend')} <span className="git-commit__note">{t('git.amendNote')}</span>
+        </label>
+        <span className="git-commit__key">{mac ? '⌘↵' : 'Ctrl+↵'}</span>
+      </div>
+      <div className="git-commit__buttons">
+        <button type="button" className="attention-card__button attention-card__button--primary" disabled={!controls.canCommit} onClick={() => onCommit(false)}>
+          {controls.amending ? t('git.amendCommit') : t('git.commit', { count: view.staged.length })}
+        </button>
+        <button
+          type="button"
+          className="attention-card__button"
+          disabled={!controls.canPush}
+          title={controls.pushBlock ? t(`git.pushBlock.${controls.pushBlock}`) : undefined}
+          onClick={() => onCommit(true)}
+        >
+          {controls.amending ? t('git.amendPush') : t('git.commitPush')}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function State({ title, body, children }: { title: string; body: string; children?: ReactNode }) {
