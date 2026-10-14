@@ -266,3 +266,122 @@
 .git-commit__input:focus { border-color: var(--accent); }
 .git-commit__row { display: flex; gap: 6px; justify-content: flex-end; }
 .git-commit__row .attention-card__button { height: 30px; font-size: 13px; }
+
+/* ── 브랜치 팝업 (이슈 #386, 시안 Git 탭 재설계 ② Branch.dc.html) — 340 폭·14 모서리·6 안쪽 여백, 줄 28. 입력 카드(.composer__box) 위에 뜬다 ── */
+.git-pill-wrap {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.git-pill[aria-expanded='true'] { background: var(--fill-active); color: var(--text); }
+
+.branch-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  width: 340px;
+  max-width: 100%;
+  max-height: min(560px, 70vh);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lv3);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.branch-pop__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px 7px;
+  margin-bottom: 4px;
+  border-bottom: 0.5px solid var(--border-light);
+  color: var(--text-tertiary);
+}
+.branch-pop__search svg { flex: none; }
+.branch-pop__search input,
+.branch-pop__edit input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+.branch-pop__search input::placeholder,
+.branch-pop__edit input::placeholder { color: var(--text-caption); }
+
+.branch-pop__item,
+.branch-pop__edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+.branch-pop__item { cursor: pointer; outline: none; }
+.branch-pop__item:hover:not(:disabled),
+.branch-pop__item:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.branch-pop__item:disabled { cursor: default; opacity: 0.45; }
+.branch-pop__item[aria-current]:disabled { opacity: 1; } /* 지금 브랜치 줄은 못 누를 뿐 흐리지 않는다 */
+.branch-pop__item--child { padding-left: 26px; }
+.branch-pop__item--muted { color: var(--text-secondary); }
+.branch-pop__edit .git-mono { font-size: 12px; }
+
+.branch-pop__icon { flex: none; }
+.branch-pop__lead { flex: none; width: 13px; }
+.branch-pop__lead--wide { width: 25px; }
+
+.branch-pop__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-pop__dot { flex: none; color: var(--ok); font-size: 11px; }
+.branch-pop__sc,
+.branch-pop__tr,
+.branch-pop__up {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-caption);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.branch-pop__up {
+  flex: 0 1 auto;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-pop__label {
+  padding: 7px 9px 3px;
+  color: var(--text-caption);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.branch-pop__sep { height: 0.5px; margin: 4px 2px; background: var(--border); }
+.branch-pop__empty { margin: 0; padding: 7px 9px; color: var(--text-caption); }
+.branch-pop__error { margin: 0 0 4px; padding: 6px 9px; border-radius: 7px; background: var(--danger-bg); color: var(--danger); }
+.branch-pop .git-confirm { margin: 0; }

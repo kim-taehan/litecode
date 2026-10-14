@@ -352,9 +352,52 @@ export class GitService extends Service {
     return this.act(directory, async (root) => {
       await this.checkBranchName(root, name)
       if (!(await this.exists(root, `refs/heads/${name}`))) throw new GitError('invalid', name)
-      const result = await this.run(root, ['checkout', '-q', name, '--'])
-      if (result.code !== 0) throw new GitError(/would be overwritten|commit your changes or stash/i.test(result.stderr) ? 'overwrite' : 'failed', firstLines(result.stderr))
+      await this.checkout(root, ['checkout', '-q', name, '--'])
       return { branch: name }
+    })
+  }
+
+  /** checkout — 변경이 덮이면 git 이 멈추고 아무것도 바꾸지 않는다(overwrite) */
+  private async checkout(root: string, args: readonly string[]): Promise<void> {
+    const result = await this.run(root, args)
+    if (result.code !== 0) throw new GitError(/would be overwritten|commit your changes or stash/i.test(result.stderr) ? 'overwrite' : 'failed', firstLines(result.stderr))
+  }
+
+  /** 원격 브랜치 이름 (`origin/x`, 이름 순) — 원격의 HEAD(가리키는 ref)는 뺀다 (브랜치 팝업 #386) */
+  async remoteBranches(directory: string): Promise<string[]> {
+    const root = await this.root(directory)
+    const out = await this.must(root, ['for-each-ref', '--format=%(refname)%1f%(symref)', 'refs/remotes'])
+    return out
+      .split('\n')
+      .filter(Boolean)
+      .map((row) => row.split('\x1f'))
+      .filter(([ref = '', symref]) => !symref && !ref.endsWith('/HEAD'))
+      .map(([ref = '']) => ref.slice('refs/remotes/'.length))
+  }
+
+  /** 원격 브랜치(`origin/x`)로 — 같은 이름의 로컬 브랜치가 있으면 그것으로, 없으면 추적 브랜치를 만들어 옮긴다 (#386) */
+  switchRemote(directory: string, name: string): Promise<GitResult<{ branch: string }>> {
+    return this.act(directory, async (root) => {
+      const slash = name.indexOf('/')
+      if (slash <= 0 || name.startsWith('-') || !(await this.exists(root, `refs/remotes/${name}`))) throw new GitError('invalid', name)
+      const local = name.slice(slash + 1)
+      await this.checkBranchName(root, local)
+      if (await this.exists(root, `refs/heads/${local}`)) await this.checkout(root, ['checkout', '-q', local, '--'])
+      else await this.checkout(root, ['checkout', '-q', '--track', '-b', local, `refs/remotes/${name}`, '--'])
+      return { branch: local }
+    })
+  }
+
+  /** 태그·커밋으로 — 분리된 HEAD (#386). 커밋을 못 찾으면 invalid */
+  switchRevision(directory: string, revision: string): Promise<GitResult<{ short: string }>> {
+    return this.act(directory, async (root) => {
+      const rev = revision.trim()
+      if (!rev || rev.startsWith('-')) throw new GitError('invalid', rev)
+      const found = await this.run(root, ['rev-parse', '-q', '--verify', `${rev}^{commit}`])
+      if (found.code !== 0) throw new GitError('invalid', rev)
+      const hash = found.stdout.trim()
+      await this.checkout(root, ['checkout', '-q', '--detach', hash, '--'])
+      return { short: (await this.must(root, ['rev-parse', '--short', hash])).trim() }
     })
   }
 
@@ -472,6 +515,10 @@ export class GitService extends Service {
         return this.createBranch(directory, name)
       case 'switchBranch':
         return this.switchBranch(directory, name)
+      case 'switchRemote':
+        return this.switchRemote(directory, name)
+      case 'switchRevision':
+        return this.switchRevision(directory, name)
       case 'deleteBranch':
         return this.deleteBranch(directory, name)
       case 'addRemote':
