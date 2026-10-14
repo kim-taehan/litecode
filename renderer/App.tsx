@@ -159,6 +159,10 @@ export function App() {
   const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
   const activeIdRef = useRef<string>(undefined)
   activeIdRef.current = active?.id
+  // 본문 탭(view)은 대화별로 새로 시작 — 추론 과정을 보다가 다른 대화로 가면 대화 탭으로 돌아온다 (이슈 #364)
+  useEffect(() => {
+    setView('chat')
+  }, [active?.id])
   /** 지금 대화의 초안 — 아래 함수들은 이 그리기의 대화에 묶인다 (기다린 뒤에 불려도 그때 보던 대화의 초안을 고친다) */
   const { text: draft, attached } = draftOf(drafts, active?.id)
   function changeDraftOf(id: string, change: (draft: Draft) => Draft): void {
@@ -735,6 +739,8 @@ export function App() {
               shareShell={shareShell}
             />
 
+            {/* 추론 과정(trajectory) 은 읽기 전용 기록 보기 — 입력 카드(채팅창)는 숨기고 대화 탭에서 다시 보인다 (이슈 #364) */}
+            {!(trajectoryOn && view === 'trajectory') && (
             <Composer
               t={t}
               active={active}
@@ -760,6 +766,7 @@ export function App() {
               attachFiles={attachFiles}
               addAttachments={addAttachments}
             />
+            )}
           </DelegationContext.Provider>
         )}
         {dropping && <DropVeil />}
