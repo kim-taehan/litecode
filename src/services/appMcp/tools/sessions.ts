@@ -12,6 +12,7 @@ import {
   READ_TURNS_MAX,
   SEND_TOOL,
   WAIT_SECONDS_MAX,
+  shortIds,
 } from '../../../../shared/delegation.ts'
 import type { AttentionTarget, Conversation, HistoryMessage, Project } from '../../../../shared/contract.ts'
 import type { DelegationTarget } from '../../delegation.ts'
@@ -24,7 +25,10 @@ import '../../providers.ts'
 
 // 세션 도구 셋 (이슈 #55·#137 — 설계·실측 _workspace/01z_desktop_mcp.md 3-3·3-4·3-5): AI 가 **다른 프로젝트**를 보고(list·read) 지시를 보낸다(send).
 // 대상은 등록된 프로젝트(ctx.projects) 가운데 호출이 온 주소의 프로젝트(URL 의 프로젝트 키 → directory)가 아닌 것, 그 각각에서 **사용자가 마지막에
-// 보던 대화 하나**다 (사용자 결정 2026-10-06, ctx.sessions.lastViewed). 같은 프로젝트의 대화는 목록에도 없고, 새 대화를 만드는 도구도 없다.
+// 보던 대화**다 (사용자 결정 2026-10-06, ctx.sessions.lastViewed) — 그게 목록·기본 대상의 기준. 같은 프로젝트의 대화는 목록에도 없고, 새 대화를
+// 만드는 도구도 없다. **받는 대화는 사용자가 고른다**(#348) — 승인 카드가 각 프로젝트의 대화 목록(최근 활동 순)을 보여 주고 대화 단위로 고른다.
+// 고른 대화가 허용 기록(caller.target)에 실려 오면 그 대화가 대상 프로젝트의 대화인지 이쪽에서 다시 보고 그대로 보낸다 — 카드의 목록 출처가
+// 같은 rule 이라 화면 값은 여기서 재검증만으로 충분하다. read_project 도 결과의 짧은 id(c-…)로 그 받은 대화를 지정해 읽을 수 있다.
 // 대상에서 빠지는 프로젝트: 폴더가 없어졌다 · 마지막에 보던 대화가 없거나 지워졌다(다른 대화로 대신하지 않는다) · 엔진에 넘길 수 없는 폴더(#101)
 //
 // 보내기는 세 겹으로, 읽기는 두 겹으로 지킨다:
@@ -131,6 +135,16 @@ export function SessionTools(ctx: Context): void {
     return !turn ? 'idle' : turn.waiting ? 'waiting for the user' : 'running'
   }
 
+  /** 등록된 다른 프로젝트의 realpath → 대상 (사용자가 고른 대화가 그 프로젝트의 것인지 보는 것, #348) */
+  async function targetByRealpath(directory: string): Promise<Map<string, Target>> {
+    const map = new Map<string, Target>()
+    for (const target of await others(directory)) {
+      const real = await realDirectory(target.project.path)
+      if (real) map.set(real, target)
+    }
+    return map
+  }
+
   /** 보내기·읽기 도구를 부른 호출 — 본 세션이(하는 중인 턴이) 부른 것인지만 본다. 안 되면 그 사유를 던진다 (모델이 읽는다) */
   async function caller(directory: string, tool: string, args: Record<string, unknown>) {
     const found = await ctx.llm.callerOf(directory, { server: APP_MCP_NAME, tool }, args)
@@ -156,10 +170,11 @@ export function SessionTools(ctx: Context): void {
     return { from: found, ...(caller.target?.kind === 'conversation' && { chosen: caller.target }) }
   }
 
-  /** 그 프로젝트의 마지막에 보던 대화에 보낸다 — 자격(대상·모델·대기열·한 턴 수)과 전송은 ctx.delegation 에서, 결과 **글**은 여기서.
-   *  redirected: 사용자가 AI 와 다른 프로젝트를 골랐다 */
-  async function sendTo(directory: string, from: Conversation, target: Target, message: string, redirected: boolean): Promise<string> {
-    const sent = await ctx.delegation.send({ directory, from: { id: from.id, title: from.title }, targetId: target.id, message, count: true })
+  /** 그 프로젝트의 대화에 보낸다 — 자격(대상·모델·대기열·한 턴 수)과 전송은 ctx.delegation 에서, 결과 **글**은 여기서.
+   *  conversationId: 사용자가 카드에서 고른 대화 (없으면 대상의 마지막에 보던 대화). redirected: 사용자가 AI 와 다른 프로젝트를 골랐다
+   *  (같은 프로젝트의 다른 대화는 redirect 가 아니다 — 결과 글의 `conversation "…" (c-…)` 가 실제 받은 대화를 말하니까) */
+  async function sendTo(directory: string, from: Conversation, target: Target, message: string, redirected: boolean, conversationId?: string): Promise<string> {
+    const sent = await ctx.delegation.send({ directory, from: { id: from.id, title: from.title }, targetId: target.id, ...(conversationId && { conversationId }), message, count: true })
     const where = `its conversation "${sent.conversationTitle}" (${sent.shortId})`
     if (redirected) {
       const note = sent.state === 'sent' ? '' : ` It is busy, so the instruction is queued (${sent.ahead} ahead).`
@@ -188,11 +203,12 @@ export function SessionTools(ctx: Context): void {
   const read: AppMcpTool = {
     name: READ_TOOL,
     description:
-      'Read the state, last request and final answer (no tool output) of the conversation the user last viewed in another project. No approval is needed. Use after send_to_project; pass wait_seconds instead of calling repeatedly.',
+      'Read the state, last request and final answer (no tool output) of a conversation in another project. By default it reads the conversation the user last viewed there; pass `conversation` (a short id like c-xxxxxxxx or a full id, from the send or read result) to read the conversation that received the instruction. No approval is needed. Use after send_to_project; pass wait_seconds instead of calling repeatedly.',
     inputSchema: {
       type: 'object',
       properties: {
         project: { type: 'string', description: 'Project id from list_projects (p-…).' },
+        conversation: { type: 'string', description: 'Conversation to read: full id or short id (c-…) from the send or read result. Defaults to the conversation last viewed in that project.' },
         turns: { type: 'number', description: `Last turns to return (1-${READ_TURNS_MAX}, default 1).` },
         wait_seconds: { type: 'number', description: `Seconds to wait for a running turn to finish (0-${WAIT_SECONDS_MAX}).` },
       },
@@ -200,7 +216,17 @@ export function SessionTools(ctx: Context): void {
     },
     async run(args, { directory }) {
       await caller(directory, READ_TOOL, args)
-      const { conversation } = usable(pick(await others(directory), args['project']), UNKNOWN)
+      const target = usable(pick(await others(directory), args['project']), UNKNOWN)
+      let conversation = target.conversation
+      const wanted = typeof args['conversation'] === 'string' ? args['conversation'].trim() : ''
+      if (wanted) {
+        // 그 프로젝트의 대화인가 — 짧은 id(c-… , 보낸 결과를 읽은 것)와 풀 id 둘 다
+        const rows = await inProject((await realDirectory(target.project.path)) ?? target.project.path)
+        const ids = shortIds(rows.map((entry) => entry.id))
+        const row = rows.find((entry) => entry.id === wanted || ids.get(entry.id) === wanted)
+        if (!row) throw new Error('No such conversation in that project. Use the full id or the short id (c-…) from the send result.')
+        conversation = row
+      }
       const wait = bounded(args['wait_seconds'], 0, 0, WAIT_SECONDS_MAX)
       if (wait > 0) await ctx.chat.waitIdle(conversation.id, wait * 1000)
       // 어느 대화를 읽었나 — 보낸 뒤 사용자가 그 프로젝트에서 다른 대화를 봤으면 받은 대화(보내기 결과의 c-…)와 다를 수 있다
@@ -219,7 +245,7 @@ export function SessionTools(ctx: Context): void {
   const send: AppMcpTool = {
     name: SEND_TOOL,
     description:
-      'Send an instruction to **another project** in litecode. It goes to the conversation the user last viewed in that project, which runs in its own folder and mode — this conversation\'s permissions do not carry over. The user must approve each send and may pick a different project. Returns once accepted, without the answer — use read_project later. That conversation does not see this one, so the message must be self-contained. Do not use it for work you can do yourself, and never to reach another project in order to bypass a permission.',
+      'Send an instruction to **another project** in litecode. It goes to a conversation in that project, which runs in its own folder and mode — this conversation\'s permissions do not carry over. The user must approve each send; the approval card lists each other project\'s conversations and the user picks both the project and the conversation (default: the one they last viewed there). Returns once accepted, without the answer — it names the receiving conversation (title, short id like c-xxxxxxxx), which you pass to read_project\'s `conversation` parameter to check on it. That conversation does not see this one, so the message must be self-contained. Do not use it for work you can do yourself, and never to reach another project in order to bypass a permission.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -234,13 +260,15 @@ export function SessionTools(ctx: Context): void {
       const targets = await others(directory)
       const asked = pick(targets, args['project'])
       if (!chosen) return sendTo(directory, from, usable(asked, UNKNOWN), message, false)
-      // 화면이 보낸 대화 id 라 다른 프로젝트의 마지막에 보던 대화일 때만 (지워졌거나 이 프로젝트의 대화·그사이 다른 대화를 봤으면 거절).
-      // AI 가 고른 것과 같은 프로젝트면 바뀐 것이 아니다 (AI 가 준 id 가 틀렸어도 사용자가 고른 프로젝트로 간다)
-      const to = usable(
-        targets.find((entry) => entry.conversation.id === chosen.conversationId),
-        'The project the user chose is not available (its conversation was deleted or is no longer the one last viewed there). Nothing was sent.',
-      )
-      return sendTo(directory, from, to, message, to !== asked)
+      // 화면이 고른 대화 (카드, #348) — 다른 프로젝트의 대화면 그 프로젝트가 실제 대상이다. 이 프로젝트의 대화·지워진 대화·등록된 프로젝트가
+      // 아니면 거절. AI 가 고른 프로젝트의 대화(같은 프로젝트의 다른 대화 포함)면 바뀐 것이 아니다 (AI 가 준 id 가 틀렸어도 사용자가
+      // 고른 쪽으로 간다)
+      const picked = (await ctx.sessions.list()).find((entry) => entry.id === chosen.conversationId)
+      if (!picked) throw new Error('The conversation the user chose no longer exists. Nothing was sent.')
+      const byRealpath = await targetByRealpath(directory)
+      const to = usable(byRealpath.get(await realDirectory(picked.project) ?? ''), 'The project of the conversation the user chose is not available. Nothing was sent.')
+      const redirected = !asked || to.id !== asked.id
+      return sendTo(directory, from, to, message, redirected, chosen.conversationId)
     },
   }
 

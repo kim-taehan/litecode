@@ -237,6 +237,12 @@
   font-size: 12px;
 }
 
+.target-picker__last {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .target-picker__meta {
   flex: none;
   color: var(--text-secondary);

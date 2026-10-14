@@ -73,8 +73,9 @@ let tokens: string
 const MODEL = { providerId: 'gw', modelId: 'm1' }
 /** 보내는 대화 */
 const A = 'aaaaaaaa-0000-4000-8000-000000000001'
-/** order-backend 의 대화 */
+/** order-backend 의 대화 둘 */
 const B = 'bbbbbbbb-0000-4000-8000-000000000002'
+const D = 'dddddddd-0000-4000-8000-000000000004'
 /** design-tokens 의 대화 */
 const C = 'cccccccc-0000-4000-8000-000000000003'
 
@@ -194,6 +195,24 @@ describe('send — 자격과 전송', () => {
     for (let n = 0; n < QUEUE_LIMIT; n++) await ctx.chat.send(B, { text: `대기 ${n}`, project: backend, model: MODEL })
     await expect(send(ctx)).rejects.toThrow(`Target queue is full (${QUEUE_LIMIT} waiting).`)
     turn.finish()
+  })
+
+  it('conversationId(카드에서 고른 대화, #348) — 대상 프로젝트의 대화면 그 대화로. 다른 프로젝트의 대화·없는 id 는 거절, 같은 대화면 보통 경로', async () => {
+    const { ctx, llm, idle, say, view } = await start()
+    await idle(B, '주문 API 설계', { project: backend })
+    await idle(D, '배포 스크립트', { project: backend })
+    await idle(C, '색 토큰', { project: tokens })
+    await view(B)
+    const before = llm.turns.length
+    const sent = await send(ctx, { conversationId: D })
+    expect(sent).toEqual({ state: 'sent', conversationId: D, conversationTitle: '배포 스크립트', shortId: 'c-dddddddd', projectName: 'order-backend' })
+    await until(() => llm.turns.length > before)
+    expect(llm.turns.at(-1)?.prompt).toBe(wrapInstruction({ project: 'shop-web', title: '주문 화면' }, '지시'))
+    // 다른 프로젝트의 대화 — 화면 조작 값을 막는 것 (프로젝트 id 와는 무관)
+    await expect(send(ctx, { conversationId: C })).rejects.toThrow('The conversation the user chose belongs to a different project.')
+    await expect(send(ctx, { conversationId: 'no-such' })).rejects.toThrow('The conversation the user chose no longer exists.')
+    // 대상의 대화와 같으면 그냥 (conversationId 이펙트 없음)
+    expect(await send(ctx, { conversationId: B })).toMatchObject({ state: 'sent', conversationId: B })
   })
 
   it('count(모델 경로) — 보내는 대화가 도는 중이어야 하고 한 턴에 상한까지. count 없이(화면 경로)는 세지 않는다', async () => {

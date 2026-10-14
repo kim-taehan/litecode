@@ -93,15 +93,23 @@ export class DelegationService extends Service {
   }
 
   /** 자격을 보고 보낸다: 쓸 수 있는 대상(모델·폴더)·대기열 상한·count 면 한 턴의 보내기 수. 받는 대화의 폴더·모델·모드는 그 대화에 저장된
-   *  것 그대로다 (ctx.chat 이 저장된 대화에서 읽는다). 던지는 글은 영어(모델이 읽는다) — 화면도 같은 문장을 그대로 보인다 */
-  async send(input: { directory: string; from: { id: string; title: string }; targetId: string; message: string; count?: boolean }): Promise<DelegationSent> {
+   *  것 그대로다 (ctx.chat 이 저장된 대화에서 읽는다). 던지는 글은 영어(모델이 읽는다) — 화면도 같은 문장을 그대로 보인다.
+   *  conversationId(승인 카드에서 사용자가 고른 대화, #348)가 있으면 그 대화가 **대상 프로젝트의** 대화인지 여기서 보고, 아니면 그 대화로 보낸다 */
+  async send(input: { directory: string; from: { id: string; title: string }; targetId: string; message: string; count?: boolean; conversationId?: string }): Promise<DelegationSent> {
     const { directory, from, message } = input
     if (typeof message !== 'string' || !message.trim()) throw new Error('message is required.')
     if (message.length > MESSAGE_MAX) throw new Error(`message is too long (${message.length} characters, the limit is ${MESSAGE_MAX}).`)
     const target = (await this.targets(directory)).find((entry) => entry.id === input.targetId)
     if (!target) throw new Error('Unknown project. Use an id from list_projects.')
     if (target.problem) throw new Error(`Target project cannot be used (${target.problem}).`)
-    const to = target.conversation
+    let to = target.conversation
+    if (input.conversationId && input.conversationId !== to.id) {
+      const all = await this.ctx.sessions.list()
+      const picked = all.find((entry) => entry.id === input.conversationId)
+      if (!picked) throw new Error('The conversation the user chose no longer exists.')
+      if ((await realDirectory(picked.project)) !== (await realDirectory(target.project.path))) throw new Error('The conversation the user chose belongs to a different project.')
+      to = picked
+    }
     if (!to.model || !this.ctx.providers.get(to.model.providerId)?.models.some((model) => model.id === to.model!.modelId)) {
       throw new Error('Target conversation has no usable model.')
     }
