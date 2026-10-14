@@ -7,8 +7,9 @@ import './delegation.css'
 
 // Projects 탭 (이슈 #341) — 다른 프로젝트의 마지막에 보던 대화에 지시를 **직접**(AI 없이) 보내기. 오른쪽 패널의 고정 탭(파일·Git·터미널·작업 탭과
 // 같은 줄). 목록(targets)은 App 이 승인 카드·진행 줄과 같은 규칙(renderer/delegationView.ts)으로 계산해 준다 — 패널은
-// DelegationContext 바깥이라 컨텍스트가 아니다. 보내기는 IPC 로(ctx.delegation — 세션 도구의 send_to_project 와 같은 자격: 대상·모델·대기열).
-// 받은 대화가 지시라는 표시는 기존 딱지(OriginTag — "다른 프로젝트에서 온 지시 · 프로젝트 · 대화")가 그대로 한다.
+// DelegationContext 바깥이라 컨텍스트가 아니다. #351: targets 에 지금 프로젝트도 들어오니 이 탭은 **자기 프로젝트는 뺀다** — 지시를 직접
+// 보내는 대상은 "다른 프로젝트" (자기 대화로 보내는 것은 그냥 여기에서 쓰는 것과 같으니까). 보내기는 IPC 로(ctx.delegation — 세션 도구의
+// send_to_project 와 같은 자격: 대상·모델·대기열). 받은 대화가 지시라는 표시는 기존 딱지(OriginTag)가 그대로 한다.
 
 export function ProjectsPanel({ directory, fromId, fromTitle, targets }: { directory: string; fromId?: string; fromTitle?: string; targets: readonly ProjectTarget[] }) {
   const t = useT()
@@ -18,12 +19,13 @@ export function ProjectsPanel({ directory, fromId, fromTitle, targets }: { direc
   const [error, setError] = useState<string>()
   const [done, setDone] = useState<string>()
 
-  const target = targets.find((entry) => entry.id === selected && !entry.peer.unusable)
+  const others = targets.filter((entry) => entry.path !== directory)
+  const target = others.find((entry) => entry.id === selected && !entry.peer.unusable)
 
   useEffect(() => {
     if (target) return
-    setSelected((now) => (now && targets.some((entry) => entry.id === now) ? now : targets[0]?.id))
-  }, [targets, target])
+    setSelected((now) => (now && others.some((entry) => entry.id === now) ? now : others[0]?.id))
+  }, [others, target])
 
   function send(): void {
     if (!target || !message.trim() || busy) return
@@ -48,12 +50,12 @@ export function ProjectsPanel({ directory, fromId, fromTitle, targets }: { direc
         </span>
       </div>
       <div className="file-preview__body projects-panel__body">
-        {targets.length === 0 ? (
+        {others.length === 0 ? (
           <p className="file-preview__empty projects-panel__empty">{t('projects.empty')}</p>
         ) : (
           <>
             <ul className="projects-panel__list" role="listbox" aria-label={t('projects.tab')}>
-              {targets.map((entry) => (
+              {others.map((entry) => (
                 <li key={entry.id}>
                   <button
                     type="button"
