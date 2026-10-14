@@ -8,8 +8,8 @@ import type { Conversation, History } from '../../../shared/contract.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../../shared/modes.ts'
 import {
   REMOTE_API_VERSION,
-  lastUserAt,
   snapshotMessage,
+  snapshotTailAt,
   snapshotShells,
   type AttentionReplyResponse,
   type ConversationSnapshot,
@@ -123,9 +123,10 @@ export function remoteRoutes(host: RouteHost): Record<string, Route> {
       // 턴이 도는 중이면 기록은 그 턴의 내 말까지만 — 쓰다 만 답은 live.progress 가 그리고, 끝나면 turn.ended 가 붙인다.
       // 끼워 넣은 말이 있으면(이슈 #250) 그 뒤에 메인이 쥔 얼린 답·끼워 넣은 말 — live.progress 는 마지막 끼워 넣은 말 뒤의 줄이다
       const combined = turn ? [...withHistory({ ...emptyChatView, running: true, messages: [turn.message] }, history.messages).messages, ...(turn.interjections ?? [])] : history.messages
-      // 폰은 전체 역사를 받지 않는다 (#365) — 도는 턴은 그 턴의 "내 말"(질문)부터, 끝난 대화는 마지막 질문부터. 마지막 것도 크면 메시지당 캡(진행 줄 전문).
+      // 폰은 전체 역사를 받지 않는다 (#365) — 꼬리(SNAPSHOT_MESSAGE_MAX, 질문 경계)만. 도는 턴은 그 턴의 "내 말"(질문)도 잘리면 안 된다 — 쓰다 만
+      // 답이 질문 없이 보이게 되니, 둘 중 앞을(더 많은 쪽을) 쓴다. 마지막 것도 크면 메시지당 캡(진행 줄 전문).
       // live(도는 진행 줄)는 캡하지 않는다 — 폰이 곧 받을 turn.progress 이벤트와 같은 모양이라 스냅샷만 캡하면 줄이 이벤트에서 불게 된다
-      const from = turn ? Math.max(0, combined.lastIndexOf(turn.message)) : lastUserAt(combined)
+      const from = turn ? Math.min(snapshotTailAt(combined), Math.max(0, combined.lastIndexOf(turn.message))) : snapshotTailAt(combined)
       // `!` 카드는 읽기 전용으로 싣는다 (#265) — 폰에서 실행하는 길은 없다. 출력은 이미 OUTPUT_LIMIT 으로 잘려 있다. 잘린 범위의 카드는 빼고 position 을 다시 센다 (#365)
       const shells = snapshotShells(conversation.shells, from)
       const snapshot: ConversationSnapshot = {

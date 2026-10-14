@@ -195,7 +195,7 @@ export interface LiveTurn {
 /** GET /v1/conversations/{cid} — 스냅샷 + 그 시점 seq. 이 대화의 이벤트는 seq 초과분만 적용한다 (스냅샷과 스트림 사이에 틈이 없다) */
 export interface ConversationSnapshot {
   /** 끝난 말풍선들 + (턴이 도는 중이면) 그 턴의 user 말까지, 끼워 넣은 말이 있으면 그 앞에 얼린 답과 그 말까지 (이슈 #250). 도는 턴의 진행 줄은 live.progress 에 있다.
-   *  **전체 기록이 아니라 마지막 질문부터** — 폰은 상태 화면이지 기록 읽는 곳이 아니다 (이슈 #365, `lastUserAt`·`snapshotMessage`) */
+   *  **전체 기록이 아니라 꼬리** (끝에서 SNAPSHOT_MESSAGE_MAX, 질문 경계) — 폰은 상태 화면이지 기록 읽는 곳이 아니다 (이슈 #365, `snapshotTailAt`·`snapshotMessage`) */
   history: History
   /** 턴이 도는 중일 때만 */
   live?: LiveTurn
@@ -208,8 +208,8 @@ export interface ConversationSnapshot {
 }
 
 // ── 대화 스냅샷의 내용 (이슈 #365) ────────────────────────────────────────────────────────────────
-// 폰은 대화를 열 때 전체 역사를 받지 않는다 — **마지막 질문부터** (끝난 대화는 마지막 user 말, 도는 턴은 그 턴의 "내 말") 만 받는다 (질문 + 그 답,
-// 통상 2개). 폰은 상태 화면(무엇이 도는가·무엇이 답을 기다리는가 보기, 답하기, 다음 질문 보내기)이고 전체 기록 읽기는 데스크탑 화면의 몫이다 —
+// 폰은 대화를 열 때 전체 역사를 받지 않는다 — **꼬리** (끝에서 SNAPSHOT_MESSAGE_MAX 개까지, 질문(user 말) 경계에서 잘림) 만 받는다.
+// 폰은 상태 화면(무엇이 도는가·무엇이 답을 기다리는가 보기, 답하기, 다음 질문 보내기)이고 전체 기록 읽기는 데스크탑 화면의 몫이다 —
 // 특히 블루투스 같은 느린 링크에서 긴 대화 스냅샷이 가장 큰 단일 페이로드였다 (실측 330KB → 20KB/s 에서 6.3초).
 // 마지막 것 하나도 클 수 있다 (어시스턴트 메시지가 진행 줄 전문 — 생각·도구 입력·결과·diff — 을 싣는다) 그래서 **메시지당 상한**이다 —
 // 백그라운드 작업의 상한(shared/tasks.ts)과 같은 선. **도는 턴의 진행 줄(live)은 캡하지 않는다** — 폰이 곧 받을 `turn.progress` 이벤트와
@@ -219,17 +219,19 @@ export interface ConversationSnapshot {
 export const SNAPSHOT_TEXT_MAX = 20_000
 /** 도구 입력·결과·오류(·메시지 오류·재시도 글) 글자 상한 — TASK_TOOL_TEXT_MAX 와 같은 선 */
 export const SNAPSHOT_DETAIL_MAX = 8_000
+/** 대화 스냅샷 꼬리에 싣는 메시지 수 — 마지막 질문뿐(2개)으로는 폰에서 다음 질문을 잇기 애매해 5 로 (사용자 2026-10-14, "2개는 너무 적나 일단 5개 정도") */
+export const SNAPSHOT_MESSAGE_MAX = 5
 
 function clipTo(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]` : text
 }
 
-/** 목록의 마지막 user 말(질문) 자리 — user 말이 없으면(새 대화·빈 기록) 0 으로 잘지 않는다 */
-export function lastUserAt(messages: readonly HistoryMessage[]): number {
-  for (let at = messages.length - 1; at >= 0; at--) {
-    if (messages[at]!.role === 'user') return at
-  }
-  return 0
+/** 스냅샷 꼬리의 시작 자리 — 끝에서 SNAPSHOT_MESSAGE_MAX 까지만. 그 첫째가 답(assistant)이면 그 앞의 질문에서 잘라 "질문 없는 답" 이 먼저 보이지 않게 한다.
+ *  도는 턴의 "내 말"(질문)이 잘리면 안 된다(쓰다 만 답이 질문 없이 보임) — 그 턴은 호출 쪽이 `lastIndexOf(턴 message)` 와 이 값 중 **앞** 을 쓴다 (routes) */
+export function snapshotTailAt(messages: readonly HistoryMessage[]): number {
+  let from = Math.max(0, messages.length - SNAPSHOT_MESSAGE_MAX)
+  while (from < messages.length && messages[from]!.role !== 'user') from++
+  return from
 }
 
 /** 진행 줄 한 줄을 폰에 싣는 크기로 — 글자 상한, 도구의 diff 는 뺀다(폰은 그린다 할 수 없는 전문). 하위 작업은 중첩 진행 줄을 뺀다(폰에 작업 탭이 없다 — #325) */

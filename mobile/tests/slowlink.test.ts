@@ -147,12 +147,13 @@ describe('느린 링크(20KB/s, 조각 185바이트) 위의 모바일 코어 ↔
     const snapshotMs = await waitFor(() => opened, '큰 스냅샷')
     const snapshotRaw = server.stats.rawBytes - before.raw
     const snapshotWire = pipe.bytes.bToA - before.wire
-    expect(connection.state.views.c_big!.messages).toHaveLength(2)
-    expect(connection.state.views.c_big!.messages[1]!.text).toBe(history[149]!.text)
-    expect(connection.state.views.c_big!.omitted).toBe(148)
-    expect(snapshotRaw).toBeLessThan(10_000) // 300KB 전체가 아니라 말풍선 둘만
+    // 꼬리(SNAPSHOT_MESSAGE_MAX) — 질문 경계라 말풍선 4개
+    expect(connection.state.views.c_big!.messages).toHaveLength(4)
+    expect(connection.state.views.c_big!.messages[3]!.text).toBe(history[149]!.text)
+    expect(connection.state.views.c_big!.omitted).toBe(146)
+    expect(snapshotRaw).toBeLessThan(10_000) // 300KB 전체가 아니라 꼬리 몇 개
     expect(snapshotWire).toBeLessThan(snapshotRaw / 2)
-    report['스냅샷(마지막 질문부터, 앞 148개 생략 — #365)'] = `${kb(snapshotRaw)} → 링크 ${kb(snapshotWire)} (${(snapshotRaw / snapshotWire).toFixed(1)}배 압축), ${(snapshotMs / 1000).toFixed(1)}초 (전체 300KB였다면 ${(300_000 / LINK.bytesPerSecond).toFixed(0)}초)`
+    report['스냅샷(꼬리 4개, 앞 146개 생략 — #365)'] = `${kb(snapshotRaw)} → 링크 ${kb(snapshotWire)} (${(snapshotRaw / snapshotWire).toFixed(1)}배 압축), ${(snapshotMs / 1000).toFixed(1)}초 (전체 300KB였다면 ${(300_000 / LINK.bytesPerSecond).toFixed(0)}초)`
 
     // ── 보내기 → 누적 진행 이벤트 → 답 ──
     let opened2 = false
