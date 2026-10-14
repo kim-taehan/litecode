@@ -1,4 +1,7 @@
 import { useState, type ReactNode } from 'react'
+import { speechLanguage, type SpeechLanguage } from '../shared/speech.ts'
+import { LANGUAGES } from '../shared/i18n/index.ts'
+import { OptionSelect } from './GeneralSettings.tsx'
 import { FEATURE_REQUIRES, featureDefault, featureOn, type ChoosableFeatureId, type FeatureReason } from '../shared/features.ts'
 import type { MessageKey } from '../shared/i18n/index.ts'
 import { useFeatureStatuses } from './featuresStore.ts'
@@ -93,6 +96,19 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
               <li key={bullet}>{bullet}</li>
             ))}
           </ul>
+        )}
+        {feature === 'voice' && (
+          <div className="settings-row" data-setting="speechLanguage">
+            <div className="settings-row__text">
+              <div className="settings-row__title">{t('settings.speechLanguage')}</div>
+              <div className="settings-row__description">{t('settings.speechLanguage.description')}</div>
+            </div>
+            <OptionSelect<SpeechLanguage>
+              value={speechLanguage(settings)}
+              options={[{ id: 'auto', label: t('settings.speechLanguage.auto') }, ...LANGUAGES]}
+              onChange={(next) => void updateSettings({ speechLanguage: next }).then(() => setError(undefined), () => setError(t('settings.saveError')))}
+            />
+          </div>
         )}
         <div className="feature-row__chips">
           {(FEATURE_REQUIRES[feature] ?? []).map((needed) => {

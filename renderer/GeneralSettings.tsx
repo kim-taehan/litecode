@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import type { Appearance, Mode, Settings } from '../shared/ipc.ts'
 import { LANGUAGES } from '../shared/i18n/index.ts'
 import { MODES } from '../shared/modes.ts'
-import { speechLanguage, type SpeechLanguage } from '../shared/speech.ts'
 import { ConfirmFullAccess } from './ModeChip.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../shared/fontSize.ts'
 import { useFeatures } from './featuresStore.ts'
@@ -69,7 +68,6 @@ export function GeneralPage() {
   const [confirmingFull, setConfirmingFull] = useState(false)
   const [version, setVersion] = useState<string>()
   const features = useFeatures()
-  const voiceOn = features.has('voice')
   const updatesOn = features.has('updates')
   const tasksOn = features.has('appMcp') // 하위 작업 도구(litecode_task_start)는 데스크탑 MCP 에 붙는다
   useEffect(() => void window.litecode.getAppVersion().then(setVersion, () => {}), [])
@@ -114,24 +112,6 @@ export function GeneralPage() {
         </div>
         <OptionSelect value={settings.language} options={LANGUAGES} onChange={(language) => save({ language })} />
       </div>
-
-      {/* 받아쓰기 언어 (음성 입력, 이슈 #109) — 기능이 켜져 있을 때만. 고른 적이 없으면 화면 언어를 따른다 (shared/speech.ts) */}
-      {voiceOn && (
-        <div className="settings-row" data-setting="speechLanguage">
-          <div className="settings-row__text">
-            <div className="settings-row__title">{t('settings.speechLanguage')}</div>
-            <div className="settings-row__description">{t('settings.speechLanguage.description')}</div>
-          </div>
-          <OptionSelect<SpeechLanguage>
-            value={speechLanguage(settings)}
-            options={[
-              { id: 'auto', label: t('settings.speechLanguage.auto') },
-              ...LANGUAGES,
-            ]}
-            onChange={(next) => save({ speechLanguage: next })}
-          />
-        </div>
-      )}
 
       <div className="settings-row settings-row--stacked">
         <div className="settings-row__title">{t('settings.appearance')}</div>
@@ -302,7 +282,7 @@ function UpdateRows({ updateUrl, onSave }: { updateUrl: string; onSave(next: str
 
 /** 설정 드롭다운 — 언어·새 대화 기본 모드 (dsh LanguageRow + ui-primitives Menu): 버튼 오른쪽 끝에 맞춘 메뉴, 고른 줄은 바탕 없이 오른쪽 ✓.
  *  열면 고른 줄에 포커스, ↑/↓ 로 옮기고 Enter·클릭으로 고른다. Esc 는 메뉴만 닫는다(모달은 그대로), 바깥 클릭은 닫는다 */
-function OptionSelect<T extends string>({ value, options, onChange }: { value: T; options: readonly { id: T; label: string }[]; onChange(next: T): void }) {
+export function OptionSelect<T extends string>({ value, options, onChange }: { value: T; options: readonly { id: T; label: string }[]; onChange(next: T): void }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
