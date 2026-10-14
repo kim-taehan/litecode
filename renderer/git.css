@@ -591,3 +591,11 @@
 .git-stash__message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-stash__meta { color: var(--text-caption); font-size: 11px; }
 .git-stash__row .file-preview__toggle:disabled { opacity: 0.45; cursor: default; }
+
+/* ── .gitignore 연계 (#390, IntelliJ 그대로) — 보기 옵션(눈 아이콘)의 작은 메뉴, 새 파일 구역 안의 흐린 무시된 줄 ── */
+.git-view { position: relative; display: flex; margin-left: 4px; }
+.git-view__menu { position: absolute; top: calc(100% + 4px); right: 0; width: auto; min-width: 180px; }
+.git-view__check { flex: none; width: 12px; color: var(--accent); }
+.git-ignored__pad { flex: none; width: 14px; }
+.git-kind[data-kind='I'] { color: var(--text-caption); }
+.git-file--ignored .git-file__name { color: var(--text-caption); }

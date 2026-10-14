@@ -23,7 +23,7 @@ import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, Spee
 import type { UpdateStatus } from './updates.ts'
 import type { Goal } from './goal.ts'
 import type { GoalReply } from '../src/services/goal.ts'
-import type { GitAction, GitBranch, GitCommit, GitLastCommit, GitResult, GitStash, GitView } from './git.ts'
+import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitResult, GitStash, GitView } from './git.ts'
 import type { DelegationSent } from '../src/services/delegation.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -235,6 +235,8 @@ export const Channel = {
   GIT_LAST_COMMIT: 'git:last-commit',
   /** 화면 → 메인 (directory) → GitStash[] — 보관(stash) 목록, 최근 먼저 (#389 보관함) */
   GIT_STASHES: 'git:stashes',
+  /** 화면 → 메인 (directory) → GitIgnored[] — 무시된 파일(폴더째 무시된 것은 폴더 한 줄)과 가린 규칙 (#390 무시된 파일 보기). 켜져 있을 때만 부른다 */
+  GIT_IGNORED: 'git:ignored',
   /** 화면 → 메인 (directory, path) → GitResult — 변경 파일 삭제(휴지통 shell.trashItem, #389). path 는 저장소 루트 기준, 프로젝트 안 파일만 */
   GIT_TRASH: 'git:trash',
   /** 화면 → 메인 (directory, GitAction) → GitResult — 바꾸는 작업 전부 */
@@ -496,6 +498,7 @@ export interface LitecodeBridge {
   gitRemoteBranches(directory: string): Promise<string[]>
   gitLastCommit(directory: string): Promise<GitLastCommit | undefined>
   gitStashes(directory: string): Promise<GitStash[]>
+  gitIgnored(directory: string): Promise<GitIgnored[]>
   gitTrash(directory: string, path: string): Promise<GitResult>
   gitRun(directory: string, action: GitAction): Promise<GitResult<Record<string, unknown>>>
   openGitRemote(directory: string): Promise<boolean>

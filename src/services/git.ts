@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { Context, Service } from 'cordis'
 import { execProgram } from './exec.ts'
-import type { GitAction, GitBranch, GitCommit, GitFailure, GitFile, GitFileKind, GitLastCommit, GitResult, GitStash, GitStatus, GitView } from '../../shared/git.ts'
+import { ignoreLine, type GitAction, type GitBranch, type GitCommit, type GitFailure, type GitFile, type GitFileKind, type GitIgnored, type GitIgnoreWhere, type GitLastCommit, type GitResult, type GitStash, type GitStatus, type GitView } from '../../shared/git.ts'
 
 // Git (ctx.git, 이슈 #290 — 시안 _workspace/mock-git/Git.dc.html). 시스템 git 을 인자 배열로 띄운다(exec.ts execProgram — 셸 글 없음).
 // 화면(Git 탭)과 AI 도구(appMcp/tools/git.ts)가 같은 메서드를 쓴다. 엔진·Electron 을 모른다 — 폴더는 부르는 쪽이 준다(IPC 는 등록된 프로젝트만).
@@ -161,6 +161,16 @@ export function parseStashList(text: string): GitStash[] {
       const branch = match?.[1]
       return { index, hash, message: match ? match[2]! : subject, ...(branch && branch !== '(no branch)' && { branch }), time: Number(time) * 1000 }
     })
+}
+
+type IgnoreRule = Omit<GitIgnored, 'path'>
+
+/** `git check-ignore -v -z` 의 글 (`source NUL line NUL pattern NUL path NUL` 반복) → 경로별 규칙 */
+export function parseCheckIgnore(text: string): Map<string, IgnoreRule> {
+  const parts = text.split('\0')
+  const rules = new Map<string, IgnoreRule>()
+  for (let index = 0; index + 3 < parts.length; index += 4) rules.set(parts[index + 3]!, { source: parts[index]!, line: Number(parts[index + 1]), pattern: parts[index + 2]! })
+  return rules
 }
 
 const withStats = (files: GitFile[], stats: Map<string, { added: number; removed: number }>): GitFile[] => files.map((file) => ({ ...file, ...stats.get(file.path) }))
@@ -575,6 +585,69 @@ export class GitService extends Service {
     })
   }
 
+  // ── .gitignore 연계 (#390) — 무시 판정은 git 에 맡긴다(.gitignore 를 직접 읽지 않는다) ──
+
+  /** 경로들 중 무시된 것의 규칙 (check-ignore -v — 추적 중인 파일은 무시되지 않은 것으로 본다. 부정 패턴 `!` 에 걸린 경로는 뺀다) */
+  private async rules(root: string, paths: readonly string[]): Promise<Map<string, IgnoreRule>> {
+    if (paths.length === 0) return new Map()
+    const result = await this.run(root, [...READ_FLAGS, 'check-ignore', '-v', '-z', '--stdin'], { stdin: paths.map((path) => `${path}\0`).join('') })
+    if (result.missing) throw new GitError('missing', 'git not found')
+    if (result.code !== 0 && result.code !== 1) throw new GitError('failed', firstLines(result.stderr) || 'git failed') // 1 = 무시된 것 없음
+    const rules = parseCheckIgnore(result.stdout)
+    for (const [path, rule] of rules) if (rule.pattern.startsWith('!')) rules.delete(path)
+    return rules
+  }
+
+  /** 무시된 파일 목록 — 폴더째 무시된 것은 폴더 한 줄(`ls-files --directory` — node_modules 안을 열지 않는다). 규칙 없이 나온 폴더(안이 모두 무시된 것)는
+   *  안의 규칙이 모두 같으면 그 규칙으로 폴더 한 줄, 다르면 안의 파일들로. 루트 기준 경로 순 */
+  async ignored(directory: string): Promise<GitIgnored[]> {
+    const root = await this.root(directory)
+    const listed = (await this.must(root, [...READ_FLAGS, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])).split('\0').filter(Boolean)
+    const rules = await this.rules(root, listed)
+    const shown: GitIgnored[] = []
+    let folded: string | undefined
+    for (const path of listed) {
+      if (folded && path.startsWith(folded)) continue
+      folded = undefined
+      const rule = rules.get(path)
+      if (rule) {
+        shown.push({ path, ...rule })
+        if (path.endsWith('/')) folded = path
+        continue
+      }
+      if (!path.endsWith('/')) continue
+      const inside = listed.filter((other) => other !== path && other.startsWith(path)).map((other) => rules.get(other))
+      const first = inside[0]
+      if (first && inside.every((other) => other && other.source === first.source && other.line === first.line)) {
+        shown.push({ path, ...first })
+        folded = path
+      }
+    }
+    return shown
+  }
+
+  /** 무시에 추가 (IntelliJ 의 Add to .gitignore · Add to .git/info/exclude) — ignoreLine 의 한 줄을 저장소 루트의 .gitignore(없으면 만든다) 또는
+   *  .git/info/exclude 끝에 덧붙인다. 기존 내용은 그대로(마지막 줄바꿈이 없으면 먼저 넣는다). 같은 줄이 이미 있으면 nothing.
+   *  새 파일만 부른다(화면 — 추적 중인 파일은 무시해도 계속 추적되므로 항목이 없다). 경로가 저장소 밖·.git 안·줄바꿈이면 invalid */
+  addIgnore(directory: string, path: string, where: GitIgnoreWhere): Promise<GitResult<{ file: string; line: string }>> {
+    return this.act(directory, async (root) => {
+      const segments = path.split(/[\\/]/)
+      if (!path || isAbsolute(path) || /[\r\n]/.test(path) || segments.includes('..') || segments.includes('.git') || (where !== 'gitignore' && where !== 'exclude')) throw new GitError('invalid', path)
+      const line = ignoreLine(path)
+      const file = where === 'gitignore' ? '.gitignore' : (await this.must(root, ['rev-parse', '--git-path', 'info/exclude'])).trim()
+      const absolute = resolve(root, file)
+      const text = await fs.readFile(absolute, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return ''
+        throw error
+      })
+      if (text.split(/\r?\n/).includes(line)) throw new GitError('nothing', line)
+      const eol = text.includes('\r\n') ? '\r\n' : '\n'
+      await fs.mkdir(dirname(absolute), { recursive: true })
+      await fs.appendFile(absolute, `${text && !text.endsWith('\n') ? eol : ''}${line}${eol}`)
+      return { file: isAbsolute(file) ? relative(root, file) : file, line }
+    })
+  }
+
   private async remoteRun(root: string, args: readonly string[]): Promise<Run> {
     const result = await this.run(root, args, { timeoutMs: REMOTE_TIMEOUT_MS })
     if (result.missing) throw new GitError('missing', 'git not found')
@@ -671,6 +744,8 @@ export class GitService extends Service {
         return this.stashPop(directory, Number(action.index), String(action.hash))
       case 'stashDrop':
         return this.stashDrop(directory, Number(action.index), String(action.hash))
+      case 'addIgnore':
+        return this.addIgnore(directory, String(action.path), action.where)
       case 'undoCommit':
         return this.undoCommit(directory)
       case 'push':

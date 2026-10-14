@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { FileDiff } from '../shared/ipc.ts'
-import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitLastCommit, type GitResult, type GitStash, type GitStatus } from '../shared/git.ts'
+import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitIgnored, type GitLastCommit, type GitResult, type GitStash, type GitStatus } from '../shared/git.ts'
 import { ago } from './ago.ts'
 import { branchTrack, groupBranches, matchesQuery, popupShortcut, recentBranches, shortcutLabel, type PopupShortcut } from './branchPopup.ts'
 import { focusComposerInput } from './composerFocus.ts'
@@ -9,8 +9,8 @@ import { DiffCard } from './DiffCard.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { openFilePreview, openGitTab, type PanelState } from './filePreviewStore.ts'
 import { commitControls, commitNotice, commitThenPush } from './gitCommit.ts'
-import { DANGER_ITEMS, entryPaths, FILE_MENU, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel, type FileMenuItem } from './gitMenu.ts'
-import { changeCount, foldsOf, refreshGit, toggleAllGitFolds, toggleGitFold, useGitView } from './gitStore.ts'
+import { DANGER_ITEMS, entryPaths, FILE_MENU, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel, menuVisible, type FileMenuItem } from './gitMenu.ts'
+import { changeCount, foldsOf, ignoredOf, ignoredShown, refreshGit, refreshIgnored, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown, useGitView } from './gitStore.ts'
 import { buildTree, entryKind, entryStat, entryState, folderKey, groupState, isFoldOpen, SECTION_UNTRACKED, splitChanges, toggleAction, treeFolders, treeRows, type ChangeEntry, type CheckState, type TreeFolder } from './gitTree.ts'
 import { reason } from './ipcError.ts'
 import { useT, type Translate } from './settingsStore.ts'
@@ -665,6 +665,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
           ))}
         </div>
         {sub === 'changes' && <FoldAllButton directory={directory} view={view} />}
+        {sub === 'changes' && <ViewOptionsButton directory={directory} />}
         {sub === 'changes' && <StashButton directory={directory} view={view} stashes={stashes ?? []} onNotice={setNotice} />}
       </div>
       {notice && (
@@ -765,6 +766,14 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
     else if (item === 'discard' && entry.changed) setConfirm({ kind: 'discard', file: entry.changed })
     else if (item === 'preview') openFilePreview(directory, entry.path)
     else if (item === 'copyPatch') void copyPatch(entry)
+    else if (item === 'ignore' || item === 'exclude') void addIgnore(entry.path, item === 'ignore' ? 'gitignore' : 'exclude')
+  }
+
+  /** 무시에 추가 (#390, IntelliJ 그대로) — 묻지 않고 바로 한 줄 덧붙이고 한 줄 알림 */
+  async function addIgnore(path: string, where: 'gitignore' | 'exclude'): Promise<void> {
+    const done = await run<{ file: string; line: string }>({ kind: 'addIgnore', path, where })
+    if (done?.ok) setNotice({ tone: 'ok', text: t('git.ignoreAdded', { line: done.line, file: done.file }) })
+    else if (done?.reason === 'nothing') setNotice({ tone: 'error', text: t('git.ignoreExists', { line: done.message }) })
   }
 
   /** 패치로 복사 — HEAD 대비(stage 된 것 + 안 된 것, 새 파일은 통째) diff 를 클립보드에 */
@@ -994,6 +1003,12 @@ function ChangesView({
   const folds = foldsOf(directory)
   const untrackedOpen = isFoldOpen(folds, SECTION_UNTRACKED)
   const stage = (entries: readonly ChangeEntry[]) => () => void onRun(toggleAction(entries))
+  // 무시된 파일 보기 (#390) — 켜져 있을 때만 읽는다. 무시된 줄은 새 파일 구역 안에 흐리게 (IntelliJ)
+  const showIgnored = ignoredShown(directory)
+  useEffect(() => {
+    if (showIgnored) void refreshIgnored(directory)
+  }, [directory, view, showIgnored])
+  const ignored = showIgnored ? (ignoredOf(directory) ?? []) : []
   return (
     <>
       {(view.merging || conflicts.length > 0) && (
@@ -1026,7 +1041,7 @@ function ChangesView({
           </div>
         </div>
       )}
-      {tracked.all.length === 0 && untracked.all.length === 0 && <p className="git-empty">{t('git.clean')}</p>}
+      {tracked.all.length === 0 && untracked.all.length === 0 && ignored.length === 0 && <p className="git-empty">{t('git.clean')}</p>}
       {tracked.all.length > 0 && (
         <>
           <div className="git-sec">
@@ -1036,10 +1051,10 @@ function ChangesView({
           <Tree directory={directory} section="c" root={tracked} busy={busy} onRun={onRun} onDiscard={onDiscard} rows={rows} />
         </>
       )}
-      {untracked.all.length > 0 && (
+      {(untracked.all.length > 0 || ignored.length > 0) && (
         <>
           <div className="git-sec git-sec--untracked">
-            <Check state={groupState(untracked.all)} label={t('git.stageUntracked')} busy={busy} onToggle={stage(untracked.all)} />
+            <Check state={groupState(untracked.all)} label={t('git.stageUntracked')} busy={busy || untracked.all.length === 0} onToggle={stage(untracked.all)} />
             <button type="button" className="git-sec__toggle" aria-expanded={untrackedOpen} onClick={() => toggleGitFold(directory, SECTION_UNTRACKED)}>
               <svg className="git-sec__chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
                 <path d="M3.5 2l3 3-3 3" />
@@ -1048,6 +1063,7 @@ function ChangesView({
             </button>
           </div>
           {untrackedOpen && <Tree directory={directory} section="u" root={untracked} busy={busy} onRun={onRun} onDiscard={onDiscard} rows={rows} />}
+          {untrackedOpen && ignored.length > 0 && <IgnoredRows ignored={ignored} />}
         </>
       )}
       {menu && (
@@ -1149,7 +1165,7 @@ export function FileMenu({
       {FILE_MENU.map((group, index) => (
         <Fragment key={index}>
           {index > 0 && <div className="git-menu__sep" role="separator" />}
-          {group.map((item) => {
+          {group.filter((item) => menuVisible(item, entry)).map((item) => {
             const shortcut = menuShortcutLabel(item, mac)
             return (
               <button key={item} type="button" role="menuitem" className="git-menu__item" data-danger={DANGER_ITEMS.has(item) || undefined} disabled={!menuEnabled(item, entry, view)} onClick={() => onPick(item)}>
@@ -1181,6 +1197,83 @@ function FoldAllButton({ directory, view }: { directory: string; view: GitStatus
         <path d="M4 6l4-3 4 3M4 10l4 3 4-3" />
       </svg>
     </button>
+  )
+}
+
+/** 무시된 줄 (#390) — 새 파일 구역 안, 흐린 글자·`–`, 체크 자리는 비운다. 어느 규칙이 가렸는지는 title. 누를 것 없음 */
+function IgnoredRows({ ignored }: { ignored: GitIgnored[] }) {
+  const t = useT()
+  return (
+    <ul className="git-tree git-ignored">
+      {ignored.map((entry) => (
+        <li key={entry.path} className="git-file git-file--ignored" data-git-kind="I">
+          <div className="git-file__row" style={{ paddingLeft: indent(0) }} title={t('git.ignoredBy', { rule: `${entry.source}:${entry.line}`, pattern: entry.pattern })}>
+            <span className="git-ignored__pad" />
+            <span className="git-kind" data-kind="I" aria-hidden="true">
+              –
+            </span>
+            <span className="git-file__name">{entry.path}</span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** 보기 옵션 (#390, IntelliJ 의 눈 아이콘 View Options) — 하위 탭 줄의 모두 접기·펴기 옆. 누르면 아래로 작은 메뉴(무시된 파일 보기 체크).
+ *  Esc·바깥으로 닫히고 포커스는 버튼으로 */
+function ViewOptionsButton({ directory }: { directory: string }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!open) return
+    wrapRef.current?.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus()
+    const outside = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [open])
+  useEffect(() => setOpen(false), [directory])
+  const close = (): void => {
+    setOpen(false)
+    buttonRef.current?.focus()
+  }
+  return (
+    <div
+      className="git-view"
+      ref={wrapRef}
+      onKeyDown={(event) => {
+        if (!open || (event.key !== 'Escape' && event.key !== 'Tab')) return
+        event.preventDefault()
+        event.stopPropagation()
+        close()
+      }}
+    >
+      <button type="button" className="git-sub__tool git-view__button" aria-label={t('git.viewOptions')} title={t('git.viewOptions')} aria-haspopup="menu" aria-expanded={open} ref={buttonRef} onClick={() => (open ? close() : setOpen(true))}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" />
+          <circle cx="8" cy="8" r="2" />
+        </svg>
+      </button>
+      {open && <ViewOptionsMenu shown={ignoredShown(directory)} onToggle={() => toggleIgnoredShown(directory)} />}
+    </div>
+  )
+}
+
+export function ViewOptionsMenu({ shown, onToggle }: { shown: boolean; onToggle(): void }) {
+  const t = useT()
+  return (
+    <div className="git-menu git-view__menu" role="menu" aria-label={t('git.viewOptions')}>
+      <button type="button" role="menuitemcheckbox" className="git-menu__item" aria-checked={shown} onClick={onToggle}>
+        <span className="git-view__check" aria-hidden="true">
+          {shown ? '✓' : ''}
+        </span>
+        {t('git.showIgnored')}
+      </button>
+    </div>
   )
 }
 

@@ -595,6 +595,7 @@ function gitBridge(ctx: Context): void {
   handle(ctx, Channel.GIT_REMOTE_BRANCHES, async (_event, directory: unknown) => ctx.git.remoteBranches(await project(directory)))
   handle(ctx, Channel.GIT_LAST_COMMIT, async (_event, directory: unknown) => ctx.git.lastCommit(await project(directory)))
   handle(ctx, Channel.GIT_STASHES, async (_event, directory: unknown) => ctx.git.stashes(await project(directory)))
+  handle(ctx, Channel.GIT_IGNORED, async (_event, directory: unknown) => ctx.git.ignored(await project(directory)))
   // 변경 파일 삭제 (#389) — 휴지통으로 (되살릴 수 있게). 프로젝트 밖 경로는 ctx.git.trash 가 거절한다
   handle(ctx, Channel.GIT_TRASH, async (_event, directory: unknown, file: unknown) => ctx.git.trash(await project(directory), String(file), (absolute) => shell.trashItem(absolute)))
   handle(ctx, Channel.GIT_RUN, async (_event, directory: unknown, action: GitAction) => ctx.git.perform(await project(directory), action))
