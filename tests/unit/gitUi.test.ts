@@ -118,12 +118,13 @@ describe('GitPanel — 정적 그림', () => {
 })
 
 describe('탭 숫자·브랜치 알약', () => {
-  it('변경이 있으면 숫자, 알약은 브랜치 이름과 ● 수. 기능이 꺼졌거나 저장소가 아니면 알약이 없다', async () => {
+  it('변경이 있으면 탭에 숫자, 알약은 브랜치 이름과 ● 만(숫자 없음). 기능이 꺼졌거나 저장소가 아니면 알약이 없다', async () => {
     const directory = await withView(status())
     expect(html(createElement(GitTabCount, { directory }))).toContain('>3</span>')
     const pill = html(createElement(GitBranchPill, { directory }))
     expect(pill).toContain('feat_290_git')
-    expect(pill).toContain('● 3')
+    expect(pill).toContain('>●</span>')
+    expect(pill).not.toContain('● 3')
     expect(html(createElement(GitBranchPill, { directory: await withView({ state: 'not-repo' }) }))).toBe('')
     features.on = new Set()
     expect(html(createElement(GitBranchPill, { directory }))).toBe('')

@@ -88,7 +88,7 @@ export function GitBranchPill({ directory }: { directory: string }) {
       >
         <BranchIcon />
         <span className="git-pill__name">{branch}</span>
-        {count > 0 && <span className="git-pill__dot">● {count}</span>}
+        {count > 0 && <span className="git-pill__dot" aria-hidden="true">●</span>}
       </button>
       {open && <BranchPopup directory={directory} view={view} onClose={close} />}
     </div>
