@@ -38,7 +38,7 @@ When the user invokes this skill as \`/forward <instruction>\`, everything after
    - the task: what to achieve and why
    - every path, value or fact it needs — paste it in, do not say "as discussed here"
    - constraints and how to tell it is done (acceptance)
-3. Show the user the target project and the full draft. Only after they confirm, call \`litecode_send_to_project\` with the draft as \`message\`.
+3. Call \`litecode_send_to_project\` with the draft as \`message\` — do not ask for confirmation in chat first. The approval card shows the full instruction and the target picker (the user can redirect it to a different project/conversation there); that card is the confirmation.
 4. The user may redirect the send to a different project from the approval card — trust the tool's result text (it names the project and conversation that actually received it, with the short id).
 5. Report the outcome (accepted or queued). Offer to check on it later — do not poll in a loop.
 
