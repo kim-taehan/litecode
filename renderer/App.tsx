@@ -71,6 +71,8 @@ export function App() {
    *  activeIds 와 다르다: 그쪽은 이번 실행 동안만이고 빈 새 대화도 가리킨다 */
   const [lastViewed, setLastViewed] = useState<Record<string, string>>({})
   const [switching, setSwitching] = useState(false)
+  /** ⌘K 반복 (#375) — 빠른 열기가 열려 있을 때 ⌘K 마다 1씩 올려 패널이 다음 프로젝트로 순환. 열림 동안은 유지된다 */
+  const [cycle, setCycle] = useState(0)
   /** 폴더를 고르거나 여는 중 — 한 번에 하나만 (dsh ui-workspace) */
   const [picking, setPicking] = useState(false)
   /** 프로젝트를 못 열었을 때의 사유 — 팝오버와 첫 실행 안내에 보인다 */
@@ -395,8 +397,9 @@ export function App() {
     if (outcome === 'failed' && current) setSwitching(true) // 사유를 팝오버에 (프로젝트가 없으면 안내 화면에 보인다)
   }
 
-  async function pickRecent(target: Project): Promise<void> {
-    if ((await pick(() => window.litecode.openProject(target.path), cannotOpen(target.path), target.path)) === 'opened') closeSwitcher(true)
+  /** 빠른 열기에서 고른 프로젝트를 연다. keepOpen 은 ⌘K 순환(#375) — 열면 패널을 유지해 다음 ⌘K로 계속 감 */
+  async function pickRecent(target: Project, keepOpen = false): Promise<void> {
+    if ((await pick(() => window.litecode.openProject(target.path), cannotOpen(target.path), target.path)) === 'opened' && !keepOpen) closeSwitcher(true)
   }
 
   async function toggleFavorite(target: Project): Promise<void> {
@@ -424,20 +427,21 @@ export function App() {
     else setSwitching(true)
   }
 
-  /** ⌘K / Ctrl+K (이슈 #305) — 열려 있으면 닫고, 아니면 연다. 핸들러는 처음 한 번만 끼우고 그 안은 래퍼가 최신이라
-   *  projects·switching 값이 오래되지 않는다 */
+  /** ⌘K / Ctrl+K (이슈 #305) — 닫혀 있으면 연다. 열려 있으면 닫지 말고 다음 프로젝트로 (#375 — 쉽게 순환).
+   *  프로젝트 여는 중(이전의 ⌘K 순환이 아직 끝나지 않았으면) 누른 건 무시한다.
+   *  핸들러는 처음 한 번만 끼우고 그 안은 래퍼가 최신이라 projects·switching·picking 값이 오래되지 않는다 */
   const switchingRef = useRef(switching)
   switchingRef.current = switching
   const toggleSwitcherRef = useRef(toggleSwitcher)
   toggleSwitcherRef.current = toggleSwitcher
-  const closeSwitcherRef = useRef(closeSwitcher)
-  closeSwitcherRef.current = closeSwitcher
+  const pickingRef = useRef(picking)
+  pickingRef.current = picking
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
       event.preventDefault()
-      if (switchingRef.current) closeSwitcherRef.current(false)
-      else toggleSwitcherRef.current()
+      if (!switchingRef.current) toggleSwitcherRef.current()
+      else if (!pickingRef.current) setCycle((count) => count + 1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -622,7 +626,8 @@ export function App() {
   }
 
 
-  // 프로젝트 빠른 열기 (이슈 #305) — 전환 카드 우측(사이드바 옆)에 뜬다 (⌘K 또는 전환 버튼, 2026-10-13 피드백 #1)
+  // 프로젝트 빠른 열기 (이슈 #305) — 전환 카드 우측(사이드바 옆)에 뜬다 (⌘K 또는 전환 버튼, 2026-10-13 피드백 #1).
+  // 열려 있으면 ⌘K 가 다음 프로젝트 순환 (#375)
   const quickOpen = switching && (
     <ProjectQuickOpen
       projects={projects ?? []}
@@ -638,6 +643,8 @@ export function App() {
       onRename={async (target, name) => setProjects(await window.litecode.renameProject(target.path, name))}
       onClose={closeSwitcher}
       switchButton={switchRef}
+      cycle={cycle}
+      onCycle={(picked) => pickRecent(picked, true)}
     />
   )
 
