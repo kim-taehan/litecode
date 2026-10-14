@@ -23,7 +23,7 @@ export interface PanelState {
    *  줄 없이 그 탭을 다시 열면 지워진다 */
   jump?: { key: string; line: number; seq: number }
   /** Git 탭을 열며 고르라고 한 하위 탭 (이슈 #290) — seq 가 오를 때마다 그 하위 탭으로 */
-  gitSub?: { sub: 'changes' | 'log' | 'branches'; seq: number }
+  gitSub?: { sub: 'changes' | 'log'; seq: number }
 }
 
 let current: PanelState | undefined
@@ -129,8 +129,8 @@ export function cycleTerminalTab(directory: string, delta: 1 | -1): boolean {
   return true
 }
 
-/** Git 탭으로 연다 — sub 를 주면 그 하위 탭(브랜치 알약은 'branches') */
-export function openGitTab(directory: string, sub?: 'changes' | 'log' | 'branches'): void {
+/** Git 탭으로 연다 — sub 를 주면 그 하위 탭 (브랜치 탭은 #399 에서 없앴다 — 브랜치는 알약의 팝업에서) */
+export function openGitTab(directory: string, sub?: 'changes' | 'log'): void {
   const state = base(directory)
   set({ ...state, open: true, active: GIT_TAB, focus: state.focus + 1, quiet: false, ...(sub && { gitSub: { sub, seq: ++jumps } }) })
 }

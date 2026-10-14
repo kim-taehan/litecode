@@ -70,10 +70,10 @@ describe('gitStore', () => {
 describe('패널 탭 저장소 — Git 탭', () => {
   it('openGitTab 은 Git 탭을 고르고, 하위 탭을 줄 때마다 seq 가 오른다. 파일 탭과 섞이지 않는다', () => {
     openFilePreview('/g', 'a.ts')
-    openGitTab('/g', 'branches')
+    openGitTab('/g', 'log')
     const first = getPanelState()!
-    expect(first).toMatchObject({ open: true, active: GIT_TAB, tabs: ['a.ts'], gitSub: { sub: 'branches' } })
-    openGitTab('/g', 'branches')
+    expect(first).toMatchObject({ open: true, active: GIT_TAB, tabs: ['a.ts'], gitSub: { sub: 'log' } })
+    openGitTab('/g', 'log')
     expect(getPanelState()!.gitSub!.seq).toBeGreaterThan(first.gitSub!.seq)
     selectTab('a.ts')
     expect(getPanelState()).toMatchObject({ active: 'a.ts', tabs: ['a.ts'] })
@@ -81,14 +81,17 @@ describe('패널 탭 저장소 — Git 탭', () => {
 })
 
 describe('GitPanel — 정적 그림', () => {
-  it('변경: 브랜치·↑↓·가져오기/올리기, 하위 탭 셋, 변경 구역(stage 된 것·안 된 것 한 트리)과 상태 글자·줄 수, 메시지가 없으면 커밋 버튼은 꺼짐', async () => {
+  it('변경: 브랜치·↑↓·가져오기/올리기, 하위 탭 둘(변경·기록 — 브랜치 탭 없음 #399), 변경 구역(stage 된 것·안 된 것 한 트리)과 상태 글자·줄 수, 메시지가 없으면 커밋 버튼은 꺼짐', async () => {
     const directory = await withView(status())
     const out = html(createElement(GitPanel, { directory }))
     expect(out).toContain('feat_290_git')
     expect(out).toContain('↑2 ↓0')
     expect(out).toContain('>가져오기</button>')
     expect(out).toContain('>올리기</button>')
-    for (const tab of ['변경', '기록', '브랜치']) expect(out).toContain(`>${tab}</button>`)
+    expect(out.match(/role="tab"[^>]*>[^<]+</g)?.map((tab) => tab.replace(/^[^]*>/, '').slice(0, -1))).toEqual(['변경', '기록'])
+    expect(out).not.toContain('>브랜치</button>')
+    // 위 줄의 브랜치 이름은 글자뿐 — 누를 곳(브랜치 탭)이 없다
+    expect(out).toMatch(/<span class="git-branch" title="feat_290_git">/)
     expect(out).toContain('변경 <span class="git-sec__n">2개 파일</span>')
     expect(out).toContain('<span class="git-add">+12</span><span class="git-del">−48</span>')
     expect(out).toMatch(/<button type="button" class="attention-card__button attention-card__button--primary" disabled="">1개 파일 커밋<\/button>/)
@@ -353,6 +356,92 @@ describe('브랜치 팝업 — 정적 그림', () => {
   })
 })
 
+// ── 브랜치 줄 메뉴 (이슈 #399 — IntelliJ: 줄의 › · 우클릭 = Checkout · New Branch from · Delete. 브랜치 탭은 없앴다) ──
+
+const { branchMenuGroups, branchMenuEnabled, isBranchMenuKey } = await import('../../renderer/branchPopup.ts')
+const { BranchMenu } = await import('../../renderer/Git.tsx')
+
+describe('브랜치 줄 메뉴 — 순수 규칙', () => {
+  it('로컬 = [전환 · 여기서 새 브랜치] | [삭제], 원격 = 전환만', () => {
+    expect(branchMenuGroups(false)).toEqual([['switch', 'newFrom'], ['delete']])
+    expect(branchMenuGroups(true)).toEqual([['switch']])
+  })
+
+  it('지금 브랜치면 전환·삭제를 끈다 (새 브랜치는 된다)', () => {
+    const now = { name: 'main', current: true, remote: false }
+    const other = { name: 'dev', current: false, remote: false }
+    expect(['switch', 'newFrom', 'delete'].map((item) => branchMenuEnabled(item as never, now))).toEqual([false, true, false])
+    expect(['switch', 'newFrom', 'delete'].map((item) => branchMenuEnabled(item as never, other))).toEqual([true, true, true])
+    expect(branchMenuEnabled('switch', { name: 'origin/main', current: true, remote: true })).toBe(false)
+  })
+
+  it('메뉴를 여는 키 — → · ContextMenu · Shift+F10', () => {
+    expect(isBranchMenuKey({ key: 'ArrowRight', shiftKey: false })).toBe(true)
+    expect(isBranchMenuKey({ key: 'ContextMenu', shiftKey: false })).toBe(true)
+    expect(isBranchMenuKey({ key: 'F10', shiftKey: true })).toBe(true)
+    expect(isBranchMenuKey({ key: 'F10', shiftKey: false })).toBe(false)
+    expect(isBranchMenuKey({ key: 'ArrowLeft', shiftKey: false })).toBe(false)
+  })
+})
+
+describe('브랜치 줄 메뉴 — 정적 그림', () => {
+  const branches = [
+    br('feat_290_git', { current: true, time: 9, upstream: 'origin/feat_290_git', ahead: 2 }),
+    br('dev', { time: 8, upstream: 'origin/dev' }),
+    br('feat_295_jobs_strip', { time: 3 }),
+    br('main', { time: 0 }),
+  ]
+  const list = (extra: Partial<Parameters<typeof BranchList>[0]> = {}) =>
+    html(createElement(BranchList, { view: status(), branches, remotes: [], busy: false, mac: true, onPull() {}, onPush() {}, onCreate() {}, onRevision() {}, onSwitch() {}, onSwitchRemote() {}, ...extra }))
+  const menu = (target: Parameters<typeof BranchMenu>[0]['target']) => html(createElement(BranchMenu, { target, at: { left: 0, top: 0 }, onPick() {}, onClose() {} }))
+
+  it('로컬 브랜치 줄마다(최근·묶음 안·낱개) 오른쪽에 › — 지금 브랜치 줄에도', () => {
+    const out = list()
+    const more = (name: string) => out.match(new RegExp(`aria-label="${name} 메뉴"`, 'g'))?.length ?? 0
+    expect(more('feat_290_git')).toBe(2) // 최근 + 묶음 안
+    expect(more('dev')).toBe(2) // 최근 + 낱개
+    expect(more('main')).toBe(1)
+    expect(out).toMatch(/<div class="branch-pop__row"><button type="button" class="branch-pop__item branch-pop__item--child" disabled="" aria-current="true">[^]*?<\/button><button type="button" class="branch-pop__more" aria-label="feat_290_git 메뉴" title="feat_290_git 메뉴" aria-haspopup="menu">›<\/button><\/div>/)
+    // 작업 중엔 › 도 못 누른다
+    expect(list({ busy: true })).toMatch(/class="branch-pop__more"[^>]*disabled=""/)
+  })
+
+  it('메뉴 — 다른 브랜치: 전환 · 여기서 새 브랜치… | 삭제…(위험), 지금 브랜치: 전환·삭제 꺼짐', () => {
+    const other = menu({ name: 'dev', current: false, remote: false })
+    expect(other).toMatch(/^<div class="git-menu branch-pop__menu" role="menu" aria-label="dev 메뉴"/)
+    expect(other.replace(/<[^>]+>/g, '|').split('|').filter(Boolean)).toEqual(['전환', '여기서 새 브랜치…', '삭제…'])
+    expect(other).toMatch(/<\/button><div class="git-menu__sep" role="separator"><\/div><button type="button" role="menuitem" class="git-menu__item" data-danger="true">삭제…<\/button>/)
+    expect(other).not.toContain('disabled')
+    const now = menu({ name: 'feat_290_git', current: true, remote: false })
+    expect(now).toMatch(/class="git-menu__item" disabled="">전환</)
+    expect(now).toMatch(/class="git-menu__item">여기서 새 브랜치…</)
+    expect(now).toMatch(/class="git-menu__item" data-danger="true" disabled="">삭제…</)
+  })
+
+  it('원격 브랜치 메뉴는 전환만', () => {
+    const remote = menu({ name: 'origin/dev', current: false, remote: true })
+    expect(remote.replace(/<[^>]+>/g, '|').split('|').filter(Boolean)).toEqual(['전환'])
+  })
+
+  it('여기서 새 브랜치 — 새 브랜치 자리에 시작점이 적힌 이름 칸', () => {
+    const out = list({ editing: { from: 'dev' } })
+    expect(out).toContain('aria-label="dev 에서 새 브랜치 이름"')
+    expect(out).not.toContain('새 브랜치 만들기…')
+  })
+
+  it('삭제 확인 카드 — 합쳐지지 않은 커밋이 있으면 경고(위험 버튼), 없으면 보통 버튼', () => {
+    const card = (branch: GitBranch) => html(createElement(ConfirmCard, { confirm: { kind: 'delete', branch }, view: status(), busy: false, onCancel() {}, onAccept: async () => {} }))
+    const unmerged = card(br('feat_295_jobs_strip', { unmerged: 3 }))
+    expect(unmerged).toContain('data-confirm="delete"')
+    expect(unmerged).toContain('data-tone="danger"')
+    expect(unmerged).toContain('feat_295_jobs_strip 는 아직 합쳐지지 않은 커밋 3개가 있습니다.')
+    expect(unmerged).toMatch(/attention-card__button--danger">삭제<\/button>/)
+    const merged = card(br('main'))
+    expect(merged).toContain('main 브랜치를 지웁니다.')
+    expect(merged).toMatch(/attention-card__button--primary">삭제<\/button>/)
+  })
+})
+
 // ── 커밋 영역 (이슈 #387, 시안 Git 탭 재설계 ① Main.dc.html 맨 아래) ──
 
 const { commitControls, commitThenPush, commitNotice } = await import('../../renderer/gitCommit.ts')
@@ -464,7 +553,7 @@ describe('커밋 영역 — 정적 그림 (시안 ①)', () => {
 // ── 변경 파일 우클릭 메뉴·보관함 (#389, 시안 ① Main.dc.html 의 .menu · .file.sel · 보관함 N) ──
 
 const { FILE_MENU, DANGER_ITEMS, entryPaths, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel, menuVisible } = await import('../../renderer/gitMenu.ts')
-const { FileMenu, StashList, ConfirmCard, ViewOptionsMenu } = await import('../../renderer/Git.tsx')
+const { FileMenu, StashButton, StashList, ConfirmCard, ViewOptionsMenu } = await import('../../renderer/Git.tsx')
 
 describe('우클릭 메뉴 — 순수 규칙', () => {
   it('항목 순서·구분선은 시안 그대로 (커밋·되돌리기 | 변경 보기·미리보기 | 패치·보관·.gitignore·exclude (#390) | 삭제), 삭제만 위험', () => {
@@ -564,10 +653,16 @@ describe('우클릭 메뉴 — 정적 그림 (시안 ① .menu)', () => {
 })
 
 describe('보관함 (#389) — 정적 그림', () => {
-  it('하위 탭 줄 오른쪽 — 모두 접기·펴기 · 보기 옵션(#390) 다음에 보관함 N (변경 탭에서만)', async () => {
+  it('하위 탭 줄 오른쪽 — 모두 접기·펴기 · 보기 옵션(#390) 다음에 보관함 N (변경 탭에서만). 보관이 0개면 버튼이 없다 (#399)', async () => {
     const directory = await withView(status())
     const out = html(createElement(GitPanel, { directory }))
-    expect(out).toMatch(/aria-label="모두 접기·펴기"[^]*<\/button><\/div><div class="git-stash"><button type="button" class="git-sub__tool git-stash__button" aria-label="보관\(stash\) 목록" aria-haspopup="dialog" aria-expanded="false"[^>]*>보관함 0<\/button><\/div><\/div>/)
+    expect(out).not.toContain('git-stash')
+    expect(out).not.toContain('보관함')
+    expect(out).toMatch(/aria-label="보기 옵션"[^]*<\/button><\/div><\/div>/) // 보기 옵션이 줄 끝
+    const button = (count: number) =>
+      html(createElement(StashButton, { directory, view: status(), stashes: Array.from({ length: count }, (_, index) => ({ index, hash: String(index).repeat(40), message: `wip ${index}`, time: 0 })), onNotice() {} }))
+    expect(button(0)).toBe('')
+    expect(button(1)).toMatch(/^<div class="git-stash"><button type="button" class="git-sub__tool git-stash__button" aria-label="보관\(stash\) 목록" aria-haspopup="dialog" aria-expanded="false"[^>]*>보관함 1<\/button><\/div>$/)
   })
 
   it('목록 — 줄마다 메시지·브랜치·시각과 [적용]·[삭제], 없으면 빈 글', () => {
@@ -629,7 +724,7 @@ describe('무시된 파일 보기 (#390, IntelliJ 의 보기 옵션)', () => {
     const directory = await withView(status())
     const read = vi.fn(async () => ignored)
     const out = html(createElement(GitPanel, { directory }))
-    expect(out).toMatch(/aria-label="모두 접기·펴기"[^]*<\/button><div class="git-view"><button type="button" class="git-sub__tool git-view__button" aria-label="보기 옵션" title="보기 옵션" aria-haspopup="menu" aria-expanded="false">[^]*<\/button><\/div><div class="git-stash">/)
+    expect(out).toMatch(/aria-label="모두 접기·펴기"[^]*<\/button><div class="git-view"><button type="button" class="git-sub__tool git-view__button" aria-label="보기 옵션" title="보기 옵션" aria-haspopup="menu" aria-expanded="false">[^]*<\/button><\/div><\/div>/)
     expect(ignoredShown(directory)).toBe(false)
     expect(out).not.toContain('git-file--ignored')
     expect(read).not.toHaveBeenCalled()

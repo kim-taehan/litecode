@@ -62,7 +62,7 @@
 .git-bar__spacer { flex: 1; }
 .git-bar .file-preview__toggle:disabled { opacity: 0.45; cursor: default; }
 
-/* 하위 탭 — 변경 · 기록 · 브랜치 */
+/* 하위 탭 — 변경 · 기록 (브랜치 탭은 #399 에서 없앴다) */
 .git-sub {
   flex: none;
   display: flex;
@@ -332,25 +332,6 @@
 .git-tag { padding: 0 6px; border-radius: 999px; background: var(--module); color: var(--text-secondary); font-size: 11px; line-height: 16px; }
 .git-tag--local { background: var(--warn-soft); color: var(--warn); }
 
-/* 브랜치 */
-.git-branches { margin: 0; padding: 6px 6px; list-style: none; font-size: 13px; line-height: 20px; }
-.git-branches__item { display: flex; align-items: center; gap: 2px; }
-.git-branches__row:disabled { cursor: default; }
-.git-branches__row:disabled:hover { background: none; }
-.git-branches__check { flex: none; width: 14px; color: var(--ok); }
-.git-branches__name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-}
-.git-branches__item[data-current] .git-branches__name { font-weight: 600; }
-.git-branches__meta { flex: none; color: var(--text-caption); font-size: 12px; white-space: nowrap; }
-.git-branches__add { color: var(--accent); }
-.git-branches__new { flex: 1; display: flex; gap: 6px; padding: 2px 6px; }
-
 /* 커밋 입력 — 패널 아래 */
 .git-commit {
   flex: none;
@@ -533,6 +514,28 @@
 .branch-pop__empty { margin: 0; padding: 7px 9px; color: var(--text-caption); }
 .branch-pop__error { margin: 0 0 4px; padding: 6px 9px; border-radius: 7px; background: var(--danger-bg); color: var(--danger); }
 .branch-pop .git-confirm { margin: 0; }
+
+/* 브랜치 줄 + 오른쪽 › (#399, IntelliJ 줄 메뉴) — › 는 늘 보인다(시안 ② 스크린샷). 메뉴는 .git-menu 를 팝업 안에 fixed 로 */
+.branch-pop__row { display: flex; align-items: center; }
+.branch-pop__row > .branch-pop__item { flex: 1; min-width: 0; }
+.branch-pop__more {
+  flex: none;
+  width: 20px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-caption);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.branch-pop__more:hover:not(:disabled),
+.branch-pop__more:focus-visible { background: var(--fill-hover); color: var(--text); outline: none; }
+.branch-pop__more:disabled { cursor: default; opacity: 0.45; }
+.branch-pop__menu { width: 200px; }
 
 /* ── 변경 파일 우클릭 메뉴 (이슈 #389, 시안 ① .menu·.mi·.sep·.file.sel) — 236 폭·10 모서리·5 여백, 항목 26, 오른쪽 단축키 11px mono, 삭제는 빨강.
    마우스 자리에 fixed 로 뜬다 (패널이 스크롤돼도 잘리지 않게). 고른 줄은 fill-active ── */
