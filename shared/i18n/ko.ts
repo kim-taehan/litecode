@@ -1210,15 +1210,6 @@ export const ko = {
   'delegate.pick.send': '{project} 에 보내기',
   'delegate.pick.sendNone': '보내기',
   'delegate.card.note': '받는 대화는 따로 돕니다. 이 대화를 멈춰도 계속됩니다.',
-  // Projects 탭 (이슈 #341) — 다른 프로젝트의 마지막에 보던 대화에 지시를 직접 보내기
-  'projects.tab': '프로젝트',
-  'projects.empty': '지시를 보낼 다른 프로젝트가 없습니다. 다른 프로젝트에서 대화를 열어 보면 여기에 나옵니다.',
-  'projects.to': '지시 → {name} · {title}',
-  'projects.placeholder': '보낼 지시 — 그 대화는 이 회화를 보지 못하니 필요한 맥락을 모두 넣어 주세요',
-  'projects.send': '보내기',
-  'projects.sent': '"{project}" 에 보냈습니다',
-  'projects.queued': '"{project}" 대기열에 들어갔습니다 (앞에 {ahead}개)',
-  'projects.unusable': '모델을 사용할 수 없습니다',
   // 대화로 스킬·MCP 서버·훅 만들기 (이슈 #145) — 승인 카드
   'make.skill.head': '스킬 만들기',
   'make.skill.scope': '저장할 곳',

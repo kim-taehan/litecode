@@ -812,7 +812,7 @@ export function App() {
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
       <ErrorBoundary scope="section" className="crash--side" resetKey={active?.project}>
-        <FilePreviewPanel directory={active?.project} fromId={active?.id} fromTitle={active?.title} targets={delegation.targets} />
+        <FilePreviewPanel directory={active?.project} />
       </ErrorBoundary>
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
