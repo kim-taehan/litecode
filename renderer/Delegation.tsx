@@ -1,4 +1,4 @@
-import { createContext, Fragment, useContext, useEffect, useState } from 'react'
+import { createContext, Fragment, useContext, useEffect, useRef, useState } from 'react'
 import type { Mode } from '../shared/ipc.ts'
 import type { MessageOrigin } from '../shared/contract.ts'
 import { DEFAULT_MODE } from '../shared/modes.ts'
@@ -139,6 +139,18 @@ export function TargetPickerBody({ picker, selected, disabled, onSelect }: { pic
   const chosen = picker.choices.find((choice) => choice.key === selected)
   // 상한(PICK_CONVERSATION_LIMIT)을 넘어 접힌 대화 펼치기 (#351) — 프로젝트 id 로. 새 요청은 카드가 다시 태어나 이 상태도 비어 시작한다
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  // 우선 선택된 줄은 목록의 스크롤 범위(max-height 240px) 밖일 수 있다 (프로젝트·대화가 늘어난 #351) — 보여질 때까지 스크롤한다
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const list = listRef.current
+    if (!list || !selected) return
+    const row = list.querySelector<HTMLElement>(`[data-target='${CSS.escape(selected)}']`)
+    if (!row) return
+    const box = list.getBoundingClientRect()
+    const rect = row.getBoundingClientRect()
+    if (rect.top < box.top) list.scrollTop += rect.top - box.top - 4
+    else if (rect.bottom > box.bottom) list.scrollTop += rect.bottom - box.bottom + 4
+  }, [selected])
   const toggle = (projectId: string): void =>
     setExpanded((now) => {
       const next = new Set(now)
@@ -170,7 +182,7 @@ export function TargetPickerBody({ picker, selected, disabled, onSelect }: { pic
         </div>
       )}
       {picker.choices.length > 0 && (
-        <div className="target-picker" role="radiogroup" aria-label={t('delegate.pick.head')}>
+        <div ref={listRef} className="target-picker" role="radiogroup" aria-label={t('delegate.pick.head')}>
           {groups.map((group) => (
             <Fragment key={group.projectId}>
               <div className="target-picker__project">
