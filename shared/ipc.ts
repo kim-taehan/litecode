@@ -23,7 +23,7 @@ import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, Spee
 import type { UpdateStatus } from './updates.ts'
 import type { Goal } from './goal.ts'
 import type { GoalReply } from '../src/services/goal.ts'
-import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitResult, GitStash, GitView } from './git.ts'
+import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
 import type { DelegationSent } from '../src/services/delegation.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -227,6 +227,7 @@ export const Channel = {
   GIT_DIFF: 'git:diff',
   /** 화면 → 메인 (directory) → GitCommit[] */
   GIT_LOG: 'git:log',
+  GIT_LOG_PAGE: 'git:log-page',
   /** 화면 → 메인 (directory) → GitBranch[] */
   GIT_BRANCHES: 'git:branches',
   /** 화면 → 메인 (directory) → string[] — 원격 브랜치 이름(`origin/x`, 원격의 HEAD 제외). 브랜치 팝업(#386) */
@@ -494,6 +495,8 @@ export interface LitecodeBridge {
   gitView(directory: string): Promise<GitView>
   gitDiff(directory: string, path: string, staged: boolean | 'head'): Promise<string>
   gitLog(directory: string): Promise<GitCommit[]>
+  /** 기록 탭 페이징 (#400) — 부모·레프가 있는 커밋 한 페이지. limit 기본 200 */
+  gitLogPage(directory: string, query?: GitLogPageQuery): Promise<GitLogPage>
   gitBranches(directory: string): Promise<GitBranch[]>
   gitRemoteBranches(directory: string): Promise<string[]>
   gitLastCommit(directory: string): Promise<GitLastCommit | undefined>

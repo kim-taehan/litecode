@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Context, Service } from 'cordis'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { GitService, parseBranchLine, parseNumstat, parseStashList, parseStatus, remoteFailure } from '../../src/services/git.ts'
+import { GitService, parseBranchLine, parseNumstat, parseRefs, parseStashList, parseStatus, remoteFailure } from '../../src/services/git.ts'
 import { GitTools } from '../../src/services/appMcp/tools/git.ts'
 import type { AppMcpTool } from '../../src/services/appMcp/rpc.ts'
 import { GIT_READ_TOOLS, GIT_WRITE_TOOLS, gitApprovalText, gitWebUrl, ignoreLine } from '../../shared/git.ts'
@@ -69,6 +69,18 @@ async function repo(): Promise<string> {
   return dir
 }
 
+/** 직선 커밋 N 개 — git commit 루프 대신 fast-import 로 한 프로세스(메시지만 바뀐다). 첫 커밋의 부모는 지금 끝(분기가
+ *  이미 있는 데서), 그 뒤는 스트림 안의 앞 커밋이 자동 부모가 된다 — 수천 개도 즉시 */
+function lineCommits(dir: string, count: number): void {
+  const from = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  let script = ''
+  for (let i = 1; i <= count; i++) {
+    const msg = `line ${i}\n`
+    script += `commit refs/heads/main\nauthor Tester <t@example.com> 1760000000 +0000\ncommitter Tester <t@example.com> 1760000000 +0000\ndata ${msg.length}\n${msg}${i === 1 ? `from ${from}\n` : ''}\n`
+  }
+  execFileSync('git', ['fast-import', '--quiet'], { cwd: dir, encoding: 'utf8', input: script })
+}
+
 describe('순수 규칙', () => {
   it('브랜치 줄 — upstream·ahead/behind, 첫 커밋 전, 분리된 HEAD', () => {
     expect(parseBranchLine('## main...origin/main [ahead 1, behind 2]')).toEqual({ branch: 'main', upstream: 'origin/main', ahead: 1, behind: 2, hasCommits: true })
@@ -109,6 +121,21 @@ describe('순수 규칙', () => {
     expect(gitWebUrl('https://user@host/team/app.git')).toBe('https://host/team/app')
     expect(gitWebUrl('/srv/repos/app.git')).toBeUndefined()
     expect(gitWebUrl(undefined)).toBeUndefined()
+  })
+
+  it('decorate → 레프 (#400) — HEAD(브랜치 위·분리) · 브랜치 · 원격 · 태그', () => {
+    const remotes = new Set(['origin'])
+    expect(parseRefs('HEAD -> dev, origin/dev, origin/HEAD, tag: v1', remotes)).toEqual([
+      { kind: 'head', name: 'dev' },
+      { kind: 'remote', name: 'origin/dev' },
+      { kind: 'remote', name: 'origin/HEAD' },
+      { kind: 'tag', name: 'v1' },
+    ])
+    expect(parseRefs('HEAD', remotes)).toEqual([{ kind: 'head', name: '' }]) // 분리된 HEAD
+    expect(parseRefs('dev', remotes)).toEqual([{ kind: 'branch', name: 'dev' }])
+    expect(parseRefs('feat/foo', remotes)).toEqual([{ kind: 'branch', name: 'feat/foo' }]) // / 있어도 원격이 아니면 로컬
+    expect(parseRefs('origin/feat/foo', remotes)).toEqual([{ kind: 'remote', name: 'origin/feat/foo' }])
+    expect(parseRefs('', remotes)).toEqual([])
   })
 
   it('승인 카드 글 — 커밋 메시지·브랜치 이름·파일', () => {
@@ -495,6 +522,107 @@ describe.skipIf(!hasGit)('GitService — 진짜 git', () => {
     expect(await git.push(dir)).toMatchObject({ ok: false, reason: 'rejected' })
     expect((await git.log(dir))[0]).toMatchObject({ subject: 'third', pushed: false })
     expect(await git.lastCommit(dir)).toEqual({ message: 'third', pushed: false })
+  })
+})
+
+describe.skipIf(!hasGit)('GitService — 기록 페이징 logPage (#400 #403)', () => {
+  it('parents·refs — 분기 후 머지 · 태그 · special characters, 머지 첫 부모가 main 끝', async () => {
+    const { git } = await start()
+    const dir = await repo() // 첫 커밋('first', main)
+    sh(dir, 'checkout', '-q', '-b', 'side')
+    await fs.writeFile(path.join(dir, 'b.txt'), 'b\n')
+    sh(dir, 'add', '.')
+    sh(dir, 'commit', '-qm', 'on side')
+    sh(dir, 'checkout', '-q', 'main')
+    await fs.writeFile(path.join(dir, 'c.txt'), 'c\n')
+    sh(dir, 'add', '.')
+    sh(dir, 'commit', '-qm', 'on main ! (100%)')
+    sh(dir, 'merge', '-q', '--no-ff', 'side', '-m', 'merge side')
+    sh(dir, 'tag', 'v1')
+
+    const page = await git.logPage(dir, { limit: 10 })
+    expect(page.hasMore).toBe(false)
+    // --topo-order 는 부모 순서를 보장하지 않으므로(첫·두 번째 부모 줄의 상대 순서) — 집합으로 보고, 각 줄은 제목으로 찾는다
+    expect(new Set(page.commits.map((m) => m.subject))).toEqual(new Set(['merge side', 'on main ! (100%)', 'on side', 'first']))
+    const [merge] = page.commits
+    const onMain = page.commits.find((m) => m.subject === 'on main ! (100%)')!
+    const onSide = page.commits.find((m) => m.subject === 'on side')!
+    const first = page.commits.find((m) => m.subject === 'first')!
+    expect(merge.parents.length).toBe(2)
+    expect(merge.parents[0]).toBe(onMain.hash) // 첫 부모 = main 의 끝
+    expect(merge.parents[1]).toBe(onSide.hash)
+    expect(onMain.parents).toEqual([first.hash])
+    expect(onSide.parents).toEqual([first.hash])
+    expect(first.parents).toEqual([])
+    expect(merge.refs).toEqual([
+      { kind: 'head', name: 'main' },
+      { kind: 'tag', name: 'v1' },
+    ])
+    expect(onMain.refs).toEqual([])
+    expect(merge.short.length).toBeGreaterThanOrEqual(7)
+  })
+
+  it('push 판정 — bare 원격: 올린 것은 true, 그 뒤 로컬 커밋은 false. refs 의 원격도 보인다', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    const bare = path.join(await folder('remote'), 'r.git')
+    sh(tmp, 'init', '-q', '--bare', bare)
+    sh(dir, 'remote', 'add', 'origin', bare)
+    sh(dir, 'push', '-q', '-u', 'origin', 'main')
+    await fs.writeFile(path.join(dir, 'a.txt'), 'local\n')
+    sh(dir, 'add', '.')
+    sh(dir, 'commit', '-qm', 'local only')
+    const page = await git.logPage(dir, { limit: 10 })
+    expect(page.commits.map((m) => m.pushed)).toEqual([false, true])
+    const [local, pushed] = page.commits
+    expect(local.refs).toEqual([{ kind: 'head', name: 'main' }])
+    expect(pushed.refs).toEqual([{ kind: 'remote', name: 'origin/main' }])
+  })
+
+  it('페이징 — hasMore 로 이어 읽으면 전체와 일치하고, 페이지 경계에서 부모가 이어진다', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    lineCommits(dir, 300)
+    const pages = await Promise.all([git.logPage(dir, { skip: 0, limit: 200 }), git.logPage(dir, { skip: 200, limit: 200 })])
+    expect(pages[0].hasMore).toBe(true)
+    expect(pages[1].hasMore).toBe(false)
+    expect(pages[0].commits.map((m) => m.subject)).toEqual(Array.from({ length: 200 }, (_, i) => `line ${300 - i}`))
+    expect(pages[1].commits.map((m) => m.subject)).toEqual([...Array.from({ length: 100 }, (_, i) => `line ${100 - i}`), 'first'])
+    // 페이지 경계 — 첫 페이지 마지막 커밋의 부모가 두 페이지 첫 커밋 (부모가 밖으로 가도 해시로 이어진다)
+    expect(pages[0].commits[199].parents[0]).toBe(pages[1].commits[0].hash)
+    const total = [...pages[0].commits, ...pages[1].commits]
+    expect(total).toHaveLength(301)
+    expect(new Set(total.map((m) => m.hash)).size).toBe(301)
+  })
+
+  it('큰 저장소 — 1500 개 커밋, 깊은 skip 도 페이지가 맞고 속도 상한 안', async () => {
+    const { git } = await start()
+    const dir = await repo()
+    lineCommits(dir, 1500)
+    const started = Date.now()
+    const all: { hash: string }[] = []
+    for (let skip = 0; ; skip += 200) {
+      const page = await git.logPage(dir, { skip, limit: 200 })
+      all.push(...page.commits)
+      if (!page.hasMore) break
+    }
+    expect(Date.now() - started).toBeLessThan(20_000) // 8 페이지 읽기 — 속도 붕괴를 잡는 느슨한 상한
+    expect(all).toHaveLength(1501)
+    expect(new Set(all.map((m) => m.hash)).size).toBe(1501)
+
+    const deep = await git.logPage(dir, { skip: 1400, limit: 100 })
+    expect(deep.commits).toHaveLength(100)
+    expect(deep.hasMore).toBe(true) // 'first' 가 아직 한 개 남음
+    expect(deep.commits[0].subject).toBe('line 100')
+    expect(deep.commits[99].subject).toBe('line 1')
+    expect((await git.logPage(dir, { skip: 1401, limit: 100 })).commits.map((m) => m.subject)).toEqual([...Array.from({ length: 99 }, (_, i) => `line ${99 - i}`), 'first'])
+  })
+
+  it('첫 커밋 전 — 빈 페이지', async () => {
+    const { git } = await start()
+    const dir = await folder('empty')
+    sh(dir, 'init', '-q')
+    expect(await git.logPage(dir)).toEqual({ commits: [], hasMore: false })
   })
 })
 

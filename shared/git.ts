@@ -46,6 +46,33 @@ export interface GitCommit {
   pushed: boolean
 }
 
+/** 커밋을 가리키는 레프 (%D 파싱, 기록 탭 #400) — head: HEAD(브랜치 위면 name = 그 브랜치, 분리된 HEAD 면 이름 없음) · branch: 로컬 브랜치 ·
+ *  remote: 원격 브랜치(`origin/…`) · tag: 태그 */
+export interface GitLogRef {
+  kind: 'head' | 'branch' | 'remote' | 'tag'
+  name: string
+}
+
+/** 기록 탭(#400) 커밋 — GitCommit 에 더해서 그래프를 그릴 부모와 칩을 그릴 레프 */
+export interface GitLogCommit extends GitCommit {
+  /** 부모 해시 (첫 부모 0, 머지는 그 뒤) — root 는 없다 */
+  parents: string[]
+  refs: GitLogRef[]
+}
+
+export interface GitLogPage {
+  commits: GitLogCommit[]
+  hasMore: boolean
+}
+
+/** 기록 탭 페이징 읽기 (#400) — P1 은 skip·limit 만 (검색·필터는 P3 에 같은 인자에 더한다) */
+export interface GitLogPageQuery {
+  /** 최근 쪽에서 몇 개를 거를 가 */
+  skip?: number
+  /** 페이지 크기 (기본 200) */
+  limit?: number
+}
+
 /** 마지막 커밋 (#387 마지막 커밋 고치기) — 전체 메시지와 올렸는지 */
 export interface GitLastCommit {
   message: string

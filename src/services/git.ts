@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { Context, Service } from 'cordis'
 import { execProgram } from './exec.ts'
-import { ignoreLine, type GitAction, type GitBranch, type GitCommit, type GitFailure, type GitFile, type GitFileKind, type GitIgnored, type GitIgnoreWhere, type GitLastCommit, type GitResult, type GitStash, type GitStatus, type GitView } from '../../shared/git.ts'
+import { ignoreLine, type GitAction, type GitBranch, type GitCommit, type GitFailure, type GitFile, type GitFileKind, type GitIgnored, type GitIgnoreWhere, type GitLastCommit, type GitLogCommit, type GitLogPage, type GitLogPageQuery, type GitLogRef, type GitResult, type GitStash, type GitStatus, type GitView } from '../../shared/git.ts'
 
 // Git (ctx.git, 이슈 #290 — 시안 _workspace/mock-git/Git.dc.html). 시스템 git 을 인자 배열로 띄운다(exec.ts execProgram — 셸 글 없음).
 // 화면(Git 탭)과 AI 도구(appMcp/tools/git.ts)가 같은 메서드를 쓴다. 엔진·Electron 을 모른다 — 폴더는 부르는 쪽이 준다(IPC 는 등록된 프로젝트만).
@@ -39,6 +39,9 @@ const MAX_OUTPUT = 4 * 1024 * 1024
 /** 화면·모델에 줄 diff 의 상한 */
 export const GIT_DIFF_MAX = 200 * 1024
 const LOG_LIMIT = 50
+/** 기록 탭(#400) 한 페이지 크기 — 200개를 한 번에 읽고 내려가며 이어서 (P2 화면) */
+const LOG_PAGE_SIZE = 200
+const LOG_PAGE_MAX = 500
 
 const READ_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', '-c', 'color.ui=false']
 const ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_MERGE_AUTOEDIT: 'no', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANGUAGE: 'C' }
@@ -173,6 +176,34 @@ export function parseCheckIgnore(text: string): Map<string, IgnoreRule> {
   return rules
 }
 
+/** `%D`(decorate) → 레프 — `HEAD -> dev` = head(name dev) · `HEAD` = head(이름 없음, 분리된 HEAD) · `tag: v1` = tag ·
+ *  `/` 가 있고 첫 구분이 원격 이름이면 remote(`origin/dev` — 브랜치 이름에 `/` 가 있어도 원격 이름으로 안 만들면 로컬이 된다) · 그 밖은 로컬 브랜치 */
+export function parseRefs(decorate: string, remotes: ReadonlySet<string>): GitLogRef[] {
+  if (!decorate) return []
+  const refs: GitLogRef[] = []
+  for (const raw of decorate.split(', ')) {
+    if (!raw) continue
+    if (raw === 'HEAD') {
+      refs.push({ kind: 'head', name: '' })
+      continue
+    }
+    const head = /^HEAD -> (.+)$/.exec(raw)
+    if (head) {
+      refs.push({ kind: 'head', name: head[1] })
+      continue
+    }
+    const tag = /^tag: (.+)$/.exec(raw)
+    if (tag) {
+      refs.push({ kind: 'tag', name: tag[1] })
+      continue
+    }
+    const slash = raw.indexOf('/')
+    if (slash > 0 && remotes.has(raw.slice(0, slash))) refs.push({ kind: 'remote', name: raw })
+    else refs.push({ kind: 'branch', name: raw })
+  }
+  return refs
+}
+
 const withStats = (files: GitFile[], stats: Map<string, { added: number; removed: number }>): GitFile[] => files.map((file) => ({ ...file, ...stats.get(file.path) }))
 
 export class GitService extends Service {
@@ -304,6 +335,39 @@ export class GitService extends Service {
         const [hash = '', short = '', subject = '', author = '', time = '0'] = record.split('\x1f')
         return { hash, short, subject, author, time: Number(time) * 1000, pushed: !local.has(hash) }
       })
+  }
+
+  /** 기록 탭 페이징 읽기 (#400 #403) — 최근부터 skip·limit. 커밋에 parents(그래프)·refs(칩) 가 담기며, '올리지 않음' 은
+   *  rev-list 의 안 올린 해시 집합(상한 skip+limit)으로 한 번에 판정한다(페이지마다 재계산 안 함).
+   *  limit+1 개를 읽어 hasMore 를 판정한다. 순서(최근→옛순)는 git log --graph 와 같은 --topo-order — 그래프가
+   *  갈라지는 모양(첫 부모 줄)이 정돈된다(큰 저장소 속도 문제는 #403 확인 항목). AI 도구의 git_log 는 별개 log 를 쓴다 */
+  async logPage(directory: string, query: GitLogPageQuery = {}): Promise<GitLogPage> {
+    const root = await this.root(directory)
+    if (!(await this.exists(root, 'HEAD'))) return { commits: [], hasMore: false }
+    const skip = Math.min(LOG_PAGE_MAX * 1000, Math.max(0, Math.trunc(query.skip || 0)))
+    const limit = Math.min(LOG_PAGE_MAX, Math.max(1, Math.trunc(query.limit || LOG_PAGE_SIZE)))
+    const [out, unpushed, remotes] = await Promise.all([
+      this.must(root, [...READ_FLAGS, 'log', '--topo-order', `--skip=${skip}`, `-n${limit + 1}`, '--format=%H%x1f%P%x1f%h%x1f%D%x1f%s%x1f%an%x1f%at%x1e']),
+      this.run(root, ['rev-list', `-n${skip + limit}`, 'HEAD', '--not', '--remotes']),
+      this.run(root, ['remote']),
+    ])
+    const local = new Set(unpushed.stdout.split('\n').filter(Boolean))
+    const remoteNames = new Set(remotes.stdout.split('\n').map((s) => s.trim()).filter(Boolean))
+    const records = out.split('\x1e').map((record) => record.trim()).filter(Boolean)
+    const commits: GitLogCommit[] = records.slice(0, limit).map((record) => {
+      const [hash = '', parentsRaw = '', short = '', decorate = '', subject = '', author = '', time = '0'] = record.split('\x1f')
+      return {
+        hash,
+        short,
+        parents: parentsRaw.split(' ').filter((p) => p !== ''),
+        subject,
+        author,
+        time: Number(time) * 1000,
+        pushed: !local.has(hash),
+        refs: parseRefs(decorate, remoteNames),
+      }
+    })
+    return { commits, hasMore: records.length > limit }
   }
 
   async branches(directory: string): Promise<GitBranch[]> {

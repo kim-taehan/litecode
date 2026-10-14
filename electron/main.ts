@@ -65,7 +65,7 @@ import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
 import { TaskTools } from '../src/services/appMcp/tools/tasks.ts'
 import { GitService } from '../src/services/git.ts'
 import { GitTools } from '../src/services/appMcp/tools/git.ts'
-import { gitWebUrl, type GitAction } from '../shared/git.ts'
+import { gitWebUrl, type GitAction, type GitLogPageQuery } from '../shared/git.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
@@ -591,6 +591,17 @@ function gitBridge(ctx: Context): void {
   handle(ctx, Channel.GIT_VIEW, async (_event, directory: unknown) => ctx.git.view(await project(directory)))
   handle(ctx, Channel.GIT_DIFF, async (_event, directory: unknown, file: unknown, staged: unknown) => ctx.git.diff(await project(directory), String(file), staged === 'head' ? 'head' : staged === true))
   handle(ctx, Channel.GIT_LOG, async (_event, directory: unknown) => ctx.git.log(await project(directory)))
+  // 기록 탭 페이징 (#400) — query 는 skip·limit 두 숫자만 (화면이 줘도 여기서만 본다)
+  handle(ctx, Channel.GIT_LOG_PAGE, async (_event, directory: unknown, query: unknown) => {
+    const record = query && typeof query === 'object' ? (query as Record<string, unknown>) : {}
+    const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined)
+    const page: GitLogPageQuery = {}
+    const skip = num(record['skip'])
+    if (skip !== undefined) page.skip = skip
+    const limit = num(record['limit'])
+    if (limit !== undefined) page.limit = limit
+    return ctx.git.logPage(await project(directory), page)
+  })
   handle(ctx, Channel.GIT_BRANCHES, async (_event, directory: unknown) => ctx.git.branches(await project(directory)))
   handle(ctx, Channel.GIT_REMOTE_BRANCHES, async (_event, directory: unknown) => ctx.git.remoteBranches(await project(directory)))
   handle(ctx, Channel.GIT_LAST_COMMIT, async (_event, directory: unknown) => ctx.git.lastCommit(await project(directory)))
