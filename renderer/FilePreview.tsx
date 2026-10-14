@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { DirectoryListing, FilePreview, HtmlAsset } from '../shared/ipc.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
-import { BranchIcon, GitPanel, GitTabCount } from './Git.tsx'
+import { GitPanel, GitTabCount } from './Git.tsx'
+import { BranchIcon } from './GitIcons.tsx'
 import {
   GIT_TAB,
   PROJECTS_TAB,

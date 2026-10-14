@@ -3,8 +3,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import type { Attention } from '../../shared/contract.ts'
-import type { GitBranch, GitStatus, GitView } from '../../shared/git.ts'
-import { changeCount, gitViewOf, ignoredShown, refreshGit, refreshIgnored, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown } from '../../renderer/gitStore.ts'
+import type { GitBranch, GitLogCommit, GitLogPage, GitStatus, GitView } from '../../shared/git.ts'
+import { appendLogGit, changeCount, gitViewOf, ignoredShown, logGitOf, refreshGit, refreshIgnored, refreshLogGit, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown } from '../../renderer/gitStore.ts'
+import { GitLog } from '../../renderer/GitLog.tsx'
+import { logChips, logWhen } from '../../renderer/logLine.ts'
 import { SECTION_UNTRACKED } from '../../renderer/gitTree.ts'
 import { GIT_TAB, getPanelState, openFilePreview, openGitTab, selectTab } from '../../renderer/filePreviewStore.ts'
 
@@ -760,5 +762,161 @@ describe('무시된 파일 보기 (#390, IntelliJ 의 보기 옵션)', () => {
     expect(out).toMatch(/<div class="git-sec git-sec--untracked"><input type="checkbox" class="git-check" data-state="off" disabled=""[^>]*aria-label="새 파일 모두 스테이지"\/>/)
     expect(out).toContain('git-file--ignored')
     expect(out).not.toContain('깨끗합니다')
+  })
+})
+
+// ── 기록 탭 (#400 #405, 시안 ⑤) ──
+
+const logCommit = (hash: string, extra: Partial<GitLogCommit> = {}): GitLogCommit => ({
+  hash,
+  short: hash.slice(0, 7),
+  subject: '제목',
+  author: 'kim',
+  time: 0,
+  pushed: true,
+  parents: [],
+  refs: [],
+  ...extra,
+})
+
+describe('logLine — 둘째 줄 때와 칩 (순수)', () => {
+  const now = new Date(2026, 9, 14, 17, 12).getTime() // 목요일 오후 5:12
+  it('오늘/어제는 요일 + 12시간제 시각, 그 밖은 YYYY. M. D.', () => {
+    expect(logWhen(new Date(2026, 9, 14, 5, 12).getTime(), now)).toBe('오늘 AM 5:12')
+    expect(logWhen(now, now)).toBe('오늘 PM 5:12')
+    expect(logWhen(new Date(2026, 9, 14, 12, 0).getTime(), now)).toBe('오늘 PM 12:00')
+    expect(logWhen(new Date(2026, 9, 14, 0, 5).getTime(), now)).toBe('오늘 AM 12:05')
+    expect(logWhen(new Date(2026, 9, 13, 9, 5).getTime(), now)).toBe('어제 AM 9:05')
+    expect(logWhen(new Date(2026, 9, 12, 9, 5).getTime(), now)).toBe('2026. 10. 12.')
+    expect(logWhen(new Date(2026, 0, 3, 15, 7).getTime(), now)).toBe('2026. 1. 3.')
+  })
+
+  it('칩 — 원격(origin/x)과 같은 이름 브랜치·HEAD 는 합치고, 브랜치·태그는 따로, origin/HEAD 는 없다', () => {
+    expect(logChips(logCommit('a', { refs: [{ kind: 'head', name: 'main' }, { kind: 'remote', name: 'origin/main' }] }))).toEqual([
+      { icon: 'branch', text: 'origin & main' },
+    ])
+    expect(
+      logChips(
+        logCommit('b', {
+          refs: [
+            { kind: 'head', name: 'feat' },
+            { kind: 'branch', name: 'main' },
+            { kind: 'remote', name: 'origin/feat' },
+            { kind: 'remote', name: 'origin/main' },
+          ],
+        }),
+      ),
+    ).toEqual([
+      { icon: 'branch', text: 'origin & feat' },
+      { icon: 'branch', text: 'origin & main' },
+    ])
+    expect(logChips(logCommit('c', { refs: [{ kind: 'remote', name: 'origin/release' }] }))).toEqual([{ icon: 'branch', text: 'origin/release' }])
+    expect(
+      logChips(
+        logCommit('d', {
+          refs: [
+            { kind: 'head', name: 'main' },
+            { kind: 'remote', name: 'origin/main' },
+            { kind: 'remote', name: 'origin/HEAD' },
+            { kind: 'tag', name: 'v1' },
+          ],
+        }),
+      ),
+    ).toEqual([
+      { icon: 'branch', text: 'origin & main' },
+      { icon: 'tag', text: 'v1' },
+    ])
+    expect(logChips(logCommit('e'))).toEqual([])
+  })
+})
+
+describe('gitStore — 기록 페이징 (#403 화면 쪽)', () => {
+  const page = (hashes: string[], hasMore: boolean): GitLogPage & { commits: GitLogCommit[] } => ({ commits: hashes.map((h) => logCommit(h)), hasMore })
+
+  it('첫 페이지 읽고 덧붙이고 — 마감이면 더 안 읽는다', async () => {
+    const pages = [page(['a', 'b'], true), page(['c', 'd'], true), page(['e'], false)]
+    const calls: (number | undefined)[] = []
+    const fake = async (_dir: string, query?: { skip?: number }): Promise<GitLogPage> => {
+      const skip = query?.skip ?? 0
+      calls.push(skip)
+      return pages[skip / 2]!
+    }
+    await refreshLogGit('/log-1', fake)
+    expect(logGitOf('/log-1')).toEqual({ commits: pages[0]!.commits, hasMore: true, reading: false })
+    await appendLogGit('/log-1', fake)
+    expect(logGitOf('/log-1')!.commits.map((c) => c.hash)).toEqual(['a', 'b', 'c', 'd'])
+    await appendLogGit('/log-1', fake)
+    expect(logGitOf('/log-1')).toEqual({ commits: pages.flatMap((p) => p.commits), hasMore: false, reading: false })
+    await appendLogGit('/log-1', fake) // 마감 — 읽지도 않고
+    expect(calls).toEqual([0, 2, 4])
+    expect(logGitOf('/log-1')!.commits).toHaveLength(5)
+  })
+
+  it('다시 읽으면 맨 처음부터 — 읽던 옛 답은 버린다', async () => {
+    let resolveFirst!: (p: GitLogPage) => void
+    const slow = refreshLogGit('/log-2', () => new Promise<GitLogPage>((resolve) => (resolveFirst = resolve)))
+    await refreshLogGit('/log-2', async () => page(['z'], false))
+    resolveFirst(page(['old'], true))
+    await slow
+    expect(logGitOf('/log-2')!.commits.map((c) => c.hash)).toEqual(['z'])
+  })
+
+  it('읽는 중이면 덧붙이지 않다', async () => {
+    let resolve!: (p: GitLogPage) => void
+    const first = refreshLogGit('/log-3', () => new Promise<GitLogPage>((r) => (resolve = r)))
+    await appendLogGit('/log-3', async () => page(['x'], false)) // 첫 페이지 읽는 중 — 무시
+    resolve(page(['a'], true))
+    await first
+    expect(logGitOf('/log-3')!.commits.map((c) => c.hash)).toEqual(['a'])
+  })
+})
+
+describe('GitLog — 정적 그림 (시안 ⑤)', () => {
+  const now = new Date(2026, 9, 14, 17, 12).getTime()
+  const view = status()
+
+  it('줄(46px 고정) — 그래프·제목·칩(레인 색)·둘째 줄(작성자·오늘…), 머지 줄은 제목 흐림, 전체 높이 = 줄 수 × 46', async () => {
+    const directory = '/log-ui'
+    const commits = [
+      logCommit('a'.repeat(40), {
+        subject: '터미널을 오른쪽 패널의 탭으로 (멀티 터미널)',
+        time: now,
+        refs: [
+          { kind: 'head', name: 'main' },
+          { kind: 'remote', name: 'origin/main' },
+        ],
+      }),
+      logCommit('b'.repeat(40), { subject: 'merge feat', time: now - 3_600_000, parents: ['c'.repeat(40), 'd'.repeat(40)], pushed: false }),
+    ]
+    await refreshLogGit(directory, async () => ({ commits, hasMore: false }))
+    const out = html(createElement(GitLog, { directory, view, now }))
+    expect(out).toContain('height:92px') // 2줄 × 46
+    expect(out).toContain('git-log2__graph')
+    expect(out).toContain('>터미널을 오른쪽 패널의 탭으로 (멀티 터미널)<')
+    expect(out).toContain('origin &amp; main') // & 는 HTML 로 escape
+    expect(out).toContain('git-log2__row git-log2__row--merge') // 머지 줄
+    expect(out).toContain('>올리지 않음')
+    expect(out).toContain('>kim · 오늘 PM 5:12<')
+    // 칩 아이콘 색은 그 줄의 레인 색 — 첫 줄(레인이 0)
+    expect(out).toContain('style="color:var(--log-lane-0)"')
+    // 그래프 점 — 첫 줄 레인이 0
+    expect(out).toMatch(/<circle cx="[0-9.]+" cy="23" r="3.5" fill="var\(--log-lane-0\)">/)
+  })
+
+  it('커밋이 없으면 빈 줄, 읽는 중이면 로딩', async () => {
+    expect(html(createElement(GitLog, { directory: '/log-none', view: status({ hasCommits: false }), now }))).toContain('아직 커밋이 없습니다')
+    expect(html(createElement(GitLog, { directory: '/log-loading', view, now }))).toContain('불러오는 중')
+    await refreshLogGit('/log-empty', async () => ({ commits: [], hasMore: false }))
+    expect(html(createElement(GitLog, { directory: '/log-empty', view, now }))).toContain('아직 커밋이 없습니다')
+  })
+
+  it('하위 탭 ⑤ 에서 기록을 고르면 — 오른쪽 새로고침(다시 읽기) + 기록 줄, 변경은 없다', async () => {
+    const directory = await withView(status())
+    await refreshLogGit(directory, async () => ({ commits: [logCommit('f'.repeat(40), { subject: '설정: ⌘, 로 열기' })], hasMore: false }))
+    const out = html(createElement(GitPanel, { directory, gitSub: { sub: 'log', seq: 3 } }))
+    expect(out).toMatch(/<div class="git-sub">[^]*<span class="git-sub__push"><button type="button" class="file-preview__tool" aria-label="다시 읽기"/)
+    expect(out).toContain('git-log2__row')
+    expect(out).toContain('>설정: ⌘, 로 열기<')
+    expect(out).not.toContain('git-sec')
   })
 })
