@@ -9,13 +9,14 @@ import { DiffCard } from './DiffCard.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { openFilePreview, openGitTab, type PanelState } from './filePreviewStore.ts'
 import { commitControls, commitNotice, commitThenPush } from './gitCommit.ts'
-import { changeCount, refreshGit, useGitView } from './gitStore.ts'
+import { changeCount, foldsOf, refreshGit, toggleAllGitFolds, toggleGitFold, useGitView } from './gitStore.ts'
+import { buildTree, entryKind, entryStat, entryState, folderKey, groupState, isFoldOpen, SECTION_UNTRACKED, splitChanges, toggleAction, treeFolders, treeRows, type ChangeEntry, type CheckState, type TreeFolder } from './gitTree.ts'
 import { reason } from './ipcError.ts'
 import { useT, type Translate } from './settingsStore.ts'
 import './git.css'
 
 // Git 탭 (이슈 #290 — 시안 _workspace/mock-git/Git.dc.html 의 구조·문구·권한표). 모양은 지금 앱의 부품을 그대로 쓴다:
-// 경로 줄(.file-preview__bar)·작은 글 버튼(.file-preview__toggle)·도구 버튼(.file-preview__tool), 파일 줄은 "AI 가 고친 파일" 카드(.changed-files__*),
+// 경로 줄(.file-preview__bar)·작은 글 버튼(.file-preview__toggle)·도구 버튼(.file-preview__tool), 변경 파일은 #388 부터 시안 ① 의 폴더 트리(.git-sec·.git-dir·.git-file, 규칙은 gitTree.ts),
 // diff 는 DiffCard, 확인 카드는 승인 카드(.attention-card) 틀, 못 쓰는 상태는 빈 칸 글(.file-preview__empty) 자리. git.css 는 그 사이를 잇는 것만.
 // 바로 하는 것(stage·커밋·브랜치 만들기)과 카드로 묻는 것(전환·올리기·가져오기, 되돌리기·삭제는 경고 카드)은 시안 7절 표 그대로.
 // 상태는 메인(ctx.git)이 정본이다 — 작업마다 다시 읽는다(gitStore). 커밋 메시지 초안은 탭을 오가도 폴더마다 남는다
@@ -618,12 +619,15 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
           <ReloadButton onClick={() => void refreshGit(directory)} />
         </span>
       </div>
-      <div className="git-sub" role="tablist" aria-label={t('git.tab')}>
-        {(['changes', 'log', 'branches'] as const).map((id) => (
-          <button key={id} type="button" role="tab" className="git-sub__tab" aria-selected={sub === id} onClick={() => setSub(id)}>
-            {t(`git.${id}`)}
-          </button>
-        ))}
+      <div className="git-sub">
+        <div className="git-sub__tabs" role="tablist" aria-label={t('git.tab')}>
+          {(['changes', 'log', 'branches'] as const).map((id) => (
+            <button key={id} type="button" role="tab" className="git-sub__tab" aria-selected={sub === id} onClick={() => setSub(id)}>
+              {t(`git.${id}`)}
+            </button>
+          ))}
+        </div>
+        {sub === 'changes' && <FoldAllButton directory={directory} view={view} />}
       </div>
       {notice && (
         <NoticeLine notice={notice} onClose={() => setNotice(undefined)}>
@@ -838,7 +842,10 @@ function NoticeLine({ notice, onClose, children }: { notice: Notice; onClose(): 
   )
 }
 
-// ── 변경 ──
+// ── 변경 (#388 시안 ① — 구역 머리 '변경 N개 파일' · 폴더 트리 · 접힌 '새 파일' 구역. 체크 = stage) ──
+
+/** 들여쓰기 — 시안: 폴더 줄 26px, 그 안의 파일 46px (한 단계 20px) */
+const indent = (depth: number): number => 26 + depth * 20
 
 function ChangesView({
   directory,
@@ -855,6 +862,13 @@ function ChangesView({
 }) {
   const t = useT()
   const conflicts = view.conflicts
+  const { tracked, untracked } = useMemo(() => {
+    const split = splitChanges(view)
+    return { tracked: buildTree(split.tracked), untracked: buildTree(split.untracked) }
+  }, [view])
+  const folds = foldsOf(directory)
+  const untrackedOpen = isFoldOpen(folds, SECTION_UNTRACKED)
+  const stage = (entries: readonly ChangeEntry[]) => () => void onRun(toggleAction(entries))
   return (
     <>
       {(view.merging || conflicts.length > 0) && (
@@ -887,96 +901,151 @@ function ChangesView({
           </div>
         </div>
       )}
-      <Group
-        label={t('git.staged', { count: view.staged.length })}
-        action={view.staged.length > 0 ? { label: t('git.unstageAll'), run: () => void onRun({ kind: 'unstage', paths: view.staged.map((file) => file.path) }) } : undefined}
-        busy={busy}
-      />
-      {view.staged.length === 0 ? (
-        <p className="git-empty">{t('git.stagedEmpty')}</p>
-      ) : (
-        <ul className="changed-files__list git-list">
-          {view.staged.map((file) => (
-            <FileRow key={file.path} directory={directory} file={file} staged busy={busy} onToggle={() => void onRun({ kind: 'unstage', paths: [file.path] })} />
-          ))}
-        </ul>
+      {tracked.all.length === 0 && untracked.all.length === 0 && <p className="git-empty">{t('git.clean')}</p>}
+      {tracked.all.length > 0 && (
+        <>
+          <div className="git-sec">
+            <Check state={groupState(tracked.all)} label={t('git.stageChanges')} busy={busy} onToggle={stage(tracked.all)} />
+            {t('git.changes')} <span className="git-sec__n">{t('git.fileCount', { count: tracked.all.length })}</span>
+          </div>
+          <Tree directory={directory} section="c" root={tracked} busy={busy} onRun={onRun} onDiscard={onDiscard} />
+        </>
       )}
-      <Group
-        label={t('git.changed', { count: view.changed.length })}
-        action={view.changed.length > 0 ? { label: t('git.stageAll'), run: () => void onRun({ kind: 'stage', paths: view.changed.map((file) => file.path) }) } : undefined}
-        busy={busy}
-      />
-      {view.changed.length === 0 ? (
-        <p className="git-empty">{t('git.clean')}</p>
-      ) : (
-        <ul className="changed-files__list git-list">
-          {view.changed.map((file) => (
-            <FileRow
-              key={file.path}
-              directory={directory}
-              file={file}
-              staged={false}
-              busy={busy}
-              onToggle={() => void onRun({ kind: 'stage', paths: [file.path] })}
-              onDiscard={() => onDiscard(file)}
-            />
-          ))}
-        </ul>
+      {untracked.all.length > 0 && (
+        <>
+          <div className="git-sec git-sec--untracked">
+            <Check state={groupState(untracked.all)} label={t('git.stageUntracked')} busy={busy} onToggle={stage(untracked.all)} />
+            <button type="button" className="git-sec__toggle" aria-expanded={untrackedOpen} onClick={() => toggleGitFold(directory, SECTION_UNTRACKED)}>
+              <svg className="git-sec__chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+                <path d="M3.5 2l3 3-3 3" />
+              </svg>
+              {t('git.untracked')} <span className="git-sec__n">{t('git.untrackedNote', { count: untracked.all.length })}</span>
+            </button>
+          </div>
+          {untrackedOpen && <Tree directory={directory} section="u" root={untracked} busy={busy} onRun={onRun} onDiscard={onDiscard} />}
+        </>
       )}
     </>
   )
 }
 
-function Group({ label, action, busy }: { label: string; action?: { label: string; run(): void }; busy: boolean }) {
+/** 모두 접기·펴기 (시안 하위 탭 줄 오른쪽) — 지금 보이는 폴더·새 파일 구역을 한꺼번에 */
+function FoldAllButton({ directory, view }: { directory: string; view: GitStatus }) {
+  const t = useT()
+  const keys = useMemo(() => {
+    const split = splitChanges(view)
+    return [
+      ...(split.untracked.length > 0 ? [SECTION_UNTRACKED] : []),
+      ...treeFolders(buildTree(split.tracked)).map((folder) => folderKey('c', folder.path)),
+      ...treeFolders(buildTree(split.untracked)).map((folder) => folderKey('u', folder.path)),
+    ]
+  }, [view])
   return (
-    <div className="git-group">
-      <span>{label}</span>
-      {action && (
-        <button type="button" className="git-link" disabled={busy} onClick={action.run}>
-          {action.label}
-        </button>
-      )}
-    </div>
+    <button type="button" className="git-sub__tool" aria-label={t('git.foldAll')} title={t('git.foldAll')} disabled={keys.length === 0} onClick={() => toggleAllGitFolds(directory, keys)}>
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+        <path d="M4 6l4-3 4 3M4 10l4 3 4-3" />
+      </svg>
+    </button>
   )
 }
 
-/** 파일 한 줄 — 체크(stage)·상태 글자·이름(폴더는 흐리게)·줄 수, 누르면 그 아래에 diff. 변경 쪽은 되돌리기 버튼 */
-function FileRow({ directory, file, staged, busy, onToggle, onDiscard }: { directory: string; file: GitFile; staged: boolean; busy: boolean; onToggle(): void; onDiscard?(): void }) {
+/** 시안의 체크(.cb) — 14px·모서리 4px, 켜짐 ✓·일부 −. 진짜 체크 상자(키보드·스크린 리더 그대로), 일부는 indeterminate */
+function Check({ state, label, busy, onToggle }: { state: CheckState; label: string; busy: boolean; onToggle(): void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = state === 'mix'
+  }, [state])
+  return <input ref={ref} type="checkbox" className="git-check" data-state={state} checked={state === 'on'} disabled={busy} aria-label={label} onChange={onToggle} />
+}
+
+function Tree({
+  directory,
+  section,
+  root,
+  busy,
+  onRun,
+  onDiscard,
+}: {
+  directory: string
+  section: 'c' | 'u'
+  root: TreeFolder
+  busy: boolean
+  onRun(action: GitAction): Promise<unknown>
+  onDiscard(file: GitFile): void
+}) {
+  const t = useT()
+  const folds = foldsOf(directory)
+  const rows = treeRows(root, (folder) => isFoldOpen(folds, folderKey(section, folder.path)))
+  return (
+    <ul className="git-tree">
+      {rows.map((row) => {
+        if (row.kind === 'file')
+          return <FileRow key={row.entry.path} directory={directory} entry={row.entry} depth={row.depth} busy={busy} onRun={onRun} onDiscard={onDiscard} />
+        const { folder } = row
+        return (
+          <li key={`dir:${folder.path}`} className="git-dir" style={{ paddingLeft: indent(row.depth) }}>
+            <Check state={groupState(folder.all)} label={t('git.stageFolder', { folder: folder.path })} busy={busy} onToggle={() => void onRun(toggleAction(folder.all))} />
+            <button type="button" className="git-dir__toggle" aria-expanded={row.open} title={folder.path} onClick={() => toggleGitFold(directory, folderKey(section, folder.path))}>
+              <svg className="git-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+                <path d="M2 4.5h4l1.5 1.5H14v6.5H2z" />
+              </svg>
+              <span className="git-dir__name">{folder.name}</span>
+              <span className="git-dir__count">{t('git.fileCount', { count: folder.all.length })}</span>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/** 파일 한 줄 (시안 .file) — 체크(stage)·상태 글자·이름·+N −N, 누르면 그 아래에 diff. 작업 트리 쪽 변경이 있으면 되돌리기 버튼.
+ *  일부만 stage 된 파일은 diff 를 두 쪽(stage 된 것·안 된 것) 다 보인다 */
+function FileRow({ directory, entry, depth, busy, onRun, onDiscard }: { directory: string; entry: ChangeEntry; depth: number; busy: boolean; onRun(action: GitAction): Promise<unknown>; onDiscard(file: GitFile): void }) {
   const t = useT()
   const [open, setOpen] = useState(false)
-  const [patch, setPatch] = useState<string>()
-  const { name, folder } = splitPath(file.path)
-  const stat = file.kind === 'U' ? t('git.newFile') : file.added !== undefined ? `+${file.added} −${file.removed ?? 0}` : ''
+  const [patches, setPatches] = useState<string[]>()
+  const { name } = splitPath(entry.path)
+  const kind = entryKind(entry)
+  const stat = entryStat(entry)
+  const sides = [...(entry.staged ? [true] : []), ...(entry.changed ? [false] : [])]
   useEffect(() => {
     if (!open) return
     let live = true
-    window.litecode.gitDiff(directory, file.path, staged).then(
-      (text) => live && setPatch(text),
-      () => live && setPatch(''),
+    Promise.all(sides.map((staged) => window.litecode.gitDiff(directory, entry.path, staged))).then(
+      (texts) => live && setPatches(texts),
+      () => live && setPatches([]),
     )
     return () => {
       live = false
     }
-  }, [open, directory, file.path, staged, file.added, file.removed])
+  }, [open, directory, entry.path, sides.join(), stat?.added, stat?.removed])
   const diffs = useMemo<FileDiff[]>(
-    () => (patch ? [{ path: file.path, status: file.kind === 'D' ? 'deleted' : file.kind === 'U' || file.kind === 'A' ? 'added' : 'modified', added: file.added ?? 0, removed: file.removed ?? 0, patch }] : []),
-    [patch, file],
+    () =>
+      (patches ?? [])
+        .filter((patch) => patch)
+        .map((patch) => ({ path: entry.path, status: kind === 'D' ? 'deleted' : kind === 'U' || kind === 'A' ? 'added' : 'modified', added: stat?.added ?? 0, removed: stat?.removed ?? 0, patch })),
+    [patches, entry.path, kind, stat?.added, stat?.removed],
   )
+  const from = entry.staged?.from
   return (
-    <li className="changed-files__item" data-git-kind={file.kind}>
-      <div className="changed-files__row">
-        <input type="checkbox" className="git-check" checked={staged} disabled={busy} aria-label={t('git.stageFile', { file: file.path })} onChange={onToggle} />
-        <button type="button" className="changed-files__toggle" aria-expanded={open} title={file.from ? `${file.from} → ${file.path}` : file.path} onClick={() => setOpen((now) => !now)}>
-          <span className="git-kind" data-kind={file.kind} aria-hidden="true">
-            {file.kind}
+    <li className="git-file" data-git-kind={kind}>
+      <div className="git-file__row" style={{ paddingLeft: indent(depth) }}>
+        <Check state={entryState(entry)} label={t('git.stageFile', { file: entry.path })} busy={busy} onToggle={() => void onRun(toggleAction([entry]))} />
+        <button type="button" className="git-file__toggle" aria-expanded={open} title={from ? `${from} → ${entry.path}` : entry.path} onClick={() => setOpen((now) => !now)}>
+          <span className="git-kind" data-kind={kind} aria-hidden="true">
+            {kind}
           </span>
-          <span className="changed-files__name">{name}</span>
-          {folder && <span className="changed-files__folder">{folder}</span>}
-          <span className="changed-files__spacer" />
-          {stat && <span className="changed-files__stat">{stat}</span>}
+          <span className="git-file__name">{name}</span>
+          {stat && (
+            <>
+              <span className="git-add">{`+${stat.added}`}</span>
+              <span className="git-del">{`−${stat.removed}`}</span>
+            </>
+          )}
         </button>
-        {onDiscard && (
-          <button type="button" className="changed-files__open" disabled={busy} aria-label={t('git.discardFile', { file: file.path })} title={t('git.discardFile', { file: file.path })} onClick={onDiscard}>
+        {entry.changed && (
+          <button type="button" className="changed-files__open" disabled={busy} aria-label={t('git.discardFile', { file: entry.path })} title={t('git.discardFile', { file: entry.path })} onClick={() => onDiscard(entry.changed!)}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M5.5 3.5L2.75 6.25L5.5 9" />
               <path d="M2.75 6.25H9.5C11.6 6.25 13.25 7.9 13.25 10S11.6 13.75 9.5 13.75H7" />
@@ -984,7 +1053,11 @@ function FileRow({ directory, file, staged, busy, onToggle, onDiscard }: { direc
           </button>
         )}
       </div>
-      {open && <div className="changed-files__diff git-diff">{patch === undefined ? null : diffs.length > 0 ? <DiffCard diffs={diffs} /> : <p className="git-empty">—</p>}</div>}
+      {open && (
+        <div className="git-diff" style={{ paddingLeft: indent(depth) }}>
+          {patches === undefined ? null : diffs.length > 0 ? <DiffCard diffs={diffs} /> : <p className="git-empty">—</p>}
+        </div>
+      )}
     </li>
   )
 }

@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import type { Attention } from '../../shared/contract.ts'
 import type { GitBranch, GitStatus, GitView } from '../../shared/git.ts'
-import { changeCount, gitViewOf, refreshGit } from '../../renderer/gitStore.ts'
+import { changeCount, gitViewOf, refreshGit, toggleAllGitFolds, toggleGitFold } from '../../renderer/gitStore.ts'
+import { SECTION_UNTRACKED } from '../../renderer/gitTree.ts'
 import { GIT_TAB, getPanelState, openFilePreview, openGitTab, selectTab } from '../../renderer/filePreviewStore.ts'
 
 // Git 탭·브랜치 알약·AI 승인 카드의 화면 (이슈 #290) — 정적 마크업과 저장소 규칙. 진짜 창 모양은 스크린샷으로 따로 봤다(보고서)
@@ -80,7 +81,7 @@ describe('패널 탭 저장소 — Git 탭', () => {
 })
 
 describe('GitPanel — 정적 그림', () => {
-  it('변경: 브랜치·↑↓·가져오기/올리기, 하위 탭 셋, 스테이지/변경 묶음과 상태 글자·줄 수, 메시지가 없으면 커밋 버튼은 꺼짐', async () => {
+  it('변경: 브랜치·↑↓·가져오기/올리기, 하위 탭 셋, 변경 구역(stage 된 것·안 된 것 한 트리)과 상태 글자·줄 수, 메시지가 없으면 커밋 버튼은 꺼짐', async () => {
     const directory = await withView(status())
     const out = html(createElement(GitPanel, { directory }))
     expect(out).toContain('feat_290_git')
@@ -88,15 +89,65 @@ describe('GitPanel — 정적 그림', () => {
     expect(out).toContain('>가져오기</button>')
     expect(out).toContain('>올리기</button>')
     for (const tab of ['변경', '기록', '브랜치']) expect(out).toContain(`>${tab}</button>`)
-    expect(out).toContain('스테이지됨 (1)')
-    expect(out).toContain('변경됨 (2)')
-    expect(out).toContain('+12 −48')
-    expect(out).toContain('새 파일')
-    expect(out).toMatch(/data-kind="U"/)
+    expect(out).toContain('변경 <span class="git-sec__n">2개 파일</span>')
+    expect(out).toContain('<span class="git-add">+12</span><span class="git-del">−48</span>')
     expect(out).toMatch(/<button type="button" class="attention-card__button attention-card__button--primary" disabled="">1개 파일 커밋<\/button>/)
-    // 되돌리기 버튼은 변경 쪽에만 (스테이지 줄엔 없다)
+    // 되돌리기 버튼은 작업 트리 쪽 변경이 있는 줄에만 (stage 만 된 줄엔 없다)
     expect(out).toContain('docs/status.md 변경 되돌리기')
     expect(out).not.toContain('src/a.ts 변경 되돌리기')
+  })
+
+  it('변경 트리 (#388 시안 ①) — 구역 머리 체크 3상태·폴더 줄(체크·폴더·이름·N개 파일)·파일 줄(체크·글자·이름·+N −N), 하위 탭 줄 오른쪽 모두 접기·펴기', async () => {
+    const directory = await withView(
+      status({
+        staged: [
+          { path: 'renderer/Git.tsx', kind: 'M', added: 42, removed: 7 },
+          { path: 'renderer/git.css', kind: 'M', added: 18, removed: 2 },
+        ],
+        changed: [{ path: 'src/services/git.ts', kind: 'M', added: 5, removed: 1 }],
+      }),
+    )
+    const out = html(createElement(GitPanel, { directory }))
+    // 구역 머리: 일부만 stage → 일부(−)
+    expect(out).toMatch(/<div class="git-sec"><input type="checkbox" class="git-check" data-state="mix"[^>]*aria-label="변경 모두 스테이지"\/>변경 <span class="git-sec__n">3개 파일<\/span><\/div>/)
+    // 폴더 줄: 폴더 먼저 이름 순, 체크 상태, 이름·개수, 펼침
+    expect(out).toMatch(/<li class="git-dir" style="padding-left:26px"><input type="checkbox" class="git-check" data-state="on" aria-label="renderer 폴더 스테이지" checked=""\/><button type="button" class="git-dir__toggle" aria-expanded="true" title="renderer">.*<span class="git-dir__name">renderer<\/span><span class="git-dir__count">2개 파일<\/span><\/button><\/li>/)
+    expect(out).toMatch(/data-state="off"[^>]*aria-label="src\/services 폴더 스테이지"/)
+    expect(out.indexOf('>renderer<')).toBeLessThan(out.indexOf('>src/services<'))
+    // 파일 줄: 폴더 안 46px, 이름만(경로는 폴더 줄이)
+    expect(out).toMatch(/<div class="git-file__row" style="padding-left:46px"><input type="checkbox" class="git-check" data-state="on" aria-label="renderer\/Git.tsx 스테이지" checked=""\/><button type="button" class="git-file__toggle" aria-expanded="false" title="renderer\/Git.tsx"><span class="git-kind" data-kind="M" aria-hidden="true">M<\/span><span class="git-file__name">Git.tsx<\/span><span class="git-add">\+42<\/span><span class="git-del">−7<\/span><\/button>/)
+    expect(out).not.toContain('changed-files__folder')
+    // 모두 접기·펴기 — 하위 탭(tablist) 밖, 같은 줄 오른쪽
+    expect(out).toMatch(/<div class="git-sub"><div class="git-sub__tabs" role="tablist"[^>]*>.*<\/div><button type="button" class="git-sub__tool" aria-label="모두 접기·펴기"/)
+  })
+
+  it('새 파일 구역 — 기본 접힘(개수와 설명만), 펴면 같은 트리·체크. 접힘은 gitStore 에 남는다(다시 그려도)', async () => {
+    const directory = await withView(status({ staged: [], changed: [{ path: 'docs/a.md', kind: 'U' }, { path: 'docs/b.md', kind: 'U' }, { path: 'x.txt', kind: 'U' }] }))
+    const closed = html(createElement(GitPanel, { directory }))
+    expect(closed).toMatch(/<div class="git-sec git-sec--untracked"><input type="checkbox" class="git-check" data-state="off"[^>]*aria-label="새 파일 모두 스테이지"\/><button type="button" class="git-sec__toggle" aria-expanded="false">.*새 파일 <span class="git-sec__n">3개 · 아직 git 이 모르는 파일<\/span><\/button><\/div>/)
+    expect(closed).not.toContain('git-dir')
+    expect(closed).not.toContain('>a.md<')
+    // 변경 구역은 tracked 가 없으면 없다
+    expect(closed).not.toContain('class="git-sec"')
+    toggleGitFold(directory, SECTION_UNTRACKED)
+    const open = html(createElement(GitPanel, { directory }))
+    expect(open).toContain('aria-expanded="true">')
+    expect(open).toMatch(/<span class="git-dir__name">docs<\/span><span class="git-dir__count">2개 파일<\/span>/)
+    expect(open).toMatch(/<div class="git-file__row" style="padding-left:26px">[^]*data-kind="U"[^>]*>U<\/span><span class="git-file__name">x.txt<\/span><\/button>/)
+    // 모두 접기 → 구역·폴더 모두 접힘
+    toggleAllGitFolds(directory, [SECTION_UNTRACKED, 'u:docs'])
+    expect(html(createElement(GitPanel, { directory }))).not.toContain('git-dir')
+  })
+
+  it('폴더를 접으면 그 안 파일 줄이 없고 개수는 남는다, 아무 변경도 없으면 깨끗합니다', async () => {
+    const directory = await withView(status({ staged: [], changed: [{ path: 'src/a.ts', kind: 'M' }, { path: 'src/b.ts', kind: 'M' }] }))
+    toggleGitFold(directory, 'c:src')
+    const out = html(createElement(GitPanel, { directory }))
+    expect(out).toMatch(/aria-expanded="false" title="src">.*<span class="git-dir__count">2개 파일<\/span>/)
+    expect(out).not.toContain('git-file__row')
+    const clean = html(createElement(GitPanel, { directory: await withView(status({ staged: [], changed: [] })) }))
+    expect(clean).toContain('>깨끗합니다</p>')
+    expect(clean).toMatch(/class="git-sub__tool"[^>]*disabled=""/)
   })
 
   it('충돌이면 위에 경고 카드 — 파일·가져오기 취소', async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { GitView } from '../shared/git.ts'
+import { toggleAllFolds, toggleFold, type Folds } from './gitTree.ts'
 
 // Git 상태의 화면 쪽 저장소 (이슈 #290) — 오른쪽 패널의 Git 탭(변경 수·목록)과 입력 카드의 브랜치 알약이 같은 값을 본다.
 // 파일 워처는 없다: 다시 읽는 때는 ① 메인이 git:changed 를 알릴 때(화면·AI 도구의 작업 뒤) ② 턴이 끝날 때 ③ 창이 앞으로 올 때 ④ 패널을 열 때(Git.tsx).
@@ -36,6 +37,25 @@ export function gitViewOf(directory: string | undefined): GitView | undefined {
 /** 변경 수 — 탭 이름 옆 숫자·알약의 점 */
 export function changeCount(view: GitView | undefined): number {
   return view?.state === 'ok' ? view.staged.length + view.changed.length + view.conflicts.length : 0
+}
+
+// 변경 트리의 접힘 (#388) — 폴더(프로젝트)마다. 다시 읽기·하위 탭·패널 탭을 오가도 남는다 (앱을 다시 켜면 기본으로)
+const folds = new Map<string, Folds>()
+
+export function foldsOf(directory: string): Folds | undefined {
+  return folds.get(directory)
+}
+
+/** 폴더·구역 하나를 접거나 편다 */
+export function toggleGitFold(directory: string, key: string): void {
+  folds.set(directory, toggleFold(folds.get(directory), key))
+  notify()
+}
+
+/** 모두 접기·펴기 — keys 는 지금 보이는 폴더·구역 열쇠 */
+export function toggleAllGitFolds(directory: string, keys: readonly string[]): void {
+  folds.set(directory, toggleAllFolds(folds.get(directory), keys))
+  notify()
 }
 
 function subscribe(listener: () => void): () => void {

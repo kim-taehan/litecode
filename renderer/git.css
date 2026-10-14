@@ -78,6 +78,22 @@
   color: var(--text-tertiary);
   font-size: 12px;
 }
+.git-sub__tabs { display: flex; gap: 2px; }
+/* 모두 접기·펴기 (시안 .ib) */
+.git-sub__tool {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.git-sub__tool:hover:not(:disabled) { background: var(--fill-hover); }
+.git-sub__tool:disabled { opacity: 0.45; cursor: default; }
 .git-sub__tab:hover { color: var(--text); background: var(--fill-hover); }
 .git-sub__tab[aria-selected='true'] { color: var(--text); background: var(--fill-active); }
 
@@ -171,43 +187,136 @@
 }
 .git-input:focus { border-color: var(--accent); }
 
-/* 변경 — 묶음 머리, 파일 줄(.changed-files__row 에 체크 하나 더) */
-.git-group {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px 2px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
+/* 변경 (#388 시안 ① Main.dc.html) — 구역 머리(.sec)·폴더 줄(.dir)·파일 줄(.file)·체크(.cb)·상태 글자(.k) 의 값 그대로.
+   들여쓰기는 Git.tsx 가 줄마다 준다(폴더 26 · 그 안 파일 46 · 한 단계 20) */
 .git-empty {
   margin: 0;
   padding: 4px 16px;
   color: var(--text-caption);
   font-size: 12px;
 }
-.git-list { font-size: 13px; line-height: 20px; }
-.git-list .changed-files__row { padding-left: 12px; }
-.git-check {
-  flex: none;
-  margin: 0 2px 0 0;
-  accent-color: var(--text);
-}
-.git-kind {
-  flex: none;
-  width: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.git-sec {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
+}
+.git-sec--untracked { margin-top: 6px; }
+.git-sec__n { color: var(--text-caption); font-weight: 400; }
+.git-sec__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.git-sec__chevron { flex: none; transition: transform 0.12s; }
+.git-sec__toggle[aria-expanded='true'] .git-sec__chevron { transform: rotate(90deg); }
+
+.git-tree { margin: 0; padding: 0; list-style: none; }
+.git-dir {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px 3px 26px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.git-dir__toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.git-dir__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-dir__count { flex: none; color: var(--text-caption); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+
+.git-file__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 12px 3px 46px;
+  font-size: 12px;
+}
+.git-file__row:hover { background: var(--fill-hover); }
+.git-file__toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.git-file__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-file[data-git-kind='D'] .git-file__name { color: var(--text-tertiary); text-decoration: line-through; }
+.git-file__row .changed-files__open { width: 20px; height: 20px; }
+.git-add,
+.git-del { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.git-add { color: var(--diff-add); }
+.git-del { color: var(--diff-del); }
+
+/* 체크 (.cb) — 14px·모서리 4px·1.5px 테두리, 켜짐·일부는 accent 바탕에 흰 ✓ / − (커밋 영역의 고치기 체크도 같은 모양) */
+.git-check {
+  flex: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1.5px solid var(--text-tertiary);
+  border-radius: 4px;
+  background: var(--surface) center / 9px 9px no-repeat;
+  cursor: pointer;
+}
+.git-check:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%23fff' stroke-width='1.8'%3E%3Cpath d='M2 5.2l2 2 4-4.4'/%3E%3C/svg%3E");
+}
+.git-check:indeterminate {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' fill='none' stroke='%23fff' stroke-width='1.8'%3E%3Cpath d='M2 5h6'/%3E%3C/svg%3E");
+}
+.git-check:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.git-check:disabled { cursor: default; }
+
+/* 상태 글자 (.k) — M 파랑 · A 초록 · U 주황 · D 빨강 (R 은 M 과 같이) */
+.git-kind {
+  flex: none;
+  width: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
   text-align: center;
-  color: var(--warn);
+  color: var(--accent);
 }
 .git-kind[data-kind='A'] { color: var(--ok); }
 .git-kind[data-kind='D'] { color: var(--danger); }
-.git-kind[data-kind='U'] { color: var(--text-caption); }
+.git-kind[data-kind='U'] { color: var(--warn); }
 .git-kind[data-kind='C'] { color: var(--danger); }
-.changed-files__item[data-git-kind='D'] .changed-files__name { color: var(--text-tertiary); text-decoration: line-through; }
-.git-diff { padding: 0 12px 4px 36px; }
+.git-diff { padding: 0 12px 4px 46px; }
 
 /* 기록 — 점과 선, 제목, 해시·작성자·때 */
 .git-log { margin: 0; padding: 6px 0; list-style: none; }
