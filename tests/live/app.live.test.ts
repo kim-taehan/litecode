@@ -704,11 +704,21 @@ describe('설정 > 모델', () => {
     for (let i = 0; i < 3; i++) await newChat.click()
     expect(await blanks()).toBe(1)
     expect(await page.locator('.main__header').textContent()).toBe('새 대화') // 그 빈 대화가 선택돼 있다
+    expect(await page.evaluate(() => document.activeElement?.classList.contains('composer__input'))).toBe(true) // 이슈 #343 — 포커스는 입력창으로
 
     await send('빈 대화 채우기')
     await newChat.click()
     await newChat.click()
     expect(await blanks()).toBe(1)
+  })
+
+  // ⌘N — 새 대화 단축키 (이슈 #344) — 버튼과 같은 동작이고 포커스도 입력창으로 (#343)
+  it('⌘N — 새 대화 단축키, 포커스는 입력창으로', async () => {
+    await send('⌘N 확인')
+    await expect.poll(() => page.locator('.main__header').textContent(), { timeout: 5_000 }).toBe('⌘N 확인')
+    await page.keyboard.press('Meta+n')
+    await expect.poll(() => page.locator('.main__header').textContent(), { timeout: 5_000 }).toBe('새 대화') // 빈 새 대화가 새로 생겨서
+    expect(await page.evaluate(() => document.activeElement?.classList.contains('composer__input'))).toBe(true)
   })
 })
 
