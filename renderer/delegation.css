@@ -193,6 +193,27 @@
   font-weight: 600;
 }
 
+/* 상한(PICK_CONVERSATION_LIMIT)을 넘어 접힌 대화 펼치기 — 라디오 줄이 아닌 일반 버튼 (#351) */
+.target-picker__more {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.target-picker__more:not(:disabled):hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
 .target-picker__row:disabled {
   cursor: default;
 }

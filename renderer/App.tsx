@@ -251,8 +251,10 @@ export function App() {
       .map((session) => peerOf(session, notices.state[session.id]?.status, session.history !== 'missing' && !!findModel(providers, session.model)))
     return {
       peers,
-      targets: projectTargets(projects ?? [], lastViewed, peers, projectPath),
-      self: { mode, project: projectName },
+      // #351: 지금 프로젝트도 포함 — 승인 카드의 "이 프로젝트" 그룹·진행 줄이 쓴다 (Projects 탭 패널은 자기 프로젝트를 스스로 빼고,
+      // 세션 도구의 목록·읽기는 메인이 제외한다)
+      targets: projectTargets(projects ?? [], lastViewed, peers),
+      self: { mode, project: projectName, id: active?.id },
       open: (id: string) => {
         const target = sessionsRef.current.find((session) => session.id === id)
         if (target) void openConversation.current({ project: target.project, conversationId: id })

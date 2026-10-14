@@ -147,6 +147,17 @@ describe('targets — 받을 대화 골라내기', () => {
     expect(targets).toHaveLength(1)
     expect(targets[0]?.problem).toBe('플러그인 파일이 있다')
   })
+
+  it('includeSelf(승인 카드, #351) — 보내는 프로젝트 자신도 대상에 있다 (마지막에 보던 대화 기준은 같다)', async () => {
+    const { ctx, idle, view } = await start()
+    await idle(B, '주문 API 설계', { project: backend })
+    await idle(A, '주문 화면')
+    await view(B)
+    await view(A)
+    const withSelf = await ctx.delegation.targets(project, true)
+    expect(withSelf.map((target) => target.id)).toEqual(expect.arrayContaining([projectId(project), projectId(backend)]))
+    expect(withSelf.find((target) => target.id === projectId(project))?.conversation.id).toBe(A)
+  })
 })
 
 describe('send — 자격과 전송', () => {
@@ -226,5 +237,75 @@ describe('send — 자격과 전송', () => {
     // 상한과 무관하게 자격은 된다 — B 는 첫 보내기가 도는 중이라 이번 것은 대기열
     expect(await send(ctx)).toMatchObject({ state: 'queued', conversationId: B })
     sender.finish()
+  })
+})
+
+describe('send — 새 대화(카드에서 "새 대화", #351)와 보내는 프로젝트 자신', () => {
+  const send = (ctx: Awaited<ReturnType<typeof start>>['ctx'], patch: Record<string, unknown> = {}) =>
+    ctx.delegation.send({ directory: project, from: { id: A, title: '주문 화면' }, targetId: projectId(backend), message: '지시', ...patch })
+
+  it('새 대話を 만들어 보낸다 — 그 프로젝트의 마지막에 본 대화 모델·모드, 그 대화에 지시 한 건. 결과가 받은 대화(제목·짧은 id)를 말한다', async () => {
+    const { ctx, llm, idle, view } = await start()
+    await idle(B, '주문 API 설계', { project: backend, mode: 'ask', model: { providerId: 'gw', modelId: 'm2' } })
+    await view(B)
+    const before = llm.turns.length
+    const sent = await send(ctx, { newConversation: true })
+    expect(sent.state).toBe('sent')
+    expect(sent.conversationId).not.toBe(B)
+    expect(sent.conversationTitle).toBe('지시') // 첫 메시지(보낸 글)에서 제목
+    expect(sent.shortId).toMatch(/^c-[0-9a-f]{8,}$/)
+    expect(sent.projectName).toBe('order-backend')
+    await until(() => llm.turns.length > before)
+    expect(llm.turns.at(-1)).toMatchObject({
+      directory: backend,
+      mode: 'ask',
+      prompt: wrapInstruction({ project: 'shop-web', title: '주문 화면' }, '지시'),
+    })
+    // 그 프로젝트 마지막에 본 대화(B) 의 모델·모드 — 새 대화가 이은 것
+    const created = (await ctx.sessions.list()).find((entry) => entry.id === sent.conversationId)
+    expect(created).toMatchObject({ project: backend, title: '지시', mode: 'ask', model: { providerId: 'gw', modelId: 'm2' } })
+  })
+
+  it('마지막에 본 대화가 쓸 수 없으면 그 프로젝트에서 가장 최근의 쓸 수 있는 대화 모델·모드를 잇는다. 한 턴 상한(count)도 통하고, 쓸 수 있는 대화가 없으면 안 보낸다', async () => {
+    const { ctx, llm, idle, say, view, sessions } = await start()
+    await idle(B, '본 대화', { project: backend }) // 최신은 아님(MODEL/build)
+    await idle(D, '다른 대화', { project: backend, mode: 'full', model: { providerId: 'gw', modelId: 'm2' } }) // 가장 최신
+    await view(B)
+    await sessions.patch(B, () => ({ model: { providerId: 'gone', modelId: 'm1' } }))
+    const before = llm.turns.length
+    const sent = await send(ctx, { newConversation: true })
+    expect(sent.state).toBe('sent')
+    await until(() => llm.turns.length > before)
+    // B(본 대화) 는 못 쓰니 그 프로젝트에서 가장 최근의 쓸 수 있는 대화(D — m2/full) 것
+    const created = (await ctx.sessions.list()).find((entry) => entry.id === sent.conversationId)
+    expect(created).toMatchObject({ model: { providerId: 'gw', modelId: 'm2' }, mode: 'full' })
+    // count(모델 경로) — 한 턴 상한은 여기에도 통한다
+    const sender = await say(A, '일의 시작')
+    for (let n = 0; n < MAX_SENDS_PER_TURN; n++) await expect(send(ctx, { newConversation: true, count: true })).resolves.toMatchObject({ state: 'sent' })
+    await expect(send(ctx, { newConversation: true, count: true })).rejects.toThrow(`Too many instructions sent in this turn (the limit is ${MAX_SENDS_PER_TURN}).`)
+    // 쓸 수 있는 대화가 하나도 없으면 (count 로 만든 새 대화들도 포함 — backend 의 전체 대화)
+    for (const entry of (await ctx.sessions.list()).filter((candidate) => candidate.project === backend)) {
+      await sessions.patch(entry.id, () => ({ model: { providerId: 'gone', modelId: 'm1' } }))
+    }
+    await expect(send(ctx, { newConversation: true })).rejects.toThrow('Target project has no conversation with a usable model.')
+    sender.finish()
+  })
+
+  it('보내는 프로젝트 자신의 대화(또는 새 대화)도 보낼 수 있다 (카드가 self 프로젝트를 고를 때, #351)', async () => {
+    const { ctx, llm, idle, view } = await start()
+    await idle(A, '주문 화면')
+    await view(A)
+    // 같은 프로젝트의 다른 대화 — 대상이 self 라도 대화 기준은 같다
+    const before = llm.turns.length
+    const sent = await send(ctx, { targetId: projectId(project), conversationId: A })
+    expect(sent).toMatchObject({ state: 'sent', conversationId: A, projectName: 'shop-web' })
+    await until(() => llm.turns.length > before)
+    expect(llm.turns.at(-1)).toMatchObject({ directory: project, prompt: wrapInstruction({ project: 'shop-web', title: '주문 화면' }, '지시') })
+    // self 프로젝트의 새 대화 — 새 대화 모델·모드 = self 의 마지막에 본 대화(A) 것
+    const fresh = await send(ctx, { targetId: projectId(project), newConversation: true })
+    expect(fresh).toMatchObject({ state: 'sent', projectName: 'shop-web' })
+    expect(fresh.conversationId).not.toBe(A)
+    const created = (await ctx.sessions.list()).find((entry) => entry.id === fresh.conversationId)
+    expect(created).toMatchObject({ project, model: MODEL, mode: 'build' })
   })
 })
