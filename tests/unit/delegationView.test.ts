@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { delegationLine, peerOf, projectTargets, readRequest, runningOrigin, sidebarMark, targetPicker, type Peer, type ProjectTarget } from '../../renderer/delegationView.ts'
+import { PICK_CONVERSATION_LIMIT, delegationLine, peerOf, projectTargets, readRequest, runningOrigin, sidebarMark, targetPicker, type Peer, type ProjectTarget } from '../../renderer/delegationView.ts'
 import { projectId } from '../../shared/delegation.ts'
 import type { Attention, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
@@ -21,11 +21,12 @@ const PROJECTS = [
   { path: TOKENS, name: 'design-tokens', displayPath: '~/work/design-tokens' },
 ]
 const VIEWED = { [WEB]: A, [BACK]: B, [TOKENS]: C }
-const peers = (b: Partial<Peer> = {}, c: Partial<Peer> = {}): Peer[] => [
-  { id: A, project: WEB, title: '주문 화면', mode: 'build', running: true },
-  { id: B, project: BACK, title: '주문 API 설계', mode: 'ask', running: false, ...b },
-  { id: D, project: BACK, title: '배포 스크립트', mode: 'build', running: false },
-  { id: C, project: TOKENS, title: '색 토큰 이름 정리', mode: 'full', running: false, ...c },
+const peers = (b: Partial<Peer> = {}, c: Partial<Peer> = {}, list: Peer[] = []): Peer[] => [
+  { id: A, project: WEB, title: '주문 화면', mode: 'build', running: true, updatedAt: 10 },
+  { id: B, project: BACK, title: '주문 API 설계', mode: 'ask', running: false, updatedAt: 50, ...b },
+  { id: D, project: BACK, title: '배포 스크립트', mode: 'build', running: false, updatedAt: 90 },
+  { id: C, project: TOKENS, title: '색 토큰 이름 정리', mode: 'full', running: false, updatedAt: 80, ...c },
+  ...list,
 ]
 const targetsOf = (list: readonly Peer[], viewed: Record<string, string> = VIEWED): ProjectTarget[] => projectTargets(PROJECTS, viewed, list, WEB)
 const BACK_ID = projectId(BACK)
@@ -142,8 +143,9 @@ describe('읽기 줄 — "결과 읽기 · 프로젝트 · 대화 · 상태"', (
   })
 })
 
-// 이슈 #67·#137 — 받을 프로젝트는 사용자가 고른다. 승인 카드의 목록: 다른 프로젝트마다 마지막에 보던 대화 하나 (시안 mock-cross-project)
-describe('승인 카드 — 받을 프로젝트 목록', () => {
+// 이슈 #67·#137 — 받을 프로젝트는 사용자가 고른다. 승인 카드의 목록 (시안 mock-cross-project):
+// #348 — 프로젝트마다 그 **대화 목록**(최근 활동 순)이고 줄은 대화 단위다. AI 가 고른 프로젝트의 마지막에 보던 대화가 먼저 선택된다
+describe('승인 카드 — 받을 프로젝트·대화 목록', () => {
   const request = (name: string, input?: unknown): Extract<Attention, { kind: 'permission' }> => ({
     kind: 'permission',
     id: 'per_1',
@@ -155,65 +157,88 @@ describe('승인 카드 — 받을 프로젝트 목록', () => {
   })
   const self = { mode: 'build' as const }
   const SEND = { project: BACK_ID, message: '정리해 줘\n전부' }
+  const pickerOf = (list: Peer[] = peers(), viewed: Record<string, string> = VIEWED) => targetPicker(request('send_to_project', SEND), targetsOf(list, viewed), list, self)!
 
-  it('프로젝트마다 한 줄 — 프로젝트 이름·경로와 그 대화의 제목·모드. AI 가 고른 곳이 표시되고 먼저 선택된다. 이 프로젝트와 새 대화 줄은 없다', () => {
-    const picker = targetPicker(request('send_to_project', SEND), targetsOf(peers()), self)!
+  it('프로젝트마다 그 대화(최근 활동 순) — 마지막에 본 대화에도 표시. AI 가 고른 프로젝트의 마지막에 보던 대화가 먼저 선택된다. 이 프로젝트와 새 대화 줄은 없다', () => {
+    const picker = pickerOf()
     expect(picker.message).toBe('정리해 줘\n전부')
-    expect(picker.choices.map((choice) => choice.key)).toEqual([B, C])
+    // order-backend 는 D(90)·B(50) 순, design-tokens 는 C
+    expect(picker.choices.map((choice) => choice.key)).toEqual([D, B, C])
     expect(picker.initial).toBe(B)
     expect(picker.missing).toBeUndefined()
     expect(picker.choices[0]).toEqual({
-      key: B,
-      target: { kind: 'conversation', conversationId: B },
+      key: D,
+      target: { kind: 'conversation', conversationId: D },
       project: { name: 'order-backend', displayPath: '~/work/order-backend' },
-      title: '주문 API 설계',
-      byAi: true,
-      mode: 'ask',
+      title: '배포 스크립트',
+      byAi: false,
+      mode: 'build',
       wider: false,
       busy: false,
     })
-    expect(picker.choices[1]).toMatchObject({ project: { name: 'design-tokens' }, title: '색 토큰 이름 정리', byAi: false })
+    expect(picker.choices[1]).toMatchObject({ title: '주문 API 설계', byAi: true })
+    // 다른 프로젝트의 마지막에 보던 대화는 "마지막에 본 대화" 로 표시된다
+    expect(picker.choices[2]).toMatchObject({ project: { name: 'design-tokens' }, title: '색 토큰 이름 정리', byAi: false, lastViewed: true })
   })
 
   it('줄마다 모드 경고(이 대화보다 권한이 넓다)와 도는 중(대기열에 들어간다)', () => {
-    const picker = targetPicker(request('send_to_project', SEND), targetsOf(peers({ running: true })), self)!
-    expect(picker.choices[0]).toMatchObject({ mode: 'ask', wider: false, busy: true })
-    expect(picker.choices[1]).toMatchObject({ mode: 'full', wider: true, busy: false })
-    // 보낸 쪽이 계획이면 매번 묻기 대화도 넓다
-    const fromPlan = targetPicker(request('send_to_project', SEND), targetsOf(peers()), { mode: 'plan' })!
-    expect(fromPlan.choices.map((choice) => choice.wider)).toEqual([true, true])
+    const picker = pickerOf(peers({ running: true }))
+    expect(picker.choices[0]).toMatchObject({ mode: 'build', wider: false, busy: false })
+    expect(picker.choices[1]).toMatchObject({ mode: 'ask', wider: false, busy: true })
+    expect(picker.choices[2]).toMatchObject({ mode: 'full', wider: true, busy: false })
+    // 보낸 쪽이 계획이면 모든 대화의 모드가 넓다
+    const fromPlan = targetPicker(request('send_to_project', SEND), targetsOf(peers()), peers(), { mode: 'plan' })!
+    expect(fromPlan.choices.map((choice) => choice.wider)).toEqual([true, true, true])
   })
 
-  it('지시를 받을 수 없는 대화(모델·폴더 없음)의 프로젝트는 목록에 없다', () => {
-    const picker = targetPicker(request('send_to_project', { project: TOKENS_ID, message: 'x' }), targetsOf(peers({ unusable: true })), self)!
-    expect(picker.choices.map((choice) => choice.key)).toEqual([C])
-    expect(picker.initial).toBe(C)
+  it('지시를 받을 수 없는 대화(모델·폴더 없음)만 빠진다 — 같은 프로젝트의 다른 대화가 남아 있으면 그걸로 프로젝트를 보여 준다', () => {
+    const picker = pickerOf(peers({ unusable: true }))
+    expect(picker.choices.map((choice) => choice.key)).toEqual([D, C])
+    expect(picker.choices.map((choice) => choice.project.name)).toEqual(['order-backend', 'design-tokens'])
+    // 마지막에 보던 대화가 못 쓰면 다른 대화(D)가 목록에 남지만 선택은 없다 (byAi 가 그 대화여야 하니까)
+    const viewedD = pickerOf(peers({ unusable: true }), { ...VIEWED, [BACK]: D })
+    expect(viewedD.initial).toBe(D)
+  })
+
+  it('프로젝트의 대화가 상한(PICK_CONVERSATION_LIMIT)을 넘으면 최근 것만 — 다만 마지막에 본 대화는 빠져 있으면 넣는다', () => {
+    const many = Array.from({ length: PICK_CONVERSATION_LIMIT + 2 }, (value, index) => ({
+      id: `f000000${index}-0000-4000-8000-00000000000${index + 1}`,
+      project: BACK,
+      title: `바쁜 대화 ${index}`,
+      mode: 'build' as const,
+      running: false,
+      updatedAt: 100 + index,
+    }))
+    // B(최신이 아님)는 상한 밖 — 목록에 넣어 준다 (상한 + 1 줄)
+    expect(pickerOf(peers({}, {}, many)).choices.filter((choice) => choice.project.name === 'order-backend')).toHaveLength(PICK_CONVERSATION_LIMIT + 1)
+    // B 가 최신이면 상한 안에서 (상한 줄)
+    expect(pickerOf(peers({ updatedAt: 10_000 }, {}, many)).choices.filter((choice) => choice.project.name === 'order-backend')).toHaveLength(PICK_CONVERSATION_LIMIT)
   })
 
   it('AI 가 고른 프로젝트가 목록에 없으면(없는 id·이 프로젝트 자신·못 쓰는 대화) 아무것도 선택돼 있지 않다 — 사용자가 골라야 한다', () => {
-    const unknown = targetPicker(request('send_to_project', { project: 'p-zzzzzzzz', message: 'x' }), targetsOf(peers()), self)!
-    expect(unknown.initial).toBeUndefined()
-    expect(unknown.missing).toBe('p-zzzzzzzz')
-    expect(unknown.choices.every((choice) => !choice.byAi)).toBe(true)
-    const itself = targetPicker(request('send_to_project', { project: projectId(WEB), message: 'x' }), targetsOf(peers()), self)!
+    const noProject = targetPicker(request('send_to_project', { project: 'p-zzzzzzzz', message: 'x' }), targetsOf(peers()), peers(), self)!
+    expect(noProject.initial).toBeUndefined()
+    expect(noProject.missing).toBe('p-zzzzzzzz')
+    expect(noProject.choices.every((choice) => !choice.byAi)).toBe(true)
+    const itself = targetPicker(request('send_to_project', { project: projectId(WEB), message: 'x' }), targetsOf(peers()), peers(), self)!
     expect(itself).toMatchObject({ missing: projectId(WEB) })
     expect(itself.initial).toBeUndefined()
   })
 
   it('받을 수 있는 프로젝트가 하나도 없으면 빈 목록 — 보낼 수 없다', () => {
-    const picker = targetPicker(request('send_to_project', SEND), targetsOf(peers(), {}), self)!
+    const picker = targetPicker(request('send_to_project', SEND), targetsOf(peers(), {}), peers(), self)!
     expect(picker.choices).toEqual([])
     expect(picker.missing).toBe(BACK_ID)
   })
 
   it('인자를 못 이었거나 다른 도구·없앤 도구·다른 서버면 보통의 승인 카드로', () => {
     const targets = targetsOf(peers())
-    expect(targetPicker(request('send_to_project'), targets, self)).toBeUndefined()
-    expect(targetPicker(request('open_terminal', { command: 'ls' }), targets, self)).toBeUndefined()
-    expect(targetPicker(request('read_project', { project: BACK_ID }), targets, self)).toBeUndefined()
-    expect(targetPicker(request('start_session', { title: 'x', message: 'y' }), targets, self)).toBeUndefined()
-    expect(targetPicker({ ...request('send_to_project', {}), mcp: { server: 'other', tool: 'send_to_project' } }, targets, self)).toBeUndefined()
-    expect(targetPicker({ kind: 'permission', id: 'p', sessionId: 's', action: 'bash', resources: ['ls'] }, targets, self)).toBeUndefined()
+    expect(targetPicker(request('send_to_project'), targets, peers(), self)).toBeUndefined()
+    expect(targetPicker(request('open_terminal', { command: 'ls' }), targets, peers(), self)).toBeUndefined()
+    expect(targetPicker(request('read_project', { project: BACK_ID }), targets, peers(), self)).toBeUndefined()
+    expect(targetPicker(request('start_session', { title: 'x', message: 'y' }), targets, peers(), self)).toBeUndefined()
+    expect(targetPicker({ ...request('send_to_project', {}), mcp: { server: 'other', tool: 'send_to_project' } }, targets, peers(), self)).toBeUndefined()
+    expect(targetPicker({ kind: 'permission', id: 'p', sessionId: 's', action: 'bash', resources: ['ls'] }, targets, peers(), self)).toBeUndefined()
   })
 
   it('읽기 승인 (이슈 #137) — 읽을 프로젝트와 그 대화를 보인다. 모르는 id 면 그 id, 다른 도구면 보통의 카드', () => {
@@ -245,8 +270,8 @@ describe('사이드바 표시·대화 상태', () => {
   })
 
   it('대화 → 상태: 도는 중이면 시작 시각, 쉬면 마지막 턴의 실패·중단 (알림 상태가 먼저 — 기록을 안 연 대화도 안다)', () => {
-    const base = { id: B, project: BACK, title: '제목', mode: 'ask' as const }
-    expect(peerOf({ ...base, pending: true, sentAt: 7, messages: [] })).toEqual({ id: B, project: BACK, title: '제목', mode: 'ask', running: true, startedAt: 7 })
+    const base = { id: B, project: BACK, title: '제목', mode: 'ask' as const, updatedAt: 1 }
+    expect(peerOf({ ...base, pending: true, sentAt: 7, messages: [] })).toEqual({ id: B, project: BACK, title: '제목', mode: 'ask', running: true, updatedAt: 1, startedAt: 7 })
     expect(peerOf({ ...base, messages: [typed, { role: 'assistant', text: '', error: 'boom' }] })).toMatchObject({ running: false, outcome: 'failed' })
     expect(peerOf({ ...base, messages: [typed, { role: 'assistant', text: '', error: '중단됨', interrupted: true }] })).toMatchObject({ outcome: 'interrupted' })
     expect(peerOf({ ...base, messages: [] }, 'failed')).toMatchObject({ outcome: 'failed' })

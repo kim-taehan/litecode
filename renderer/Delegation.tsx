@@ -126,9 +126,9 @@ function FolderIcon() {
   )
 }
 
-/** 승인 카드의 내용 (이슈 #67·#137 — 시안 _workspace/mock-cross-project) — 받을 프로젝트를 사용자가 고른다: 프로젝트 줄(폴더·이름·경로) 아래 그
- *  프로젝트에서 마지막에 보던 대화 한 줄(라디오, AI 가 고른 곳이 먼저 선택), 안내 한 줄, 보낼 글 전문, 고른 곳의 폴더·모드 경고 상자.
- *  "대기열에 들어갑니다" 는 줄마다 보인다. 틀(주황 띠·버튼)은 Attention.tsx 의 승인 카드 */
+/** 승인 카드의 내용 (이슈 #67·#137·#348 — 시안 _workspace/mock-cross-project) — 받을 **프로젝트와 그 대화**를 사용자가 고른다: 프로젝트
+ *  줄(폴더·이름·경로) 아래 그 프로젝트의 대화 목록(라디오, 각 프로젝트에서 최근 활동 순 · 상한, AI 가 고른 곳의 마지막에 보던 대화가 먼저
+ *  선택), 안내 한 줄, 보낼 글 전문, 고른 곳의 폴더·모드 경고 상자. "대기열에 들어갑니다" 는 줄마다 보인다. 틀(주황 띠·버튼)은 Attention.tsx 의 승인 카드 */
 export function TargetPickerBody({ picker, selected, disabled, onSelect }: { picker: TargetPicker; selected: string | undefined; disabled: boolean; onSelect(key: string): void }) {
   const t = useT()
   const { self } = useDelegation()
@@ -146,31 +146,38 @@ export function TargetPickerBody({ picker, selected, disabled, onSelect }: { pic
       )}
       {picker.choices.length > 0 && (
         <div className="target-picker" role="radiogroup" aria-label={t('delegate.pick.head')}>
-          {picker.choices.flatMap((choice) => [
-            <div key={`${choice.key}:project`} className="target-picker__project">
-              <FolderIcon />
-              <span className="target-picker__project-name">{choice.project.name}</span>
-              <span className="target-picker__project-path">{choice.project.displayPath}</span>
-            </div>,
-            <button
-              key={choice.key}
-              type="button"
-              role="radio"
-              className="target-picker__row"
-              aria-checked={choice.key === selected}
-              aria-label={`${choice.project.name} · ${choice.title}`}
-              data-target={choice.key}
-              disabled={disabled}
-              onClick={() => onSelect(choice.key)}
-            >
-              <span className="target-picker__dot" aria-hidden="true" />
-              <span className="target-picker__title">{choice.title}</span>
-              {choice.byAi && <span className="target-picker__ai">{t('delegate.pick.byAi')}</span>}
-              <span className="target-picker__meta" data-wider={choice.wider || undefined} title={choice.wider ? t('delegate.card.modeWider') : undefined}>
-                {[choice.mode && t(`mode.${choice.mode}`), choice.busy ? t('delegate.card.targetBusy') : t('delegate.pick.idle')].filter(Boolean).join(' · ')}
-              </span>
-            </button>,
-          ])}
+          {picker.choices.map((choice, index) => {
+            const previous = picker.choices[index - 1]
+            const newProject = !previous || previous.project.displayPath !== choice.project.displayPath
+            return [
+              newProject ? (
+                <div key={`${choice.key}:project`} className="target-picker__project">
+                  <FolderIcon />
+                  <span className="target-picker__project-name">{choice.project.name}</span>
+                  <span className="target-picker__project-path">{choice.project.displayPath}</span>
+                </div>
+              ) : null,
+              <button
+                key={choice.key}
+                type="button"
+                role="radio"
+                className="target-picker__row"
+                aria-checked={choice.key === selected}
+                aria-label={`${choice.project.name} · ${choice.title}`}
+                data-target={choice.key}
+                disabled={disabled}
+                onClick={() => onSelect(choice.key)}
+              >
+                <span className="target-picker__dot" aria-hidden="true" />
+                <span className="target-picker__title">{choice.title}</span>
+                {choice.byAi && <span className="target-picker__ai">{t('delegate.pick.byAi')}</span>}
+                {choice.lastViewed && <span className="target-picker__last">{t('delegate.pick.lastViewed')}</span>}
+                <span className="target-picker__meta" data-wider={choice.wider || undefined} title={choice.wider ? t('delegate.card.modeWider') : undefined}>
+                  {[choice.mode && t(`mode.${choice.mode}`), choice.busy ? t('delegate.card.targetBusy') : t('delegate.pick.idle')].filter(Boolean).join(' · ')}
+                </span>
+              </button>,
+            ]
+          })}
         </div>
       )}
       <div className="target-picker__hint">{self.project ? t('delegate.pick.hint', { project: self.project }) : t('delegate.pick.hintNoName')}</div>
