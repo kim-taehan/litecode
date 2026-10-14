@@ -13,7 +13,7 @@ import { agoText, clip, lastTurns, projectLine, SessionTools } from '../../src/s
 import type { ChatOptions, ChatResult } from '../../src/services/llm.ts'
 import type { ToolCaller } from '../../src/services/toolCalls.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
-import { attentionTarget, DELEGATION_SERVER, MAX_SENDS_PER_TURN, projectId, QUEUE_LIMIT, shortIds, widerMode, wrapInstruction } from '../../shared/delegation.ts'
+import { attentionTarget, DELEGATION_SERVER, LIST_MAX, MAX_SENDS_PER_TURN, projectId, QUEUE_LIMIT, shortIds, widerMode, wrapInstruction } from '../../shared/delegation.ts'
 import type { Attention, Conversation, History, HistoryMessage } from '../../shared/contract.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
@@ -326,6 +326,35 @@ describe('list_projects', () => {
     const afterGone = await call('list_projects')
     expect(afterGone).not.toContain('order-backend')
     expect(afterGone).toContain('design-tokens')
+  })
+
+  it('상한(LIST_MAX 20)까지 나열 — 넘으면 넘긴 개수를 다음 줄에 알려 준다, 조용히 자르지 않는다 (#353)', async () => {
+    const { call, idle, view, projects } = await start()
+    await idle(B, '주문 API 설계', { project: backend })
+    await idle(C, '색 토큰 이름 정리', { project: tokens })
+    await view(B)
+    await view(C)
+    const extraId = (index: number): string => `99999999-0000-4000-8000-${(9000 + index).toString().padStart(12, '0')}`
+    // 더 18개 — backend·tokens 합쳐서 정확히 20개 (상한, 넘어가지 않음)
+    for (let i = 0; i < LIST_MAX - 2; i++) {
+      const dir = path.join(root, `extra-${i}`)
+      await fs.mkdir(dir)
+      await projects.open(dir)
+      await idle(extraId(i), `추가 ${i}`, { project: dir })
+      await view(extraId(i))
+    }
+    let lines = (await call('list_projects')).split('\n')
+    expect(lines).toHaveLength(LIST_MAX)
+    expect(lines.join('\n')).not.toContain('more not listed')
+    // 21번째 프로젝트 — 넘은 것은 알려 준다
+    const extra = path.join(root, 'extra-many')
+    await fs.mkdir(extra)
+    await projects.open(extra)
+    await idle(extraId(99), '하나 더', { project: extra })
+    await view(extraId(99))
+    lines = (await call('list_projects')).split('\n')
+    expect(lines).toHaveLength(LIST_MAX + 1)
+    expect(lines[LIST_MAX]).toBe('… and 1 more not listed.')
   })
 })
 

@@ -202,10 +202,11 @@ export function SessionTools(ctx: Context): void {
       const targets = (await others(directory)).filter((entry) => !entry.problem)
       if (targets.length === 0) return 'No other project can receive an instruction. Only projects where the user has viewed a conversation are listed; this project is never listed.'
       const now = Date.now()
-      return targets
-        .slice(0, LIST_MAX)
-        .map((entry) => projectLine(entry.id, entry.project, entry.conversation, stateOf(entry.conversation.id), ctx.chat.queued(entry.conversation.id), now))
-        .join('\n')
+      const shown = targets.slice(0, LIST_MAX)
+      // (#353) — 잘린 것이 있으면 조용히 하지 않는다: 목록 뒤에 남은 개수를 알려 준다
+      const rest = targets.length - shown.length
+      const lines = shown.map((entry) => projectLine(entry.id, entry.project, entry.conversation, stateOf(entry.conversation.id), ctx.chat.queued(entry.conversation.id), now)).join('\n')
+      return rest > 0 ? `${lines}\n… and ${rest} more not listed.` : lines
     },
   }
 
