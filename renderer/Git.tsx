@@ -232,6 +232,10 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
         <ConfirmCard confirm={confirm} view={view} busy={busy} onCancel={() => setConfirm(undefined)} onAccept={accept} />
       ) : (
         <BranchList
+          onOpenTab={() => {
+            openGitTab(directory)
+            onClose()
+          }}
           view={view}
           branches={branches}
           remotes={remotes}
@@ -265,6 +269,7 @@ export function BranchList({
   mac,
   editing,
   onEdit = () => {},
+  onOpenTab = () => {},
   onPull,
   onPush,
   onCreate,
@@ -279,6 +284,8 @@ export function BranchList({
   mac: boolean
   editing?: Editing
   onEdit?(editing: Editing | undefined): void
+  /** 검색 줄 오른쪽 — 오른쪽 패널의 Git 탭을 연다 */
+  onOpenTab?(): void
   onPull(): void
   onPush(): void
   onCreate(name: string): void
@@ -432,6 +439,18 @@ export function BranchList({
           <path d="M10.5 10.5L14 14" />
         </svg>
         <input aria-label={t('git.pop.search')} placeholder={t('git.pop.search')} value={query} autoFocus={!editing} onChange={(event) => setQuery(event.target.value)} />
+        <button
+          type="button"
+          className="branch-pop__tab"
+          aria-label={t('git.pop.openTab')}
+          title={t('git.pop.openTab')}
+          onClick={onOpenTab}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <rect x="2" y="3" width="12" height="10" rx="2" />
+            <path d="M10 3v10" />
+          </svg>
+        </button>
       </label>
       {blocks.map((block, index) => (
         <Fragment key={index}>

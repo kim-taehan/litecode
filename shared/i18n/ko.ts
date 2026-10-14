@@ -948,6 +948,7 @@ export const ko = {
   'git.retry': '다시 시도',
   'git.pillTitle': '브랜치 {branch} · 변경 {count}',
   'git.pop.search': '브랜치·동작 검색',
+  'git.pop.openTab': '오른쪽 Git 탭 열기',
   'git.pop.pull': '가져오기 (원격 → 이 브랜치)',
   'git.pop.newBranch': '새 브랜치 만들기…',
   'git.pop.revision': '태그·커밋으로 전환…',

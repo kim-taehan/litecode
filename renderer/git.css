@@ -438,6 +438,21 @@
   color: var(--text-tertiary);
 }
 .branch-pop__search svg { flex: none; }
+.branch-pop__tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.branch-pop__tab:hover { background: var(--fill-hover); color: var(--text); }
 .branch-pop__search input,
 .branch-pop__edit input {
   flex: 1;

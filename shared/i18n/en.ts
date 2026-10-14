@@ -920,6 +920,7 @@ export const en = {
   'git.retry': 'Try again',
   'git.pillTitle': 'Branch {branch} · {count} changed',
   'git.pop.search': 'Search branches and actions',
+  'git.pop.openTab': 'Open the Git tab',
   'git.pop.pull': 'Pull (remote → this branch)',
   'git.pop.newBranch': 'Create new branch…',
   'git.pop.revision': 'Switch to tag or commit…',
