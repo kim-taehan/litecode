@@ -592,6 +592,7 @@ function gitBridge(ctx: Context): void {
   handle(ctx, Channel.GIT_DIFF, async (_event, directory: unknown, file: unknown, staged: unknown) => ctx.git.diff(await project(directory), String(file), staged === true))
   handle(ctx, Channel.GIT_LOG, async (_event, directory: unknown) => ctx.git.log(await project(directory)))
   handle(ctx, Channel.GIT_BRANCHES, async (_event, directory: unknown) => ctx.git.branches(await project(directory)))
+  handle(ctx, Channel.GIT_REMOTE_BRANCHES, async (_event, directory: unknown) => ctx.git.remoteBranches(await project(directory)))
   handle(ctx, Channel.GIT_RUN, async (_event, directory: unknown, action: GitAction) => ctx.git.perform(await project(directory), action))
   handle(ctx, Channel.GIT_OPEN_REMOTE, async (_event, directory: unknown) => {
     const view = await ctx.git.view(await project(directory))

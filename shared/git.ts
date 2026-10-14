@@ -71,6 +71,8 @@ export type GitAction =
   | { kind: 'stage' | 'unstage' | 'discard'; paths: string[] }
   | { kind: 'commit'; message: string }
   | { kind: 'createBranch' | 'switchBranch' | 'deleteBranch'; name: string }
+  /** 브랜치 팝업 (#386) — switchRemote: `origin/x` → 같은 이름 로컬 브랜치로(없으면 추적 브랜치를 만든다) · switchRevision: 태그·커밋 해시 → 분리된 HEAD */
+  | { kind: 'switchRemote' | 'switchRevision'; name: string }
   | { kind: 'addRemote'; url: string }
   | { kind: 'undoCommit' | 'push' | 'pull' | 'abortMerge' | 'init' }
 

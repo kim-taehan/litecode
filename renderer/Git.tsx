@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { FileDiff } from '../shared/ipc.ts'
 import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitResult, type GitStatus } from '../shared/git.ts'
 import { ago } from './ago.ts'
+import { branchTrack, groupBranches, matchesQuery, popupShortcut, recentBranches, shortcutLabel, type PopupShortcut } from './branchPopup.ts'
+import { focusComposerInput } from './composerFocus.ts'
 import { splitPath } from './changedFiles.ts'
 import { DiffCard } from './DiffCard.tsx'
 import { useFeatures } from './featuresStore.ts'
@@ -19,7 +21,7 @@ import './git.css'
 
 type Sub = 'changes' | 'log' | 'branches'
 type Confirm =
-  | { kind: 'switch'; name: string }
+  | { kind: 'switch'; name: string; via?: 'remote' | 'revision' }
   | { kind: 'push' }
   | { kind: 'pull' }
   | { kind: 'discard'; file: GitFile }
@@ -42,20 +44,470 @@ export function GitTabCount({ directory }: { directory: string }) {
   )
 }
 
-/** 입력 카드의 브랜치 알약 — 누르면 Git 탭의 브랜치 목록. 저장소가 아니거나 git 이 없으면 그리지 않는다 */
+/** 입력 카드의 브랜치 알약 — 누르면 위로 브랜치 팝업 (#386). 저장소가 아니거나 git 이 없으면 그리지 않는다 */
 export function GitBranchPill({ directory }: { directory: string }) {
   const t = useT()
   const on = useFeatures().has('git')
   const view = useGitView(on ? directory : undefined)
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  // 바깥을 누르면 닫는다 (모드 칩·+ 메뉴와 같다)
+  useEffect(() => {
+    if (!open) return
+    const outside = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) close()
+    }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [open])
+
+  // 프로젝트가 바뀌면 닫는다 — 팝업은 그 저장소의 것이다
+  useEffect(() => setOpen(false), [directory])
+
+  function close(): void {
+    setOpen(false)
+    if (!focusComposerInput()) triggerRef.current?.focus() // 닫히면 입력창으로 (#374) — 없으면 알약으로
+  }
+
   if (!on || view?.state !== 'ok') return null
   const count = changeCount(view)
   const branch = view.branch ?? t('git.detached')
   return (
-    <button type="button" className="mode-chip git-pill" title={t('git.pillTitle', { branch, count })} onClick={() => openGitTab(directory, 'branches')}>
-      <BranchIcon />
-      <span className="git-pill__name">{branch}</span>
-      {count > 0 && <span className="git-pill__dot">● {count}</span>}
-    </button>
+    <div className="git-pill-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="mode-chip git-pill"
+        ref={triggerRef}
+        title={t('git.pillTitle', { branch, count })}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+      >
+        <BranchIcon />
+        <span className="git-pill__name">{branch}</span>
+        {count > 0 && <span className="git-pill__dot">● {count}</span>}
+      </button>
+      {open && <BranchPopup directory={directory} view={view} onClose={close} />}
+    </div>
+  )
+}
+
+// ── 브랜치 팝업 (이슈 #386, 시안 Git 탭 재설계 ② Branch.dc.html) ──
+// 알약 위로 뜬다(입력 카드 .composer__box 기준, + 메뉴와 같은 자리 잡기). 위에서부터 검색 칸 · 가져오기/올리기 · 새 브랜치/태그·커밋으로 전환 ·
+// 최근 · 로컬 브랜치(앞부분 묶음) · 원격 브랜치. 바꾸는 동작은 Git 탭과 같은 흐름이다 — 전환·가져오기·올리기는 확인 카드(ConfirmCard)를
+// 팝업 안에 띄워 묻고, 새 브랜치는 바로 만든다. 성공하면 닫고, 실패는 팝업 위쪽 한 줄(충돌은 Git 탭의 충돌 카드로 보낸다).
+// 단축키 ⌘T(가져오기)·⌥⌘N(새 브랜치)는 팝업이 열려 있을 때만 (mac 밖은 Ctrl). 시안의 ⌘K 글자는 뺐다 — ⌘K 는 프로젝트 빠른 열기(#379)
+
+type Editing = 'branch' | 'revision'
+
+function BranchPopup({ directory, view, onClose }: { directory: string; view: GitStatus; onClose(): void }) {
+  const t = useT()
+  const mac = navigator.platform.startsWith('Mac')
+  const [branches, setBranches] = useState<GitBranch[]>()
+  const [remotes, setRemotes] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState<Confirm>()
+  const [error, setError] = useState<{ text: string; detail?: string }>()
+  const [editing, setEditing] = useState<Editing>()
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let live = true
+    window.litecode.gitBranches(directory).then(
+      (list) => live && setBranches(list),
+      () => live && setBranches([]),
+    )
+    window.litecode.gitRemoteBranches(directory).then(
+      (list) => live && setRemotes(list),
+      () => live && setRemotes([]),
+    )
+    return () => {
+      live = false
+    }
+  }, [directory, view])
+
+  const askRemote = (kind: 'push' | 'pull'): void => {
+    setError(undefined)
+    setConfirm(view.remote ? { kind } : { kind: 'remote', then: kind })
+  }
+
+  // 누른 줄이 사라지면 포커스가 팝업 밖(body)으로 빠져 Esc·화살표가 안 닿는다 — 확인 카드는 주 버튼으로, 입력 칸을 접으면 검색 칸으로
+  useEffect(() => {
+    if (confirm && confirm.kind !== 'remote') popRef.current?.querySelector<HTMLElement>('.attention-card__button--primary, .attention-card__button--danger')?.focus()
+  }, [confirm])
+  const edit = (next: Editing | undefined): void => {
+    setEditing(next)
+    if (!next) popRef.current?.querySelector<HTMLElement>('.branch-pop__search input')?.focus()
+  }
+
+  const shortcutRef = useRef<(shortcut: PopupShortcut) => void>(() => {})
+  shortcutRef.current = (shortcut) => {
+    if (busy || confirm) return
+    if (shortcut === 'pull' && view.branch && !view.merging) askRemote('pull')
+    if (shortcut === 'newBranch' && view.hasCommits) setEditing('branch')
+  }
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing) return
+      const shortcut = popupShortcut(event, mac)
+      if (!shortcut) return
+      event.preventDefault()
+      event.stopPropagation()
+      shortcutRef.current(shortcut)
+    }
+    window.addEventListener('keydown', onKey, true) // 터미널 ⌘T(useTerminalKeys)보다 먼저 — 그쪽은 팝업이 열려 있으면 물러난다
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [mac])
+
+  async function run(action: GitAction): Promise<boolean> {
+    setBusy(true)
+    setError(undefined)
+    try {
+      const result = await window.litecode.gitRun(directory, action)
+      if (result.ok) return true
+      if (result.reason === 'no-remote') setConfirm({ kind: 'remote', then: action.kind === 'pull' ? 'pull' : 'push' })
+      else if (result.reason === 'conflict') {
+        onClose()
+        openGitTab(directory, 'changes') // 충돌 카드(파일·가져오기 취소)는 Git 탭에 있다
+      } else setError({ text: t(`git.error.${result.reason}`), detail: result.message })
+      return false
+    } catch (failure) {
+      setError({ text: t('git.error.failed'), detail: reason(failure) })
+      return false
+    } finally {
+      setBusy(false)
+      void refreshGit(directory)
+    }
+  }
+
+  async function accept(value?: string): Promise<void> {
+    const current = confirm
+    if (!current) return
+    if (current.kind === 'remote') {
+      if (await run({ kind: 'addRemote', url: value ?? '' })) setConfirm(current.then ? { kind: current.then } : undefined)
+      return
+    }
+    if (current.kind !== 'switch' && current.kind !== 'push' && current.kind !== 'pull') return
+    setConfirm(undefined)
+    const action: GitAction =
+      current.kind === 'switch'
+        ? { kind: current.via === 'remote' ? 'switchRemote' : current.via === 'revision' ? 'switchRevision' : 'switchBranch', name: current.name }
+        : { kind: current.kind }
+    if (await run(action)) onClose()
+  }
+
+  function onKeyDown(event: ReactKeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault() // 입력창의 Esc 두 번(답변 중지)은 이미 쓰인 Esc 를 세지 않는다
+      event.stopPropagation()
+      if (confirm) setConfirm(undefined)
+      else if (editing) edit(undefined)
+      else onClose()
+      return
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    const list = [...(popRef.current?.querySelectorAll<HTMLElement>('.branch-pop__search input, button.branch-pop__item:not(:disabled)') ?? [])]
+    if (list.length === 0) return
+    event.preventDefault()
+    const at = list.indexOf(document.activeElement as HTMLElement)
+    list[(at + (event.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus()
+  }
+
+  return (
+    <div className="branch-pop" role="dialog" aria-label={t('git.branches')} ref={popRef} onKeyDown={onKeyDown}>
+      {error && (
+        <p className="branch-pop__error" role="alert" title={error.detail}>
+          {error.text}
+        </p>
+      )}
+      {confirm ? (
+        <ConfirmCard confirm={confirm} view={view} busy={busy} onCancel={() => setConfirm(undefined)} onAccept={accept} />
+      ) : (
+        <BranchList
+          view={view}
+          branches={branches}
+          remotes={remotes}
+          busy={busy}
+          mac={mac}
+          editing={editing}
+          onEdit={edit}
+          onPull={() => askRemote('pull')}
+          onPush={() => askRemote('push')}
+          onCreate={async (name) => {
+            if (await run({ kind: 'createBranch', name })) onClose()
+          }}
+          onRevision={(name) => {
+            setEditing(undefined)
+            setConfirm({ kind: 'switch', name, via: 'revision' })
+          }}
+          onSwitch={(name) => setConfirm({ kind: 'switch', name })}
+          onSwitchRemote={(name) => setConfirm({ kind: 'switch', name, via: 'remote' })}
+        />
+      )}
+    </div>
+  )
+}
+
+/** 팝업의 목록 — 검색 칸부터 원격 브랜치까지 (시안 ② 의 줄 그대로). 검색하면 동작·브랜치를 이름으로 거르고 묶음·원격을 편다 */
+export function BranchList({
+  view,
+  branches,
+  remotes,
+  busy,
+  mac,
+  editing,
+  onEdit = () => {},
+  onPull,
+  onPush,
+  onCreate,
+  onRevision,
+  onSwitch,
+  onSwitchRemote,
+}: {
+  view: GitStatus
+  branches: GitBranch[] | undefined
+  remotes: string[]
+  busy: boolean
+  mac: boolean
+  editing?: Editing
+  onEdit?(editing: Editing | undefined): void
+  onPull(): void
+  onPush(): void
+  onCreate(name: string): void
+  onRevision(name: string): void
+  onSwitch(name: string): void
+  onSwitchRemote(name: string): void
+}) {
+  const t = useT()
+  const [query, setQuery] = useState('')
+  const [opened, setOpened] = useState<Map<string, boolean>>(new Map())
+  const searching = query.trim() !== ''
+  const shown = (branches ?? []).filter((branch) => matchesQuery(branch.name, query))
+  const shownRemotes = remotes.filter((name) => matchesQuery(name, query))
+  /** 묶음·원격이 펼쳐졌나 — 누르기 전엔 지금 브랜치가 든 묶음만 펼침, 검색 중엔 모두 */
+  const isOpen = (key: string, initially: boolean): boolean => searching || (opened.get(key) ?? initially)
+  const toggle = (key: string, initially: boolean): void => setOpened((now) => new Map(now).set(key, !(now.get(key) ?? initially)))
+
+  const branchRow = (branch: GitBranch, lead: ReactNode, child = false) => {
+    const track = branchTrack(branch)
+    return (
+      <button
+        key={branch.name}
+        type="button"
+        className={`branch-pop__item${child ? ' branch-pop__item--child' : ''}`}
+        disabled={branch.current || busy}
+        aria-current={branch.current || undefined}
+        onClick={() => onSwitch(branch.name)}
+      >
+        {lead}
+        <span className="branch-pop__name git-mono" title={branch.name}>
+          {branch.name}
+        </span>
+        {branch.current && (
+          <span className="branch-pop__dot" aria-label={t('git.pop.current')}>
+            ●
+          </span>
+        )}
+        {track ? <span className="branch-pop__tr">{track}</span> : branch.upstream && <span className="branch-pop__up">{branch.upstream}</span>}
+      </button>
+    )
+  }
+
+  const pullLabel = t('git.pop.pull')
+  const pushLabel = t('git.push')
+  const newLabel = t('git.pop.newBranch')
+  const revisionLabel = t('git.pop.revision')
+  const remoteOff = busy || view.merging || !view.branch
+
+  const sync: ReactNode[] = []
+  if (matchesQuery(pullLabel, query))
+    sync.push(
+      <button key="pull" type="button" className="branch-pop__item" disabled={remoteOff} onClick={onPull}>
+        <span className="branch-pop__name">{pullLabel}</span>
+        <span className="branch-pop__sc">{shortcutLabel('pull', mac)}</span>
+      </button>,
+    )
+  if (matchesQuery(pushLabel, query))
+    sync.push(
+      <button key="push" type="button" className="branch-pop__item" disabled={remoteOff || !view.hasCommits} onClick={onPush}>
+        <span className="branch-pop__name">{pushLabel}</span>
+        {view.ahead > 0 && <span className="branch-pop__tr">{`↑${view.ahead}`}</span>}
+      </button>,
+    )
+
+  const make: ReactNode[] = []
+  if (editing === 'branch')
+    make.push(<InlineField key="new" icon={<PlusIcon />} label={t('git.newBranchLabel')} busy={busy} onSubmit={onCreate} onCancel={() => onEdit(undefined)} />)
+  else if (matchesQuery(newLabel, query))
+    make.push(
+      <button key="new" type="button" className="branch-pop__item" disabled={busy || !view.hasCommits} onClick={() => onEdit('branch')}>
+        <PlusIcon />
+        <span className="branch-pop__name">{newLabel}</span>
+        <span className="branch-pop__sc">{shortcutLabel('newBranch', mac)}</span>
+      </button>,
+    )
+  if (editing === 'revision')
+    make.push(<InlineField key="revision" icon={<span className="branch-pop__lead" />} label={t('git.pop.revisionLabel')} busy={busy} onSubmit={onRevision} onCancel={() => onEdit(undefined)} />)
+  else if (matchesQuery(revisionLabel, query))
+    make.push(
+      <button key="revision" type="button" className="branch-pop__item" disabled={busy || !view.hasCommits} onClick={() => onEdit('revision')}>
+        <span className="branch-pop__lead" />
+        <span className="branch-pop__name">{revisionLabel}</span>
+      </button>,
+    )
+
+  const blocks: ReactNode[] = [sync, make].filter((block) => block.length > 0)
+  if (branches === undefined) blocks.push(<p key="loading" className="branch-pop__empty">{t('filePreview.loading')}</p>)
+  else {
+    const recent = recentBranches(shown)
+    if (recent.length > 0)
+      blocks.push([
+        <div key="recent-label" className="branch-pop__label">
+          {t('git.pop.recent')}
+        </div>,
+        ...recent.map((branch) => (
+          <Fragment key={`recent-${branch.name}`}>
+            {branchRow(branch, branch.current ? <PopBranchIcon /> : branch.upstream && !branchTrack(branch) ? <CheckIcon /> : <span className="branch-pop__lead" />)}
+          </Fragment>
+        )),
+      ])
+    const entries = groupBranches(shown)
+    if (entries.length > 0)
+      blocks.push([
+        <div key="local-label" className="branch-pop__label">
+          {t('git.pop.local')}
+        </div>,
+        ...entries.map((entry) => {
+          if (entry.kind === 'branch') return branchRow(entry.branch, <span className="branch-pop__lead branch-pop__lead--wide" />)
+          const initially = entry.branches.some((branch) => branch.current)
+          const open = isOpen(`group:${entry.prefix}`, initially)
+          return (
+            <Fragment key={`group:${entry.prefix}`}>
+              <button type="button" className="branch-pop__item" aria-expanded={open} onClick={() => toggle(`group:${entry.prefix}`, initially)}>
+                <ChevronIcon open={open} />
+                <FolderIcon />
+                <span className="branch-pop__name">{entry.prefix}</span>
+                <span className="branch-pop__tr">{t('git.pop.count', { count: entry.branches.length })}</span>
+              </button>
+              {open && entry.branches.map((branch) => branchRow(branch, null, true))}
+            </Fragment>
+          )
+        }),
+      ])
+    if (shownRemotes.length > 0) {
+      const open = isOpen('remote', false)
+      blocks.push([
+        <button key="remote" type="button" className="branch-pop__item branch-pop__item--muted" aria-expanded={open} onClick={() => toggle('remote', false)}>
+          <ChevronIcon open={open} />
+          <span className="branch-pop__name">{t('git.pop.remote')}</span>
+          <span className="branch-pop__tr">{t('git.pop.count', { count: shownRemotes.length })}</span>
+        </button>,
+        ...(open
+          ? shownRemotes.map((name) => (
+              <button key={`remote:${name}`} type="button" className="branch-pop__item branch-pop__item--child" disabled={busy || name.slice(name.indexOf('/') + 1) === view.branch} onClick={() => onSwitchRemote(name)}>
+                <span className="branch-pop__name git-mono" title={name}>
+                  {name}
+                </span>
+              </button>
+            ))
+          : []),
+      ])
+    }
+    if (blocks.length === 0) blocks.push(<p key="empty" className="branch-pop__empty">{t('git.pop.empty')}</p>)
+  }
+
+  return (
+    <>
+      <label className="branch-pop__search">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5" />
+          <path d="M10.5 10.5L14 14" />
+        </svg>
+        <input aria-label={t('git.pop.search')} placeholder={t('git.pop.search')} value={query} autoFocus={!editing} onChange={(event) => setQuery(event.target.value)} />
+      </label>
+      {blocks.map((block, index) => (
+        <Fragment key={index}>
+          {index > 0 && <div className="branch-pop__sep" />}
+          {block}
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+/** 팝업 안의 한 줄 입력 (새 브랜치 이름·태그/커밋) — Enter 로 보내고 Esc 로 접는다 */
+function InlineField({ icon, label, busy, onSubmit, onCancel }: { icon: ReactNode; label: string; busy: boolean; onSubmit(value: string): void; onCancel(): void }) {
+  const [value, setValue] = useState('')
+  return (
+    <form
+      className="branch-pop__edit"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (value.trim() && !busy) onSubmit(value.trim())
+      }}
+    >
+      {icon}
+      <input
+        className="git-mono"
+        aria-label={label}
+        placeholder={label}
+        value={value}
+        autoFocus
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return
+          event.preventDefault()
+          event.stopPropagation()
+          onCancel()
+        }}
+      />
+    </form>
+  )
+}
+
+// 시안의 그림 (13px·12px) — 지금 브랜치(가지)·올려 둔 브랜치(✓)·+·접기 화살표·폴더
+function PopBranchIcon() {
+  return (
+    <svg className="branch-pop__icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <circle cx="4" cy="3.5" r="1.7" />
+      <circle cx="4" cy="12.5" r="1.7" />
+      <circle cx="12" cy="6" r="1.7" />
+      <path d="M4 5.2v5.6M12 7.7c0 2.5-2 2.8-8 3.3" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg className="branch-pop__icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <path d="M2.5 8.5l3 3 8-8" />
+    </svg>
+  )
+}
+
+function PlusIcon() {
+  return (
+    <svg className="branch-pop__icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d="M8 3v10M3 8h10" />
+    </svg>
+  )
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg className="branch-pop__icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <path d={open ? 'M4 6l4 4 4-4' : 'M6 4l4 4-4 4'} />
+    </svg>
+  )
+}
+
+function FolderIcon() {
+  return (
+    <svg className="branch-pop__icon" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <path d="M2 4.5h4l1.5 1.5H14v6.5H2z" />
+    </svg>
   )
 }
 

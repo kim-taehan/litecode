@@ -229,6 +229,8 @@ export const Channel = {
   GIT_LOG: 'git:log',
   /** 화면 → 메인 (directory) → GitBranch[] */
   GIT_BRANCHES: 'git:branches',
+  /** 화면 → 메인 (directory) → string[] — 원격 브랜치 이름(`origin/x`, 원격의 HEAD 제외). 브랜치 팝업(#386) */
+  GIT_REMOTE_BRANCHES: 'git:remote-branches',
   /** 화면 → 메인 (directory, GitAction) → GitResult — 바꾸는 작업 전부 */
   GIT_RUN: 'git:run',
   /** 화면 → 메인 (directory) — origin 주소를 https 로 바꿔 기본 브라우저로 연다. 못 바꾸면 false */
@@ -485,6 +487,7 @@ export interface LitecodeBridge {
   gitDiff(directory: string, path: string, staged: boolean): Promise<string>
   gitLog(directory: string): Promise<GitCommit[]>
   gitBranches(directory: string): Promise<GitBranch[]>
+  gitRemoteBranches(directory: string): Promise<string[]>
   gitRun(directory: string, action: GitAction): Promise<GitResult<Record<string, unknown>>>
   openGitRemote(directory: string): Promise<boolean>
   onGitChanged(listener: (directory: string) => void): () => void

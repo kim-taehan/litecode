@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import type { Attention } from '../../shared/contract.ts'
-import type { GitStatus, GitView } from '../../shared/git.ts'
+import type { GitBranch, GitStatus, GitView } from '../../shared/git.ts'
 import { changeCount, gitViewOf, refreshGit } from '../../renderer/gitStore.ts'
 import { GIT_TAB, getPanelState, openFilePreview, openGitTab, selectTab } from '../../renderer/filePreviewStore.ts'
 
@@ -139,5 +139,161 @@ describe('AI 의 git 쓰기 도구 승인 카드', () => {
     expect(out).toContain('llm.ts 를 나눈다')
     expect(out).toContain('>항상 허용</button>')
     expect(html(createElement(AttentionCard, { request: card('git_push', {}), onAnswer: async () => {} }))).toContain('AI 가 원격에 올리려고 합니다 (push)')
+  })
+})
+
+// ── 브랜치 팝업 (이슈 #386, 시안 Branch.dc.html ②) ──
+
+const { recentBranches, branchPrefix, groupBranches, matchesQuery, branchTrack, popupShortcut, shortcutLabel } = await import('../../renderer/branchPopup.ts')
+const { BranchList } = await import('../../renderer/Git.tsx')
+
+const br = (name: string, extra: Partial<GitBranch> = {}): GitBranch => ({ name, current: false, time: 0, ahead: 0, behind: 0, unmerged: 0, ...extra })
+
+describe('브랜치 팝업 — 순수 규칙', () => {
+  it('최근 = 지금 브랜치 먼저, 그다음 마지막 커밋 시각 순 상위 3개', () => {
+    const list = [br('a', { time: 1 }), br('b', { time: 5 }), br('c', { time: 3, current: true }), br('d', { time: 4 }), br('e', { time: 2 })]
+    expect(recentBranches(list).map((branch) => branch.name)).toEqual(['c', 'b', 'd'])
+    expect(recentBranches([br('x')]).map((branch) => branch.name)).toEqual(['x'])
+  })
+
+  it('앞부분 — 구분자 _ 와 / 둘 다, 구분자가 없거나 끝에만 있으면 없다', () => {
+    expect(branchPrefix('feat_290_git')).toBe('feat_')
+    expect(branchPrefix('feat/log-graph')).toBe('feat/')
+    expect(branchPrefix('fix_1')).toBe('fix_')
+    expect(branchPrefix('main')).toBeUndefined()
+    expect(branchPrefix('wip_')).toBeUndefined()
+    expect(branchPrefix('_x')).toBeUndefined()
+  })
+
+  it('묶기 — 둘 이상인 앞부분만 묶음(이름 순), 하나뿐이면 낱개. 묶음이 먼저, 낱개는 이름 순. feat_ 와 feat/ 는 다른 묶음', () => {
+    const list = [br('main'), br('feat_303_terminal'), br('dev'), br('feat_290_git'), br('fix_1'), br('fix_2'), br('docs_only'), br('feat/a'), br('feat/b')]
+    const entries = groupBranches(list)
+    expect(entries.map((entry) => (entry.kind === 'group' ? `${entry.prefix}[${entry.branches.map((branch) => branch.name).join(',')}]` : entry.branch.name))).toEqual([
+      'feat/[feat/a,feat/b]',
+      'feat_[feat_290_git,feat_303_terminal]',
+      'fix_[fix_1,fix_2]',
+      'dev',
+      'docs_only',
+      'main',
+    ])
+  })
+
+  it('검색 — 대소문자 무시, 앞뒤 공백 무시, 빈 검색은 모두', () => {
+    expect(matchesQuery('feat_290_GIT', ' git ')).toBe(true)
+    expect(matchesQuery('main', 'dev')).toBe(false)
+    expect(matchesQuery('main', '  ')).toBe(true)
+  })
+
+  it('↑↓ — 있는 쪽만', () => {
+    expect(branchTrack(br('a', { ahead: 3 }))).toBe('↑3')
+    expect(branchTrack(br('a', { ahead: 1, behind: 2 }))).toBe('↑1 ↓2')
+    expect(branchTrack(br('a', { behind: 2 }))).toBe('↓2')
+    expect(branchTrack(br('a'))).toBe('')
+  })
+
+  it('단축키 — mac 은 ⌘T·⌥⌘N, 그 밖은 Ctrl+T·Ctrl+Alt+N. 물리 키(code)로 본다 (한글 입력 체계)', () => {
+    const key = (code: string, mods: { meta?: boolean; ctrl?: boolean; alt?: boolean; shift?: boolean } = {}) => ({ code, metaKey: !!mods.meta, ctrlKey: !!mods.ctrl, altKey: !!mods.alt, shiftKey: !!mods.shift })
+    expect(popupShortcut(key('KeyT', { meta: true }), true)).toBe('pull')
+    expect(popupShortcut(key('KeyN', { meta: true, alt: true }), true)).toBe('newBranch')
+    expect(popupShortcut(key('KeyN', { meta: true }), true)).toBeUndefined() // ⌘N 은 새 대화
+    expect(popupShortcut(key('KeyT', { ctrl: true }), true)).toBeUndefined()
+    expect(popupShortcut(key('KeyT', { meta: true, shift: true }), true)).toBeUndefined()
+    expect(popupShortcut(key('KeyT', { ctrl: true }), false)).toBe('pull')
+    expect(popupShortcut(key('KeyN', { ctrl: true, alt: true }), false)).toBe('newBranch')
+    expect(popupShortcut(key('KeyT', { meta: true }), false)).toBeUndefined()
+    expect([shortcutLabel('pull', true), shortcutLabel('newBranch', true), shortcutLabel('pull', false), shortcutLabel('newBranch', false)]).toEqual(['⌘T', '⌥⌘N', 'Ctrl+T', 'Ctrl+Alt+N'])
+  })
+})
+
+describe('브랜치 팝업 — 정적 그림', () => {
+  const branches = [
+    br('feat_290_git', { current: true, time: 9, upstream: 'origin/feat_290_git', ahead: 2 }),
+    br('dev', { time: 8, upstream: 'origin/dev' }),
+    br('feat_295_jobs_strip', { time: 3, ahead: 3 }),
+    br('feat_303_terminal_panel', { time: 2 }),
+    br('fix_1', { time: 1 }),
+    br('fix_2', { time: 1 }),
+    br('main', { time: 0, upstream: 'origin/main' }),
+  ]
+  const list = (extra: Partial<Parameters<typeof BranchList>[0]> = {}) =>
+    html(
+      createElement(BranchList, {
+        view: status(),
+        branches,
+        remotes: ['origin/dev', 'origin/main', 'origin/feat_x'],
+        busy: false,
+        mac: true,
+        onPull() {},
+        onPush() {},
+        onCreate() {},
+        onRevision() {},
+        onSwitch() {},
+        onSwitchRemote() {},
+        ...extra,
+      }),
+    )
+
+  it('시안의 줄 — 검색 칸(⌘K 글자 없음)·가져오기 ⌘T·올리기 ↑2·새 브랜치 ⌥⌘N·태그·커밋으로 전환·최근·로컬 브랜치·원격 브랜치 개수', () => {
+    const out = list()
+    expect(out).toContain('placeholder="브랜치·동작 검색"')
+    expect(out).not.toContain('⌘K')
+    expect(out).toContain('가져오기 (원격 → 이 브랜치)')
+    expect(out).toContain('>⌘T<')
+    expect(out).toMatch(/올리기<\/span><span class="branch-pop__tr">↑2</)
+    expect(out).toContain('새 브랜치 만들기…')
+    expect(out).toContain('>⌥⌘N<')
+    expect(out).toContain('태그·커밋으로 전환…')
+    expect(out).toContain('>최근<')
+    expect(out).toContain('>로컬 브랜치<')
+    expect(out).toMatch(/원격 브랜치<\/span><span class="branch-pop__tr">3개</)
+    // 원격 목록은 접혀 있다
+    expect(out).not.toContain('origin/feat_x')
+    // 순서: 동작 → 최근 → 로컬 → 원격
+    const at = (text: string) => out.indexOf(text)
+    expect(at('가져오기 (원격')).toBeLessThan(at('>최근<'))
+    expect(at('>최근<')).toBeLessThan(at('>로컬 브랜치<'))
+    expect(at('>로컬 브랜치<')).toBeLessThan(at('원격 브랜치</span>'))
+  })
+
+  it('로컬 — 지금 브랜치가 든 묶음은 펼침, 다른 묶음은 접힘(개수), 낱개는 upstream, ↑ 수, 지금 브랜치 ●', () => {
+    const out = list()
+    const local = out.slice(out.indexOf('>로컬 브랜치<'))
+    expect(local).toMatch(/feat_<\/span><span class="branch-pop__tr">3개</)
+    expect(local).toMatch(/fix_<\/span><span class="branch-pop__tr">2개</)
+    expect(local).toContain('feat_295_jobs_strip')
+    expect(local).toContain('>↑3<')
+    expect(local).not.toContain('fix_1') // 접힘
+    expect(local).toContain('aria-label="지금 브랜치"')
+    expect(local).toContain('>origin/main<')
+    expect(local.indexOf('fix_<')).toBeLessThan(local.indexOf('>dev<'))
+    // 지금 브랜치 줄은 누를 수 없다
+    expect(local).toMatch(/<button type="button" class="branch-pop__item branch-pop__item--child" disabled="" aria-current="true"><span class="branch-pop__name git-mono" title="feat_290_git">/)
+  })
+
+  it('최근 — 지금 브랜치(●·↑2) 다음 dev(upstream)', () => {
+    const out = list()
+    const recent = out.slice(out.indexOf('>최근<'), out.indexOf('>로컬 브랜치<'))
+    expect(recent.indexOf('feat_290_git')).toBeLessThan(recent.indexOf('>dev<'))
+    expect(recent).toContain('>origin/dev<')
+    expect(recent).toContain('●')
+  })
+
+  it('커밋 전이면 새 브랜치를 못 누르고, 분리된 HEAD·충돌 중이면 가져오기·올리기를 못 누른다', () => {
+    expect(list({ view: status({ hasCommits: false }) })).toMatch(/<button type="button" class="branch-pop__item" disabled=""><svg[^]*?새 브랜치 만들기…/)
+    const detached = list({ view: status({ branch: undefined }) })
+    expect(detached).toMatch(/<button type="button" class="branch-pop__item" disabled=""><span class="branch-pop__name">가져오기/)
+    expect(detached).toMatch(/<button type="button" class="branch-pop__item" disabled=""><span class="branch-pop__name">올리기/)
+  })
+
+  it('원격 브랜치가 없으면 그 줄이 없다, 브랜치를 읽는 중이면 읽는 중', () => {
+    expect(list({ remotes: [] })).not.toContain('원격 브랜치')
+    expect(list({ branches: undefined })).toContain('불러오는 중')
+  })
+
+  it('알약 — 분리된 HEAD 여도 그린다, 팝업 단추(aria-haspopup·닫힘)', async () => {
+    const pill = html(createElement(GitBranchPill, { directory: await withView(status({ branch: undefined, upstream: undefined })) }))
+    expect(pill).toContain('분리된 HEAD')
+    expect(pill).toContain('aria-haspopup="dialog"')
+    expect(pill).toContain('aria-expanded="false"')
   })
 })
