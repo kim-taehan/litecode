@@ -115,6 +115,12 @@ describe('리듀서 — 스냅샷과 스트림 사이', () => {
     expect(run([started(11), ended(12)], loaded).views['c1']!.shells).toEqual(shells)
     expect(opened().views['c1']!.shells).toBeUndefined()
   })
+
+  it('스냅샷의 omitted(앞에서 잘린 메시지 수)를 모습에 싣는다 — 안 잘리면 없다 (#365)', () => {
+    const trimmed = run([{ type: 'conversation.loaded', cid: 'c1', snapshot: snapshot(10, { history: { messages: [{ id: 'm2', role: 'user' as const, text: '마지막 질문' }] }, omitted: 4 }) }], opened())
+    expect(trimmed.views['c1']).toMatchObject({ messages: [{ id: 'm2', role: 'user' }], omitted: 4 })
+    expect(opened().views['c1']!.omitted).toBeUndefined()
+  })
 })
 
 describe('리듀서 — 다시 받기', () => {

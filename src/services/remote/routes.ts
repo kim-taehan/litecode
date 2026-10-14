@@ -8,6 +8,9 @@ import type { Conversation, History } from '../../../shared/contract.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../../shared/modes.ts'
 import {
   REMOTE_API_VERSION,
+  lastUserAt,
+  snapshotMessage,
+  snapshotShells,
   type AttentionReplyResponse,
   type ConversationSnapshot,
   type Hello,
@@ -117,21 +120,21 @@ export function remoteRoutes(host: RouteHost): Record<string, Route> {
       }
       const live = host.ctx.chat.snapshot()[cid]
       const turn = live?.turn
-      // `!` 카드는 읽기 전용으로 싣는다 (#265) — 폰에서 실행하는 길은 없다. 출력은 이미 OUTPUT_LIMIT 으로 잘려 있다
-      const shells = conversation.shells?.length ? { shells: conversation.shells } : {}
-      const snapshot: ConversationSnapshot = turn
-        ? {
-            // 턴이 도는 중이면 기록은 그 턴의 내 말까지만 — 쓰다 만 답은 live.progress 가 그리고, 끝나면 turn.ended 가 붙인다.
-            // 끼워 넣은 말이 있으면(이슈 #250) 그 뒤에 메인이 쥔 얼린 답·끼워 넣은 말 — live.progress 는 마지막 끼워 넣은 말 뒤의 줄이다
-            history: {
-              ...history,
-              messages: [...withHistory({ ...emptyChatView, running: true, messages: [turn.message] }, history.messages).messages, ...(turn.interjections ?? [])],
-            },
-            live: { progress: turn.progress, attention: turn.attention, queue: live.queue.items },
-            ...shells,
-            seq: host.log().seq,
-          }
-        : { history, ...shells, seq: host.log().seq }
+      // 턴이 도는 중이면 기록은 그 턴의 내 말까지만 — 쓰다 만 답은 live.progress 가 그리고, 끝나면 turn.ended 가 붙인다.
+      // 끼워 넣은 말이 있으면(이슈 #250) 그 뒤에 메인이 쥔 얼린 답·끼워 넣은 말 — live.progress 는 마지막 끼워 넣은 말 뒤의 줄이다
+      const combined = turn ? [...withHistory({ ...emptyChatView, running: true, messages: [turn.message] }, history.messages).messages, ...(turn.interjections ?? [])] : history.messages
+      // 폰은 전체 역사를 받지 않는다 (#365) — 도는 턴은 그 턴의 "내 말"(질문)부터, 끝난 대화는 마지막 질문부터. 마지막 것도 크면 메시지당 캡(진행 줄 전문).
+      // live(도는 진행 줄)는 캡하지 않는다 — 폰이 곧 받을 turn.progress 이벤트와 같은 모양이라 스냅샷만 캡하면 줄이 이벤트에서 불게 된다
+      const from = turn ? Math.max(0, combined.lastIndexOf(turn.message)) : lastUserAt(combined)
+      // `!` 카드는 읽기 전용으로 싣는다 (#265) — 폰에서 실행하는 길은 없다. 출력은 이미 OUTPUT_LIMIT 으로 잘려 있다. 잘린 범위의 카드는 빼고 position 을 다시 센다 (#365)
+      const shells = snapshotShells(conversation.shells, from)
+      const snapshot: ConversationSnapshot = {
+        history: { ...history, messages: combined.slice(from).map(snapshotMessage) },
+        ...(turn && { live: { progress: turn.progress, attention: turn.attention, queue: live.queue.items } }),
+        ...(shells && { shells }),
+        ...(from > 0 && { omitted: from }),
+        seq: host.log().seq,
+      }
       return [200, snapshot]
     },
 

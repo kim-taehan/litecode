@@ -194,13 +194,94 @@ export interface LiveTurn {
 
 /** GET /v1/conversations/{cid} — 스냅샷 + 그 시점 seq. 이 대화의 이벤트는 seq 초과분만 적용한다 (스냅샷과 스트림 사이에 틈이 없다) */
 export interface ConversationSnapshot {
-  /** 끝난 말풍선들 + (턴이 도는 중이면) 그 턴의 user 말까지, 끼워 넣은 말이 있으면 그 앞에 얼린 답과 그 말까지 (이슈 #250). 도는 턴의 진행 줄은 live.progress 에 있다 */
+  /** 끝난 말풍선들 + (턴이 도는 중이면) 그 턴의 user 말까지, 끼워 넣은 말이 있으면 그 앞에 얼린 답과 그 말까지 (이슈 #250). 도는 턴의 진행 줄은 live.progress 에 있다.
+   *  **전체 기록이 아니라 마지막 질문부터** — 폰은 상태 화면이지 기록 읽는 곳이 아니다 (이슈 #365, `lastUserAt`·`snapshotMessage`) */
   history: History
   /** 턴이 도는 중일 때만 */
   live?: LiveTurn
-  /** 이 대화의 `!명령` 결과 카드 (#265) — 읽기 전용. 카드가 없으면 필드가 없다. 새로 돈 카드는 스트림으로 오지 않는다 — 다시 읽을 때 보인다 */
+  /** 이 대화의 `!명령` 결과 카드 (#265) — 읽기 전용. 카드가 없으면 필드가 없다. 새로 돈 카드는 스트림으로 오지 않는다 — 다시 읽을 때 보인다.
+   *  history 와 함께 잘리면 보이는 범위만 싣고 position 은 보이는 말풍선 기준으로 다시 센다 (이슈 #365, `snapshotShells`) */
   shells?: ShellCard[]
+  /** history 가 앞에서 잘린 메시지 수 — 폰이 "앞의 메시지 N개 생략" 을 그리는 것. 0 이면(안 잘린) 필드가 없다 (이슈 #365) */
+  omitted?: number
   seq: number
+}
+
+// ── 대화 스냅샷의 내용 (이슈 #365) ────────────────────────────────────────────────────────────────
+// 폰은 대화를 열 때 전체 역사를 받지 않는다 — **마지막 질문부터** (끝난 대화는 마지막 user 말, 도는 턴은 그 턴의 "내 말") 만 받는다 (질문 + 그 답,
+// 통상 2개). 폰은 상태 화면(무엇이 도는가·무엇이 답을 기다리는가 보기, 답하기, 다음 질문 보내기)이고 전체 기록 읽기는 데스크탑 화면의 몫이다 —
+// 특히 블루투스 같은 느린 링크에서 긴 대화 스냅샷이 가장 큰 단일 페이로드였다 (실측 330KB → 20KB/s 에서 6.3초).
+// 마지막 것 하나도 클 수 있다 (어시스턴트 메시지가 진행 줄 전문 — 생각·도구 입력·결과·diff — 을 싣는다) 그래서 **메시지당 상한**이다 —
+// 백그라운드 작업의 상한(shared/tasks.ts)과 같은 선. **도는 턴의 진행 줄(live)은 캡하지 않는다** — 폰이 곧 받을 `turn.progress` 이벤트와
+// 같은 모양이라, 스냅샷만 캡하면 그 줄이 이벤트가 올 때 불게 된다. 데스크탑 화면은 영향이 없다(이것은 ctx.remote 가 폰에 내보내는 페이로드의 모양뿐).
+
+/** 스냅샷 메시지의 생각·응답 글(·지시문·하위 작업 지시) 글자 상한 — TASK_ITEM_TEXT_MAX 와 같은 선 */
+export const SNAPSHOT_TEXT_MAX = 20_000
+/** 도구 입력·결과·오류(·메시지 오류·재시도 글) 글자 상한 — TASK_TOOL_TEXT_MAX 와 같은 선 */
+export const SNAPSHOT_DETAIL_MAX = 8_000
+
+function clipTo(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]` : text
+}
+
+/** 목록의 마지막 user 말(질문) 자리 — user 말이 없으면(새 대화·빈 기록) 0 으로 잘지 않는다 */
+export function lastUserAt(messages: readonly HistoryMessage[]): number {
+  for (let at = messages.length - 1; at >= 0; at--) {
+    if (messages[at]!.role === 'user') return at
+  }
+  return 0
+}
+
+/** 진행 줄 한 줄을 폰에 싣는 크기로 — 글자 상한, 도구의 diff 는 뺀다(폰은 그린다 할 수 없는 전문). 하위 작업은 중첩 진행 줄을 뺀다(폰에 작업 탭이 없다 — #325) */
+export function snapshotItem(item: TurnItem): TurnItem {
+  switch (item.kind) {
+    case 'think':
+    case 'text':
+    case 'context':
+      return item.text.length > SNAPSHOT_TEXT_MAX ? { ...item, text: clipTo(item.text, SNAPSHOT_TEXT_MAX) } : item
+    case 'tool': {
+      const { diffs: _diffs, ...tool } = item
+      return {
+        ...tool,
+        ...(tool.input !== undefined && { input: clipTo(tool.input, SNAPSHOT_DETAIL_MAX) }),
+        ...(tool.result !== undefined && { result: clipTo(tool.result, SNAPSHOT_DETAIL_MAX) }),
+        ...(tool.error !== undefined && { error: clipTo(tool.error, SNAPSHOT_DETAIL_MAX) }),
+      }
+    }
+    case 'subtask':
+      return {
+        ...item,
+        items: [],
+        ...(item.prompt !== undefined && { prompt: clipTo(item.prompt, SNAPSHOT_TEXT_MAX) }),
+        ...(item.error !== undefined && { error: clipTo(item.error, SNAPSHOT_DETAIL_MAX) }),
+      }
+    case 'changes':
+      return item.diffs.length === 0 ? item : { ...item, diffs: [] }
+    case 'retry':
+      return item.message.length > SNAPSHOT_DETAIL_MAX ? { ...item, message: clipTo(item.message, SNAPSHOT_DETAIL_MAX) } : item
+    case 'hook':
+      return item.reason === undefined ? item : { ...item, reason: clipTo(item.reason, SNAPSHOT_DETAIL_MAX) }
+    case 'compaction':
+      return item
+  }
+}
+
+/** 말풍선 하나를 폰에 싣는 크기로 — user 글도 캡한다(붙여 넣은 파일이 길 수 있다). 어시스턴트는 진행 줄을 snapshotItem 으로 (live 의 도는 진행 줄은 여기 지나지 않는다) */
+export function snapshotMessage(message: HistoryMessage): HistoryMessage {
+  return {
+    ...message,
+    text: clipTo(message.text, SNAPSHOT_TEXT_MAX),
+    ...(message.error !== undefined && { error: clipTo(message.error, SNAPSHOT_DETAIL_MAX) }),
+    ...(message.items !== undefined && { items: message.items.map(snapshotItem) }),
+  }
+}
+
+/** 대화의 `!명령` 카드를 보이는 범위만 — 잘림(omitted) 이전의 카드는 기록과 함께 빼고, position 은 보이는 말풍선 기준으로 다시 센다 (0 = 첫 말풍선 앞).
+ *  카드가 없으면(또는 전부 잘리면) undefined — 필드 자체가 없다 (기존과 같은 규칙) */
+export function snapshotShells(shells: readonly ShellCard[] | undefined, omitted: number): ShellCard[] | undefined {
+  if (shells === undefined) return undefined
+  const kept = omitted === 0 ? [...shells] : shells.filter((shell) => shell.position >= omitted).map((shell) => (shell.position === omitted ? shell : { ...shell, position: shell.position - omitted }))
+  return kept.length > 0 ? kept : undefined
 }
 
 /** POST /v1/conversations/{cid}/messages → 202. 같은 clientMessageId 를 다시 보내면 턴을 또 만들지 않고 처음 결과를 준다 */
