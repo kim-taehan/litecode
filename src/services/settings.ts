@@ -6,6 +6,7 @@ import { readJsonFileSync, unreadableFileError, writeJsonFileSync } from './json
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../shared/fontSize.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../shared/modes.ts'
 import { isFeatureSwitches, type FeatureSwitches } from '../../shared/features.ts'
+import { isNotifyChannels, type NotifyChannels } from '../../shared/notifyChannels.ts'
 import { isSpeechLanguage, type SpeechLanguage } from '../../shared/speech.ts'
 import { isUpdateUrl } from '../../shared/updates.ts'
 import { isRunningTaskLimit } from '../../shared/tasks.ts'
@@ -28,6 +29,8 @@ export interface Settings {
   openInApp?: string
   /** 기능별 켜기 (설정 > 기능, 이슈 #8) — false 로 적힌 기능만 꺼진다. 없으면 모두 켜짐 (ctx.features 가 묶음을 올리고 내린다) */
   features?: FeatureSwitches
+  /** 알림 채널 자 스위치 (설정 > 기능 > 알림, 이슈 #372) — 외부(system: PC 알림·dock 배지)·내부(app: 앱 안 토스트). false 로 적힌 채널만 꺼지고 없으면 둘 다 켜짐 (ctx.notifications 가 쓴다) */
+  notifyChannels?: NotifyChannels
   /** "Claude Code 스킬 함께 쓰기" (`+` 메뉴의 스킬 팝업, 이슈 #7·#43) — 켜면 엔진이 ~/.claude/skills·프로젝트 .claude/skills 를 싣는다(ctx.engine 재시작). 없으면 꺼짐(사용자 결정) */
   claudeSkills?: boolean
   /** "창을 닫아도 계속 실행" (설정 > 일반, 이슈 #92 — Windows·Linux 만) — 창 닫기가 숨기기가 되고 앱은 트레이에 남는다. 없으면 켜짐. false 면 창 닫기 = 종료 (ctx.quit) */
@@ -73,6 +76,7 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   defaultMode: isMode,
   openInApp: (value): value is string => typeof value === 'string',
   features: isFeatureSwitches,
+  notifyChannels: isNotifyChannels,
   claudeSkills: (value): value is boolean => typeof value === 'boolean',
   keepRunning: (value): value is boolean => typeof value === 'boolean',
   trayNoticeShown: (value): value is boolean => typeof value === 'boolean',

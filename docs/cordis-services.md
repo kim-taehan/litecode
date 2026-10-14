@@ -51,7 +51,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `openIn` | `openIn` | `openIn.ts` | 다른 앱에서 열기 | `projects` | 켜짐 |
 | `appMcp` | `appMcp` | `appMcp.ts` + `appMcp/tools/*` | 앱 내장 MCP 서버(`litecode_*` 도구 6개) | `mcp` | 켜짐 |
 | `goal` | `goal` | `goal.ts` + `appMcp/tools/goal.ts` (+ 순수 `shared/goal.ts`) | 대화마다 목표 하나(`/goal`)·끝날 때까지 자동 이어가기(연속 8번 상한, 중지·오류·카드·재시작이면 일시 정지)·모델 도구 `litecode_goal_get`·`goal_update`(#285) | `chat`, `sessions` (+도구는 `appMcp` `llm`) | 켜짐 |
-| `notifications` | `notifications` | `notifications.ts` | 턴 끝·승인 대기 알림·토스트 | `settings`, `sessions`, `projects` | **꺼짐** |
+| `notifications` | `notifications` | `notifications.ts` (+ 순수 `shared/notifyChannels.ts`) | 턴 끝·승인 대기 알림·토스트 — 채널 자 스위치(외부 `system`: PC 알림·dock 배지 / 내부 `app`: 앱 안 토스트) 를 `settings.notifyChannels` 로 따로 켜고 끈다(#372) | `settings`, `sessions`, `projects` | **꺼짐** |
 | `remote` | `remote` | `remote.ts`(진입점)·`remote/*`(서비스·요청 표·짝짓기 요청·chat 이벤트 옮기기, #298) | 모바일 연결 — 계약·인증·기기·짝짓기·이벤트 링 (+평문 루프백 HTTP 운반) | `chat`, `sessions`, `projects`, `providers`, `settings` | **꺼짐** |
 | `lan` | — | `remote/https.ts` | 사내망 연결 — TLS 운반(설정 > 모바일의 토글, #210) | `remote` | 켜짐 (`remote` 를 켜면) |
 | `bluetooth` | — | `remote/bluetooth.ts` | 블루투스 연결 — BLE 운반(설정 > 모바일의 토글, #210). 네이티브 모듈은 켤 때 읽는다 | `remote` | **꺼짐** |

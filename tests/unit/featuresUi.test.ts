@@ -9,10 +9,14 @@ import { FeaturesPage } from '../../renderer/FeaturesSettings.tsx'
 
 // 설정 > 기능 — 한 줄에 기능 하나, 줄을 누르면 아래로 자세한 설명 (시안 _workspace/mock-features Main·Detail).
 // 저장된 기능 값은 테스트마다 바꿔 끼운다 (settingsStore 목킹 — reportUi.test.ts 방식)
-const store = vi.hoisted(() => ({ features: {} as FeatureSwitches, statuses: {} as FeatureStatuses }))
+const store = vi.hoisted(() => ({
+  features: {} as FeatureSwitches,
+  statuses: {} as FeatureStatuses,
+  notifyChannels: undefined as undefined | { system?: boolean; app?: boolean },
+}))
 vi.mock('../../renderer/settingsStore.ts', () => ({
   useT: () => (key: MessageKey, vars?: Record<string, string | number>) => translate('ko', key, vars),
-  useSettings: () => ({ features: store.features }),
+  useSettings: () => ({ features: store.features, notifyChannels: store.notifyChannels }),
   updateSettings: async () => undefined,
 }))
 // 기능 상태(이슈 #224)는 메인(ctx.features)이 밀어 준다 — 테스트마다 바꿔 끼운다
@@ -20,9 +24,10 @@ vi.mock('../../renderer/featuresStore.ts', () => ({
   useFeatureStatuses: () => store.statuses,
 }))
 
-function render(features: FeatureSwitches = {}, initialExpanded: ChoosableFeatureId | undefined = undefined, statuses: FeatureStatuses = {}, initialQuery = ''): string {
+function render(features: FeatureSwitches = {}, initialExpanded: ChoosableFeatureId | undefined = undefined, statuses: FeatureStatuses = {}, initialQuery = '', notifyChannels?: { system?: boolean; app?: boolean }): string {
   store.features = features
   store.statuses = statuses
+  store.notifyChannels = notifyChannels
   return renderToStaticMarkup(createElement(FeaturesPage, { initialExpanded, initialQuery }))
 }
 
@@ -173,6 +178,31 @@ describe('기능 문구', () => {
       const key = `settings.features.group.${group.id}`
       expect([key, key in ko && key in en]).toEqual([key, true])
     }
+  })
+})
+
+// 이슈 #372 — 알림 줄을 펼치면 외부(PC 알림·dock 배지)·내부(토스트) 채널 스위치가 둘 더 보인다
+describe('FeaturesPage — 알림 채널 자 스위치 (#372)', () => {
+  const rowOf = (html: string, feature: string): string => {
+    const start = html.indexOf(`data-feature="${feature}"`)
+    const next = html.indexOf('<li class="feature-row"', start)
+    return html.slice(start, next < 0 ? undefined : next)
+  }
+
+  it('알림 줄을 펼치면 줄 스위치 + 외부·내부 스위치 3개, 기본 둘 다 켬', () => {
+    const html = render({}, 'notifications')
+    const row = rowOf(html, 'notifications')
+    expect(count(row, 'role="switch"')).toBe(3)
+    expect(row).toContain('aria-label="외부 알림"')
+    expect(row).toContain('aria-label="내부 알림"')
+    expect(count(row, 'aria-checked="true"')).toBe(2) // 채널 둘만 — 알림 기능이 기본 꺼짐이라 줄 스위치는 오프
+  })
+
+  it('꺼 둔 채널은 aria-checked=false 로 보인다', () => {
+    const html = render({}, 'notifications', {}, '', { system: false })
+    const row = rowOf(html, 'notifications')
+    expect(row).toContain('aria-checked="false" aria-label="외부 알림"')
+    expect(count(row, 'aria-checked="true"')).toBe(1) // 내부만 켜짐
   })
 })
 

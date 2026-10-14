@@ -333,3 +333,70 @@ describe('폰 연결 알림 (#276) — remote/changed 의 기기 connected false
     expect(host.shown).toHaveLength(1)
   })
 })
+
+describe('알림 채널 자 스위치 (notifyChannels, 이슈 #372) — 외부(PC 알림·dock 배지) / 내부(토스트)', () => {
+  it('외부를 끄면 PC 알림 없고 배지 0 — 점은 안 본 완료로 남는다', async () => {
+    const { ctx, host, notifications } = await start()
+    ctx.settings.set({ notifyChannels: { system: false } })
+    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
+    await notifications.idle()
+    expect(host.shown).toEqual([])
+    expect(host.badges.at(-1)).toBe(0)
+    expect(notifications.snapshot().c1?.status).toBe('done')
+  })
+
+  it('내부를 끄면 토스트 없고 PC 알림 판단은 그대로 — 점은 안 본 완료로 남는다', async () => {
+    const { ctx, host, notifications, toasts } = await start()
+    ctx.settings.set({ notifyChannels: { app: false } })
+    host.foreground = true
+    notifications.view('c2')
+    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
+    await notifications.idle()
+    expect(host.shown).toEqual([])
+    expect(toasts).toEqual([])
+    expect(notifications.snapshot().c1?.status).toBe('done')
+  })
+
+  it('도는 중에 밖을 끄면 떠 있던 PC 알림이 닫히고 배지가 지워진다', async () => {
+    const { ctx, host, notifications } = await start()
+    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
+    await notifications.idle()
+    expect(host.shown).toHaveLength(1)
+    expect(host.badges.at(-1)).toBe(1)
+    ctx.settings.set({ notifyChannels: { system: false } })
+    expect(host.shown[0]!.closed).toBe(true)
+    expect(host.badges.at(-1)).toBe(0)
+  })
+
+  it('두 채널을 다 끄면 사건도 점은 남기고 알람은 없다', async () => {
+    const { ctx, host, notifications, toasts } = await start()
+    ctx.settings.set({ notifyChannels: { system: false, app: false } })
+    ctx.emit('llm/turn-ended', ended('ses_1', 'done')) // 뒤 — PC 쪽
+    await notifications.idle()
+    host.foreground = true
+    notifications.view('c2')
+    ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta')) // 앞 — 토스트 쪽
+    await notifications.idle()
+    expect(host.shown).toEqual([])
+    expect(toasts).toEqual([])
+    expect(host.badges.at(-1)).toBe(0)
+    expect(notifications.snapshot()).toEqual({
+      c1: { project: '/work/alpha', status: 'done' },
+      c3: { project: '/work/beta', status: 'done' },
+    })
+  })
+
+  it('폰 재결합 알림도 밖 채널을 따른다 — 알리지 않은 시각은 쿨다운에 남지 않는다', async () => {
+    const phone = (connected: boolean, via?: string): RemoteDeviceInfo => ({ id: 'd1', name: 'Galaxy', platform: 'android', pairedAt: 1, connected, ...(via && { via }) })
+    const changed = (...devices: RemoteDeviceInfo[]): RemoteStatus => ({ port: 47600, addresses: [], requests: [], devices })
+    const { ctx, host } = await start()
+    ctx.settings.set({ notifyChannels: { system: false } })
+    ctx.emit('remote/changed', changed(phone(false)))
+    ctx.emit('remote/changed', changed(phone(true, 'bluetooth')))
+    expect(host.shown).toEqual([])
+    ctx.settings.set({ notifyChannels: {} }) // 다시 켜면 바로 알린다(쿨다운이 안 찍혔으므로)
+    ctx.emit('remote/changed', changed(phone(false, 'bluetooth')))
+    ctx.emit('remote/changed', changed(phone(true, 'bluetooth')))
+    expect(host.shown.map((entry) => entry.title)).toEqual(['Galaxy 연결됨 — 블루투스'])
+  })
+})
