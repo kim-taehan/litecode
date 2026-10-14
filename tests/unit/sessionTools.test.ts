@@ -747,14 +747,15 @@ describe('read_project', () => {
     expect(llm.asked.at(-1)).toMatchObject({ directory: project, server: 'litecode', tool: 'read_project' })
   })
 
-  it('읽기는 승인을 안 본다(#342) — 앱에서 허용하지 않아도 읽힌다. 하위 작업이 불렀거나 앱이 돌린 턴이 아니면 아무것도 읽지 않는다', async () => {
+  it('읽기는 승인을 안 본다(#342) — 앱에서 허용하지 않아도, 하위 작업(백그라운드 태스크, #357)이 부르면 읽힌다. 앱이 돌린 턴이 아니면 못 읽는다', async () => {
     const { call, scene, calledBy, llm } = await start()
     const sender = await scene()
     const args = { project: projectId(backend) }
+    const RESULT = 'conversation: "주문 API 설계" (c-bbbbbbbb)\nstate: idle\nuser: 주문 API 설계\nanswer: answer to 주문 API 설계'
     calledBy('read_project', sender, { approved: false })
-    expect(await call('read_project', args)).toBe('conversation: "주문 API 설계" (c-bbbbbbbb)\nstate: idle\nuser: 주문 API 설계\nanswer: answer to 주문 API 설계')
+    expect(await call('read_project', args)).toBe(RESULT)
     calledBy('read_project', sender, { child: true })
-    await expect(call('read_project', args)).rejects.toThrow(/Sub-tasks cannot reach other projects/)
+    expect(await call('read_project', args)).toBe(RESULT) // 모니터링 태스크가 forward 결과를 지켜 보는 것
     llm.callers.delete('read_project')
     await expect(call('read_project', args)).rejects.toThrow(/Could not tell which conversation/)
   })

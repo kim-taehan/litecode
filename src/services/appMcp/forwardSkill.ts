@@ -40,11 +40,12 @@ When the user invokes this skill as \`/forward <instruction>\`, everything after
    - constraints and how to tell it is done (acceptance)
 3. Call \`litecode_send_to_project\` with the draft as \`message\` — do not ask for confirmation in chat first. The approval card shows the full instruction and the target picker (the user can redirect it to a different project/conversation there); that card is the confirmation.
 4. The user may redirect the send to a different project from the approval card — trust the tool's result text (it names the project and conversation that actually received it, with the short id).
-5. Say briefly that it was accepted (or queued), then **monitor the work from this conversation** — the user expects to be told the result here: call \`litecode_read_project\` for the receiving project with the \`conversation\` short id (c-…) from the send result and \`wait_seconds: 45\`.
-   - \`state: running\` → call it again the same way. One call at a time, and never several identical calls in one message — the other project works for minutes; keep checking and do nothing else here while it runs.
-   - \`state: idle\` → the work is done. **Report its final result here, in this conversation** — the answer the read returned, complete enough to stand alone.
-   - \`state: waiting for the user\` → stop monitoring: the receiving conversation is blocked on the user's own input (an approval or a question). Tell the user which project and conversation is waiting, and that you will check on it again once they have answered there.
-   - Keep monitoring as long as the work runs, even for many minutes. If the user stops this turn, monitoring stops with it; they can ask to check on it any time later.
+5. Say briefly that it was accepted (or queued), then hand the monitoring to a **background task** so this conversation is free again: call \`litecode_task_start\` with agent \`general\`, a short description like \`monitor <project name>\`, and a self-contained prompt (the task cannot see this conversation) that tells the task to do exactly this:
+   - call \`litecode_read_project\` for the receiving project (id p-…) with the \`conversation\` short id (c-…) from the send result and \`wait_seconds: 45\`
+   - while the result says \`state: running\`, call it again the same way — one call at a time, and never several identical calls in one message
+   - when the result says \`state: idle\`, make its **final message the finished work's final result** — what the read returned, complete enough to stand alone
+   - if the result says \`state: waiting for the user\`, make its final message a note that the receiving conversation (name the project and the conversation) is waiting on the user's own input
+   Then end your reply — the task's final message arrives here as a new message by itself, so say nothing more. If \`litecode_task_start\` is unavailable or refused (e.g. plan mode), monitor by calling \`litecode_read_project\` yourself the same way, one call at a time, and report the final result here instead.
 
 ## Checking on earlier work
 - If the user later asks how the forwarded work went, call \`litecode_read_project\` for that project (pass the \`conversation\` short id if you have it) with \`wait_seconds\` (up to 45), and report the state — and its final result if \`state: idle\`.

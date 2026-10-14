@@ -37,7 +37,7 @@ import '../../providers.ts'
 // 1. 엔진 권한 — 보내기: ask 라 부를 때마다 승인 카드가 뜬다 (engine.ts 의 규칙. 계획 모드에는 없고, 하위 작업에는 없다). 읽기: 모드 에이전트에는
 //    allow(카드 없음) — "읽기도 매번 승인해야 되니?" 에 안 된다고(사용자 결정 2026-10-06). 매번 묻기 모드만 와일드카드 ask 로 묻는다
 // 2. 부른 대화 — 호출 요청에는 "누가 불렀나" 가 없어 ctx.llm.callerOf 로 그 폴더의 도는 턴에서 찾는다. 못 찾으면(앱이 돌린 턴이 아니다) 거절,
-//    하위 작업이 부른 거면 거절
+//    **보내기** 는 하위 작업(백그라운드 태스크)이 부른 것도 거절 — 읽기는 허용한다(#357 — 읽기 전용·승인 카드 없는 모니터링, 백그라운드 태스크가 forward 결과를 지켜 본다)
 // 3. 앱 확인(보내기만) — 사용자가 **앱의 승인 카드에서** 허용한 호출만 받는다 (caller.approved). 엔진 비밀번호를 쥔 폴더 코드가 엔진 API 로 스스로
 //    허용한 호출은 기록이 없어 거절된다. 읽기는 카드가 없으니 이 요소를 뗐다(#342 — 카드 없이 allow 인 모드에서 승인이 기록될 일이 없어 읽기가
 //    영원히 거부되던 것)
@@ -147,11 +147,12 @@ export function SessionTools(ctx: Context): void {
     return map
   }
 
-  /** 보내기·읽기 도구를 부른 호출 — 본 세션이(하는 중인 턴이) 부른 것인지만 본다. 안 되면 그 사유를 던진다 (모델이 읽는다) */
-  async function caller(directory: string, tool: string, args: Record<string, unknown>) {
+  /** 보내기·읽기 도구를 부른 호출 — 본 세션이(하는 중인 턴이) 부른 것인지만 본다. 안 되면 그 사유를 던진다 (모델이 읽는다).
+   *  childOk — 하위 작업(백그라운드 태스크)이 부른 호출을 넣을 것: 읽기만(#357 — 읽기 전용·승인 카드 없다), 보내기는 안 된다(깊이 1·승인) */
+  async function caller(directory: string, tool: string, args: Record<string, unknown>, childOk = false) {
     const found = await ctx.llm.callerOf(directory, { server: APP_MCP_NAME, tool }, args)
     if (!found) throw new Error(NO_CALLER)
-    if (found.child) throw new Error('Sub-tasks cannot reach other projects.')
+    if (found.child && !childOk) throw new Error('Sub-tasks cannot reach other projects.')
     return found
   }
 
@@ -225,7 +226,8 @@ export function SessionTools(ctx: Context): void {
       required: ['project'],
     },
     async run(args, { directory }) {
-      await caller(directory, READ_TOOL, args)
+      // childOk — 하위 작업(백그라운드 태스크)의 읽기 모니터링도 허용 (send 만 하위 작업을 거절, #357)
+      await caller(directory, READ_TOOL, args, true)
       const target = usable(pick(await others(directory), args['project']), UNKNOWN)
       let conversation = target.conversation
       const wanted = typeof args['conversation'] === 'string' ? args['conversation'].trim() : ''
