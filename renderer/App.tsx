@@ -437,6 +437,21 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // ⌘N / Ctrl+N — 새 대화 (이슈 #344). startNewChat 이 프로젝트 가드·빈 대화 하나로 다 하고 포커스까지 잡는다 (#343)
+  const startNewChatRef = useRef(startNewChat)
+  startNewChatRef.current = startNewChat
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'n') return
+      // 판(aria-modal) 이나 프로젝트 전환(빠른 열기) 이 열려 있으면 물러난다 (⌘↑/⌘↓ 과 같은 전역 키 규칙)
+      if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+      event.preventDefault()
+      startNewChatRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // ⌘↑/⌘↓ (2026-10-13 피드백 #3) — 바로 이전/다음 대화로. 사이드바 대화 목록 순서(진행중만 보기·찾기·고정 순) 기준, 끝에서 감돈다
   const listedNavRef = useRef(listed)
   listedNavRef.current = listed
@@ -457,6 +472,8 @@ export function App() {
     const session = blank ?? newSession(project.path)
     if (!blank) setSessions((sessionsNow) => [session, ...sessionsNow])
     setActiveIds((current) => ({ ...current, [project.path]: session.id }))
+    // 열린 즉시 바로 쓸 수 있도록 (이슈 #343) — `/clear` 도 이 함수라 같은 효과가 붙는다
+    trigger.inputRef.current?.focus()
   }
 
   function updateSession(id: string, mutate: (session: Session) => Session): void {
@@ -747,7 +764,7 @@ export function App() {
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
       <ErrorBoundary scope="section" className="crash--side" resetKey={active?.project}>
-        <FilePreviewPanel directory={active?.project} />
+        <FilePreviewPanel directory={active?.project} fromId={active?.id} fromTitle={active?.title} targets={delegation.targets} />
       </ErrorBoundary>
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
