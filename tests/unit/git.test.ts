@@ -207,6 +207,37 @@ describe.skipIf(!hasGit)('GitService — 진짜 git', () => {
     expect((await git.branches(dir)).map((branch) => branch.name)).toEqual(['main'])
   })
 
+  it('여기서 새 브랜치 (#399) — 시작점 브랜치 끝에서 만들고 옮긴다, 없는·잘못된 시작점은 invalid, 덮이면 overwrite', async () => {
+    const { git, changed } = await start()
+    const dir = await repo()
+    sh(dir, 'checkout', '-q', '-b', 'other')
+    await fs.writeFile(path.join(dir, 'a.txt'), 'other\n')
+    sh(dir, 'commit', '-qam', 'on other')
+    const otherTip = sh(dir, 'rev-parse', 'other').trim()
+    sh(dir, 'checkout', '-q', 'main')
+
+    expect(await git.createBranch(dir, 'from-other', 'other')).toEqual({ ok: true, branch: 'from-other' })
+    expect(await git.view(dir)).toMatchObject({ branch: 'from-other', changed: [] })
+    expect(sh(dir, 'rev-parse', 'HEAD').trim()).toBe(otherTip)
+    expect(await fs.readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('other\n')
+    expect(changed).toContain(dir)
+    // GitAction 으로도 (화면의 git:run)
+    expect(await git.perform(dir, { kind: 'createBranch', name: 'from-main', from: 'main' })).toEqual({ ok: true, branch: 'from-main' })
+    expect(sh(dir, 'rev-parse', 'HEAD').trim()).toBe(sh(dir, 'rev-parse', 'main').trim())
+
+    expect(await git.createBranch(dir, 'x1', 'nope')).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(await git.createBranch(dir, 'x2', '-x')).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(await git.createBranch(dir, 'x3', 'bad..name')).toMatchObject({ ok: false, reason: 'invalid' })
+    expect((await git.branches(dir)).map((branch) => branch.name).sort()).toEqual(['from-main', 'from-other', 'main', 'other'])
+
+    // 지금 변경이 시작점 내용에 덮이면 멈추고 아무것도 안 바뀐다
+    await fs.writeFile(path.join(dir, 'a.txt'), 'local edit\n')
+    expect(await git.createBranch(dir, 'x4', 'other')).toMatchObject({ ok: false, reason: 'overwrite' })
+    expect(await git.view(dir)).toMatchObject({ branch: 'from-main', changed: [{ path: 'a.txt' }] })
+    expect(await fs.readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('local edit\n')
+    expect((await git.branches(dir)).map((branch) => branch.name)).not.toContain('x4')
+  })
+
   it('전환 — 지금 변경이 덮이면 멈추고 아무것도 안 바뀐다(overwrite)', async () => {
     const { git } = await start()
     const dir = await repo()

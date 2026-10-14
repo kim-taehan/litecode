@@ -398,11 +398,17 @@ export class GitService extends Service {
     if (!name || name.startsWith('-') || (await this.run(root, ['check-ref-format', '--branch', name])).code !== 0) throw new GitError('invalid', name)
   }
 
-  /** 새 브랜치를 만들고 옮겨 간다 (변경은 그대로 따라온다) */
-  createBranch(directory: string, name: string): Promise<GitResult<{ branch: string }>> {
+  /** 새 브랜치를 만들고 옮겨 간다 (변경은 그대로 따라온다). from(로컬 브랜치)을 주면 그 끝에서 — 브랜치 팝업 줄 메뉴의 '여기서 새 브랜치' (#399).
+   *  없는 시작점은 invalid, 지금 변경이 시작점 내용에 덮이면 git 이 멈추고 아무것도 안 바뀐다(overwrite) */
+  createBranch(directory: string, name: string, from?: string): Promise<GitResult<{ branch: string }>> {
     return this.act(directory, async (root) => {
       await this.checkBranchName(root, name)
-      await this.must(root, ['checkout', '-q', '-b', name])
+      if (from === undefined) await this.must(root, ['checkout', '-q', '-b', name])
+      else {
+        await this.checkBranchName(root, from)
+        if (!(await this.exists(root, `refs/heads/${from}`))) throw new GitError('invalid', from)
+        await this.checkout(root, ['switch', '-q', '-c', name, `refs/heads/${from}`])
+      }
       return { branch: name }
     })
   }
@@ -725,7 +731,7 @@ export class GitService extends Service {
       case 'amend':
         return this.amend(directory, String(action.message))
       case 'createBranch':
-        return this.createBranch(directory, name)
+        return this.createBranch(directory, name, action.from === undefined ? undefined : String(action.from))
       case 'switchBranch':
         return this.switchBranch(directory, name)
       case 'switchRemote':

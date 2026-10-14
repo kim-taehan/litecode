@@ -1,4 +1,5 @@
 import type { GitBranch } from '../shared/git.ts'
+import { isMenuKey } from './gitMenu.ts'
 
 // 브랜치 팝업의 순수 규칙 (이슈 #386, 시안 Git 탭 재설계 ② Branch.dc.html) — 최근 고르기·앞부분 묶기·검색·단축키.
 // 화면은 Git.tsx 의 BranchList 가 그린다
@@ -64,4 +65,26 @@ export function popupShortcut(event: { code: string; metaKey: boolean; ctrlKey: 
 export function shortcutLabel(shortcut: PopupShortcut, mac: boolean): string {
   if (shortcut === 'pull') return mac ? '⌘T' : 'Ctrl+T'
   return mac ? '⌥⌘N' : 'Ctrl+Alt+N'
+}
+
+// ── 브랜치 줄 메뉴 (#399, IntelliJ 의 브랜치 팝업 줄 › · 우클릭 = Checkout · New Branch from · Delete) ──
+
+export type BranchMenuItem = 'switch' | 'newFrom' | 'delete'
+
+/** 메뉴가 열린 줄 — current: 로컬은 지금 브랜치, 원격은 같은 이름 로컬이 지금 브랜치 */
+export type BranchMenuTarget = { name: string; current: boolean; remote: boolean }
+
+/** 묶음 사이에 구분선. 원격 줄은 전환만 */
+export function branchMenuGroups(remote: boolean): BranchMenuItem[][] {
+  return remote ? [['switch']] : [['switch', 'newFrom'], ['delete']]
+}
+
+/** 지금 브랜치면 전환·삭제는 끈다(git 도 지금 브랜치는 못 지운다). 여기서 새 브랜치는 늘 된다 */
+export function branchMenuEnabled(item: BranchMenuItem, target: BranchMenuTarget): boolean {
+  return item === 'newFrom' || !target.current
+}
+
+/** 줄에서 메뉴를 여는 키 — → (IntelliJ 의 하위 메뉴) · ContextMenu · Shift+F10 */
+export function isBranchMenuKey(event: { key: string; shiftKey: boolean }): boolean {
+  return event.key === 'ArrowRight' || isMenuKey(event)
 }

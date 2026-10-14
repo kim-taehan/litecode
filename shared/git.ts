@@ -113,7 +113,9 @@ export type GitAction =
   | { kind: 'commit'; message: string }
   /** 마지막 커밋 고치기 (#387) — stage 된 것을 합치고 메시지를 바꾼다. 원격 어디에도 없는 커밋만 (아니면 pushed) */
   | { kind: 'amend'; message: string }
-  | { kind: 'createBranch' | 'switchBranch' | 'deleteBranch'; name: string }
+  | { kind: 'switchBranch' | 'deleteBranch'; name: string }
+  /** from(로컬 브랜치)을 주면 그 끝에서 만든다 — 브랜치 팝업 줄 메뉴의 '여기서 새 브랜치' (#399). 없으면 지금 HEAD 에서 */
+  | { kind: 'createBranch'; name: string; from?: string }
   /** 브랜치 팝업 (#386) — switchRemote: `origin/x` → 같은 이름 로컬 브랜치로(없으면 추적 브랜치를 만든다) · switchRevision: 태그·커밋 해시 → 분리된 HEAD */
   | { kind: 'switchRemote' | 'switchRevision'; name: string }
   | { kind: 'addRemote'; url: string }

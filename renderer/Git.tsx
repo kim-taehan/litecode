@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type K
 import type { FileDiff } from '../shared/ipc.ts'
 import { gitWebUrl, type GitAction, type GitBranch, type GitCommit, type GitFile, type GitIgnored, type GitLastCommit, type GitResult, type GitStash, type GitStatus } from '../shared/git.ts'
 import { ago } from './ago.ts'
-import { branchTrack, groupBranches, matchesQuery, popupShortcut, recentBranches, shortcutLabel, type PopupShortcut } from './branchPopup.ts'
+import { branchMenuEnabled, branchMenuGroups, branchTrack, groupBranches, isBranchMenuKey, matchesQuery, popupShortcut, recentBranches, shortcutLabel, type BranchMenuItem, type BranchMenuTarget, type PopupShortcut } from './branchPopup.ts'
 import { focusComposerInput } from './composerFocus.ts'
 import { splitPath } from './changedFiles.ts'
 import { DiffCard } from './DiffCard.tsx'
@@ -13,7 +13,7 @@ import { DANGER_ITEMS, entryPaths, FILE_MENU, isMenuKey, menuEnabled, menuShortc
 import { changeCount, foldsOf, ignoredOf, ignoredShown, refreshGit, refreshIgnored, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown, useGitView } from './gitStore.ts'
 import { buildTree, entryKind, entryStat, entryState, folderKey, groupState, isFoldOpen, SECTION_UNTRACKED, splitChanges, toggleAction, treeFolders, treeRows, type ChangeEntry, type CheckState, type TreeFolder } from './gitTree.ts'
 import { reason } from './ipcError.ts'
-import { useT, type Translate } from './settingsStore.ts'
+import { useT } from './settingsStore.ts'
 import './git.css'
 
 // Git 탭 (이슈 #290 — 시안 _workspace/mock-git/Git.dc.html 의 구조·문구·권한표). 모양은 지금 앱의 부품을 그대로 쓴다:
@@ -22,7 +22,7 @@ import './git.css'
 // 바로 하는 것(stage·커밋·브랜치 만들기)과 카드로 묻는 것(전환·올리기·가져오기, 되돌리기·삭제는 경고 카드)은 시안 7절 표 그대로.
 // 상태는 메인(ctx.git)이 정본이다 — 작업마다 다시 읽는다(gitStore). 커밋 메시지 초안은 탭을 오가도 폴더마다 남는다
 
-type Sub = 'changes' | 'log' | 'branches'
+type Sub = 'changes' | 'log'
 type Confirm =
   | { kind: 'switch'; name: string; via?: 'remote' | 'revision' }
   | { kind: 'push' }
@@ -105,8 +105,12 @@ export function GitBranchPill({ directory }: { directory: string }) {
 // 최근 · 로컬 브랜치(앞부분 묶음) · 원격 브랜치. 바꾸는 동작은 Git 탭과 같은 흐름이다 — 전환·가져오기·올리기는 확인 카드(ConfirmCard)를
 // 팝업 안에 띄워 묻고, 새 브랜치는 바로 만든다. 성공하면 닫고, 실패는 팝업 위쪽 한 줄(충돌은 Git 탭의 충돌 카드로 보낸다).
 // 단축키 ⌘T(가져오기)·⌥⌘N(새 브랜치)는 팝업이 열려 있을 때만 (mac 밖은 Ctrl). 시안의 ⌘K 글자는 뺐다 — ⌘K 는 프로젝트 빠른 열기(#379)
+// 브랜치 줄 메뉴 (#399, IntelliJ 그대로) — 줄 오른쪽 › · 우클릭 · →/메뉴 키로 팝업 안에 작은 메뉴: 전환 · 여기서 새 브랜치… | 삭제…(원격 줄은 전환만).
+// 삭제는 확인 카드(합쳐지지 않은 커밋이면 경고)를 팝업 안에 띄우고, 지운 뒤에도 팝업은 남는다. Esc 는 메뉴만 닫는다
 
-type Editing = 'branch' | 'revision'
+/** 입력 칸 — 새 브랜치(지금 HEAD 에서)·태그/커밋, from = 줄 메뉴의 '여기서 새 브랜치' (#399) */
+type Editing = 'branch' | 'revision' | { from: string }
+type BranchMenuState = { target: BranchMenuTarget; at: { left: number; top: number }; returnTo: HTMLElement }
 
 function BranchPopup({ directory, view, onClose }: { directory: string; view: GitStatus; onClose(): void }) {
   const t = useT()
@@ -117,6 +121,7 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
   const [confirm, setConfirm] = useState<Confirm>()
   const [error, setError] = useState<{ text: string; detail?: string }>()
   const [editing, setEditing] = useState<Editing>()
+  const [menu, setMenu] = useState<BranchMenuState>()
   const popRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -195,6 +200,12 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
       if (await run({ kind: 'addRemote', url: value ?? '' })) setConfirm(current.then ? { kind: current.then } : undefined)
       return
     }
+    if (current.kind === 'delete') {
+      // 지운 뒤에도 팝업은 남는다 (IntelliJ) — 목록은 git/changed 로 다시 읽힌다
+      setConfirm(undefined)
+      await run({ kind: 'deleteBranch', name: current.branch.name })
+      return
+    }
     if (current.kind !== 'switch' && current.kind !== 'push' && current.kind !== 'pull') return
     setConfirm(undefined)
     const action: GitAction =
@@ -208,7 +219,8 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
     if (event.key === 'Escape') {
       event.preventDefault() // 입력창의 Esc 두 번(답변 중지)은 이미 쓰인 Esc 를 세지 않는다
       event.stopPropagation()
-      if (confirm) setConfirm(undefined)
+      if (menu) closeMenu()
+      else if (confirm) setConfirm(undefined)
       else if (editing) edit(undefined)
       else onClose()
       return
@@ -219,6 +231,27 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
     event.preventDefault()
     const at = list.indexOf(document.activeElement as HTMLElement)
     list[(at + (event.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus()
+  }
+
+  /** 메뉴를 닫으면 연 줄(또는 ›)로 — 그 줄이 사라졌으면 검색 칸으로 */
+  function closeMenu(): void {
+    const back = menu?.returnTo
+    setMenu(undefined)
+    if (back?.isConnected) back.focus()
+    else popRef.current?.querySelector<HTMLElement>('.branch-pop__search input')?.focus()
+  }
+
+  function pickMenu(item: BranchMenuItem): void {
+    if (!menu) return
+    const { target } = menu
+    setMenu(undefined)
+    setError(undefined)
+    if (item === 'switch') setConfirm({ kind: 'switch', name: target.name, ...(target.remote && { via: 'remote' as const }) })
+    else if (item === 'newFrom') setEditing({ from: target.name })
+    else {
+      const branch = branches?.find((entry) => entry.name === target.name)
+      if (branch) setConfirm({ kind: 'delete', branch })
+    }
   }
 
   return (
@@ -233,7 +266,7 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
       ) : (
         <BranchList
           onOpenTab={() => {
-            openGitTab(directory)
+            openGitTab(directory, 'changes') // 하위 탭은 변경·기록 둘 — Git 탭은 변경 화면으로 연다 (#399)
             onClose()
           }}
           view={view}
@@ -246,7 +279,7 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
           onPull={() => askRemote('pull')}
           onPush={() => askRemote('push')}
           onCreate={async (name) => {
-            if (await run({ kind: 'createBranch', name })) onClose()
+            if (await run({ kind: 'createBranch', name, ...(typeof editing === 'object' && { from: editing.from }) })) onClose()
           }}
           onRevision={(name) => {
             setEditing(undefined)
@@ -254,8 +287,10 @@ function BranchPopup({ directory, view, onClose }: { directory: string; view: Gi
           }}
           onSwitch={(name) => setConfirm({ kind: 'switch', name })}
           onSwitchRemote={(name) => setConfirm({ kind: 'switch', name, via: 'remote' })}
+          onMenu={(target, at, returnTo) => setMenu({ target, at, returnTo })}
         />
       )}
+      {menu && !confirm && <BranchMenu target={menu.target} at={menu.at} onPick={pickMenu} onClose={closeMenu} />}
     </div>
   )
 }
@@ -276,6 +311,7 @@ export function BranchList({
   onRevision,
   onSwitch,
   onSwitchRemote,
+  onMenu = () => {},
 }: {
   view: GitStatus
   branches: GitBranch[] | undefined
@@ -292,6 +328,8 @@ export function BranchList({
   onRevision(name: string): void
   onSwitch(name: string): void
   onSwitchRemote(name: string): void
+  /** 줄 메뉴를 연다 (#399) — at 은 화면 좌표, returnTo 는 닫힌 뒤 포커스가 돌아갈 곳 */
+  onMenu?(target: BranchMenuTarget, at: { left: number; top: number }, returnTo: HTMLElement): void
 }) {
   const t = useT()
   const [query, setQuery] = useState('')
@@ -303,16 +341,58 @@ export function BranchList({
   const isOpen = (key: string, initially: boolean): boolean => searching || (opened.get(key) ?? initially)
   const toggle = (key: string, initially: boolean): void => setOpened((now) => new Map(now).set(key, !(now.get(key) ?? initially)))
 
-  const branchRow = (branch: GitBranch, lead: ReactNode, child = false) => {
-    const track = branchTrack(branch)
+  /** 줄 하나 = 누르면 전환하는 줄 + 오른쪽 › (줄 메뉴, #399). 우클릭·→·메뉴 키도 같은 메뉴 */
+  const withMenu = (key: string, target: BranchMenuTarget, row: ReactNode) => {
+    const label = t('git.pop.menu.label', { branch: target.name })
     return (
+      <div
+        key={key}
+        className="branch-pop__row"
+        onContextMenu={(event) => {
+          event.preventDefault()
+          if (!busy) onMenu(target, { left: event.clientX, top: event.clientY }, (event.currentTarget.querySelector<HTMLElement>('.branch-pop__item:not(:disabled)') ?? event.currentTarget.querySelector<HTMLElement>('.branch-pop__more'))!)
+        }}
+      >
+        {row}
+        <button
+          type="button"
+          className="branch-pop__more"
+          aria-label={label}
+          title={label}
+          aria-haspopup="menu"
+          disabled={busy}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            onMenu(target, { left: rect.right, top: rect.top }, event.currentTarget)
+          }}
+        >
+          ›
+        </button>
+      </div>
+    )
+  }
+  /** → · 메뉴 키로 줄 메뉴 — 줄 오른쪽 끝에 */
+  const menuKey = (target: BranchMenuTarget) => (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (busy || !isBranchMenuKey(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    onMenu(target, { left: rect.right, top: rect.top }, event.currentTarget)
+  }
+
+  const branchRow = (branch: GitBranch, lead: ReactNode, child = false, key = branch.name) => {
+    const track = branchTrack(branch)
+    const target: BranchMenuTarget = { name: branch.name, current: branch.current, remote: false }
+    return withMenu(
+      key,
+      target,
       <button
-        key={branch.name}
         type="button"
         className={`branch-pop__item${child ? ' branch-pop__item--child' : ''}`}
         disabled={branch.current || busy}
         aria-current={branch.current || undefined}
         onClick={() => onSwitch(branch.name)}
+        onKeyDown={menuKey(target)}
       >
         {lead}
         <span className="branch-pop__name git-mono" title={branch.name}>
@@ -324,7 +404,7 @@ export function BranchList({
           </span>
         )}
         {track ? <span className="branch-pop__tr">{track}</span> : branch.upstream && <span className="branch-pop__up">{branch.upstream}</span>}
-      </button>
+      </button>,
     )
   }
 
@@ -351,8 +431,17 @@ export function BranchList({
     )
 
   const make: ReactNode[] = []
-  if (editing === 'branch')
-    make.push(<InlineField key="new" icon={<PlusIcon />} label={t('git.newBranchLabel')} busy={busy} onSubmit={onCreate} onCancel={() => onEdit(undefined)} />)
+  if (editing === 'branch' || typeof editing === 'object')
+    make.push(
+      <InlineField
+        key={typeof editing === 'object' ? `new:${editing.from}` : 'new'}
+        icon={<PlusIcon />}
+        label={typeof editing === 'object' ? t('git.pop.newFromLabel', { branch: editing.from }) : t('git.newBranchLabel')}
+        busy={busy}
+        onSubmit={onCreate}
+        onCancel={() => onEdit(undefined)}
+      />,
+    )
   else if (matchesQuery(newLabel, query))
     make.push(
       <button key="new" type="button" className="branch-pop__item" disabled={busy || !view.hasCommits} onClick={() => onEdit('branch')}>
@@ -380,11 +469,9 @@ export function BranchList({
         <div key="recent-label" className="branch-pop__label">
           {t('git.pop.recent')}
         </div>,
-        ...recent.map((branch) => (
-          <Fragment key={`recent-${branch.name}`}>
-            {branchRow(branch, branch.current ? <PopBranchIcon /> : branch.upstream && !branchTrack(branch) ? <CheckIcon /> : <span className="branch-pop__lead" />)}
-          </Fragment>
-        )),
+        ...recent.map((branch) =>
+          branchRow(branch, branch.current ? <PopBranchIcon /> : branch.upstream && !branchTrack(branch) ? <CheckIcon /> : <span className="branch-pop__lead" />, false, `recent-${branch.name}`),
+        ),
       ])
     const entries = groupBranches(shown)
     if (entries.length > 0)
@@ -418,13 +505,18 @@ export function BranchList({
           <span className="branch-pop__tr">{t('git.pop.count', { count: shownRemotes.length })}</span>
         </button>,
         ...(open
-          ? shownRemotes.map((name) => (
-              <button key={`remote:${name}`} type="button" className="branch-pop__item branch-pop__item--child" disabled={busy || name.slice(name.indexOf('/') + 1) === view.branch} onClick={() => onSwitchRemote(name)}>
-                <span className="branch-pop__name git-mono" title={name}>
-                  {name}
-                </span>
-              </button>
-            ))
+          ? shownRemotes.map((name) => {
+              const target: BranchMenuTarget = { name, current: name.slice(name.indexOf('/') + 1) === view.branch, remote: true }
+              return withMenu(
+                `remote:${name}`,
+                target,
+                <button type="button" className="branch-pop__item branch-pop__item--child" disabled={busy || target.current} onClick={() => onSwitchRemote(name)} onKeyDown={menuKey(target)}>
+                  <span className="branch-pop__name git-mono" title={name}>
+                    {name}
+                  </span>
+                </button>,
+              )
+            })
           : []),
       ])
     }
@@ -489,6 +581,61 @@ function InlineField({ icon, label, busy, onSubmit, onCancel }: { icon: ReactNod
         }}
       />
     </form>
+  )
+}
+
+/** 브랜치 줄 메뉴 (#399) — 팝업 안에 fixed 로 뜬다(우클릭 메뉴 .git-menu 모양). Esc·←·Tab·바깥 = 메뉴만 닫힘(팝업은 남음), ↑↓ 이동 */
+export function BranchMenu({ target, at, onPick, onClose }: { target: BranchMenuTarget; at: { left: number; top: number }; onPick(item: BranchMenuItem): void; onClose(): void }) {
+  const t = useT()
+  const ref = useRef<HTMLDivElement>(null)
+  const [place, setPlace] = useState(at)
+  const items = (): HTMLElement[] => [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [])]
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useLayoutEffect(() => {
+    const rect = ref.current?.getBoundingClientRect()
+    if (!rect) return
+    setPlace({ left: Math.max(4, Math.min(at.left, window.innerWidth - rect.width - 4)), top: Math.max(4, Math.min(at.top, window.innerHeight - rect.height - 4)) })
+  }, [at.left, at.top])
+
+  useEffect(() => {
+    items()[0]?.focus()
+    const outside = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) closeRef.current()
+    }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [])
+
+  function onKeyDown(event: ReactKeyboardEvent): void {
+    if (event.key === 'Escape' || event.key === 'ArrowLeft' || event.key === 'Tab') {
+      event.preventDefault()
+      event.stopPropagation() // 팝업의 Esc(팝업 닫기)까지 가지 않게
+      onClose()
+      return
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    event.stopPropagation() // 팝업의 ↑↓(줄 이동)까지 가지 않게
+    const list = items()
+    const index = list.indexOf(document.activeElement as HTMLElement)
+    list[(index + (event.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus()
+  }
+
+  return (
+    <div className="git-menu branch-pop__menu" role="menu" aria-label={t('git.pop.menu.label', { branch: target.name })} style={{ left: place.left, top: place.top }} ref={ref} onKeyDown={onKeyDown}>
+      {branchMenuGroups(target.remote).map((group, index) => (
+        <Fragment key={index}>
+          {index > 0 && <div className="git-menu__sep" role="separator" />}
+          {group.map((item) => (
+            <button key={item} type="button" role="menuitem" className="git-menu__item" data-danger={item === 'delete' || undefined} disabled={!branchMenuEnabled(item, target)} onClick={() => onPick(item)}>
+              {t(`git.pop.menu.${item}`)}
+            </button>
+          ))}
+        </Fragment>
+      ))}
+    </div>
   )
 }
 
@@ -640,10 +787,10 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
   return (
     <div className="git">
       <div className="file-preview__bar git-bar">
-        <button type="button" className="file-preview__toggle git-branch" title={branch} onClick={() => setSub('branches')}>
+        <span className="git-branch" title={branch}>
           <BranchIcon />
           <span className="git-branch__name">{branch}</span>
-        </button>
+        </span>
         {(view.ahead > 0 || view.behind > 0) && <span className="git-bar__track">{`↑${view.ahead} ↓${view.behind}`}</span>}
         <span className="git-bar__spacer" />
         <span className="file-preview__tools">
@@ -658,7 +805,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
       </div>
       <div className="git-sub">
         <div className="git-sub__tabs" role="tablist" aria-label={t('git.tab')}>
-          {(['changes', 'log', 'branches'] as const).map((id) => (
+          {(['changes', 'log'] as const).map((id) => (
             <button key={id} type="button" role="tab" className="git-sub__tab" aria-selected={sub === id} onClick={() => setSub(id)}>
               {t(`git.${id}`)}
             </button>
@@ -723,7 +870,6 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
           />
         )}
         {sub === 'log' && <LogView directory={directory} view={view} />}
-        {sub === 'branches' && <BranchesView directory={directory} view={view} busy={busy} onRun={run} onSwitch={(name) => setConfirm({ kind: 'switch', name })} onDelete={(branch) => setConfirm({ kind: 'delete', branch })} />}
       </div>
       {sub === 'changes' && (
         <CommitBox
@@ -819,9 +965,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
     }
     setConfirm(undefined)
     if (current.kind === 'push' || current.kind === 'pull') return remote(current.kind)
-    if (current.kind === 'switch') return void (await run({ kind: 'switchBranch', name: current.name }))
     if (current.kind === 'discard') return void (await run({ kind: 'discard', paths: [current.file.path] }))
-    if (current.kind === 'delete') return void (await run({ kind: 'deleteBranch', name: current.branch.name }))
     if (current.kind === 'commitFile') {
       const done = await run<{ short: string; files: number }>({ kind: 'commitPaths', paths: entryPaths(current.entry), message: value ?? '' })
       if (done?.ok) setNotice({ tone: 'ok', text: t('git.committed', { hash: done.short, count: done.files }), undo: true })
@@ -1438,7 +1582,7 @@ function FileRow({
 // 줄 = 메시지·브랜치·시각 + [적용]·[삭제]. 적용 = stash pop(충돌이면 멈춘 채 알리고 보관은 남는다), 삭제 = 확인 카드(팝업 안) → stash drop.
 // 실패는 팝업 위 한 줄. Esc·바깥으로 닫히고 포커스는 버튼으로
 
-function StashButton({ directory, view, stashes, onNotice }: { directory: string; view: GitStatus; stashes: GitStash[]; onNotice(notice: Notice): void }) {
+export function StashButton({ directory, view, stashes, onNotice }: { directory: string; view: GitStatus; stashes: GitStash[]; onNotice(notice: Notice): void }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -1459,6 +1603,7 @@ function StashButton({ directory, view, stashes, onNotice }: { directory: string
     buttonRef.current?.focus()
   }
 
+  if (stashes.length === 0) return null // 보관이 없으면 버튼도 없다 (#399) — 보관하면 다시 나타난다
   return (
     <div className="git-stash" ref={wrapRef}>
       <button type="button" className="git-sub__tool git-stash__button" aria-label={t('git.stashList')} aria-haspopup="dialog" aria-expanded={open} ref={buttonRef} onClick={() => (open ? close() : setOpen(true))}>
@@ -1612,109 +1757,6 @@ function LogView({ directory, view }: { directory: string; view: GitStatus }) {
       ))}
     </ol>
   )
-}
-
-// ── 브랜치 ──
-
-function BranchesView({
-  directory,
-  view,
-  busy,
-  onRun,
-  onSwitch,
-  onDelete,
-}: {
-  directory: string
-  view: GitStatus
-  busy: boolean
-  onRun(action: GitAction): Promise<unknown>
-  onSwitch(name: string): void
-  onDelete(branch: GitBranch): void
-}) {
-  const t = useT()
-  const [branches, setBranches] = useState<GitBranch[]>()
-  const [creating, setCreating] = useState(false)
-  const [name, setName] = useState('')
-  const input = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    let live = true
-    window.litecode.gitBranches(directory).then(
-      (list) => live && setBranches(list),
-      () => live && setBranches([]),
-    )
-    return () => {
-      live = false
-    }
-  }, [directory, view])
-  useEffect(() => {
-    if (creating) input.current?.focus()
-  }, [creating])
-  const create = async (): Promise<void> => {
-    if (!name.trim()) return
-    await onRun({ kind: 'createBranch', name: name.trim() })
-    setName('')
-    setCreating(false)
-  }
-  if (branches === undefined) return <p className="git-empty">{t('filePreview.loading')}</p>
-  const now = Date.now()
-  return (
-    <ul className="git-branches">
-      {branches.map((branch) => (
-        <li key={branch.name} className="git-branches__item" data-current={branch.current || undefined}>
-          <button type="button" className="changed-files__toggle git-branches__row" disabled={branch.current || busy} onClick={() => onSwitch(branch.name)}>
-            <span className="git-branches__check" aria-hidden="true">
-              {branch.current ? '✓' : ''}
-            </span>
-            <span className="git-branches__name">{branch.name}</span>
-            <span className="changed-files__spacer" />
-            <span className="git-branches__meta">{branchMeta(branch, now, t)}</span>
-          </button>
-          {!branch.current && (
-            <button type="button" className="changed-files__open" disabled={busy} aria-label={t('git.deleteBranch', { branch: branch.name })} title={t('git.deleteBranch', { branch: branch.name })} onClick={() => onDelete(branch)}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 4.5H13M6.5 4.5V3H9.5V4.5M4.5 4.5L5.2 13H10.8L11.5 4.5" />
-              </svg>
-            </button>
-          )}
-        </li>
-      ))}
-      <li className="git-branches__item">
-        {creating ? (
-          <form
-            className="git-branches__new"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void create()
-            }}
-          >
-            <input
-              ref={input}
-              className="git-input git-mono"
-              aria-label={t('git.newBranchLabel')}
-              placeholder={t('git.newBranchLabel')}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => event.key === 'Escape' && (event.stopPropagation(), setCreating(false))}
-            />
-            <button type="submit" className="file-preview__toggle" disabled={busy || !name.trim()}>
-              {t('git.create')}
-            </button>
-          </form>
-        ) : (
-          <button type="button" className="changed-files__toggle git-branches__add" disabled={busy || !view.hasCommits} onClick={() => setCreating(true)}>
-            {`＋ ${t('git.newBranch')}`}
-          </button>
-        )}
-      </li>
-    </ul>
-  )
-}
-
-function branchMeta(branch: GitBranch, now: number, t: Translate): string {
-  const parts = [branch.current ? t('git.current') : ago(branch.time, now)]
-  if (branch.ahead || branch.behind) parts.push(`↑${branch.ahead} ↓${branch.behind}`)
-  if (branch.unmerged > 0) parts.push(t('git.unmerged', { count: branch.unmerged }))
-  return parts.join(' · ')
 }
 
 // ── 확인 카드 (승인 카드 틀) ──
