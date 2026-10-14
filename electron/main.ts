@@ -518,17 +518,6 @@ mcpBridge.inject = ['mcp']
 // 화면이 지금 프로젝트를 알리고(APP_MCP_VIEW), 도구의 요청은 모든 창에 흘린다(화면이 프로젝트로 거른다). 창이 다 닫히면 보고 있는 것이 없다
 function appMcpBridge(ctx: Context): void {
   handle(ctx, Channel.APP_MCP_VIEW, async (_event, directory?: string) => ctx.appMcp.view(typeof directory === 'string' ? directory : undefined))
-  // 사용자가 다른 프로젝트에 지시를 직접 보낸다 (오른쪽 패널 Projects 탭, #341) — 대상·자격은 세션 도구와 같은 결정지.
-  // 여기서 하는 것: 형만 본다 (사실과 자격은 ctx.delegation). from 은 지금 보는 대화 — 딱지·출처에 남는다
-  handle(ctx, Channel.DELEGATION_SEND, async (_event, input: { directory?: string; fromId?: string; fromTitle?: string; targetId?: string; message?: string }) => {
-    if (typeof input?.directory !== 'string' || typeof input.fromId !== 'string' || typeof input.targetId !== 'string') throw new Error('Invalid request.')
-    return ctx.delegation.send({
-      directory: input.directory,
-      from: { id: input.fromId, title: typeof input.fromTitle === 'string' && input.fromTitle ? input.fromTitle : 'New conversation' },
-      targetId: input.targetId,
-      message: input.message ?? '',
-    })
-  })
   ctx.on('appMcp/open-file', (directory, file, line) => broadcast(Channel.APP_MCP_OPEN_FILE, directory, file, line))
   ctx.on('appMcp/open-terminal', (directory, id) => broadcast(Channel.APP_MCP_OPEN_TERMINAL, directory, id))
   ctx.effect(() => {

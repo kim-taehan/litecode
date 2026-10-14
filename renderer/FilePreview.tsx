@@ -5,7 +5,6 @@ import { GitPanel, GitTabCount } from './Git.tsx'
 import { BranchIcon } from './GitIcons.tsx'
 import {
   GIT_TAB,
-  PROJECTS_TAB,
   closeFilePreview,
   closeTab,
   isTaskTab,
@@ -27,10 +26,8 @@ import { languageOfPath } from './highlight.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
 import { useFeatures } from './featuresStore.ts'
 import { reason } from './ipcError.ts'
-import type { ProjectTarget } from './delegationView.ts'
 import { lineJump } from './lineJump.ts'
 import { useT } from './settingsStore.ts'
-import { ProjectsPanel } from './ProjectsPanel.tsx'
 import { TabAddMenu } from './TabAddMenu.tsx'
 import { TaskTab } from './TaskTab.tsx'
 import { taskTitle } from './taskTabView.ts'
@@ -64,15 +61,14 @@ function readWidth(): number {
   return Math.round(window.innerWidth * DEFAULT_RATIO)
 }
 
-/** 지금 보는 대화의 프로젝트 패널일 때만 그린다 — 프로젝트를 옮기면 숨긴다. fromId·fromTitle 은 지금 보는 대화(Projects 탭이 지시를 보낼 때
- *  보내는 대화로 남는다), targets 는 다른 프로젝트의 받을 대화(Projects 탭 — DelegationContext 바깥이라 props 로) */
-export function FilePreviewPanel({ directory, fromId, fromTitle, targets }: { directory?: string; fromId?: string; fromTitle?: string; targets: readonly ProjectTarget[] }) {
+/** 지금 보는 대화의 프로젝트 패널일 때만 그린다 — 프로젝트를 옮기면 숨긴다 */
+export function FilePreviewPanel({ directory }: { directory?: string }) {
   const state = usePanelState()
   const stale = !!state?.open && state.directory !== directory
   useEffect(() => {
     if (stale) closeFilePreview()
   }, [stale])
-  return state?.open && !stale ? <Panel state={state} fromId={fromId} fromTitle={fromTitle} targets={targets} /> : null
+  return state?.open && !stale ? <Panel state={state} /> : null
 }
 
 /** 대화 머리 오른쪽 끝 — 오른쪽 패널을 열고 숨기는 버튼 (왼쪽 사이드바 접기 그림을 뒤집은 것). 늘 보인다 — 숨겨도 탭은 남는다 (사용자 요청 2026-10-04) */
@@ -98,7 +94,7 @@ export function RightPanelButton({ directory }: { directory: string }) {
   )
 }
 
-function Panel({ state, fromId, fromTitle, targets }: { state: PanelState; fromId?: string; fromTitle?: string; targets: readonly ProjectTarget[] }) {
+function Panel({ state }: { state: PanelState }) {
   const t = useT()
   const [width, setWidth] = useState(readWidth)
   const root = useRef<HTMLElement>(null)
@@ -108,13 +104,10 @@ function Panel({ state, fromId, fromTitle, targets }: { state: PanelState; fromI
   const gitOn = useFeatures().has('git')
   // 터미널 탭 (이슈 #303) — 기능 terminal 이 켜져 있을 때만. 꺼졌는데 터미널 탭을 고른 채면 파일 탭으로 본다
   const terminalOn = useFeatures().has('terminal')
-  // Projects 탭 (이슈 #341) — 기능 appMcp(데스크탑 MCP)가 켜져 있을 때만. 꺼졌으면 파일 탭으로 본다
-  const appMcpOn = useFeatures().has('appMcp')
   const { directory, tabs: allTabs, fullscreen, jump } = state
   // 기능이 꺼지면(셸도 다 끝났다) 터미널 탭은 보이지 않는다
   const tabs = terminalOn ? allTabs : allTabs.filter((key) => !isTerminalTab(key))
-  const active =
-    state.active === GIT_TAB && !gitOn ? undefined : state.active === PROJECTS_TAB && !appMcpOn ? undefined : isTerminalTab(state.active) && !terminalOn ? undefined : state.active
+  const active = state.active === GIT_TAB && !gitOn ? undefined : isTerminalTab(state.active) && !terminalOn ? undefined : state.active
   // 파일 탭은 한 번 본 뒤부터 계속 마운트 — 다른 탭에 갔다 와도 펼친 폴더·스크롤이 그대로 (dsh keepMounted, 안 본 탭은 미리 안 그린다)
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
@@ -214,19 +207,6 @@ function Panel({ state, fromId, fromTitle, targets }: { state: PanelState; fromI
               <BranchIcon className="file-preview__tab-icon" />
               <span className="file-preview__tab-title">{t('git.tab')}</span>
               <GitTabCount directory={directory} />
-            </div>
-          )}
-          {appMcpOn && (
-            <div
-              role="tab"
-              tabIndex={0}
-              className="file-preview__tab file-preview__tab--files file-preview__tab--projects"
-              aria-selected={active === PROJECTS_TAB}
-              onClick={() => selectTab(PROJECTS_TAB)}
-              onKeyDown={(event) => activateOnKey(event, () => selectTab(PROJECTS_TAB))}
-            >
-              <ProjectsIcon className="file-preview__tab-icon" />
-              <span className="file-preview__tab-title">{t('projects.tab')}</span>
             </div>
           )}
           {tabs.map((key) => {
@@ -361,12 +341,11 @@ function Panel({ state, fromId, fromTitle, targets }: { state: PanelState; fromI
       </div>
       {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} />}
       {active === GIT_TAB && <GitPanel directory={directory} gitSub={state.gitSub} />}
-      {active === PROJECTS_TAB && <ProjectsPanel directory={directory} fromId={fromId} fromTitle={fromTitle} targets={targets} />}
       {active !== undefined && isTerminalTab(active) && (
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
       )}
       {active !== undefined && isTaskTab(active) && <TaskTab key={active} taskId={taskIdOf(active)!} directory={directory} />}
-      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && active !== GIT_TAB && active !== PROJECTS_TAB && (
+      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && active !== GIT_TAB && (
         <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />
       )}
     </aside>
@@ -789,16 +768,6 @@ function TerminalIcon({ className = 'file-preview__icon', size = 14 }: { classNa
     <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 4.5L6.5 8L3 11.5" />
       <path d="M8.5 12H13" />
-    </svg>
-  )
-}
-
-/** Projects 탭 — 겹친 폴더 두 개 (다른 프로젝트로) */
-function ProjectsIcon({ className = 'file-preview__icon' }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
-      <path d="M1.75 5.25V3.25C1.75 2.42 2.42 1.75 3.25 1.75H5.5L7 3.25H11.5C12.33 3.25 13 3.92 13 4.75V6" />
-      <path d="M4.5 6H11.75C12.88 6 13.75 6.88 13.75 8V11.75C13.75 12.58 13.08 13.25 12.25 13.25H4.25C3.42 13.25 2.75 12.58 2.75 11.75V7C2.75 6.45 3.2 6 3.75 6H4.5Z" />
     </svg>
   )
 }

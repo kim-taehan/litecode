@@ -24,7 +24,6 @@ import type { UpdateStatus } from './updates.ts'
 import type { Goal } from './goal.ts'
 import type { GoalReply } from '../src/services/goal.ts'
 import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
-import type { DelegationSent } from '../src/services/delegation.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Mode } from './modes.ts'
@@ -48,7 +47,6 @@ export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScop
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
 export type { UpdateState, UpdateStatus } from './updates.ts'
 export type { SpeechErrorCode, SpeechLanguage, SpeechPartial, SpeechReply, SpeechState, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened, SpeechTranscript, SpeechUnavailable } from './speech.ts'
-export type { DelegationSent } from '../src/services/delegation.ts'
 
 export const Channel = {
   LIST_PROVIDERS: 'providers:list',
@@ -184,8 +182,6 @@ export const Channel = {
   APP_MCP_OPEN_FILE: 'appMcp:open-file',
   /** 메인 → 화면 (directory, id) — AI 가 open(터미널) 을 불렀다 (명령은 메인이 이미 채웠다) */
   APP_MCP_OPEN_TERMINAL: 'appMcp:open-terminal',
-  /** 화면 → 메인 — 사용자가 다른 프로젝트에 지시를 직접 보낸다 (오른쪽 패널 Projects 탭, #341). 대상은 그 프로젝트의 마지막에 보던 대화 */
-  DELEGATION_SEND: 'delegation:send',
   REMOTE_STATUS: 'remote:status',
   REMOTE_START_PAIRING: 'remote:start-pairing',
   REMOTE_CANCEL_PAIRING: 'remote:cancel-pairing',
@@ -307,9 +303,6 @@ export interface LitecodeBridge {
   markViewed(conversationId: string): Promise<void>
   /** 프로젝트 경로 → 그 프로젝트에서 마지막에 보던 대화 id (앱을 껐다 켜도 남는다) — 다른 프로젝트에 지시를 보낼 때 받는 대화 */
   lastViewed(): Promise<Record<string, string>>
-  /** 다른 프로젝트의 마지막에 보던 대화에 지시를 직접 보낸다 (오른쪽 패널 Projects 탭, #341) — 대상·자격(모델·대기열)은 세션 도구와 같은
-   *  결정지(ctx.delegation). from 은 지금 보는 대화(딱지·출처에 남는다). 거절 사유는 에러로 */
-  sendDelegation(input: { directory: string; fromId?: string; fromTitle?: string; targetId: string; message: string }): Promise<DelegationSent>
   /** 넣거나 고친다. 그 프로젝트가 보관 개수를 넘어 지운 대화 id 를 준다. 보낸 대화의 저장은 메인(ctx.chat)이 한다 — 화면은 `!명령` 만
    *  돌린 새 대화를 목록에 넣을 때만 쓴다 */
   saveConversation(conversation: Conversation): Promise<string[]>

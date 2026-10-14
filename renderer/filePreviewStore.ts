@@ -71,9 +71,6 @@ export function openFilePreview(directory: string, token: string, line?: number,
 /** Git 탭의 열쇠 (이슈 #290) — 파일 탭 열쇠(프로젝트 기준 경로)와 겹치지 않는 글자. 고정 탭이라 tabs 에는 없다 */
 export const GIT_TAB = '\0git'
 
-/** Projects 탭의 열쇠 (이슈 #341) — 다른 프로젝트의 마지막에 보던 대화에 지시를 직접 보내기. 고정 탭이라 tabs 에는 없다 */
-export const PROJECTS_TAB = '\0projects'
-
 /** 터미널 탭의 열쇠 (이슈 #303) — `\0term/<id>`, id 는 메인(ctx.terminals)이 주는 폴더별 번호(탭 이름 터미널 1·2·…).
  *  파일 탭 열쇠(경로)와 겹치지 않는다 */
 export const TERM_PREFIX = '\0term/'

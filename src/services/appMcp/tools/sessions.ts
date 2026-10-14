@@ -104,7 +104,7 @@ function bounded(value: unknown, fallback: number, min: number, max: number): nu
   return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.floor(number))) : fallback
 }
 
-/** 다른 프로젝트 하나와 그 프로젝트에서 마지막에 보던 대화 — 대상·자격의 단일 결정지는 ctx.delegation (화면의 Projects 탭과 공유, #341) */
+/** 다른 프로젝트 하나와 그 프로젝트에서 마지막에 보던 대화 — 대상·자격의 단일 결정지는 ctx.delegation */
 type Target = DelegationTarget
 
 export function SessionTools(ctx: Context): void {
@@ -116,7 +116,7 @@ export function SessionTools(ctx: Context): void {
     return all.filter((entry) => real.get(entry.project) === directory)
   }
 
-  /** 보내는 프로젝트가 아닌 등록된 프로젝트와 그 각각의 마지막에 보던 대화 — ctx.delegation 에서 (화면의 Projects 탭과 같은 규칙) */
+  /** 보내는 프로젝트가 아닌 등록된 프로젝트와 그 각각의 마지막에 보던 대화 — ctx.delegation 에서 */
   function others(directory: string): Promise<Target[]> {
     return ctx.delegation.targets(directory)
   }
