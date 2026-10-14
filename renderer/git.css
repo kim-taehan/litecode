@@ -342,7 +342,100 @@
   }
 }
 .git-sub__push { margin-left: auto; display: inline-flex; align-items: center; }
-.git-log2 { height: 100%; overflow-y: auto; }
+
+/* 기록 필터 바 (#409, 시안 ⑤) — 검색(텍스트 또는 해시 + .*·Cc) + 알약 4개 */
+.git-log2 { height: 100%; display: flex; flex-direction: column; }
+.git-log2__bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px 8px 0;
+  border-bottom: 0.5px solid var(--border-light);
+}
+.git-log2__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-caption);
+}
+.git-log2__search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 5px 0;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.git-log2__toggle {
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-caption);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+.git-log2__toggle:hover { background: var(--fill-hover); color: var(--text); }
+.git-log2__toggle[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent); }
+.git-log2__pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.git-log2__pill { display: inline-flex; align-items: center; }
+.git-log2__pill-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.git-log2__pill-button:hover { background: var(--fill-hover); }
+.git-log2__pill-value { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.git-log2__pill-caret { color: var(--text-caption); font-size: 10px; }
+.git-log2__pill-x {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  border: none;
+  border-radius: 50%;
+  background: var(--fill-hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.git-log2__pill-x:hover { background: var(--border); color: var(--text); }
+.git-log2__menu { width: 240px; }
+.git-log2__menu .git-menu__item[data-on] { background: var(--fill-active); color: var(--text); font-weight: 600; }
+.git-log2__menu-hint { padding: 3px 9px 5px; color: var(--text-caption); font-size: 11px; }
+.git-log2__path-input {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.git-log2__path-input:focus { border-color: var(--accent); }
+.git-log2__scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .git-log2__list { margin: 0; padding: 0; list-style: none; }
 .git-log2__row { display: flex; gap: 8px; height: 46px; padding: 0 16px 0 0; border-bottom: 0.5px solid var(--border-light); }
 .git-log2__graph { flex: none; margin-top: 0; }

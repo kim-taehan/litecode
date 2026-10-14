@@ -58,8 +58,15 @@ export function laneColor(lane: number): string {
   return LANE_COLORS[lane % LANE_COLORS.length]!
 }
 
+/** 폭 상한 (#409 필터) — 필터로 부모가 목록에서 빠지면 기다리는 레인이 쌓일 텐데, 이보다 넓지 않게 막는다 */
+export interface GraphOptions {
+  /** 레인 수 상한 (기본 = 없음). 차면: 새로 내릴 머지 선은 끊고, 도트는 맨 오른쪽 레인을 빼앗는다 */
+  maxLanes?: number
+}
+
 /** commits(최근→옛순)의 그래프를 계산한다. state 를 주면 그 전 페이지의 레인 상태를 이어간다 */
-export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState = { lanes: [] }): { rows: GraphRow[]; state: GraphState } {
+export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState = { lanes: [] }, options: GraphOptions = {}): { rows: GraphRow[]; state: GraphState } {
+  const maxLanes = options.maxLanes ?? Infinity
   const lanes: Array<string | null> = state.lanes ? state.lanes.slice() : []
   const rows: GraphRow[] = []
 
@@ -96,7 +103,13 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
     } else {
       // 기다리는 레인 없음 — 새 페이지 첫 줄·필터로 부모가 숨겨진 줄·root. 선은 이 줄에서 시작한다
       lane = freeLane()
-      if (lane >= lanes.length) lanes.push(null)
+      if (lane >= lanes.length) {
+        if (lanes.length > 0 && lanes.length >= maxLanes) {
+          // 폭 상한 — 맨 오른쪽 레인을 빼앗는다 (기다리던 선은 끊김)
+          lane = lanes.length - 1
+          lanes[lane] = null
+        } else lanes.push(null)
+      }
     }
 
     // 첫 부모 — 도트 레인을 그대로 잇는다
@@ -120,7 +133,10 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
       const parent = parents[k]!
       let other = lanes.indexOf(parent)
       if (other < 0) {
-        other = freeLane()
+        const free = freeLane()
+        // 폭 상한 — 새 레인을 여는 것뿐이면 그 선은 끊는다 (기다림은 안 남는다)
+        if (free >= lanes.length && lanes.length >= maxLanes) continue
+        other = free
         if (other >= lanes.length) lanes.push(null)
       }
       lanes[other] = parent

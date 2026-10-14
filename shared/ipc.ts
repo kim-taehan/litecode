@@ -224,6 +224,8 @@ export const Channel = {
   /** 화면 → 메인 (directory) → GitCommit[] */
   GIT_LOG: 'git:log',
   GIT_LOG_PAGE: 'git:log-page',
+  /** 화면 → 메인 (directory) → string[] — 기록 필터의 사용자 목록(최근 200개 작성자, #409) */
+  GIT_LOG_AUTHORS: 'git:log-authors',
   /** 화면 → 메인 (directory) → GitBranch[] */
   GIT_BRANCHES: 'git:branches',
   /** 화면 → 메인 (directory) → string[] — 원격 브랜치 이름(`origin/x`, 원격의 HEAD 제외). 브랜치 팝업(#386) */
@@ -488,8 +490,10 @@ export interface LitecodeBridge {
   gitView(directory: string): Promise<GitView>
   gitDiff(directory: string, path: string, staged: boolean | 'head'): Promise<string>
   gitLog(directory: string): Promise<GitCommit[]>
-  /** 기록 탭 페이징 (#400) — 부모·레프가 있는 커밋 한 페이지. limit 기본 200 */
+  /** 기록 탭 페이징 (#400) — 부모·레프가 있는 커밋 한 페이지. limit 기본 200. query 는 기록 필터(#409) */
   gitLogPage(directory: string, query?: GitLogPageQuery): Promise<GitLogPage>
+  /** 기록 필터의 사용자 목록 (#409) */
+  gitLogAuthors(directory: string): Promise<string[]>
   gitBranches(directory: string): Promise<GitBranch[]>
   gitRemoteBranches(directory: string): Promise<string[]>
   gitLastCommit(directory: string): Promise<GitLastCommit | undefined>

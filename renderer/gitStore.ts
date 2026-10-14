@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { GitIgnored, GitLogCommit, GitLogPage, GitLogPageQuery, GitView } from '../shared/git.ts'
+import { buildLogQuery, defaultLogFilter, type GitLogFilter } from './logFilter.ts'
 import { isFoldOpen, SECTION_UNTRACKED, toggleAllFolds, toggleFold, type Folds } from './gitTree.ts'
 
 // Git 상태의 화면 쪽 저장소 (이슈 #290) — 오른쪽 패널의 Git 탭(변경 수·목록)과 입력 카드의 브랜치 알약이 같은 값을 본다.
@@ -106,6 +107,22 @@ export interface GitLogView {
 const logPages = new Map<string, GitLogPage>()
 const logAsked = new Map<string, number>()
 const logReading = new Set<string>()
+// 기록 필터 (#409) — 폴더(프로젝트)마다. 바뀔 때 첫 페이지부터 다시 읽는다
+const logFilters = new Map<string, GitLogFilter>()
+
+export function logFilterOf(directory: string | undefined): GitLogFilter {
+  return (directory && logFilters.get(directory)) || defaultLogFilter()
+}
+
+/** 읽기 실행자 — (directory, 쿼리) → 페이지. 저장소가 저장된 필터를 쿼리로 바꾸어 준다 */
+type LogReader = (directory: string, query: GitLogPageQuery) => Promise<GitLogPage>
+const gitLogPage: LogReader = (directory, query) => window.litecode.gitLogPage(directory, query)
+
+/** 필터를 바꾼다 — 바뀐 것으로 첫 페이지부터 다시 (레이인 상태도 리셋) */
+export function setLogFilter(directory: string, patch: Partial<GitLogFilter>, read: LogReader = gitLogPage): Promise<void> {
+  logFilters.set(directory, { ...logFilterOf(directory), ...patch })
+  return refreshLogGit(directory, read)
+}
 
 export function logGitOf(directory: string | undefined): GitLogView | undefined {
   if (directory === undefined) return undefined
@@ -114,14 +131,14 @@ export function logGitOf(directory: string | undefined): GitLogView | undefined 
   return { commits: page.commits, hasMore: page.hasMore, reading: logReading.has(directory) }
 }
 
-/** 첫 페이지를 안고 다시 읽는다 — 같은 폴더의 읽기는 마지막 요청의 답만 쓴다(그 사이 다시 읽으면 그 전 답은 버림) */
-export function refreshLogGit(directory: string, read: (directory: string, query?: GitLogPageQuery) => Promise<GitLogPage> = (d, q) => window.litecode.gitLogPage(d, q)): Promise<void> {
+/** 첫 페이지를 안고 다시 읽는다 — 쿼리에 저장된 필터를 붙이고, 같은 폴더의 읽기는 마지막 요청의 답만 쓴다(그 사이 다시 읽으면 그 전 답은 버림) */
+export function refreshLogGit(directory: string, read: LogReader = gitLogPage): Promise<void> {
   const seq = (logAsked.get(directory) ?? 0) + 1
   logAsked.set(directory, seq)
   logPages.set(directory, { commits: [], hasMore: false })
   logReading.add(directory)
   notify()
-  return read(directory).then(
+  return read(directory, buildLogQuery(logFilterOf(directory), 0)).then(
     (page) => {
       if (logAsked.get(directory) !== seq) return
       logPages.set(directory, page)
@@ -136,15 +153,15 @@ export function refreshLogGit(directory: string, read: (directory: string, query
   )
 }
 
-/** 읽힌 것 뒤에 다음 페이지를 덧붙인다 — 이미 읽고 있거나 마감이면 아무것도 안 한다 */
-export function appendLogGit(directory: string, read: (directory: string, query?: GitLogPageQuery) => Promise<GitLogPage> = (d, q) => window.litecode.gitLogPage(d, q)): Promise<void> {
+/** 읽힌 것 뒤에 다음 페이지를 덧붙인다 — 쿼리는 같은 필터, skip 만 바뀐다. 읽고 있거나 마감이면 아무것도 안 한다 */
+export function appendLogGit(directory: string, read: LogReader = gitLogPage): Promise<void> {
   const page = logPages.get(directory)
   if (!page || !page.hasMore || logReading.has(directory)) return Promise.resolve()
   const skip = page.commits.length
   const seq = logAsked.get(directory) ?? 0
   logReading.add(directory)
   notify()
-  return read(directory, { skip }).then(
+  return read(directory, buildLogQuery(logFilterOf(directory), skip)).then(
     (next) => {
       if (logAsked.get(directory) !== seq) {
         logReading.delete(directory)
@@ -175,6 +192,11 @@ export function useGitView(directory: string | undefined): GitView | undefined {
 export function useLogGit(directory: string | undefined): GitLogView | undefined {
   useSyncExternalStore(subscribe, () => version, () => version)
   return logGitOf(directory)
+}
+
+export function useLogFilter(directory: string | undefined): GitLogFilter {
+  useSyncExternalStore(subscribe, () => version, () => version)
+  return logFilterOf(directory)
 }
 
 /** App 이 한 번 건다 — 기능이 켜져 있고 프로젝트를 보고 있을 때 다시 읽는 때를 잇는다 */

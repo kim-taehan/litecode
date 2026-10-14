@@ -147,3 +147,46 @@ describe('layoutGraph — 고정 입력', () => {
     expect(rowsOf([], { lanes: ['h1', null] })).toMatchObject({ rows: [], state: { lanes: ['h1', null] } })
   })
 })
+
+describe('layoutGraph — 폭 상한 (maxLanes, #409)', () => {
+  // 두 번째 부모가 목록에 절대 안 오는 이력(필터가 부모를 뺀 모양) — x1..x5 는 등장하지 않는다
+  const chain = [c('k5', ['k4', 'x5']), c('k4', ['k3', 'x4']), c('k3', ['k2', 'x3']), c('k2', ['k1', 'x2']), c('k1', ['k0', 'x1']), c('k0')]
+
+  it('없으면(기본) — 이전 그대로, 레인이 계속 쌓인다', () => {
+    const { rows, state } = layoutGraph(chain)
+    expect(rows.map((row) => row.diagonal)).toEqual([
+      [{ from: 0, to: 1 }],
+      [{ from: 0, to: 2 }],
+      [{ from: 0, to: 3 }],
+      [{ from: 0, to: 4 }],
+      [{ from: 0, to: 5 }],
+      [],
+    ])
+    expect(state.lanes).toHaveLength(6)
+  })
+
+  it('maxLanes=4 — 새 레인은 4개에서 멈추고(그 머지 선은 끊김), 도트는 영향 없음', () => {
+    const { rows, state } = layoutGraph(chain, undefined, { maxLanes: 4 })
+    expect(rows.map((row) => row.diagonal)).toEqual([
+      [{ from: 0, to: 1 }],
+      [{ from: 0, to: 2 }],
+      [{ from: 0, to: 3 }],
+      [], // x2 — 레인 여는 것뿐이라 끊김
+      [], // x1 — 같음
+      [],
+    ])
+    expect(state.lanes).toEqual([null, 'x5', 'x4', 'x3']) // x2·x1 은 아예 안 남음
+    expect(rows.every((row) => row.lane === 0)).toBe(true)
+  })
+
+  it('레인이 가득하면 도트가 맨 오른쪽 레인을 빼앗는다(기다리던 선은 끊김)', () => {
+    const { rows, state } = layoutGraph([c('a', ['b', 'x1']), c('c', ['e', 'x2']), c('b'), c('e')], undefined, { maxLanes: 1 })
+    expect(rows.map((row) => ({ lane: row.lane, diagonal: row.diagonal }))).toEqual([
+      { lane: 0, diagonal: [] }, // a — x1 은 레인 여는 것뿐이라 끊김
+      { lane: 0, diagonal: [] }, // c — b 가 기다리던 레인을 빼앗음
+      { lane: 0, diagonal: [] }, // b
+      { lane: 0, diagonal: [] }, // e
+    ])
+    expect(state.lanes).toEqual([])
+  })
+})

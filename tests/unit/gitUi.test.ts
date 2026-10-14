@@ -3,10 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import type { Attention } from '../../shared/contract.ts'
-import type { GitBranch, GitLogCommit, GitLogPage, GitStatus, GitView } from '../../shared/git.ts'
-import { appendLogGit, changeCount, gitViewOf, ignoredShown, logGitOf, refreshGit, refreshIgnored, refreshLogGit, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown } from '../../renderer/gitStore.ts'
+import type { GitBranch, GitLogCommit, GitLogPage, GitLogPageQuery, GitStatus, GitView } from '../../shared/git.ts'
+import { appendLogGit, changeCount, gitViewOf, ignoredShown, logGitOf, refreshGit, refreshIgnored, refreshLogGit, setLogFilter, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown } from '../../renderer/gitStore.ts'
 import { GitLog } from '../../renderer/GitLog.tsx'
 import { logChips, logWhen } from '../../renderer/logLine.ts'
+import { LogFilterBar } from '../../renderer/LogFilterBar.tsx'
+import { defaultLogFilter } from '../../renderer/logFilter.ts'
 import { SECTION_UNTRACKED } from '../../renderer/gitTree.ts'
 import { GIT_TAB, getPanelState, openFilePreview, openGitTab, selectTab } from '../../renderer/filePreviewStore.ts'
 
@@ -918,5 +920,38 @@ describe('GitLog — 정적 그림 (시안 ⑤)', () => {
     expect(out).toContain('git-log2__row')
     expect(out).toContain('>설정: ⌘, 로 열기<')
     expect(out).not.toContain('git-sec')
+  })
+})
+
+// ── 기록 필터 (#400 #409) ──
+
+describe('기록 필터 (#409)', () => {
+  it('setLogFilter — 합친 필터를 쿼리로 붙여 첫 페이지부터 다시', async () => {
+    const seen: GitLogPageQuery[] = []
+    const fake = (dir: string, query: GitLogPageQuery): Promise<GitLogPage> => {
+      void dir
+      seen.push(query)
+      return Promise.resolve({ commits: [], hasMore: false })
+    }
+    await setLogFilter('/log-filter', { text: 'abc', branch: 'dev' }, fake)
+    expect(logGitOf('/log-filter')).toEqual({ commits: [], hasMore: false, reading: false })
+    expect(seen).toEqual([{ skip: 0, text: 'abc', regex: false, caseSensitive: true, branch: 'dev' }])
+  })
+
+  it('LogFilterBar — 검색 + .*·Cc 토글 + 알약 4개(브랜치·사용자·날짜·경로), 켜진 것만 값 + ×', () => {
+    const idle = html(createElement(LogFilterBar, { filter: defaultLogFilter(), currentBranch: 'dev', branches: [], remotes: [], authors: [], onChange() {} }))
+    expect(idle).toContain('placeholder="텍스트 또는 해시"')
+    expect(idle).toMatch(/aria-pressed="false"[^>]*>\.\*</) // .* 꺼짐
+    expect(idle).toMatch(/aria-pressed="true"[^>]*>Cc/) // Cc 기본 켬
+    expect(idle).toContain('>브랜치<span class="git-log2__pill-value">dev</span>') // 지금 브랜치(꺼진 상태라 × 없음)
+    expect(idle).toContain('>날짜<span class="git-log2__pill-value">전체</span>')
+    expect(idle).toContain('>사용자<span class="git-log2__pill-caret"') // 값이 없으면 caret 바로
+    expect(idle).not.toContain('git-log2__pill-x')
+
+    const active = html(
+      createElement(LogFilterBar, { filter: { ...defaultLogFilter(), branch: 'feat/x', author: 'kim' }, currentBranch: 'dev', branches: [], remotes: [], authors: [], onChange() {} }),
+    )
+    expect(active).toContain('>브랜치<span class="git-log2__pill-value">feat/x</span><span class="git-log2__pill-caret" aria-hidden="true">⌄</span></button><button type="button" class="git-log2__pill-x" aria-label="필터 지우기">×</button>')
+    expect(active).toContain('>사용자<span class="git-log2__pill-value">kim</span>')
   })
 })
