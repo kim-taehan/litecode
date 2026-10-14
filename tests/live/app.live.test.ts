@@ -567,6 +567,19 @@ describe('설정 > 모델', () => {
     await expect.poll(() => page.locator('.composer__input').evaluate((el) => el === document.activeElement), { timeout: 5_000 }).toBe(true)
   })
 
+  // ⌘, / Ctrl+, — 설정 판 단축키 (이슈 #384, macOS 의 설정 표준 키)
+  it('⌘, 로 설정 판이 열리고, 판이 열려 있으면 다른 전역 키처럼 물러난다', async () => {
+    expect(await dialog().count()).toBe(0)
+    await page.keyboard.press('Meta+Comma')
+    await dialog().waitFor({ timeout: 5_000 })
+    expect(await dialog().getByRole('button', { name: '일반', exact: true }).getAttribute('aria-current')).toBe('page')
+    // 판(설정) 이 열려 있으면 ⌘, 는 토글이 아니라 물러난다 (⌘N 과 같은 전역 키 규칙) — 닫기는 Esc/×
+    await page.keyboard.press('Meta+Comma')
+    expect(await dialog().count()).toBe(1)
+    await page.keyboard.press('Escape')
+    await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+  })
+
   // dsh ui-sidebar 설정 줄(.trigger)과 같은 모양 — 사용자: "설정이 너무 작다" (2026-10-01 캡처), 사이드바 dsh 값 라운드(2026-10-02)에서 42px·16px 톱니로
   it('설정 버튼은 dsh 사이드바 설정 줄 모양이다 — 42px 줄·12px 모서리·14px 글자·16px 톱니, 위 구분선 없음', async () => {
     const button = settingsButton()

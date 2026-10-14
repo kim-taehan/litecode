@@ -479,6 +479,20 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // ⌘, / Ctrl+, — 설정 판 열기 (이슈 #384). macOS 의 설정 표준 키 — 모든 앱이 쓰니까 배울 필요 없이 누른다.
+  // 열면 닫는 것은 ×/Esc (닫히면 포커스는 #382 대로)
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key !== ',') return
+      // 판(aria-modal) 이나 프로젝트 전환(빠른 열기) 이 열려 있으면 물러난다 (⌘N 과 같은 전역 키 규칙)
+      if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+      event.preventDefault()
+      setSettingsOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // ⌘↑/⌘↓ (2026-10-13 피드백 #3) — 바로 이전/다음 대화로. 사이드바 대화 목록 순서(진행중만 보기·찾기·고정 순) 기준, 끝에서 감돈다
   const listedNavRef = useRef(listed)
   listedNavRef.current = listed
