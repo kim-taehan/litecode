@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsService } from '../../src/services/settings.ts'
 import { FeaturesService, type FeatureDefinition } from '../../src/services/features.ts'
 import { missingServices } from '../../electron/resilience.ts'
-import { CHOOSABLE_FEATURES, FEATURE_GROUPS, FEATURES, MOBILE_PATH_FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
+import { CHOOSABLE_FEATURES, FEATURE_GROUPS, FEATURE_SCREEN_HIDDEN, FEATURES, featureOn, type FeatureId } from '../../shared/features.ts'
 import { bluetoothProblem } from '../../src/services/remote/bluetooth.ts'
 import { speechProblem } from '../../src/services/speech.ts'
 
@@ -46,8 +46,9 @@ let tmp: string
 let file: string
 
 /** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)·음성 입력(voice)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56). 훅(hooks)은 #302 부터 필수(늘 켜짐).
+ *  터미널(terminal)·다른 앱에서 열기(openIn)은 고정(늘 켜짐)으로 옮김 (사용자 결정 2026-10-15 — 기능 화면에서 제거).
  *  사내망 연결(lan)·블루투스 연결(bluetooth)은 기본 꺼짐 (이슈 #210, 사내망은 #268 부터 — 켜는 순간 키체인의 TLS 키를 읽는다).
- *  새 버전 알림(updates)도 기본 꺼짐 (이슈 #273 — 켜기 전엔 바깥 요청 0). Git(git, 이슈 #290)도 기본 꺼짐.
+ *  새 버전 알림(updates)도 기본 꺼짐 (이슈 #273 — 켜기 전엔 바깥 요청 0; 2026-10-15 부터 기능 화면의 카드만 잠정 숨김). Git(git, 이슈 #290)도 기본 꺼짐.
  *  라이트코드 디자인(design, 이슈 #422)도 기본 꺼짐 (사용자 결정 2026-10-15) */
 const DEFAULT_ON = FEATURES.filter(
   (feature) => !['web', 'notifications', 'remote', 'lan', 'bluetooth', 'voice', 'browser', 'updates', 'git', 'design'].includes(feature),
@@ -364,12 +365,12 @@ describe('FeaturesService — 기능 상태', () => {
     const ready = await new Promise<Context>((resolve) => ctx.inject(['settings', 'features'], resolve))
     await ready.features.idle()
     expect(seen.length).toBeGreaterThan(0)
-    expect((seen.at(-1) as Record<string, unknown>).terminal).toEqual({ state: 'on' })
+    expect((seen.at(-1) as Record<string, unknown>).repeatGuard).toEqual({ state: 'on' })
     const before = seen.length
-    ready.features.problem('terminal', 'no radio')
+    ready.features.problem('repeatGuard', 'no radio')
     expect(seen).toHaveLength(before + 1)
-    expect((seen.at(-1) as Record<string, unknown>).terminal).toEqual({ state: 'failed', reason: 'no radio' })
-    ready.features.problem('terminal', 'no radio')
+    expect((seen.at(-1) as Record<string, unknown>).repeatGuard).toEqual({ state: 'failed', reason: 'no radio' })
+    ready.features.problem('repeatGuard', 'no radio')
     expect(seen).toHaveLength(before + 1)
     ready.settings.set({ features: { trajectory: false } })
     await ready.features.idle()
@@ -454,7 +455,7 @@ describe('settings.features', () => {
 describe('FEATURE_GROUPS — 설정 > 기능의 중분류', () => {
   it('고르는 기능을 빠짐없이 한 번씩 담는다(모바일 연결의 길은 설정 > 모바일 로 뺐다) — 새 기능을 더하면 묶음에도 넣어야 한다', () => {
     const grouped = FEATURE_GROUPS.flatMap((group) => group.features)
-    expect([...grouped].sort()).toEqual(CHOOSABLE_FEATURES.filter((feature) => !MOBILE_PATH_FEATURES.includes(feature)).sort())
+    expect([...grouped].sort()).toEqual(CHOOSABLE_FEATURES.filter((feature) => !FEATURE_SCREEN_HIDDEN.includes(feature)).sort())
     expect(new Set(grouped).size).toBe(grouped.length)
   })
 })

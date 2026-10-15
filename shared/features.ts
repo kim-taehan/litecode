@@ -22,15 +22,16 @@ export type ChoosableFeatureId = Exclude<FeatureId, keyof typeof FIXED>
 /** 사용자가 켜고 끄는 기능 (설정 > 기능의 카드) */
 export const CHOOSABLE_FEATURES: readonly FeatureId[] = FEATURES.filter((feature) => !(feature in FEATURE_FIXED))
 
-/** 설정 > 기능에 카드를 두지 않는 기능 — 모바일 연결의 길(사내망·블루투스)은 설정 > 모바일 한 곳에서만 켜고 끈다 (사용자 결정 2026-10-09: "기능 화면에서는 하나만") */
-export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
+/** 설정 > 기능에 카드를 두지 않는 기능 — 모바일 연결의 길(사내망·블루투스)은 설정 > 모바일 한 곳에서만 켜고 끈다 (사용자 결정 2026-10-09: "기능 화면에서는 하나만").
+ *  새 버전 알림(updates)은 일단 카드만 숨김 (사용자 결정 2026-10-15) — 기능은 그대로(기본 꺼짐, settings.json 의 값으로만 켜고 끈다) */
+export const FEATURE_SCREEN_HIDDEN: readonly FeatureId[] = ['lan', 'bluetooth', 'updates']
 
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 순서대로 이어 붙인 것이 줄 순서,
  *  묶음 이름은 줄마다 뱃지로 보인다 (#302 — 구역 제목은 없앴다). 자동화 묶음은 훅이 필수가 되며 비어 뺐다 */
 export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['trajectory', 'git', 'design'] },
   { id: 'ai', features: ['appMcp', 'web', 'browser'] },
-  { id: 'devices', features: ['voice', 'remote', 'notifications', 'updates'] },
+  { id: 'devices', features: ['voice', 'remote', 'notifications'] },
 ]
 
 /** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다),
@@ -44,6 +45,7 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'devices'; feature
  *  TLS 키를 읽어 macOS 가 키체인 접근을 물을 수 있다, 이슈 #268)과 블루투스 연결(bluetooth — 기본 꺼짐: 켜는 순간 macOS 가 블루투스 허용을 묻고, 네이티브 모듈을
  *  그때 읽는다). 둘 다 모바일 연결(remote)이 켜져 있어야 한다 — 모바일 연결만 켜면 길은 고르지 않은 상태다(설정 > 모바일에서 고른다).
  *  새 버전 알림(updates — ctx.updates, 이슈 #273)도 기본 꺼짐 — 켜면 GitHub 릴리즈(또는 설정의 주소)에 묻는다. 폐쇄망 규칙: 켜기 전에는 바깥 요청 0.
+ *  (2026-10-15 부터 설정 > 기능의 카드가 잠정 숨김 — FEATURE_SCREEN_HIDDEN, 기능 자체는 그대로)
  *  Git(git — ctx.git, 이슈 #290)도 기본 꺼짐 — 시스템 git 이 필요하고 커밋·올리기를 하는 기능이라 사용자가 켠다. 데스크탑 MCP 를 요구하지 않는다
  *  (데스크탑 MCP 가 꺼져 있으면 AI 도구만 빠지고 Git 탭·브랜치 알약은 그대로).
  *  라이트코드 디자인(design, 이슈 #422)도 기본 꺼짐 (사용자 결정 2026-10-15) — 시안 스킬(/design)과

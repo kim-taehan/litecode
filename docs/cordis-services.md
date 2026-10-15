@@ -46,9 +46,9 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `bang` `shell` | `shell` | `shell.ts` | `!명령` 실행 | — | 고정 켜짐 |
 | `skills` | `skills` | `skills.ts` | 스킬 목록·본문 붙이기(앱 폴더·프로젝트 `.opencode/skills`) | `llm` | 고정 켜짐 |
 | `mcp` | `mcp` | `mcp.ts` `mcpClient.ts` | MCP 서버 목록·편집·연결 시험·서버 안 도구 고르기 | `llm` | 고정 켜짐 |
- | `terminal` | `terminals` | `terminals.ts` | 터미널 탭, 다중 — (프로젝트, 번호)별 pty + 출력 축적, 이벤트에 번호 (#303) | `llm` | 켜짐 |
+ | `terminal` | `terminals` | `terminals.ts` | 터미널 탭, 다중 — (프로젝트, 번호)별 pty + 출력 축적, 이벤트에 번호 (#303) | `llm` | 켜짐 (고정 — 2026-10-15 부터 기능 화면에 줄 없음) |
 | `trajectory` | `trajectory` | `trajectory.ts` | 추론 과정 보기 | `llm` | 켜짐 |
-| `openIn` | `openIn` | `openIn.ts` | 다른 앱에서 열기 | `projects` | 켜짐 |
+| `openIn` | `openIn` | `openIn.ts` | 다른 앱에서 열기 | `projects` | 켜짐 (고정 — 2026-10-15 부터 기능 화면에 줄 없음) |
 | `appMcp` | `appMcp` | `appMcp.ts` + `appMcp/tools/*` | 앱 내장 MCP 서버(`litecode_*` 도구 — open·present·세션 셋·새 대화·만들기·작업·git) | `mcp` | 켜짐 |
 | `notifications` | `notifications` | `notifications.ts` | 턴 끝·승인 대기 알림·토스트 | `settings`, `sessions`, `projects` | **꺼짐** |
 | `remote` | `remote` | `remote.ts`(진입점)·`remote/*`(서비스·요청 표·짝짓기 요청·chat 이벤트 옮기기, #298) | 모바일 연결 — 계약·인증·기기·짝짓기·이벤트 링 (+평문 루프백 HTTP 운반) | `chat`, `sessions`, `projects`, `providers`, `settings` | **꺼짐** |
@@ -58,7 +58,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `hooks` | `hooks` | `hooks.ts` + `hooks/*` | AI 행동에 거는 사용자 셸 훅 | `chat`, `sessions`, `llm` | **꺼짐** |
 | `voice` | `speech` | `speech.ts` | 음성 입력(내장 인식 엔진) | `settings` | **꺼짐** |
 | `browser` | `browser` | `browser.ts` + `browser/*` | Chrome 조종(Playwright MCP 를 MCP 서버로 등록) | `mcp` | **꺼짐** |
-| `updates` | `updates` | `updates.ts` (+ 순수 `shared/updates.ts`) | 새 버전 알림 — GitHub 릴리즈(또는 설정 `updateUrl`)에 묻기만, 설치본에서만(#273) | `settings` | **꺼짐** |
+| `updates` | `updates` | `updates.ts` (+ 순수 `shared/updates.ts`) | 새 버전 알림 — GitHub 릴리즈(또는 설정 `updateUrl`)에 묻기만, 설치본에서만(#273) | `settings` | **꺼짐** (기능 화면의 카드는 2026-10-15 부터 잠정 숨김 — 기능은 그대로) |
 | `repeatGuard` | `repeatGuard` | `repeatGuard.ts` (+ 순수 `repeatCounter.ts`) | 같은 도구·같은 인자 연속 3·5·8번째로 실행에 들어갈 때(`llm/tool-started`) 모델에게만 한 줄(`ctx.llm.remind`, 합성 글) — 막지 않는다(#284) | `llm` | 켜짐 |
 | `git` | `git` | `git.ts` + `appMcp/tools/git.ts` (+ 모양 `shared/git.ts`) | 시스템 git(인자 배열, 인증 창 없음) — 상태·diff·기록·브랜치·stage·커밋·전환·push/pull(충돌이면 멈춤)·되돌리기·실행 취소. 바꾸면 `git/changed`. AI 도구 `litecode_git_*`(읽기 넷 바로, 쓰기 여섯 승인 카드)는 `appMcp` 가 켜져 있을 때만 뜬다(#290) | — (도구는 `appMcp`) | **꺼짐** |
 
