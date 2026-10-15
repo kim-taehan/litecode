@@ -59,6 +59,7 @@ import { RemoteBluetooth, bluetoothProblem, type BlenoLike } from '../src/servic
 import { ForwardSkillService } from '../src/services/appMcp/forwardSkill.ts'
 import { DelegationService } from '../src/services/delegation.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
+import { ConversationTools } from '../src/services/appMcp/tools/conversation.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { GoalService } from '../src/services/goal.ts'
 import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
@@ -754,6 +755,7 @@ const features: FeatureDefinition[] = [
       ctx.plugin(OpenTool) // 앱 MCP 의 open — 파일(오른쪽 패널)·터미널(채워만 둠)
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
+      ctx.plugin(ConversationTools) // 앱 MCP 의 new_conversation — 질문이 바뀌면 이 프로젝트의 새 대화로 이어 가기 (이슈 #415)
       ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
       ctx.plugin(TaskTools) // 앱 MCP 의 task_start — 백그라운드 하위 작업, 내장 task 를 대신한다 (이슈 #319)
       ctx.plugin(DelegationService) // 프로젝트 간 지시의 대상·자격·전송 — 세션 도구와 Projects 탭의 단일 결정지 (이슈 #55·#341)

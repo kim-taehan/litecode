@@ -50,6 +50,7 @@ describe('modePermission — 메인 대화', () => {
 
   it('앱 MCP 도구: 다른 프로젝트에 보내기는 늘 묻는다(계획엔 없다), 읽기도 늘 묻는다(계획 포함, #137), 목록·결과물·열기(파일·터미널 한 도구)는 묻지 않는다 — 옛 이름은 보통의 MCP 도구', () => {
     expect(row('litecode_send_to_project')).toEqual({ plan: 'deny', build: 'ask', ask: 'ask', full: 'ask' })
+    expect(row('litecode_new_conversation')).toEqual({ plan: 'deny', build: 'ask', ask: 'ask', full: 'ask' })
     expect(row('litecode_read_project')).toEqual({ plan: 'allow', build: 'allow', ask: 'ask', full: 'allow' })
     // 없앤 도구 이름은 보통의 MCP 도구로 본다 (특별 규칙 없음)
     expect(row('litecode_start_session')).toEqual(row('github_create_issue'))
@@ -95,7 +96,7 @@ describe('modePermission — 하위 작업 (자식은 부모 모드 권한을 �
   })
 
   it('하위 작업은 보내기·읽기·결과물·만들기 도구와 task 를 못 쓴다', () => {
-    for (const permission of ['litecode_send_to_project', 'litecode_read_project', 'litecode_present', 'litecode_create', 'task']) {
+    for (const permission of ['litecode_send_to_project', 'litecode_new_conversation', 'litecode_read_project', 'litecode_present', 'litecode_create', 'task']) {
       expect(child(permission, ['general']), permission).toMatchObject({ build: 'deny', ask: 'deny', full: 'deny' })
     }
   })

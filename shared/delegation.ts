@@ -13,6 +13,8 @@ export const DELEGATION_SERVER = 'litecode'
 export const LIST_TOOL = 'list_projects'
 export const READ_TOOL = 'read_project'
 export const SEND_TOOL = 'send_to_project'
+/** 이 프로젝트에 새 대화를 만들어 질문을 이어 가는 도구 (이슈 #415) */
+export const NEW_CONVERSATION_TOOL = 'new_conversation'
 
 /** 한 턴에 보낼 수 있는 지시 수 */
 export const MAX_SENDS_PER_TURN = 5

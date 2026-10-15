@@ -130,7 +130,7 @@ export function engineMcpConfig(def: EngineMcp, hidden: readonly string[]): Reco
 // 그 이름은 ctx.mcp 가 예약한다 — 사용자·폴더 서버는 `litecode` 라는 이름으로 못 붙는다
 //
 // 세션 도구 (이슈 #55·#137, 01z 1-3·1-6·3-5 — 실측한 모양 그대로. 이름은 #137 에서 다른 프로젝트용으로 바뀌었다: list_projects·read_project·
-// send_to_project, 새 대화를 만드는 도구는 없앴다): 목록(list_projects)은 묻지 않는다. **보내기만 전역 deny + 기본·전체 권한 에이전트에 ask** —
+// send_to_project). 같은 프로젝트의 새 대화 도구는 #415 (new_conversation — 아래 NEW_CONVERSATION_*): 목록(list_projects)은 묻지 않는다. **보내기만 전역 deny + 기본·전체 권한 에이전트에 ask** —
 // 그래야 하위 작업(general·explore)과 모르는 에이전트의 도구 목록에서 빠진다(9/9. 규칙이 없으면 general 이 보고 부른다, 6/6). 전체 권한은
 // `"*":"allow"` 뒤의 개별 ask 가 묻게 하고(3/3), 매번 묻기는 `*_*: ask` 가 전역 deny 뒤에 와 묻는다. 계획은 `*_*: deny` 그대로라 보내기 도구가
 // 없다(사용자 결정). general-ask 는 자기 `*_*: ask` 가 전역 deny 를 되살리므로 **그 뒤에 개별 deny 가 따로** 있어야 한다 (웹 도구 deny 와 같은 함정).
@@ -147,6 +147,11 @@ export function engineMcpConfig(def: EngineMcp, hidden: readonly string[]): Reco
 // 읽기는 묻지 않는다(사용자 2026-10-06 "읽기도 매번 승인해야 되니?") — 같은 PC·같은 사용자의 다른 프로젝트 대화를 읽을 뿐 아무것도 바꾸지 않는다. 매번 묻기 모드(`*_*: ask`)는 그대로 묻는다
 const READ_TOOL_ALLOW = { litecode_read_project: 'allow' }
 const SEND_TOOLS_ASK = { litecode_send_to_project: 'ask', ...READ_TOOL_ALLOW }
+// 새 대화 도구 (이슈 #415) — 보내기 도구와 같은 모양: 전역 deny + 기본·전체 권한 에이전트에 ask. 전체 권한에서도 묻는 것은 보내기
+// 도구와 같은 판단 — 부를 때마다 **새로 자립해서 도는 대화**를 만드는 일이므로 "전체 권한" 이 대신 승인하지 않는다. 계획·매번 묻기는
+// 와일드카드가 낀다(`deny`·`ask`), general-ask 는 자기 `*_*: ask` 가 전역 deny 를 되살리니 맨 끝에 개별 deny
+const NEW_CONVERSATION_ASK = { litecode_new_conversation: 'ask' }
+const NEW_CONVERSATION_DENY = { litecode_new_conversation: 'deny' }
 const PRESENT_ALLOW = { litecode_present: 'allow' }
 const PRESENT_DENY = { litecode_present: 'deny' }
 const SEND_TOOLS_DENY = { litecode_send_to_project: 'deny', litecode_read_project: 'deny' }
@@ -167,12 +172,12 @@ const GIT_WRITE_ALLOW = gitRules(GIT_WRITE_TOOLS, 'allow')
 const GIT_TOOLS_DENY = gitRules([...GIT_READ_TOOLS, ...GIT_WRITE_TOOLS], 'deny')
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
   plan: { '*_*': 'deny', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
-  [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ASK },
+  [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...NEW_CONVERSATION_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ASK },
   [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
-  // 전체 권한은 git 쓰기도 묻지 않는다 (2026-10-12) — 기본·매번 묻기는 카드
-  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW },
+  // 전체 권한은 git 쓰기도 묻지 않는다 (2026-10-12) — 기본·매번 묻기는 카드. 새 대화 도구는 git 씩과 달리 전체 권한에서도 카드 (이슈 #415)
+  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...NEW_CONVERSATION_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW },
   // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
-  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...MAKE_TOOLS_DENY, ...GIT_TOOLS_DENY, ...SEND_TOOLS_DENY },
+  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...MAKE_TOOLS_DENY, ...GIT_TOOLS_DENY, ...SEND_TOOLS_DENY, ...NEW_CONVERSATION_DENY },
 }
 
 // 브라우저 도구 (`chrome_*`, 이슈 #147 — 실측·권고 _workspace/01aj_playwright_mcp.md §4, 도구 갈래는 shared/browser.ts). ctx.browser 가 동봉한
@@ -387,7 +392,7 @@ export function engineConfig(
     : Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
   // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
   const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
-  const permission = { ...TASK_DENY, ...SEND_TOOLS_DENY, ...MAKE_TOOLS_DENY, ...PRESENT_DENY, ...GIT_TOOLS_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
+  const permission = { ...TASK_DENY, ...SEND_TOOLS_DENY, ...NEW_CONVERSATION_DENY, ...MAKE_TOOLS_DENY, ...PRESENT_DENY, ...GIT_TOOLS_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
   const ruled: Record<string, { permission: Permission }> = skillRule
     ? Object.fromEntries(Object.entries(agent).map(([name, def]) => [name, { ...def, permission: withLast(def.permission, 'skill', skillRule) as Permission }]))
     : agent
