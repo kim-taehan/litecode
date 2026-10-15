@@ -17,6 +17,7 @@ const PATHS: Record<ChoosableFeatureId, string> = {
   lan: 'M3 15h14M5 15V9h10v6M10 9V5M7 5h6',
   bluetooth: 'M6 6l8 8-4 3V3l4 3-8 8',
   updates: 'M10 3v10M6 9l4 4 4-4M4 17h12',
+  design: 'M3 3h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM13 17V7M10.5 9.5L13 7l2.5 2.5',
 }
 
 export function FeatureIcon({ feature }: { feature: ChoosableFeatureId }) {

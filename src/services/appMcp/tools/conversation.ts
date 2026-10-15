@@ -64,12 +64,14 @@ export function ConversationTools(ctx: Context): void {
   const start: AppMcpTool = {
     name: NEW_CONVERSATION_TOOL,
     description:
-      'Start a **new conversation in this project** to continue when the user\'s question has clearly changed to a different topic ' +
-      `that this conversation's context no longer serves. You give the new conversation its title and the message that starts it. ` +
+      'Use it proactively: whenever you judge that the user\'s question has shifted to a different topic that this conversation\'s ' +
+      'context no longer serves, you MUST **start a new conversation in this project** with this tool and continue the Q&A there. ' +
+      'Do not answer the new topic in this conversation and do not force it into this conversation\'s context. ' +
+      'You give the new conversation its title and the message that starts it. ' +
       `The message must be self-contained — the new conversation cannot see this one. It is created in this project and runs with this ` +
       `conversation's model and mode. The user must approve each start with the title visible in the approval card. ` +
       'Returns with the new conversation\'s title and short id (c-…); the run row in this conversation links to it, ' +
-      'so tell the user to open it and continue there. ' +
+      'so make sure the user opens it and continues there. ' +
       'Do not use it to split your own work into parts (that is task_start) or to reach something a permission refused.',
     inputSchema: {
       type: 'object',
