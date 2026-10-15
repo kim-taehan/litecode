@@ -408,7 +408,7 @@ describe('featureOn', () => {
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'voice', 'browser', 'updates', 'repeatGuard', 'git', 'design'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'voice', 'browser', 'updates', 'git', 'design'])
     expect(featureOn(undefined, 'git')).toBe(false) // Git 은 기본 꺼짐, 데스크탑 MCP 가 꺼져도 켤 수 있다 (도구만 빠진다, 이슈 #290)
     expect(featureOn({ git: true, appMcp: false }, 'git')).toBe(true)
     expect(featureOn(undefined, 'updates')).toBe(false) // 새 버전 알림은 기본 꺼짐 — 켜기 전엔 바깥 요청 0 (이슈 #273)

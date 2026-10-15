@@ -10,7 +10,6 @@ const PATHS: Record<ChoosableFeatureId, string> = {
   goal: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   web: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM3 10h14M10 3c-3 3-3 11 0 14M10 3c3 3 3 11 0 14',
   browser: 'M3 4h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM2 8h16',
-  repeatGuard: 'M4 8a6 6 0 0 1 10-2l2 2M16 3v5h-5M16 12a6 6 0 0 1-10 2l-2-2M4 17v-5h5',
   voice: 'M10 12a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3zM5 9a5 5 0 0 0 10 0M10 14v3',
   remote: 'M7 2h6a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM9 15h2',
   notifications: 'M5 14V9a5 5 0 0 1 10 0v5l1 2H4zM8 18h4',
