@@ -21,8 +21,6 @@ import type { HookCandidate, HookDraft, HookRecent, HookRow, HookScope, HookTest
 import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 import type { UpdateStatus } from './updates.ts'
-import type { Goal } from './goal.ts'
-import type { GoalReply } from '../src/services/goal.ts'
 import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -216,12 +214,6 @@ export const Channel = {
   UPDATES_OPEN: 'updates:open',
   /** 메인 → 화면 (UpdateStatus) */
   UPDATES_CHANGED: 'updates:changed',
-  /** 목표(ctx.goal, 이슈 #285) — 기능 `goal` 이 켜졌을 때만 있다. 화면 → 메인 (conversationId, args) → GoalReply — `/goal` 뒤의 글·입력 카드 위 줄의 버튼 */
-  GOAL_COMMAND: 'goal:command',
-  /** 화면 → 메인 (conversationId) → Goal | null */
-  GOAL_GET: 'goal:get',
-  /** 메인 → 화면 (conversationId, Goal | null) */
-  GOAL_CHANGED: 'goal:changed',
   /** Git(ctx.git, 이슈 #290) — 기능 `git` 이 켜졌을 때만 있다. 화면 → 메인 (directory) → GitView. directory 는 등록된 프로젝트여야 한다 */
   GIT_VIEW: 'git:view',
   /** 화면 → 메인 (directory, path, staged) → unified diff. staged 가 'head' 면 HEAD 대비(stage 된 것 + 안 된 것, #389 패치로 복사) */
@@ -492,11 +484,6 @@ export interface LitecodeBridge {
   /** [내려받기] — 릴리즈 페이지를 기본 브라우저로. https 이고 github.com 이거나 확인 주소의 호스트일 때만 (아니면 false) */
   openUpdate(url: string): Promise<boolean>
   onUpdateChanged(listener: (status: UpdateStatus) => void): () => void
-  /** 목표 (ctx.goal, 이슈 #285) — **기능 `goal` 이 켜져 있을 때만 부른다**. args 는 `/goal` 뒤의 글 (빈 글 = 보기, pause·resume·clear, 그 밖 = 새 목표).
-   *  message 가 오면 입력창 아래 한 줄로, send 가 오면 평소 보내기로 보낸다(말풍선엔 display) */
-  goalCommand(conversationId: string, args: string): Promise<GoalReply>
-  goal(conversationId: string): Promise<Goal | null>
-  onGoalChanged(listener: (conversationId: string, goal: Goal | null) => void): () => void
   /** Git (ctx.git, 이슈 #290) — **기능 `git` 이 켜져 있을 때만 부른다**. directory 는 등록된 프로젝트 (아니면 거절) */
   gitView(directory: string): Promise<GitView>
   gitDiff(directory: string, path: string, staged: boolean | 'head'): Promise<string>

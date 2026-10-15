@@ -5,7 +5,6 @@ const PATHS: Record<ChoosableFeatureId, string> = {
   trajectory: 'M3 5h8M3 10h12M3 15h6',
   git: 'M6 7v6M6 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM14 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM14 11c0 2-8 0-8 2',
   appMcp: 'M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z',
-  goal: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   web: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM3 10h14M10 3c-3 3-3 11 0 14M10 3c3 3 3 11 0 14',
   browser: 'M3 4h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM2 8h16',
   voice: 'M10 12a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3zM5 9a5 5 0 0 0 10 0M10 14v3',

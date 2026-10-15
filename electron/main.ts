@@ -63,8 +63,6 @@ import { DelegationService } from '../src/services/delegation.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { ConversationTools } from '../src/services/appMcp/tools/conversation.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
-import { GoalService } from '../src/services/goal.ts'
-import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
 import { TaskTools } from '../src/services/appMcp/tools/tasks.ts'
 import { GitService } from '../src/services/git.ts'
 import { GitTools } from '../src/services/appMcp/tools/git.ts'
@@ -578,14 +576,6 @@ function updatesBridge(ctx: Context): void {
 }
 updatesBridge.inject = ['updates']
 
-// 목표 (ctx.goal, 이슈 #285) — `/goal`·입력 카드 위 줄의 버튼과, 바뀐 목표를 모든 창에
-function goalBridge(ctx: Context): void {
-  handle(ctx, Channel.GOAL_COMMAND, async (_event, conversationId: string, args: string) => ctx.goal.command(String(conversationId), String(args ?? '')))
-  handle(ctx, Channel.GOAL_GET, async (_event, conversationId: string) => (await ctx.goal.get(String(conversationId))) ?? null)
-  ctx.on('goal/changed', (conversationId, goal) => broadcast(Channel.GOAL_CHANGED, conversationId, goal ?? null))
-}
-goalBridge.inject = ['goal']
-
 // Git (ctx.git, 이슈 #290) — 오른쪽 패널 Git 탭·브랜치 알약. 등록된 프로젝트 폴더에서만 돈다(화면이 오염돼도 아무 폴더에서나 git 을 돌리지 않는다).
 // 바뀌면(화면·AI 도구의 작업 뒤) 모든 창에 알린다 — 화면은 그 폴더를 보고 있으면 다시 읽는다
 function gitBridge(ctx: Context): void {
@@ -776,17 +766,6 @@ const features: FeatureDefinition[] = [
       ctx.plugin(DelegationService) // 프로젝트 간 지시의 대상·자격·전송 — 세션 도구와 Projects 탭의 단일 결정지 (이슈 #55·#341)
       ctx.plugin(ForwardSkillService, { appDir: path.join(userData, 'opencode', 'skills') }) // 내장 /forward 스킬 — 기능이 꺼지면 스킬도 함께 사라진다 (이슈 #341)
       ctx.plugin(appMcpBridge)
-    },
-  },
-  {
-    // 목표 (이슈 #285) — 기본 켜짐, 데스크탑 MCP 가 켜져 있어야 한다(모델이 끝을 알리는 litecode_goal_* 가 거기 붙는다). 끄면 `/goal`(ctx.get 으로 본다)·
-    // 도구·자동 이어가기·IPC 가 함께 내려간다. 다시 켜면 진행 중이던 목표는 일시 정지로 돌아온다
-    id: 'goal',
-    service: 'goal',
-    plugin: (ctx) => {
-      ctx.plugin(GoalService)
-      ctx.plugin(GoalTools)
-      ctx.plugin(goalBridge)
     },
   },
   {

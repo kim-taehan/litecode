@@ -4,7 +4,6 @@ import { shellContext } from './shell.ts'
 import { readJsonFile, unreadableFileError, writeJsonFile } from './jsonFile.ts'
 import { isMode } from '../../shared/modes.ts'
 import { TITLE_MAX } from '../../shared/chat.ts'
-import { goalOf, type Goal } from '../../shared/goal.ts'
 import './llm.ts'
 import { tr } from '../i18n.ts'
 import type { Attachment, Conversation, MessageOrigin, ShellCard } from '../../shared/contract.ts'
@@ -90,7 +89,6 @@ export class SessionsService extends Service {
         attachments: input.attachments ?? existing?.attachments,
         origins: input.origins ?? existing?.origins,
         shells: existing?.shells, // 카드는 메인만 고친다 — 화면이 보낸 목록 정보로 덮지 않는다
-        goal: existing?.goal, // 목표도 ctx.goal 만 고친다(setGoal) — 턴 시작의 통째 저장·화면이 보낸 목록 정보로 덮지 않는다 (이슈 #285)
       })
       const conversations = existing
         ? stored.conversations.map((entry) => (entry === existing ? next : entry))
@@ -153,15 +151,6 @@ export class SessionsService extends Service {
     return stored.conversations.find((entry) => entry.id === id)
   }
 
-  /** 그 대화의 목표를 바꾸거나(goal) 지운다(undefined) — ctx.goal 만 부른다 (이슈 #285). 고친 대화를 준다 (저장 안 된 대화면 undefined).
-   *  시각·순서는 그대로다 */
-  async setGoal(id: string, goal: Goal | undefined): Promise<Conversation | undefined> {
-    const stored = await this.update((stored) => ({
-      ...stored,
-      conversations: stored.conversations.map((entry) => (entry.id === id ? pick({ ...entry, goal }) : entry)),
-    }))
-    return stored.conversations.find((entry) => entry.id === id)
-  }
 
   /** 엔진 세션이 생기자마자 붙인다 — 답을 기다리는 중에 앱이 꺼져도 다시 열 수 있게 (ctx.llm.chat 의 onSession).
    *  그사이 대화가 지워졌으면 붙일 곳이 없다 — 그 엔진 세션은 orphans 에 넣어 지운다 */
@@ -352,9 +341,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, renamed, pinned, updatedAt, model, mode, usage, labels, attachments, origins, shells, goal }: Conversation): Conversation {
-  const kept = goalOf(goal)
-  return { id, project, engineSessionId, title, ...(renamed === true && { renamed }), ...(pinned === true && { pinned }), updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, origins, shells, ...(kept && { goal: kept }) }
+function pick({ id, project, engineSessionId, title, renamed, pinned, updatedAt, model, mode, usage, labels, attachments, origins, shells }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, ...(renamed === true && { renamed }), ...(pinned === true && { pinned }), updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, origins, shells }
 }
 
 function isConversation(value: unknown): value is Conversation {

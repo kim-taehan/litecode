@@ -3,7 +3,6 @@
 // 그 파일들은 node:fs·cordis·undici 를 import 해서 모바일 앱(Metro·앱 tsconfig)이 따라 들어갈 수 없다. 원래 자리는 re-export 로 남겼다.
 // **여기에 Node·Electron·opencode 를 아는 코드를 넣지 않는다** — 값을 만드는 쪽(opencode 형식 → 이 모양)은 서비스 파일에 그대로 있다.
 
-import type { Goal } from './goal.ts'
 import type { HookEvent, HookOutcome } from './hooks.ts'
 import type { Mode } from './modes.ts'
 import type { SkillSource } from './skills.ts'
@@ -285,8 +284,6 @@ export interface Conversation {
   origins?: Record<string, MessageOrigin>
   /** `!명령` 결과 카드 — opencode 는 모르는 로컬 기록이다(AI 에게 보내기 전까지). 메인만 고친다(addShell·shareShell) */
   shells?: ShellCard[]
-  /** 이 대화의 목표 (이슈 #285, shared/goal.ts) — ctx.goal 만 고친다(setGoal). 통째 저장이 덮지 않는다 */
-  goal?: Goal
 }
 
 /** 대화 안의 `!명령` 결과 카드 하나 */

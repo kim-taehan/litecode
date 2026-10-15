@@ -1,7 +1,6 @@
 import { APP_MCP_NAME } from './mcp.ts'
 import type { ChatOptions, ChatResult } from './llm.ts'
 import { tr } from '../i18n.ts'
-import { GOAL_GET_TOOL, GOAL_UPDATE_TOOL } from '../../shared/goal.ts'
 import { DEFAULT_MODE, type Mode } from '../../shared/modes.ts'
 import {
   TASK_QUIET_MS,
@@ -255,7 +254,7 @@ export class BackgroundTasks {
         },
         stop: task.stop.signal,
         stallTimeoutMs: TASK_STALL_TIMEOUT_MS, // 평소 무응답 한도로 죽이지 않는다 — 조용함은 알림으로 (quiet)
-        hideMcpTools: { [APP_MCP_NAME]: [TASK_START_TOOL, TASK_STATUS_TOOL, GOAL_GET_TOOL, GOAL_UPDATE_TOOL] },
+        hideMcpTools: { [APP_MCP_NAME]: [TASK_START_TOOL, TASK_STATUS_TOOL] },
       })
       .catch((error: unknown): ChatResult => ({ ok: false, error: (error as Error).message }))
     const end: TaskEnd = result.ok ? 'completed' : result.interrupted || task.stop.signal.aborted ? 'stopped' : 'failed'
