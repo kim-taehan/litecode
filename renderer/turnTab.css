@@ -1,0 +1,58 @@
+/* 오른쪽 패널 "이 턴의 작업" 탭 (이슈 #416) — 머리는 작업 탭(.task-tab) 과 같은 모양, 본문은 채팅의 작업 줄(.turn__work) */
+
+.turn-tab {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.turn-tab__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+
+.turn-tab__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 점 — 파랑 = 도는 중, 초록 = 완료, 빨강 = 실패·중단 (작업 탭의 점과 같은 규칙) */
+.turn-tab__dot {
+  flex: none;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.turn-tab[data-state='done'] .turn-tab__dot { border-color: var(--ok); background: var(--ok); }
+.turn-tab[data-state='failed'] .turn-tab__dot { border-color: var(--danger); background: var(--danger); }
+.turn-tab[data-state='interrupted'] .turn-tab__dot { border-color: var(--text-caption); background: var(--text-caption); }
+
+.turn-tab__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+/* 채팅이 아닌 여백이라 작업 줄 하단 여백을 뺀다 */
+.turn-tab__work {
+  margin-bottom: 0;
+}
+.turn-tab__work > .turn-row--text:last-child {
+  margin-bottom: 0;
+}

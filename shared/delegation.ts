@@ -1,6 +1,7 @@
 // 다른 프로젝트에 지시 보내기 (이슈 #55·#137 — 설계 _workspace/01z_desktop_mcp.md 3-3·3-4) 의 공용 규칙 — 메인(세션 도구)과 화면(진행 줄·승인 카드)이
 // 같은 것을 쓴다. 타입 + 순수 함수뿐이다 (Node·Electron·React·엔진을 모른다).
-// 대상은 **다른 프로젝트 각각에서 사용자가 마지막에 보던 대화 하나**다 (사용자 결정 2026-10-06) — 같은 프로젝트의 대화는 대상이 아니고, 새 대화도 만들지 않는다
+// 목록·기본 대상은 **다른 프로젝트 각각에서 사용자가 마지막에 보던 대화 하나**다 (사용자 결정 2026-10-06). 다만 승인 카드에서 **사용자가 고를
+// 선택지**는 더 넓다 (#351): 다른 대화(상한 밖 오래된 대화 포함)·보내는 프로젝트의 대화·그 프로젝트의 **새 대화**(new-conversation)
 
 import type { ChatOrigin } from './chat.ts'
 import type { Mode } from './modes.ts'
@@ -67,9 +68,11 @@ export function widerMode(target: Mode, sender: Mode): boolean {
   return MODE_RANK[target] > MODE_RANK[sender]
 }
 
-/** 화면(IPC)이 보낸 "받을 대화" 에서 아는 모양만 — 그 밖은 undefined (도구 인자대로 간다). 값이 가리키는 대화가 쓸 수 있는지는 도구가 본다 (이슈 #67) */
+/** 화면(IPC)이 보낸 "받을 대화" 에서 아는 모양만 — 그 밖은 undefined (도구 인자대로 간다). 값이 가리키는 대화가 쓸 수 있는지는 도구가 본다 (이슈 #67).
+ *  new-conversation(#351): 새 대화를 만들 프로젝트의 id(p-…) */
 export function attentionTarget(value: unknown): AttentionTarget | undefined {
-  const target = value as { kind?: unknown; conversationId?: unknown } | null | undefined
+  const target = value as { kind?: unknown; conversationId?: unknown; projectId?: unknown } | null | undefined
   if (target?.kind === 'conversation' && typeof target.conversationId === 'string' && target.conversationId) return { kind: 'conversation', conversationId: target.conversationId }
+  if (target?.kind === 'new-conversation' && typeof target.projectId === 'string' && target.projectId) return { kind: 'new-conversation', projectId: target.projectId }
   return scopeTarget(value) // 스킬·MCP 서버·훅 만들기의 "저장할 곳" (이슈 #145)
 }

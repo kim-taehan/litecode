@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AttachmentKind, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
 import { titleFrom } from '../shared/chat.ts'
 import { applyHistory, applyLive } from './chatState.ts'
+import { focusComposerInput } from './composerFocus.ts'
 import { useFollowBottom } from './Minimap.tsx'
 import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
@@ -38,6 +39,7 @@ import { canWrite, fromConversation, isBlank, newSession, toConversation, withBl
 import { useSidebarLayout } from './useSidebarLayout.ts'
 import { useLastModel } from './useLastModel.ts'
 import { useChatEvents } from './useChatEvents.ts'
+import { feedTurnSnapshot } from './turnDetailStore.ts'
 import { useTerminalKeys } from './useTerminalKeys.ts'
 import { useSessionNav } from './useSessionNav.ts'
 import { Sidebar } from './Sidebar.tsx'
@@ -71,6 +73,9 @@ export function App() {
    *  activeIds 와 다르다: 그쪽은 이번 실행 동안만이고 빈 새 대화도 가리킨다 */
   const [lastViewed, setLastViewed] = useState<Record<string, string>>({})
   const [switching, setSwitching] = useState(false)
+  /** ⌘K 반복 (#375·#379) — 빠른 열기가 열려 있을 때 ⌘K 마다 1씩 올려 패널의 강조(선택 행)가 다음 프로젝트로.
+   *  Enter 로 확정(고른 프로젝트를 열고 닫는다)까지 하면 실제 전환 */
+  const [cycle, setCycle] = useState(0)
   /** 폴더를 고르거나 여는 중 — 한 번에 하나만 (dsh ui-workspace) */
   const [picking, setPicking] = useState(false)
   /** 프로젝트를 못 열었을 때의 사유 — 팝오버와 첫 실행 안내에 보인다 */
@@ -94,10 +99,11 @@ export function App() {
   const listRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLButtonElement>(null)
-  // 닫으면 포커스를 설정 버튼으로 돌려준다. 모달의 Esc 구독이 매 렌더 다시 걸리지 않게 참조를 고정한다
+  // 닫으면 포커스는 입력창으로 (이슈 #382) — 입력 카드가 안 보이는 화면(추론 과정 탭)이면 설정 버튼으로.
+  // 모달의 Esc 구독이 매 렌더 다시 걸리지 않게 참조를 고정한다
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)
-    settingsRef.current?.focus()
+    if (!focusComposerInput()) settingsRef.current?.focus()
   }, [])
 
   /** 첫 목록을 다 올렸나 — 그 전에 온 알림 열기 신호는 첫 목록 뒤에 당겨 간다 */
@@ -118,8 +124,13 @@ export function App() {
     // 목록은 그 뒤에 보인다 (열어 보는 동안 안내 화면이 번쩍이지 않게). 켠 직후에는 저장된 대화 위의 새 대화에서 시작한다
     void (async () => {
       const stored = (await window.litecode.listConversations()).map(fromConversation)
-      // 메인이 쥔 도는 턴·대기열을 입힌다 — 창을 닫았다 열어도 진행 줄·대기열이 이어져 보인다 (그 뒤는 이벤트로)
+      // 메인이 쥔 도는 턴·대기열을 입힌다 — 창을 닫았다 열어도 진행 줄·대기열이 이어져 보인다 (그 뒤는 이벤트로).
+      // "이 턴의 작업" 탭(이슈 #416) 도 같은 스냅샷으로 이어 붙인다
       const live = await window.litecode.chatSnapshot()
+      for (const session of stored) {
+        const turn = live[session.id]?.turn
+        if (turn) feedTurnSnapshot(session.id, turn.startedAt, turn.progress)
+      }
       setSessions(stored.map((session) => applyLive(session, live[session.id])))
       const list = await window.litecode.listProjects()
       if (list[0] && (await pick(() => window.litecode.openProject(list[0]!.path), cannotOpen(list[0].path), list[0].path)) === 'opened') {
@@ -159,6 +170,10 @@ export function App() {
   const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
   const activeIdRef = useRef<string>(undefined)
   activeIdRef.current = active?.id
+  // 본문 탭(view)은 대화별로 새로 시작 — 추론 과정을 보다가 다른 대화로 가면 대화 탭으로 돌아온다 (이슈 #364)
+  useEffect(() => {
+    setView('chat')
+  }, [active?.id])
   /** 지금 대화의 초안 — 아래 함수들은 이 그리기의 대화에 묶인다 (기다린 뒤에 불려도 그때 보던 대화의 초안을 고친다) */
   const { text: draft, attached } = draftOf(drafts, active?.id)
   function changeDraftOf(id: string, change: (draft: Draft) => Draft): void {
@@ -251,8 +266,10 @@ export function App() {
       .map((session) => peerOf(session, notices.state[session.id]?.status, session.history !== 'missing' && !!findModel(providers, session.model)))
     return {
       peers,
-      targets: projectTargets(projects ?? [], lastViewed, peers, projectPath),
-      self: { mode, project: projectName },
+      // #351: 지금 프로젝트도 포함 — 승인 카드의 "이 프로젝트" 그룹·진행 줄이 쓴다 (Projects 탭 패널은 자기 프로젝트를 스스로 빼고,
+      // 세션 도구의 목록·읽기는 메인이 제외한다)
+      targets: projectTargets(projects ?? [], lastViewed, peers),
+      self: { mode, project: projectName, id: active?.id },
       open: (id: string) => {
         const target = sessionsRef.current.find((session) => session.id === id)
         if (target) void openConversation.current({ project: target.project, conversationId: id })
@@ -285,6 +302,23 @@ export function App() {
       return started.ok ? undefined : started.error
     },
   })
+  // 세션 이동에 입력창 포커스 (이슈 #374) — 사이드바 대화 행 클릭·⌘↑/⌘↓·알림으로 대화 열기, 어느 길로 오든
+  // 키가 옛 화면에 남아 있으면 마우스를 다시 대야 하므로 입력창에게 건다. 첫 출현(앱 기동)은 이동이 아니라서 그대로 둔다.
+  // 판(aria-modal)·프로젝트 빠른 열기가 열려 있으면 포커스를 가져가지 않는다 — ⌘N·⌘↑/⌘↓ 과 같은 전역 키 규칙.
+  // (빠른 열기로 프로젝트만 바꾼 것은 입력 창이 없는 그 패널이 닫히면 전환 버튼이 키를 가지므로 여기서 포기한다)
+  // 추론 과정(#364) 탭에는 입력 창이 없다 — 그 탭에서 오면 대화 탭으로 돌아온 다음 그리기에 건다 (view 의존)
+  const prevActiveId = useRef<string | undefined>(undefined)
+  const composerFocusId = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    const id = active?.id
+    if (id !== undefined && prevActiveId.current !== undefined && id !== prevActiveId.current) composerFocusId.current = id
+    prevActiveId.current = id
+    if (composerFocusId.current !== id || (trajectoryOn && view === 'trajectory')) return
+    composerFocusId.current = undefined
+    if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+    trigger.inputRef.current?.focus()
+  }, [active?.id, view, trajectoryOn])
+
   /** 지금 대화의 목표 (이슈 #285) — 입력 카드 위 줄 */
   const goal = useGoal(features.has('goal'), active?.id)
   // Git 상태 다시 읽기 (이슈 #290) — 작업 뒤·턴 끝·창 포커스. 탭 숫자와 브랜치 알약이 같은 값을 본다
@@ -418,20 +452,50 @@ export function App() {
     else setSwitching(true)
   }
 
-  /** ⌘K / Ctrl+K (이슈 #305) — 열려 있으면 닫고, 아니면 연다. 핸들러는 처음 한 번만 끼우고 그 안은 래퍼가 최신이라
+  /** ⌘K / Ctrl+K (이슈 #305) — 닫혀 있으면 연다. 열려 있으면 강조(선택 행)를 다음 프로젝트로 (#379 —
+   *  Enter 로 확정하면 실제로 열고 닫힌다). 핸들러는 처음 한 번만 끼우고 그 안은 래퍼가 최신이라
    *  projects·switching 값이 오래되지 않는다 */
   const switchingRef = useRef(switching)
   switchingRef.current = switching
   const toggleSwitcherRef = useRef(toggleSwitcher)
   toggleSwitcherRef.current = toggleSwitcher
-  const closeSwitcherRef = useRef(closeSwitcher)
-  closeSwitcherRef.current = closeSwitcher
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
       event.preventDefault()
-      if (switchingRef.current) closeSwitcherRef.current(false)
-      else toggleSwitcherRef.current()
+      if (!switchingRef.current) toggleSwitcherRef.current()
+      else setCycle((count) => count + 1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // ⌘N / Ctrl+N — 새 대화 (이슈 #344). startNewChat 이 프로젝트 가드·빈 대화 하나로 다 하고 포커스까지 잡는다 (#343)
+  const startNewChatRef = useRef(startNewChat)
+  startNewChatRef.current = startNewChat
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'n') return
+      // 판(aria-modal) 이나 프로젝트 전환(빠른 열기) 이 열려 있으면 물러난다 (⌘↑/⌘↓ 과 같은 전역 키 규칙)
+      if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+      event.preventDefault()
+      startNewChatRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // ⌘, / Ctrl+, — 설정 판 열기 (이슈 #384). macOS 의 설정 표준 키 — 모든 앱이 쓰니까 배울 필요 없이 누른다.
+  // 열면 닫는 것은 ×/Esc (닫히면 포커스는 #382 대로).
+  // 키를 문자(',') 가 아니라 물리 키(event.code 'Comma') 로 본다 — 한국어(두벌식) 입력 체계에서
+  // 콤마 물리 키가 event.key= '.' 으로 올 수 있기 때문
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.code !== 'Comma') return
+      // 판(aria-modal) 이나 프로젝트 전환(빠른 열기) 이 열려 있으면 물러난다 (⌘N 과 같은 전역 키 규칙)
+      if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+      event.preventDefault()
+      setSettingsOpen(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -457,6 +521,8 @@ export function App() {
     const session = blank ?? newSession(project.path)
     if (!blank) setSessions((sessionsNow) => [session, ...sessionsNow])
     setActiveIds((current) => ({ ...current, [project.path]: session.id }))
+    // 열린 즉시 바로 쓸 수 있도록 (이슈 #343) — `/clear` 도 이 함수라 같은 효과가 붙는다
+    trigger.inputRef.current?.focus()
   }
 
   function updateSession(id: string, mutate: (session: Session) => Session): void {
@@ -599,7 +665,8 @@ export function App() {
   }
 
 
-  // 프로젝트 빠른 열기 (이슈 #305) — 전환 카드 우측(사이드바 옆)에 뜬다 (⌘K 또는 전환 버튼, 2026-10-13 피드백 #1)
+  // 프로젝트 빠른 열기 (이슈 #305) — 전환 카드 우측(사이드바 옆)에 뜬다 (⌘K 또는 전환 버튼, 2026-10-13 피드백 #1).
+  // 열려 있으면 ⌘K 가 강조(선택 행)를 다음 프로젝트로 이동하고 Enter 로 확정 (#379)
   const quickOpen = switching && (
     <ProjectQuickOpen
       projects={projects ?? []}
@@ -615,6 +682,7 @@ export function App() {
       onRename={async (target, name) => setProjects(await window.litecode.renameProject(target.path, name))}
       onClose={closeSwitcher}
       switchButton={switchRef}
+      cycle={cycle}
     />
   )
 
@@ -716,6 +784,8 @@ export function App() {
               shareShell={shareShell}
             />
 
+            {/* 추론 과정(trajectory) 은 읽기 전용 기록 보기 — 입력 카드(채팅창)는 숨기고 대화 탭에서 다시 보인다 (이슈 #364) */}
+            {!(trajectoryOn && view === 'trajectory') && (
             <Composer
               t={t}
               active={active}
@@ -741,6 +811,7 @@ export function App() {
               attachFiles={attachFiles}
               addAttachments={addAttachments}
             />
+            )}
           </DelegationContext.Provider>
         )}
         {dropping && <DropVeil />}

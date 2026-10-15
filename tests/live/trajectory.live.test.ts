@@ -106,8 +106,11 @@ describe('Trajectory 탭', () => {
     expect(await page.locator('.trajectory__lane-name').allTextContents()).toEqual(['Input', 'Model', 'Tools'])
   })
 
-  it('Trajectory 탭을 연 채로 보내면 턴이 끝난 뒤 다시 읽어 새 줄이 생긴다 — 실패한 도구는 빨간 줄과 빨간 막대', async () => {
+  it('추론 과정엔 입력 창문이 없어 대화 탭에서 보내고 돌아오면, 턴이 끝난 뒤 다시 읽어 새 줄이 생긴다 — 실패한 도구는 빨간 줄과 빨간 막대', async () => {
+    expect(await page.locator('.composer').count()).toBe(0) // 입력 카드는 대화 탭에서만 (이슈 #364)
+    await tab('Chat').click()
     await type('읽기 실패 [call:read {"path":"/nope-litecode"}]')
+    await tab('Trajectory').click()
     await expect.poll(() => turnHeads().count(), { timeout: 30_000 }).toBe(2)
 
     const failed = page.locator('.trajectory__row--error[data-kind="tool"]')
@@ -191,6 +194,19 @@ describe('Trajectory 탭', () => {
     expect(await rows().count()).toBe(0)
     await toolbar('Turns').click()
     expect(await rows().count()).toBe(all)
+  })
+
+  it('추론 과정 탭을 보고 있으면 입력 창문이 없고, 다른 대화로 가면 대화 탭으로 돌아온다 (이슈 #364)', async () => {
+    expect(await page.locator('.composer').count()).toBe(0)
+    await page.getByRole('button', { name: '+ 새 대화' }).click()
+    expect(await tab('Chat').getAttribute('aria-selected')).toBe('true') // 다른 대화로 갔으므로
+    expect(await page.locator('.composer').count()).toBe(1) // 입력 카드는 돌아온다
+
+    await page.locator('.session-item', { hasText: '[bash:echo traj-ok]' }).locator('.session-item__main').click()
+    expect(await tab('Chat').getAttribute('aria-selected')).toBe('true')
+    // 이동하자 돌아온 입력 카드로 포커스도 간다 (이슈 #374) — view 리셋 그리기 뒤에야 포커스가 생길 수 있어 poll
+    await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('composer__input') ?? false), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => replies().count(), { timeout: 10_000 }).toBe(4)
   })
 
   it('앱을 다시 켜고 그 대화를 열면 Trajectory 줄이 그대로다 (opencode 기록에서 다시 읽는다)', async () => {

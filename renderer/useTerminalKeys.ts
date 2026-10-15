@@ -10,7 +10,8 @@ export function useTerminalKeys({ project, terminalOn }: { project: string | und
       const command = navigator.platform.startsWith('Mac') ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
       if (!command || event.altKey || !project || !terminalOn) return
       // 판(aria-modal)이 떠 있으면 물러난다 (⌘F 와 같다 — ChatFind.tsx). 입력창·패널이 아닌 글 칸에서는 그 칸의 커서 이동·페이지 이동이다
-      if (document.querySelector('[aria-modal="true"]')) return
+      // 브랜치 팝업(#386)이 열려 있으면 ⌘T 는 그 팝업의 가져오기다
+      if (document.querySelector('[aria-modal="true"], .branch-pop')) return
       const target = event.target instanceof HTMLElement ? event.target : undefined
       if (target?.matches('input, textarea, [contenteditable]') && !target.closest('.composer__input, .file-preview')) return
       if (event.key.toLowerCase() === 't' && !event.shiftKey) {

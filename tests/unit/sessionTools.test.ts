@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ChatService } from '../../src/services/chat.ts'
+import { DelegationService } from '../../src/services/delegation.ts'
 import { SessionsService } from '../../src/services/sessions.ts'
 import { ProjectsService } from '../../src/services/projects.ts'
 import { APP_MCP_NAME } from '../../src/services/mcp.ts'
@@ -12,11 +13,13 @@ import { agoText, clip, lastTurns, projectLine, SessionTools } from '../../src/s
 import type { ChatOptions, ChatResult } from '../../src/services/llm.ts'
 import type { ToolCaller } from '../../src/services/toolCalls.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
-import { attentionTarget, DELEGATION_SERVER, MAX_SENDS_PER_TURN, projectId, QUEUE_LIMIT, shortIds, widerMode, wrapInstruction } from '../../shared/delegation.ts'
+import { attentionTarget, DELEGATION_SERVER, LIST_MAX, MAX_SENDS_PER_TURN, projectId, QUEUE_LIMIT, shortIds, widerMode, wrapInstruction } from '../../shared/delegation.ts'
 import type { Attention, Conversation, History, HistoryMessage } from '../../shared/contract.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
-// 세션 도구 셋 (이슈 #55·#137, 01z 3-3·3-4) — list_projects·read_project·send_to_project. 대상은 다른 프로젝트 각각에서 사용자가 마지막에 보던 대화 하나.
+// 세션 도구 셋 (이슈 #55·#137, 01z 3-3·3-4) — list_projects·read_project·send_to_project. 대상의 기준(목록·기본)은 다른 프로젝트 각각에서
+// 사용자가 마지막에 보던 대화; 받는 곳은 승인 카드에서 사용자가 고른다(#348, #351: 다른 대화·새 대화·보내는 프로젝트의 대화까지) — 자격은
+// 이쪽에서 다시 본다. read_project 는 conversation(c-…)으로 읽을 대화를 지정한다 (이 프로젝트로 간 것은 읽지 못한다).
 // ctx.projects 도 진짜다(임시 파일) — 프로젝트 셋: 보내는 shop-web, 받는 order-backend·design-tokens.
 // ctx.chat·ctx.sessions 는 진짜(임시 파일), ctx.llm 은 가짜다: 턴을 쥐고 있다가 시험이 끝내고, callerOf 는 시험이 정한 "부른 대화" 를 준다
 // (진짜 찾기·승인 기록은 toolCalls.test.ts·turnEvents.test.ts). ctx.appMcp 는 등록된 도구를 모으기만 한다
@@ -152,8 +155,9 @@ async function start() {
   ctx.plugin(SessionsService, { file: path.join(root, 'sessions.json') })
   ctx.plugin(ProjectsService, { file: path.join(root, 'projects.json') })
   ctx.plugin(ChatService)
+  ctx.plugin(DelegationService)
   ctx.plugin(SessionTools)
-  const ready = await new Promise<Context>((resolve) => ctx.inject(['chat', 'sessions', 'projects', 'llm', 'appMcp'], resolve))
+  const ready = await new Promise<Context>((resolve) => ctx.inject(['chat', 'sessions', 'projects', 'llm', 'appMcp', 'delegation'], resolve))
   for (const dir of [tokens, backend, project]) await ready.projects.open(dir)
   const llm = ready.llm as unknown as FakeLlm
   const tools = (ready.appMcp as unknown as FakeAppMcp).tools
@@ -259,9 +263,10 @@ describe('순수 규칙', () => {
     expect(agoText(0, 3 * 86_400_000)).toBe('3d ago')
   })
 
-  it('화면이 보낸 "받을 대화" 는 모양만 거른다 — 아는 모양이 아니면 덮어쓰기 없음(도구 인자대로). 새 대화는 없다', () => {
+  it('화면이 보낸 "받을 대화" 는 모양만 거른다 — 아는 모양이 아니면 덮어쓰기 없음(도구 인자대로). 새 대화(new-conversation, #351)는 프로젝트 id 로', () => {
     expect(attentionTarget({ kind: 'conversation', conversationId: B, title: 'x' })).toEqual({ kind: 'conversation', conversationId: B })
-    for (const bad of [undefined, null, 'new', {}, { kind: 'new' }, { kind: 'conversation' }, { kind: 'conversation', conversationId: 7 }, { kind: 'conversation', conversationId: '' }, { kind: 'other' }]) {
+    expect(attentionTarget({ kind: 'new-conversation', projectId: projectId(backend) })).toEqual({ kind: 'new-conversation', projectId: projectId(backend) })
+    for (const bad of [undefined, null, 'new', {}, { kind: 'new' }, { kind: 'conversation' }, { kind: 'conversation', conversationId: 7 }, { kind: 'conversation', conversationId: '' }, { kind: 'new-conversation' }, { kind: 'new-conversation', projectId: 7 }, { kind: 'new-conversation', projectId: '' }, { kind: 'other' }]) {
       expect(attentionTarget(bad), JSON.stringify(bad)).toBeUndefined()
     }
   })
@@ -321,6 +326,35 @@ describe('list_projects', () => {
     const afterGone = await call('list_projects')
     expect(afterGone).not.toContain('order-backend')
     expect(afterGone).toContain('design-tokens')
+  })
+
+  it('상한(LIST_MAX 20)까지 나열 — 넘으면 넘긴 개수를 다음 줄에 알려 준다, 조용히 자르지 않는다 (#353)', async () => {
+    const { call, idle, view, projects } = await start()
+    await idle(B, '주문 API 설계', { project: backend })
+    await idle(C, '색 토큰 이름 정리', { project: tokens })
+    await view(B)
+    await view(C)
+    const extraId = (index: number): string => `99999999-0000-4000-8000-${(9000 + index).toString().padStart(12, '0')}`
+    // 더 18개 — backend·tokens 합쳐서 정확히 20개 (상한, 넘어가지 않음)
+    for (let i = 0; i < LIST_MAX - 2; i++) {
+      const dir = path.join(root, `extra-${i}`)
+      await fs.mkdir(dir)
+      await projects.open(dir)
+      await idle(extraId(i), `추가 ${i}`, { project: dir })
+      await view(extraId(i))
+    }
+    let lines = (await call('list_projects')).split('\n')
+    expect(lines).toHaveLength(LIST_MAX)
+    expect(lines.join('\n')).not.toContain('more not listed')
+    // 21번째 프로젝트 — 넘은 것은 알려 준다
+    const extra = path.join(root, 'extra-many')
+    await fs.mkdir(extra)
+    await projects.open(extra)
+    await idle(extraId(99), '하나 더', { project: extra })
+    await view(extraId(99))
+    lines = (await call('list_projects')).split('\n')
+    expect(lines).toHaveLength(LIST_MAX + 1)
+    expect(lines[LIST_MAX]).toBe('… and 1 more not listed.')
   })
 })
 
@@ -524,8 +558,9 @@ describe('send_to_project', () => {
 
 // 이슈 #67 — 받을 곳은 사용자가 고른다: 승인 카드에서 고른 프로젝트의 대화가 허용 기록(caller.target)에 실려 온다. 도구는 인자 대신 그것으로 보내고
 // 자격을 다시 본다. 결과 글이 실제 대상을 말한다
-describe('받을 프로젝트 고르기 (이슈 #67·#137)', () => {
+describe('받을 프로젝트 고르기 (이슈 #67·#137·#351)', () => {
   const pick = (conversationId: string) => ({ target: { kind: 'conversation' as const, conversationId } })
+  const pickNew = (projectId: string) => ({ target: { kind: 'new-conversation' as const, projectId } })
 
   it('AI 가 고른 프로젝트를 그대로 고르면 기존 결과 글 그대로다 (바뀐 것이 아니다)', async () => {
     const { call, scene, calledBy } = await start()
@@ -564,31 +599,117 @@ describe('받을 프로젝트 고르기 (이슈 #67·#137)', () => {
     expect(chat.queued(C)).toBe(1)
   })
 
-  it('고른 대상에도 자격을 다시 본다 — 이 프로젝트의 대화·마지막에 보던 것이 아닌 대화·지워진 대화·없는 id·모델 없음·대기열 상한. 거절되면 아무것도 안 가고 횟수도 안 센다', async () => {
+  it('같은 프로젝트의 다른 대화도 받는다 (#348) — 결과 글이 실제 받은 대화(제목·c-…)를 말하고, redirect 문구는 없다. read_project 는 그 c-… 로 읽는다', async () => {
+    const { call, scene, idle, calledBy, llm, chat, sessions } = await start()
+    await idle(D, '배포 스크립트', { project: backend })
+    const sender = await scene()
+    calledBy('send_to_project', sender, pick(D))
+    calledBy('read_project', sender)
+    const before = llm.turns.length
+    expect(await call('send_to_project', { project: projectId(backend), message: '배포도 같이 해 줘' })).toBe(
+      `Accepted. "order-backend" (${projectId(backend)}) started working on it in its conversation "배포 스크립트" (c-dddddddd).`,
+    )
+    await until(() => llm.turns.length > before)
+    const turn = llm.turns.at(-1)!
+    expect(turn).toMatchObject({ directory: backend, prompt: WRAPPED('배포도 같이 해 줘') })
+    llm.answers.set(turn, '배포 준비했습니다')
+    turn.finish()
+    await until(() => !chat.turnOf(D))
+    expect(await call('read_project', { project: projectId(backend), conversation: 'c-dddddddd' })).toBe(
+      `conversation: "배포 스크립트" (c-dddddddd)\nstate: idle\nuser: 배포도 같이 해 줘\nanswer: 배포 준비했습니다`,
+    )
+  })
+
+  it('"새 대화" — 그 프로젝트의 대화 모델·모드로 새 대화를 만들어 보낸다 (#351). 결과 글에 새 대화 제목·짧은 id. read_project 는 그 c-… 로 읽는다', async () => {
+    const { call, scene, calledBy, llm, chat, started, sessions } = await start()
+    const sender = await scene({ mode: 'ask', model: { providerId: 'gw', modelId: 'm2' } }) // B: ask/m2 — 새 대화가 이를 잇는다
+    calledBy('send_to_project', sender, pickNew(projectId(backend)))
+    const result = await call('send_to_project', { project: projectId(backend), message: '릴리스 노트 정리해 줘' })
+    expect(result).toMatch(/^Accepted\. "order-backend" \(p-[0-9a-f]{8}\) started working on it in a new conversation "릴리스 노트 정리해 줘" \(c-[0-9a-f]+\)\.$/)
+    await until(() => llm.turns.at(-1)?.prompt?.includes('릴리스 노트') === true)
+    expect(llm.turns.at(-1)).toMatchObject({ directory: backend, modelId: 'm2', mode: 'ask', prompt: WRAPPED('릴리스 노트 정리해 줘') })
+    const created = llm.turns.at(-1)!.sessionId
+    const event = started.at(-1)!
+    expect(event).toMatchObject({ origin: `session:${A}` })
+    const storedConversation = (await sessions.list()).find((entry) => entry.engineSessionId === created)
+    expect(storedConversation).toMatchObject({ project: backend, title: '릴리스 노트 정리해 줘', mode: 'ask', model: { providerId: 'gw', modelId: 'm2' } })
+    llm.answers.set(llm.turns.at(-1)!, '노트를 만들었습니다')
+    llm.turns.at(-1)!.finish()
+    await until(() => !chat.turnOf(storedConversation!.id))
+    const shortId = `c-${storedConversation!.id.slice(0, 8)}` // uuid 의 앞 8자 = 짧은 id
+    const READ_HEAD = `conversation: "릴리스 노트 정리해 줘" (${shortId})`
+    expect(await call('read_project', { project: projectId(backend), conversation: shortId })).toBe(
+      `${READ_HEAD}\nstate: idle\nuser: 릴리스 노트 정리해 줘\nanswer: 노트를 만들었습니다`,
+    )
+  })
+
+  it('"새 대화" 도 보내는 프로젝트(self)가 될 수 있다 — 결과 글은 "이 프로젝트" 문구, read_project 지시 없음', async () => {
+    const { call, scene, view, calledBy, llm, started, sessions } = await start()
+    const sender = await scene() // A: build/m1 — 새 대화가 이를 잇는다
+    await view(A) // 대상 기준 — 카드의 "이 프로젝트" 그룹이 있다는 뜻
+    calledBy('send_to_project', sender, pickNew(projectId(project)))
+    const result = await call('send_to_project', { project: projectId(backend), message: '여기서 할 일' })
+    expect(result).toMatch(/^Accepted\. The user chose a conversation in this project: "shop-web" \(id p-[0-9a-f]{8}\)\. It runs in a new conversation "여기서 할 일" \(c-[0-9a-f]+\)\.$/)
+    await until(() => llm.turns.at(-1)?.prompt?.includes('여기서 할 일') === true)
+    expect(llm.turns.at(-1)).toMatchObject({ directory: project, modelId: 'm1', mode: 'build', prompt: WRAPPED('여기서 할 일') })
+    expect(started.at(-1)).toMatchObject({ origin: `session:${A}` })
+    const created = (await sessions.list()).find((entry) => entry.engineSessionId === llm.turns.at(-1)!.sessionId)
+    expect(created).toMatchObject({ project, mode: 'build' })
+  })
+
+  it('"새 대화" — 그 프로젝트가 등록 대상(목록)에 없거나 엔진에 넘길 수 없으면 안 보낸다', async () => {
+    const { call, scene, calledBy, llm } = await start()
+    const sender = await scene()
+    const turns = llm.turns.length
+    const NOT_AVAILABLE = 'The project for the new conversation is not available. Nothing was sent.'
+    calledBy('send_to_project', sender, pickNew('p-zzzzzzzz'))
+    await expect(call('send_to_project', { project: projectId(backend), message: 'x' })).rejects.toThrow(NOT_AVAILABLE)
+    calledBy('send_to_project', sender, pickNew(projectId(tokens)))
+    await expect(call('send_to_project', { project: projectId(backend), message: 'x' })).rejects.toThrow(NOT_AVAILABLE) // 본 적 없는 프로젝트(대상 목록에 없음)
+    expect(llm.turns.length).toBe(turns)
+  })
+
+  it('보내는 프로젝트 자신의 대화도 고를 수 있다 (#351) — 결과 글은 "이 프로젝트" 라고 말하고 read_project 지시하지 않는다. 받는 대화가 돌면 대기열', async () => {
+    const { call, scene, view, calledBy, chat, llm } = await start()
+    const sender = await scene() // B: order-backend 에 쉬는 대화, A: shop-web 의 도는 sender
+    await view(A)
+    calledBy('send_to_project', sender, pick(A))
+    expect(await call('send_to_project', { project: projectId(backend), message: '여기에서 할 일' })).toBe(
+      `Accepted. The user chose a conversation in this project: "shop-web" (id ${projectId(project)}). It is busy, so the instruction is queued (1 ahead). It runs in its conversation "주문 화면" (c-aaaaaaaa).`,
+    )
+    expect(chat.queued(A)).toBe(1)
+    expect(chat.queued(B)).toBe(0)
+    expect(llm.turns.at(-1)?.prompt).not.toContain('여기에서 할 일') // A 의 도는 턴 끝나야 대기열에서 나온다
+  })
+
+  it('고른 대화에도 자격을 다시 본다 — 본 적 없는 대화·지워진 대화·없는 id·모델 없음·대기열 상한. 거절되면 아무것도 안 가고 횟수도 안 센다', async () => {
     const { call, scene, idle, say, view, calledBy, llm, chat, sessions } = await start()
     await idle(D, '배포 스크립트', { project: backend })
+    const unregistered = path.join(root, 'unregistered')
+    await fs.mkdir(unregistered)
+    await idle('eeeeeeee-0000-4000-8000-000000000006', '본 적 없는 프로젝트', { project: unregistered })
     const busy = await say(C, '색 토큰 이름 정리', { project: tokens })
     await view(C)
     const sender = await scene()
     await view(A)
     const args = { project: projectId(backend), message: '지시' }
     const turns = llm.turns.length
-    const GONE = /The project the user chose is not available/
+    const NO_PROJECT = /The project of the conversation the user chose is not available/
     const rejected = async (target: string, reason: RegExp | string) => {
       calledBy('send_to_project', sender, pick(target))
       await expect(call('send_to_project', args)).rejects.toThrow(reason)
     }
-    await rejected(A, GONE) // 보내는 프로젝트 자신
-    await rejected(D, GONE) // 그 프로젝트의 대화지만 마지막에 보던 것이 아니다
-    await rejected('no-such-conversation', GONE) // 화면이 조작된 값을 보냈다
+    await rejected('eeeeeeee-0000-4000-8000-000000000006', NO_PROJECT) // 그 프로젝트의 대화지만 본 적 없다(목록에 없음)
+    await rejected('no-such-conversation', /no longer exists/) // 화면이 조작된 값을 보냈다
+    await sessions.remove(D)
+    await rejected(D, /no longer exists/)
     for (let n = 0; n < QUEUE_LIMIT; n++) await chat.send(C, { text: `사람 ${n}`, project: tokens, model: MODEL })
     await rejected(C, /^Target queue is full/)
     await sessions.patch(B, () => ({ model: { providerId: 'gone', modelId: 'm1' } }))
     await rejected(B, 'Target conversation has no usable model.')
     await sessions.remove(B)
-    await rejected(B, GONE)
+    await rejected(B, /no longer exists/)
     expect(llm.turns.length).toBe(turns)
-    expect(await sessions.list()).toHaveLength(3) // A·C·D — 새 대화가 생기지 않았다
     expect(chat.queued(C)).toBe(QUEUE_LIMIT)
     expect(chat.countSend(A, 1)).toBe(true) // 하나도 안 셌다
     busy.finish()
@@ -626,14 +747,15 @@ describe('read_project', () => {
     expect(llm.asked.at(-1)).toMatchObject({ directory: project, server: 'litecode', tool: 'read_project' })
   })
 
-  it('읽기도 앱에서 허용한 호출만 — 허용 기록이 없거나 하위 작업이 불렀으면 아무것도 읽지 않는다', async () => {
+  it('읽기는 승인을 안 본다(#342) — 앱에서 허용하지 않아도, 하위 작업(백그라운드 태스크, #357)이 부르면 읽힌다. 앱이 돌린 턴이 아니면 못 읽는다', async () => {
     const { call, scene, calledBy, llm } = await start()
     const sender = await scene()
     const args = { project: projectId(backend) }
+    const RESULT = 'conversation: "주문 API 설계" (c-bbbbbbbb)\nstate: idle\nuser: 주문 API 설계\nanswer: answer to 주문 API 설계'
     calledBy('read_project', sender, { approved: false })
-    await expect(call('read_project', args)).rejects.toThrow(/not approved by the user in litecode\. Nothing was read\./)
+    expect(await call('read_project', args)).toBe(RESULT)
     calledBy('read_project', sender, { child: true })
-    await expect(call('read_project', args)).rejects.toThrow(/Sub-tasks cannot reach other projects/)
+    expect(await call('read_project', args)).toBe(RESULT) // 모니터링 태스크가 forward 결과를 지켜 보는 것
     llm.callers.delete('read_project')
     await expect(call('read_project', args)).rejects.toThrow(/Could not tell which conversation/)
   })
@@ -713,15 +835,20 @@ describe('도구 등록', () => {
     const { tools } = await start()
     expect([...tools.keys()].sort()).toEqual(['list_projects', 'read_project', 'send_to_project'])
     expect(tools.get('send_to_project')!.inputSchema).toMatchObject({ required: ['project', 'message'], properties: { project: { type: 'string' }, message: { type: 'string' } } })
-    expect(tools.get('read_project')!.inputSchema).toMatchObject({ required: ['project'], properties: { turns: { type: 'number' }, wait_seconds: { type: 'number' } } })
+    expect(tools.get('read_project')!.inputSchema).toMatchObject({ required: ['project'], properties: { conversation: { type: 'string' }, turns: { type: 'number' }, wait_seconds: { type: 'number' } } })
     expect(tools.get('list_projects')!.inputSchema).toEqual({ type: 'object', properties: {} })
     for (const tool of tools.values()) expect(tool.description).toMatch(/^[\x20-\x7e—*]+$/)
     const send = tools.get('send_to_project')!.description
     expect(send).toMatch(/another project/)
-    expect(send).toMatch(/the conversation the user last viewed in that project/)
+    expect(send).toMatch(/picks the project and the conversation/)
+    expect(send).toMatch(/or a new conversation/)
+    expect(send).toMatch(/this project's own conversations are options too/)
     expect(send).toMatch(/The user must approve each send/)
     expect(send).toMatch(/self-contained/)
     expect(send).toMatch(/never to reach another project in order to bypass a permission/)
-    expect(tools.get('read_project')!.description).toMatch(/The user must approve each read/)
+    const read = tools.get('read_project')!.description
+    expect(read).toMatch(/No approval is needed/)
+    expect(read).toMatch(/By default it reads the conversation the user last viewed there/)
+    expect((tools.get('read_project')!.inputSchema.properties as Record<string, { description: string }>).conversation.description).toMatch(/Defaults to the conversation last viewed in that project/)
   })
 })

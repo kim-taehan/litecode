@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { AttachmentKind, Project } from '../shared/ipc.ts'
+import { focusComposerInput } from './composerFocus.ts'
 import { FILE_ICON_PATHS } from './Attachments.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { HooksPopup } from './HooksPopup.tsx'
@@ -16,7 +17,7 @@ import './plus.css'
 // 맨 위는 "파일 추가"·"이미지 추가"(이슈 #44) — 누르면 메뉴를 닫고 onAttach 로 넘긴다(OS 파일 고르기는 메인이 띄운다). 그 아래 구분선.
 // 지금 고른 모델이 이미지를 못 받으면(설정 > 모델의 "이미지 입력" — 01y: 그 표시 없이는 이미지가 ERROR 글로 바뀐다) "이미지 추가" 는 못 누르고
 // 사유 한 줄을 보인다. disabled 가 아니라 aria-disabled 다 — 화살표로 닿아 사유가 읽힌다.
-// 메뉴 동작은 모드 칩 메뉴(ModeChip — dsh ui-primitives Menu)와 같다: Esc·바깥 누르기로 닫힘, 화살표로 이동, 닫히면 버튼으로 포커스.
+// 메뉴 동작은 모드 칩 메뉴(ModeChip — dsh ui-primitives Menu)와 같다: Esc·바깥 누르기로 닫힘, 화살표로 이동, 닫히면 입력창으로 포커스 (#374).
 // 훅(이슈 #102) 줄은 기능 `hooks` 가 켜져 있을 때만 있다 — 오른쪽에 "켜짐 N"(이 프로젝트에서 도는 훅), 고르면 훅 팝업(HooksPopup). 꺼져 있으면 채널도 부르지 않는다.
 // 개수·요약은 메뉴를 열 때마다 묻는다(스킬 파일·서버 상태는 앱 밖에서 바뀐다). 프로젝트가 없으면 버튼을 못 누른다.
 
@@ -40,7 +41,7 @@ export function PlusMenu({ project, imageInput, onAttach }: { project?: Project;
     rows()[0]?.focus()
     const outside = (event: PointerEvent) => {
       const target = event.target as Node
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false)
+      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) close()
     }
     document.addEventListener('pointerdown', outside)
     return () => document.removeEventListener('pointerdown', outside)
@@ -70,7 +71,7 @@ export function PlusMenu({ project, imageInput, onAttach }: { project?: Project;
 
   function close(): void {
     setOpen(false)
-    triggerRef.current?.focus()
+    if (!focusComposerInput()) triggerRef.current?.focus() // 닫히면 입력창으로 — 없으면(컴포저 안 보이는 화면) 버튼으로
   }
 
   function onMenuKeyDown(event: ReactKeyboardEvent): void {
@@ -103,7 +104,7 @@ export function PlusMenu({ project, imageInput, onAttach }: { project?: Project;
 
   function closePopup(): void {
     setPopup(undefined)
-    triggerRef.current?.focus()
+    if (!focusComposerInput()) triggerRef.current?.focus() // 닫히면 입력창으로
   }
 
   return (

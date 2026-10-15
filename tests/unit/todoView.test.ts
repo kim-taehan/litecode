@@ -91,18 +91,23 @@ describe('todoDock — 입력 카드 위 줄', () => {
 describe('화면', () => {
   const list = [todo('read a.txt', 'done'), todo('edit b.txt', 'active'), todo('run tests'), todo('write docs', 'cancelled')]
   const turn = (item: TurnItem) => renderToStaticMarkup(createElement(AssistantTurn, { items: [item], text: '', running: true, directory: '/p' }))
+  const row = (todos: readonly TodoItem[]) => renderToStaticMarkup(createElement(TodoRow, { todos }))
+  const failedTurn = (items: TurnItem[]) => renderToStaticMarkup(createElement(AssistantTurn, { items, text: '⚠️ bad', failed: true, directory: '/p' }))
 
-  it('대화 안: todowrite 줄은 "할 일 · 완료 1/3" — 일반 도구 줄(Todowrite)이 아니다', () => {
+  it('대화 안: 진행 중이면 줄은 우측 "이 턴의 작업" 탭으로 — 채팅엔 한 줄. 줄 자체는 "할 일 · 완료 1/3"', () => {
     const html = turn(write('m:p1', list))
-    expect(html).toContain('data-kind="todo"')
-    expect(html).toContain('할 일')
-    expect(html).toContain('완료 1/3')
-    expect(html).not.toContain('Todowrite')
+    expect(html).not.toContain('data-kind="todo"') // 줄은 탭으로 (이슈 #416)
+    expect(html).toContain('turn-running__line')
+    const todoRow = row(list)
+    expect(todoRow).toContain('data-kind="todo"')
+    expect(todoRow).toContain('할 일')
+    expect(todoRow).toContain('완료 1/3')
+    expect(todoRow).not.toContain('Todowrite')
   })
 
-  it('대화 안: 빈 목록은 "목록 비움", 실패한 todowrite 는 도구 줄로 남되 제목은 "할 일"', () => {
-    expect(turn(write('m:p1', []))).toContain('목록 비움')
-    const failed = turn({ kind: 'tool', id: 'm:p1', name: 'todowrite', status: 'error', error: 'bad' })
+  it('줄 자체: 빈 목록은 "목록 비움". 실패한 todowrite 는 (끝난 턴의) 도구 줄로 남되 제목은 "할 일"', () => {
+    expect(row([])).toContain('목록 비움')
+    const failed = failedTurn([{ kind: 'tool', id: 'm:p1', name: 'todowrite', status: 'error', error: 'bad' }])
     expect(failed).toContain('data-status="error"')
     expect(failed).toContain('할 일')
     expect(failed).not.toContain('Todowrite')
@@ -115,6 +120,13 @@ describe('화면', () => {
     expect(stalled).toContain('멈춤: edit b.txt')
     const live = renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: [write('m:p1', list)], running: true }))
     expect(live).toContain('지금: edit b.txt')
+  })
+
+  it('입력 카드 위: 닫기 버튼은 턴이 안 돌 때만 — 도는 동안엔 없다', () => {
+    const stalled = renderToStaticMarkup(createElement(TodoDock, { messages: [user, answer(write('m:p1', list))], progress: undefined, running: false }))
+    expect(stalled).toContain('todo-dock__dismiss')
+    const live = renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: [write('m:p1', list)], running: true }))
+    expect(live).not.toContain('todo-dock__dismiss')
   })
 
   it('입력 카드 위: 목록이 없거나 다 끝났으면 아무것도 그리지 않는다', () => {

@@ -12,6 +12,15 @@ import { tr } from '../i18n.ts'
 // 덧붙이고(어느 이름이 이기는지는 기본 파일만 정한다), 이어 붙인 사슬 전체를 바이트 상한으로 자른다. 순서가 좁은 폴더 → 넓은 폴더라 뒤를 자르면
 // 넓은 쪽이 먼저 잘린다. 잘리면 끝에 "(잘림: N바이트 중 M)" 를 붙인다 — 진행 줄 지시문 항목(instructionsNote)이 이것과 머리 줄을 읽는다.
 
+// 할 일 동기화 규칙 (이슈 #406 실측 2026-10-14 — #403 P1 세션 ses_…OBzORuTutYErIp):
+// - 할 일 7개를 **1회만** todowrite 로 만들고, 진행 33분·도구 134회(전 항목 완료, PR까지) 동안에도 목록을 한 번도
+//   갱신하지 않은 모델이 실재한다(엔진 todo 테이블: 7개 전부 created = updated). todowrite 도구 설명(엔진 내장)에만
+//   있는 갱신 규칙은 작은 모델(로컬 27B)이 지키지 않는다 → 할 일 줄이 0/7 에 멈춰 있다
+// - 그래서 앱이 매 턴 system 에(프로젝트 지시문 뒤에 — 뒤가 이긴다) 이 한 줄을 싣는다. 그 뒤 스텝은 이 턴 user 의
+//   system 을 쓰고(01ar E) 끼워 넣는 말이 같은 system 을 싣는다
+export const TODO_SYNC_RULE =
+  'Keep your todo list in sync with your progress. As soon as you finish a todo item, call todowrite again with the full list, marking that item completed and the item you start next in_progress. Update it as you go — not only when you create the list or when the work is done.'
+
 const NAMES = ['AGENTS.md', 'CLAUDE.md']
 const LOCAL_NAMES = ['AGENTS.local.md', 'CLAUDE.local.md']
 /** 사슬 전체(이어 붙인 결과)의 UTF-8 바이트 상한 — 잘림 표시는 이 밖에 붙는다 */

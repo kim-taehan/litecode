@@ -1,13 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { DirectoryListing, FilePreview, HtmlAsset } from '../shared/ipc.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
-import { BranchIcon, GitPanel, GitTabCount } from './Git.tsx'
+import { GitPanel, GitTabCount } from './Git.tsx'
+import { BranchIcon } from './GitIcons.tsx'
 import {
   GIT_TAB,
   closeFilePreview,
   closeTab,
   isTaskTab,
   isTerminalTab,
+  isTurnTab,
   openFilePreview,
   panelTakesFocus,
   openFilesTab,
@@ -17,6 +19,8 @@ import {
   taskIdOf,
   terminalIdOf,
   toggleFullscreen,
+  TURN_PREFIX,
+  turnRefOf,
   usePanelState,
   type PanelState,
 } from './filePreviewStore.ts'
@@ -29,6 +33,7 @@ import { lineJump } from './lineJump.ts'
 import { useT } from './settingsStore.ts'
 import { TabAddMenu } from './TabAddMenu.tsx'
 import { TaskTab } from './TaskTab.tsx'
+import { TurnTab } from './TurnTab.tsx'
 import { taskTitle } from './taskTabView.ts'
 import { findTask, useTaskMap } from './tasksStore.ts'
 import { TerminalView } from './TerminalView.tsx'
@@ -244,6 +249,40 @@ function Panel({ state }: { state: PanelState }) {
                 </div>
               )
             }
+            const turnRef = turnRefOf(key)
+            if (turnRef !== undefined) {
+              const name = t('turnTab.tab')
+              return (
+                <div
+                  key={key}
+                  role="tab"
+                  tabIndex={0}
+                  className="file-preview__tab file-preview__tab--turn"
+                  aria-selected={active === key}
+                  title={name}
+                  aria-label={name}
+                  data-turn={key.slice(TURN_PREFIX.length)}
+                  onClick={() => selectTab(key)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
+                  onAuxClick={(event) => event.button === 1 && closeTab(key)}
+                >
+                  <TurnTabIcon className="file-preview__tab-icon" />
+                  <span className="file-preview__tab-title">{name}</span>
+                  <button
+                    type="button"
+                    className="file-preview__tab-close"
+                    aria-label={t('filePreview.closeTab', { name })}
+                    title={t('filePreview.closeTab', { name })}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      closeTab(key)
+                    }}
+                  >
+                    <CrossIcon size={12} />
+                  </button>
+                </div>
+              )
+            }
             const terminalId = terminalIdOf(key)
             if (terminalId !== undefined) {
               const name = t('terminal.tab', { id: terminalId })
@@ -344,7 +383,10 @@ function Panel({ state }: { state: PanelState }) {
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
       )}
       {active !== undefined && isTaskTab(active) && <TaskTab key={active} taskId={taskIdOf(active)!} directory={directory} />}
-      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && active !== GIT_TAB && (
+      {active !== undefined &&
+        isTurnTab(active) &&
+        <TurnTab key={active} conversationId={turnRefOf(active)!.conversationId} startedAt={turnRefOf(active)!.startedAt} directory={directory} />}
+      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && active !== GIT_TAB && (
         <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />
       )}
     </aside>
@@ -779,6 +821,15 @@ function TaskIcon({ className = 'file-preview__icon' }: { className?: string }) 
       <circle cx="3.5" cy="8" r="0.9" fill="currentColor" stroke="none" />
       <circle cx="3.5" cy="11.5" r="0.9" fill="currentColor" stroke="none" />
       <path d="M6.5 4.5H13M6.5 8H13M6.5 11.5H11" />
+    </svg>
+  )
+}
+
+/** "이 턴의 작업" 탭 — 번개 (이슈 #416, 대화 진행 중 줄의 아이콘과 같은 번개) */
+function TurnTabIcon({ className = 'file-preview__icon' }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z" />
     </svg>
   )
 }

@@ -1,10 +1,10 @@
-import { createContext, useContext } from 'react'
+import { createContext, Fragment, useContext, useEffect, useRef, useState } from 'react'
 import type { Mode } from '../shared/ipc.ts'
 import type { MessageOrigin } from '../shared/contract.ts'
 import { DEFAULT_MODE } from '../shared/modes.ts'
 import { useT } from './settingsStore.ts'
 import { formatDuration } from './turnView.ts'
-import type { DelegationLine, Peer, ProjectTarget, TargetPicker } from './delegationView.ts'
+import type { DelegationLine, Peer, ProjectTarget, TargetChoice, TargetPicker } from './delegationView.ts'
 import { useNow } from './useNow.ts'
 import './delegation.css'
 
@@ -16,10 +16,10 @@ import './delegation.css'
 export interface DelegationValue {
   /** 저장된 대화 전부 (모든 프로젝트) */
   peers: readonly Peer[]
-  /** 다른 프로젝트마다 사용자가 마지막에 보던 대화 하나 — 지시를 받는 곳 */
+  /** 프로젝트마다 사용자가 마지막에 보던 대화 하나 — 지시를 받는 곳 (#351: 지금 프로젝트 포함) */
   targets: readonly ProjectTarget[]
-  /** 지금 보는 대화의 모드(받는 대화의 모드와 견준다)와 지금 프로젝트의 이름 */
-  self: { mode: Mode; project?: string }
+  /** 지금 보는 대화의 모드(받는 대화의 모드와 견른다)·지금 프로젝트의 이름·지금 대화의 id (카드에서 "이 대화" 를 빼는 것) */
+  self: { mode: Mode; project?: string; id?: string }
   /** 그 대화를 연다 — 다른 프로젝트의 대화면 그 프로젝트로 넘어간다 */
   open(conversationId: string): void
 }
@@ -102,14 +102,17 @@ export function DelegationRow({ line }: { line: DelegationLine }) {
   )
 }
 
-/** 받는 대화의 내 말 자리 위 딱지 — 누르면 보낸 대화로 (지워졌으면 적어 둔 제목만 보인다) */
+/** 받는 대화의 내 말 자리 위 딱지 — 누르면 보낸 대화로 (지워졌으면 적어 둔 제목만 보인다).
+ *  "다른 프로젝트에서 온 지시" 는 보낸 쪽이 **다른** 프로젝트일 때만 — 같은 프로젝트의 대화가 보낸 것은 "다른 대화에서 온 지시" (#351) */
 export function OriginTag({ origin }: { origin: MessageOrigin }) {
   const t = useT()
-  const { peers, open } = useDelegation()
+  const { peers, self, open } = useDelegation()
   const peer = peers.find((candidate) => candidate.id === origin.conversationId)
   const title = peer?.title || origin.title
-  // 보낸 프로젝트 이름이 없는 것은 같은 프로젝트의 대화가 보낸 옛 기록이다 (이슈 #137 전)
-  const label = origin.project ? t('delegate.fromProject', { project: origin.project, title }) : t('delegate.from', { title })
+  // 보낸 프로젝트 이름이 없는 것은 같은 프로젝트의 대화가 보낸 옛 기록이다 (이슈 #137 전). 이름이 지금 프로젝트와 같으면(#351)도 같은 프로젝트
+  const fromProject = origin.project
+  const crossProject = fromProject !== undefined && fromProject !== self.project
+  const label = crossProject ? t('delegate.fromProject', { project: fromProject, title }) : t('delegate.from', { title })
   return (
     <button type="button" className="origin-tag" disabled={!peer} onClick={() => peer && open(peer.id)}>
       <FromIcon />
@@ -126,15 +129,49 @@ function FolderIcon() {
   )
 }
 
-/** 승인 카드의 내용 (이슈 #67·#137 — 시안 _workspace/mock-cross-project) — 받을 프로젝트를 사용자가 고른다: 프로젝트 줄(폴더·이름·경로) 아래 그
- *  프로젝트에서 마지막에 보던 대화 한 줄(라디오, AI 가 고른 곳이 먼저 선택), 안내 한 줄, 보낼 글 전문, 고른 곳의 폴더·모드 경고 상자.
- *  "대기열에 들어갑니다" 는 줄마다 보인다. 틀(주황 띠·버튼)은 Attention.tsx 의 승인 카드 */
+/** 승인 카드의 내용 (이슈 #67·#137·#348·#351 — 시안 _workspace/mock-cross-project) — 받을 **프로젝트와 그 대화**를 사용자가 고른다:
+ *  프로젝트 줄(폴더·이름·경로) 아래 그 프로젝트의 "**새 대화**" 줄 + 대화 목록(라디오, 최근 활동 순 · 상한, 넘어간 대話は "N개 더 보기" 로
+ *  접혀 있다, AI 가 고른 곳의 마지막에 보던 대화가 먼저 선택), 안내 한 줄, 보낼 글 전문, 고른 곳의 폴더·모드 경고 상자.
+ *  "대기열에 들어갑니다" 는 줄마다 보인다. 틀(주황 띠·버튼)은 Attention.tsx 의 승인 카드 (카드가 요청 id 로 keyed 라 새 요청이면 여기 상태도 다시 시작) */
 export function TargetPickerBody({ picker, selected, disabled, onSelect }: { picker: TargetPicker; selected: string | undefined; disabled: boolean; onSelect(key: string): void }) {
   const t = useT()
   const { self } = useDelegation()
   const chosen = picker.choices.find((choice) => choice.key === selected)
-  // 폴더 경로만 굵게 — 번역 글의 {folder} 자리에서 가른다
-  const [before = '', after = ''] = chosen ? t('delegate.pick.warn', { folder: '\u0000', mode: t(`mode.${chosen.mode ?? DEFAULT_MODE}`) }).split('\u0000') : []
+  // 상한(PICK_CONVERSATION_LIMIT)을 넘어 접힌 대화 펼치기 (#351) — 프로젝트 id 로. 새 요청은 카드가 다시 태어나 이 상태도 비어 시작한다
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  // 우선 선택된 줄은 목록의 스크롤 범위(max-height 240px) 밖일 수 있다 (프로젝트·대화가 늘어난 #351) — 보여질 때까지 스크롤한다
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const list = listRef.current
+    if (!list || !selected) return
+    const row = list.querySelector<HTMLElement>(`[data-target='${CSS.escape(selected)}']`)
+    if (!row) return
+    const box = list.getBoundingClientRect()
+    const rect = row.getBoundingClientRect()
+    if (rect.top < box.top) list.scrollTop += rect.top - box.top - 4
+    else if (rect.bottom > box.bottom) list.scrollTop += rect.bottom - box.bottom + 4
+  }, [selected])
+  const toggle = (projectId: string): void =>
+    setExpanded((now) => {
+      const next = new Set(now)
+      if (next.has(projectId)) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+  const foldedByProject = new Map<string, number>()
+  for (const choice of picker.choices) if (choice.folded) foldedByProject.set(choice.projectId, (foldedByProject.get(choice.projectId) ?? 0) + 1)
+  // 프로젝트 그룹 — 접힌 줄(hidden)은 펼칠 때까지 목록에 안 넣는다
+  const groups: { project: { name: string; displayPath: string }; projectId: string; rows: TargetChoice[]; hidden: number }[] = []
+  for (const choice of picker.choices) {
+    const last = groups[groups.length - 1]
+    if (!last || last.projectId !== choice.projectId) groups.push({ project: choice.project, projectId: choice.projectId, rows: [], hidden: 0 })
+    const group = groups[groups.length - 1]!
+    if (choice.folded && !expanded.has(choice.projectId)) group.hidden++
+    else group.rows.push(choice)
+  }
+  // 폴더 경로만 굵게 — 번역 글의 {folder} 자리에서 가른다. 새 대화면 그 프로젝트의 대화 모드가 아니라 새 대화 문장
+  const warn = chosen && (chosen.newConversation ? t('delegate.pick.warnNew', { folder: '\u0000', mode: t(`mode.${chosen.mode ?? DEFAULT_MODE}`) }) : t('delegate.pick.warn', { folder: '\u0000', mode: t(`mode.${chosen.mode ?? DEFAULT_MODE}`) }))
+  const [before = '', after = ''] = warn ? warn.split('\u0000') : []
   return (
     <>
       <div className="attention-card__headline">{t('delegate.card.send')}</div>
@@ -145,32 +182,45 @@ export function TargetPickerBody({ picker, selected, disabled, onSelect }: { pic
         </div>
       )}
       {picker.choices.length > 0 && (
-        <div className="target-picker" role="radiogroup" aria-label={t('delegate.pick.head')}>
-          {picker.choices.flatMap((choice) => [
-            <div key={`${choice.key}:project`} className="target-picker__project">
-              <FolderIcon />
-              <span className="target-picker__project-name">{choice.project.name}</span>
-              <span className="target-picker__project-path">{choice.project.displayPath}</span>
-            </div>,
-            <button
-              key={choice.key}
-              type="button"
-              role="radio"
-              className="target-picker__row"
-              aria-checked={choice.key === selected}
-              aria-label={`${choice.project.name} · ${choice.title}`}
-              data-target={choice.key}
-              disabled={disabled}
-              onClick={() => onSelect(choice.key)}
-            >
-              <span className="target-picker__dot" aria-hidden="true" />
-              <span className="target-picker__title">{choice.title}</span>
-              {choice.byAi && <span className="target-picker__ai">{t('delegate.pick.byAi')}</span>}
-              <span className="target-picker__meta" data-wider={choice.wider || undefined} title={choice.wider ? t('delegate.card.modeWider') : undefined}>
-                {[choice.mode && t(`mode.${choice.mode}`), choice.busy ? t('delegate.card.targetBusy') : t('delegate.pick.idle')].filter(Boolean).join(' · ')}
-              </span>
-            </button>,
-          ])}
+        <div ref={listRef} className="target-picker" role="radiogroup" aria-label={t('delegate.pick.head')}>
+          {groups.map((group) => (
+            <Fragment key={group.projectId}>
+              <div className="target-picker__project">
+                <FolderIcon />
+                <span className="target-picker__project-name">{group.project.name}</span>
+                <span className="target-picker__project-path">{group.project.displayPath}</span>
+              </div>
+              {group.rows.map((choice) => {
+                const title = choice.newConversation ? t('delegate.pick.newConversation') : choice.title
+                return (
+                  <button
+                    key={choice.key}
+                    type="button"
+                    role="radio"
+                    className="target-picker__row"
+                    aria-checked={choice.key === selected}
+                    aria-label={`${group.project.name} · ${title}`}
+                    data-target={choice.key}
+                    disabled={disabled}
+                    onClick={() => onSelect(choice.key)}
+                  >
+                    <span className="target-picker__dot" aria-hidden="true" />
+                    <span className="target-picker__title">{title}</span>
+                    {choice.byAi && <span className="target-picker__ai">{t('delegate.pick.byAi')}</span>}
+                    {choice.lastViewed && <span className="target-picker__last">{t('delegate.pick.lastViewed')}</span>}
+                    <span className="target-picker__meta" data-wider={choice.wider || undefined} title={choice.wider ? t('delegate.card.modeWider') : undefined}>
+                      {[choice.mode && t(`mode.${choice.mode}`), !choice.newConversation && (choice.busy ? t('delegate.card.targetBusy') : t('delegate.pick.idle'))].filter(Boolean).join(' · ')}
+                    </span>
+                  </button>
+                )
+              })}
+              {(foldedByProject.get(group.projectId) ?? 0) > 0 && (
+                <button type="button" className="target-picker__more" disabled={disabled} onClick={() => toggle(group.projectId)}>
+                  {expanded.has(group.projectId) ? t('delegate.pick.less') : t('delegate.pick.more', { count: group.hidden })}
+                </button>
+              )}
+            </Fragment>
+          ))}
         </div>
       )}
       <div className="target-picker__hint">{self.project ? t('delegate.pick.hint', { project: self.project }) : t('delegate.pick.hintNoName')}</div>

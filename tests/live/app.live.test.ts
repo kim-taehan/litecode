@@ -563,6 +563,32 @@ describe('설정 > 모델', () => {
     await openSettings()
     await page.keyboard.press('Escape')
     await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+    // 설정창이 닫히면 포커스는 다시 입력창으로 (이슈 #382)
+    await expect.poll(() => page.locator('.composer__input').evaluate((el) => el === document.activeElement), { timeout: 5_000 }).toBe(true)
+  })
+
+  // ⌘, / Ctrl+, — 설정 판 단축키 (이슈 #384, macOS 의 설정 표준 키)
+  it('⌘, 로 설정 판이 열리고, 판이 열려 있으면 다른 전역 키처럼 물러난다', async () => {
+    expect(await dialog().count()).toBe(0)
+    await page.keyboard.press('Meta+Comma')
+    await dialog().waitFor({ timeout: 5_000 })
+    expect(await dialog().getByRole('button', { name: '일반', exact: true }).getAttribute('aria-current')).toBe('page')
+    // 판(설정) 이 열려 있으면 ⌘, 는 토글이 아니라 물러난다 (⌘N 과 같은 전역 키 규칙) — 닫기는 Esc/×
+    await page.keyboard.press('Meta+Comma')
+    expect(await dialog().count()).toBe(1)
+    await page.keyboard.press('Escape')
+    await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
+  })
+
+  // 한국어(두벌식) 입력 체계 — 콤마 물리 키가 key="." 으로 올 수 있어 핸들러는 물리 키(event.code) 로 본다
+  it('입력 체계에 상관없이 콤마 물리 키 + Cmd 로도 설정 판이 열린다 (#384)', async () => {
+    expect(await dialog().count()).toBe(0)
+    await page.evaluate(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Comma', key: '.', metaKey: true, bubbles: true, cancelable: true }))
+    })
+    await dialog().waitFor({ timeout: 5_000 })
+    await page.keyboard.press('Escape')
+    await expect.poll(() => dialog().count(), { timeout: 5_000 }).toBe(0)
   })
 
   // dsh ui-sidebar 설정 줄(.trigger)과 같은 모양 — 사용자: "설정이 너무 작다" (2026-10-01 캡처), 사이드바 dsh 값 라운드(2026-10-02)에서 42px·16px 톱니로
@@ -704,11 +730,38 @@ describe('설정 > 모델', () => {
     for (let i = 0; i < 3; i++) await newChat.click()
     expect(await blanks()).toBe(1)
     expect(await page.locator('.main__header').textContent()).toBe('새 대화') // 그 빈 대화가 선택돼 있다
+    expect(await page.evaluate(() => document.activeElement?.classList.contains('composer__input'))).toBe(true) // 이슈 #343 — 포커스는 입력창으로
 
     await send('빈 대화 채우기')
     await newChat.click()
     await newChat.click()
     expect(await blanks()).toBe(1)
+  })
+
+  // ⌘N — 새 대화 단축키 (이슈 #344) — 버튼과 같은 동작이고 포커스도 입력창으로 (#343)
+  it('⌘N — 새 대화 단축키, 포커스는 입력창으로', async () => {
+    await send('⌘N 확인')
+    await expect.poll(() => page.locator('.main__header').textContent(), { timeout: 5_000 }).toBe('⌘N 확인')
+    await page.keyboard.press('Meta+n')
+    await expect.poll(() => page.locator('.main__header').textContent(), { timeout: 5_000 }).toBe('새 대화') // 빈 새 대화가 새로 생겨서
+    expect(await page.evaluate(() => document.activeElement?.classList.contains('composer__input'))).toBe(true)
+  })
+
+  // 이슈 #374 — 세션 이동에 포커스: 다른 대화 행을 클릭하거나 ⌘↑/⌘↓ 로 이동하면 키가 옛 화면에 남아 마우스를 다시 대야
+  // 하므로 입력창으로 간다 (#343 의 새 대화 버튼을 잇는 길)
+  it('다른 대화 행 클릭·⌘↓ 이동에 입력창 포커스가 자동으로 간다 (#374)', async () => {
+    const inputFocused = () => page.evaluate(() => document.activeElement?.classList.contains('composer__input') ?? false)
+    const header = () => page.locator('.main__header').textContent()
+    await send('세션 이동 포커스 확인') // 지금 대화가 목록에 남는다 — 그로 부터는 다른 대화를 볼 수 있다
+    const other = page.locator('.session-item:not(.session-item--active)').first()
+    const otherTitle = (await other.locator('.session-item__title').textContent())!.trim()
+    await other.locator('.session-item__main').click()
+    await expect.poll(header, { timeout: 5_000 }).toBe(otherTitle)
+    await expect.poll(inputFocused, { timeout: 5_000 }).toBe(true) // 마우스로 이동해도 입력창
+
+    await page.keyboard.press('Meta+ArrowDown') // 키로 이동해도 입력창
+    await expect.poll(header, { timeout: 5_000 }).not.toBe(otherTitle)
+    await expect.poll(inputFocused, { timeout: 5_000 }).toBe(true)
   })
 })
 
@@ -1159,9 +1212,10 @@ describe('모델 선택', () => {
     await menu().getByRole('menuitemradio', { name: 'Echo B' }).click()
     await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
     expect(await composerModel()).toBe('Echo B')
-    expect(await trigger().evaluate((el) => el === document.activeElement)).toBe(true) // 고르면 포커스는 드롭다운 버튼으로
+    expect(await page.locator('.composer__input').evaluate((el) => el === document.activeElement)).toBe(true) // 고르면 포커스는 다시 입력창으로 (#374)
 
     // 키보드: Enter 로 열고 ↑ 로 옮겨 Enter 로 고른다. Esc 는 고르지 않고 닫는다
+    await trigger().focus() // 앞 선택으로 포커스가 입력창에 갔으므로 버튼으로 다시
     await page.keyboard.press('Enter')
     await menu().waitFor({ timeout: 5_000 })
     expect(await focused()).toBe('Echo B')
@@ -1171,6 +1225,8 @@ describe('모델 선택', () => {
     await expect.poll(() => menu().count(), { timeout: 5_000 }).toBe(0)
     expect(await composerModel()).toBe('Echo B')
     expect(await page.locator('.composer').count()).toBe(1) // Esc 가 다른 것(대화 화면)까지 닫지 않는다
+    expect(await page.locator('.composer__input').evaluate((el) => el === document.activeElement)).toBe(true) // Esc 로 닫아도 입력창 (#374)
+    await trigger().focus()
     await page.keyboard.press('Enter')
     await menu().waitFor({ timeout: 5_000 })
     await page.keyboard.press('ArrowUp')

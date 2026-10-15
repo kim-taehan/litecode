@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ProviderSummary } from '../shared/ipc.ts'
+import { focusComposerInput } from './composerFocus.ts'
 import { findModel, type ModelRef } from './modelChoice.ts'
 import { useT } from './settingsStore.ts'
 
@@ -11,7 +12,7 @@ interface ModelSelectProps {
 }
 
 /** 입력창 아래 모델 드롭다운 (dsh ui-model-selection 참조). 설정의 모든 모델을 provider 묶음으로 보이고, 지금 모델 줄에 체크.
- *  열면 그 줄에 포커스, ↑/↓ 로 옮기고 Enter·클릭으로 고른다. Esc·바깥 클릭은 고르지 않고 닫는다. 닫히면 포커스는 버튼으로 */
+ *  열면 그 줄에 포커스, ↑/↓ 로 옮기고 Enter·클릭으로 고른다. Esc·바깥 클릭은 고르지 않고 닫는다. 닫히면 포커스는 입력창으로 (#374) */
 export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -34,7 +35,7 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
     const list = rows()
     ;(list.find((row) => row.getAttribute('aria-checked') === 'true') ?? list[0])?.focus()
     const outside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+      if (!rootRef.current?.contains(event.target as Node)) close()
     }
     document.addEventListener('pointerdown', outside)
     return () => document.removeEventListener('pointerdown', outside)
@@ -42,7 +43,7 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
 
   function close(): void {
     setOpen(false)
-    triggerRef.current?.focus()
+    if (!focusComposerInput()) triggerRef.current?.focus() // 닫히면 입력창으로 — 없으면(컴포저 안 보이는 화면) 버튼으로
   }
 
   function onMenuKeyDown(event: ReactKeyboardEvent): void {

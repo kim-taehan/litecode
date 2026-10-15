@@ -75,12 +75,38 @@
   border-radius: 0;
 }
 
+.todo-dock__bar {
+  display: flex;
+  align-items: center;
+}
+
+.todo-dock__dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.todo-dock__dismiss:hover,
+.todo-dock__dismiss:focus-visible {
+  background: var(--fill-active);
+  color: var(--text);
+}
+
 .todo-dock__head {
   display: flex;
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  width: 100%;
+  flex: 1 1 auto;
   min-width: 0;
   height: 32px;
   padding: 0 12px;

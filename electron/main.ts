@@ -56,6 +56,8 @@ import { RemoteService } from '../src/services/remote.ts'
 import { RemoteHttp } from '../src/services/remote/http.ts'
 import { RemoteHttps } from '../src/services/remote/https.ts'
 import { RemoteBluetooth, bluetoothProblem, type BlenoLike } from '../src/services/remote/bluetooth.ts'
+import { ForwardSkillService } from '../src/services/appMcp/forwardSkill.ts'
+import { DelegationService } from '../src/services/delegation.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { GoalService } from '../src/services/goal.ts'
@@ -63,7 +65,7 @@ import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
 import { TaskTools } from '../src/services/appMcp/tools/tasks.ts'
 import { GitService } from '../src/services/git.ts'
 import { GitTools } from '../src/services/appMcp/tools/git.ts'
-import { gitWebUrl, type GitAction } from '../shared/git.ts'
+import { gitWebUrl, type GitAction, type GitLogPageQuery } from '../shared/git.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../src/services/jsonFile.ts'
@@ -524,7 +526,7 @@ function appMcpBridge(ctx: Context): void {
     return () => void app.off('window-all-closed', onAllClosed)
   })
 }
-appMcpBridge.inject = ['appMcp']
+appMcpBridge.inject = ['appMcp', 'delegation']
 
 // 모바일 연결 (이슈 #56) — 설정 > 모바일과 짝짓기 [허용] 확인의 IPC. 상태가 바뀌면(요청이 왔다·기기가 붙었다) 모든 창에
 function remoteBridge(ctx: Context): void {
@@ -576,9 +578,38 @@ function gitBridge(ctx: Context): void {
     return directory
   }
   handle(ctx, Channel.GIT_VIEW, async (_event, directory: unknown) => ctx.git.view(await project(directory)))
-  handle(ctx, Channel.GIT_DIFF, async (_event, directory: unknown, file: unknown, staged: unknown) => ctx.git.diff(await project(directory), String(file), staged === true))
+  handle(ctx, Channel.GIT_DIFF, async (_event, directory: unknown, file: unknown, staged: unknown) => ctx.git.diff(await project(directory), String(file), staged === 'head' ? 'head' : staged === true))
   handle(ctx, Channel.GIT_LOG, async (_event, directory: unknown) => ctx.git.log(await project(directory)))
+  // 기록 탭 페이징 (#400) — query 는 skip·limit 두 숫자만 (화면이 줘도 여기서만 본다)
+  handle(ctx, Channel.GIT_LOG_PAGE, async (_event, directory: unknown, query: unknown) => {
+    const record = query && typeof query === 'object' ? (query as Record<string, unknown>) : {}
+    const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined)
+    const str = (value: unknown) => (typeof value === 'string' && value.length <= 500 ? value : undefined)
+    const page: GitLogPageQuery = {}
+    const skip = num(record['skip'])
+    if (skip !== undefined) page.skip = skip
+    const limit = num(record['limit'])
+    if (limit !== undefined) page.limit = limit
+    for (const key of ['text', 'branch', 'author', 'since', 'until'] as const) {
+      const value = str(record[key])
+      if (value !== undefined) page[key] = value
+    }
+    page.regex = record['regex'] === true
+    page.caseSensitive = record['caseSensitive'] === true
+    if (Array.isArray(record['paths'])) {
+      const paths = (record['paths'] as unknown[]).filter((value): value is string => typeof value === 'string' && value.length <= 500).slice(0, 50)
+      if (paths.length > 0) page.paths = paths
+    }
+    return ctx.git.logPage(await project(directory), page)
+  })
+  handle(ctx, Channel.GIT_LOG_AUTHORS, async (_event, directory: unknown) => ctx.git.logAuthors(await project(directory)))
   handle(ctx, Channel.GIT_BRANCHES, async (_event, directory: unknown) => ctx.git.branches(await project(directory)))
+  handle(ctx, Channel.GIT_REMOTE_BRANCHES, async (_event, directory: unknown) => ctx.git.remoteBranches(await project(directory)))
+  handle(ctx, Channel.GIT_LAST_COMMIT, async (_event, directory: unknown) => ctx.git.lastCommit(await project(directory)))
+  handle(ctx, Channel.GIT_STASHES, async (_event, directory: unknown) => ctx.git.stashes(await project(directory)))
+  handle(ctx, Channel.GIT_IGNORED, async (_event, directory: unknown) => ctx.git.ignored(await project(directory)))
+  // 변경 파일 삭제 (#389) — 휴지통으로 (되살릴 수 있게). 프로젝트 밖 경로는 ctx.git.trash 가 거절한다
+  handle(ctx, Channel.GIT_TRASH, async (_event, directory: unknown, file: unknown) => ctx.git.trash(await project(directory), String(file), (absolute) => shell.trashItem(absolute)))
   handle(ctx, Channel.GIT_RUN, async (_event, directory: unknown, action: GitAction) => ctx.git.perform(await project(directory), action))
   handle(ctx, Channel.GIT_OPEN_REMOTE, async (_event, directory: unknown) => {
     const view = await ctx.git.view(await project(directory))
@@ -725,6 +756,8 @@ const features: FeatureDefinition[] = [
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
       ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
       ctx.plugin(TaskTools) // 앱 MCP 의 task_start — 백그라운드 하위 작업, 내장 task 를 대신한다 (이슈 #319)
+      ctx.plugin(DelegationService) // 프로젝트 간 지시의 대상·자격·전송 — 세션 도구와 Projects 탭의 단일 결정지 (이슈 #55·#341)
+      ctx.plugin(ForwardSkillService, { appDir: path.join(userData, 'opencode', 'skills') }) // 내장 /forward 스킬 — 기능이 꺼지면 스킬도 함께 사라진다 (이슈 #341)
       ctx.plugin(appMcpBridge)
     },
   },

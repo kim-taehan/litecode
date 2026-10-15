@@ -71,7 +71,7 @@ describe('MissingConversations — 못 연 프로젝트의 대화', () => {
 })
 
 describe('ProjectQuickOpen — 프로젝트 빠른 열기 (이슈 #305)', () => {
-  const base = { projects, onPick: noop, onOpenFolder: noop, onToggleFavorite: noop, onRemove: later, onRename: later, onClose: noop }
+  const base = { projects, onPick: noop, onOpenFolder: noop, onToggleFavorite: noop, onRemove: later, onRename: later, onClose: noop, cycle: 0 }
   it('즐겨찾기 먼저(그룹 라벨 없음), 지금 프로젝트 ✓, 상태 점·도는 수, 폴더 열기 행, 오류', () => {
     const html = renderToStaticMarkup(
       createElement(ProjectQuickOpen, {

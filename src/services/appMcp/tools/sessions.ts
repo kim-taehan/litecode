@@ -1,5 +1,4 @@
 import type { Context } from 'cordis'
-import path from 'node:path'
 import { realDirectory } from '../../projectPath.ts'
 import { APP_MCP_NAME } from '../../mcp.ts'
 import type { AppMcpTool } from '../rpc.ts'
@@ -7,37 +6,41 @@ import { DEFAULT_MODE } from '../../../../shared/modes.ts'
 import {
   LIST_MAX,
   LIST_TOOL,
-  MAX_SENDS_PER_TURN,
   MESSAGE_MAX,
-  originOfConversation,
-  projectId,
-  QUEUE_LIMIT,
   READ_CLIP,
   READ_TOOL,
   READ_TURNS_MAX,
   SEND_TOOL,
-  shortIds,
   WAIT_SECONDS_MAX,
-  wrapInstruction,
+  shortIds,
 } from '../../../../shared/delegation.ts'
 import type { AttentionTarget, Conversation, HistoryMessage, Project } from '../../../../shared/contract.ts'
+import type { DelegationTarget } from '../../delegation.ts'
 import '../../appMcp.ts'
 import '../../chat.ts'
+import '../../delegation.ts'
 import '../../sessions.ts'
 import '../../projects.ts'
 import '../../providers.ts'
 
 // 세션 도구 셋 (이슈 #55·#137 — 설계·실측 _workspace/01z_desktop_mcp.md 3-3·3-4·3-5): AI 가 **다른 프로젝트**를 보고(list·read) 지시를 보낸다(send).
 // 대상은 등록된 프로젝트(ctx.projects) 가운데 호출이 온 주소의 프로젝트(URL 의 프로젝트 키 → directory)가 아닌 것, 그 각각에서 **사용자가 마지막에
-// 보던 대화 하나**다 (사용자 결정 2026-10-06, ctx.sessions.lastViewed). 같은 프로젝트의 대화는 목록에도 없고, 새 대화를 만드는 도구도 없다.
+// 보던 대화**다 (사용자 결정 2026-10-06, ctx.sessions.lastViewed) — 그게 목록·기본 대상의 기준. 같은 프로젝트의 대화는 목록에도 없고, 새 대화를
+// 만들 **도구**도 없다. **받는 대화는 사용자가 고른다**(#348, 선택지가 넓어진 것 #351) — 승인 카드가 각 프로젝트(보내는 프로젝트 포함)의
+// 대화 목록과 **새 대화** 줄을 보여 주므로, 고른 것은 다른 대화·이 프로젝트의 대화·새 대화(new-conversation)가 될 수 있다. 고른 것이 허용
+// 기록(caller.target)에 실려 오면 그 대상(등록된 프로젝트인지는 includeSelf 대상 목록)으로 이쪽에서 다시 보고 보낸다 — 새 대화면
+// ctx.delegation.send(newConversation) 가 그 프로젝트의 대화 모델·모드로 만든다. read_project 도 결과의 짧은 id(c-…)로 그 받은 대화를
+// 지정해 읽을 수 있다 (이 프로젝트로 간 것은 읽을 수 없다 — 그 목록엔 이 프로젝트가 없으므로).
 // 대상에서 빠지는 프로젝트: 폴더가 없어졌다 · 마지막에 보던 대화가 없거나 지워졌다(다른 대화로 대신하지 않는다) · 엔진에 넘길 수 없는 폴더(#101)
 //
-// 보내기·읽기는 세 겹으로 지킨다:
-// 1. 엔진 권한 — ask 라 부를 때마다 승인 카드가 뜬다 (engine.ts 의 규칙. 계획 모드에는 보내기가 없고, 하위 작업에는 둘 다 없다)
+// 보내기는 세 겹으로, 읽기는 두 겹으로 지킨다:
+// 1. 엔진 권한 — 보내기: ask 라 부를 때마다 승인 카드가 뜬다 (engine.ts 의 규칙. 계획 모드에는 없고, 하위 작업에는 없다). 읽기: 모드 에이전트에는
+//    allow(카드 없음) — "읽기도 매번 승인해야 되니?" 에 안 된다고(사용자 결정 2026-10-06). 매번 묻기 모드만 와일드카드 ask 로 묻는다
 // 2. 부른 대화 — 호출 요청에는 "누가 불렀나" 가 없어 ctx.llm.callerOf 로 그 폴더의 도는 턴에서 찾는다. 못 찾으면(앱이 돌린 턴이 아니다) 거절,
-//    하위 작업이 불렀으면 거절
-// 3. 앱 확인 — 사용자가 **앱의 승인 카드에서** 허용한 호출만 받는다 (caller.approved). 엔진 비밀번호를 쥔 폴더 코드가 엔진 API 로 스스로
-//    허용한 호출은 기록이 없어 거절된다
+//    **보내기** 는 하위 작업(백그라운드 태스크)이 부른 것도 거절 — 읽기는 허용한다(#357 — 읽기 전용·승인 카드 없는 모니터링, 백그라운드 태스크가 forward 결과를 지켜 본다)
+// 3. 앱 확인(보내기만) — 사용자가 **앱의 승인 카드에서** 허용한 호출만 받는다 (caller.approved). 엔진 비밀번호를 쥔 폴더 코드가 엔진 API 로 스스로
+//    허용한 호출은 기록이 없어 거절된다. 읽기는 카드가 없으니 이 요소를 뗐다(#342 — 카드 없이 allow 인 모드에서 승인이 기록될 일이 없어 읽기가
+//    영원히 거부되던 것)
 // 그리고 보내기는 깊이 1(지시를 받아 도는 턴은 다시 지시하지 못한다)·한 턴에 5번·받는 대화 대기열 5개.
 //
 // 받는 쪽: 받는 대화는 **자기 프로젝트 폴더·자기 모델·자기 모드**로 움직인다 — 보내는 쪽 권한이 넘어가지 않는다. 쉬면 그 자리에서 턴이 되고 돌고
@@ -101,15 +104,8 @@ function bounded(value: unknown, fallback: number, min: number, max: number): nu
   return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.floor(number))) : fallback
 }
 
-/** 다른 프로젝트 하나와 그 프로젝트에서 마지막에 보던 대화 */
-interface Target {
-  /** 모델에게 보이는 프로젝트 id (p-…) */
-  id: string
-  project: Project
-  conversation: Conversation
-  /** 엔진에 넘길 수 없는 폴더면 그 사유 (#101) — 목록에는 없고, 보내거나 읽으면 이 사유로 거절한다 */
-  problem?: string
-}
+/** 다른 프로젝트 하나와 그 프로젝트에서 마지막에 보던 대화 — 대상·자격의 단일 결정지는 ctx.delegation */
+type Target = DelegationTarget
 
 export function SessionTools(ctx: Context): void {
   /** 그 프로젝트(realpath)의 대화 — 저장된 project 는 사용자가 고른 경로 그대로라 realpath 로 맞춰 본다 */
@@ -120,25 +116,9 @@ export function SessionTools(ctx: Context): void {
     return all.filter((entry) => real.get(entry.project) === directory)
   }
 
-  /** 보내는 프로젝트(directory, realpath)가 아닌 등록된 프로젝트와 그 각각의 마지막에 보던 대화 — 폴더가 없어졌거나 그 대화가 없으면(본 적 없다·
-   *  지워졌다) 빠진다. 경로는 realpath 로 맞춰 본다 (inProject 와 같은 이유) */
-  async function others(directory: string): Promise<Target[]> {
-    const all = await ctx.sessions.list()
-    const viewed = new Map<string, string>()
-    for (const [project, id] of Object.entries(await ctx.sessions.lastViewed())) {
-      const real = await realDirectory(project)
-      if (real) viewed.set(real, id)
-    }
-    const targets: Target[] = []
-    for (const project of await ctx.projects.list()) {
-      const real = await realDirectory(project.path)
-      if (!real || real === directory) continue
-      const conversation = all.find((entry) => entry.id === viewed.get(real))
-      if (!conversation) continue
-      const problem = await ctx.llm.folderProblem(real)
-      targets.push({ id: projectId(project.path), project, conversation, ...(problem && { problem }) })
-    }
-    return targets
+  /** 보내는 프로젝트가 아닌 등록된 프로젝트와 그 각각의 마지막에 보던 대화 — ctx.delegation 에서 */
+  function others(directory: string): Promise<Target[]> {
+    return ctx.delegation.targets(directory)
   }
 
   function pick(targets: readonly Target[], id: unknown): Target | undefined {
@@ -157,59 +137,61 @@ export function SessionTools(ctx: Context): void {
     return !turn ? 'idle' : turn.waiting ? 'waiting for the user' : 'running'
   }
 
-  /** 그 대화의 짧은 id (c-…) — 저장된 대화 전부를 한 묶음으로 (화면도 같은 묶음으로 푼다) */
-  async function shortOf(id: string): Promise<string> {
-    return shortIds((await ctx.sessions.list()).map((entry) => entry.id)).get(id) ?? id
+  /** 등록 대상(보내는 프로젝트 포함, #351)의 realpath → 대상 (사용자가 고른 대화가 그 프로젝트의 것인지 보는 것, #348) */
+  async function targetByRealpath(directory: string): Promise<Map<string, Target>> {
+    const map = new Map<string, Target>()
+    for (const target of await ctx.delegation.targets(directory, true)) {
+      const real = await realDirectory(target.project.path)
+      if (real) map.set(real, target)
+    }
+    return map
   }
 
-  /** 보내기·읽기 도구를 부른 호출 — 본 세션이 불렀고 사용자가 앱에서 허용했어야 한다. 안 되면 그 사유를 던진다 (모델이 읽는다) */
+  /** 보내기·읽기 도구를 부른 호출 — 본 세션이(하는 중인 턴이) 부른 것인지만 본다. 안 되면 그 사유를 던진다 (모델이 읽는다).
+   *  childOk — 하위 작업(백그라운드 태스크)이 부른 호출을 넣을 것: 읽기만(#357 — 읽기 전용·승인 카드 없다), 보내기는 안 된다(깊이 1·승인) */
+  async function caller(directory: string, tool: string, args: Record<string, unknown>, childOk = false) {
+    const found = await ctx.llm.callerOf(directory, { server: APP_MCP_NAME, tool }, args)
+    if (!found) throw new Error(NO_CALLER)
+    if (found.child && !childOk) throw new Error('Sub-tasks cannot reach other projects.')
+    return found
+  }
+
+  /** 보내기 도구를 부른 호출 — 위 확인에 사용자가 앱의 승인 카드에서 허용했음(caller.approved)이 더해진다 */
   async function approved(directory: string, tool: string, args: Record<string, unknown>, refused: string) {
-    const caller = await ctx.llm.callerOf(directory, { server: APP_MCP_NAME, tool }, args)
-    if (!caller) throw new Error(NO_CALLER)
-    if (caller.child) throw new Error('Sub-tasks cannot reach other projects.')
-    if (!caller.approved) throw new Error(`This call was not approved by the user in litecode. ${refused}`)
-    return caller
+    const found = await caller(directory, tool, args)
+    if (!found.approved) throw new Error(`This call was not approved by the user in litecode. ${refused}`)
+    return found
   }
 
-  /** 보내기 도구를 부른 대화 — 자격(본 세션·앱에서 허용·깊이 1)을 다 보고 준다. chosen 은 허용하며 사용자가 고른 받을 대화 (없으면 도구 인자대로) */
-  async function sender(directory: string, args: Record<string, unknown>): Promise<{ from: Conversation; chosen?: Extract<AttentionTarget, { kind: 'conversation' }> }> {
+  /** 보내기 도구를 부른 대화 — 자격(본 세션·앱에서 허용·깊이 1)을 다 보고 준다. chosen 은 허용하며 사용자가 고른 받을 곳(없는 대화·새 대화,
+   *  #348·#351 — 없으면 도구 인자대로) */
+  async function sender(directory: string, args: Record<string, unknown>): Promise<{ from: Conversation; chosen?: Extract<AttentionTarget, { kind: 'conversation' | 'new-conversation' }> }> {
     const caller = await approved(directory, SEND_TOOL, args, 'Nothing was sent.')
     const found = (await inProject(directory)).find((entry) => entry.engineSessionId === caller.sessionId)
     const turn = found && ctx.chat.turnOf(found.id)
     if (!found || !turn) throw new Error(NO_CALLER)
     if (turn.origin.startsWith('session:')) throw new Error('This turn was started by another conversation and cannot delegate further.')
-    return { from: found, ...(caller.target?.kind === 'conversation' && { chosen: caller.target }) }
+    const target = caller.target
+    const chosen = target?.kind === 'conversation' || target?.kind === 'new-conversation' ? target : undefined
+    return { from: found, ...(chosen && { chosen }) }
   }
 
-  /** 보내는 프로젝트의 이름 — 받는 대화의 딱지·감싼 글에 보인다. 목록에서 빠진 폴더면 폴더 이름 */
-  async function nameOf(directory: string): Promise<string> {
-    for (const project of await ctx.projects.list()) if ((await realDirectory(project.path)) === directory) return project.name
-    return path.basename(directory)
-  }
-
-  /** 그 프로젝트의 마지막에 보던 대화에 보낸다 — 자격을 보고(모델·대기열 상한) 쉬면 턴으로, 돌고 있으면 대기열로. 받는 대화의 폴더·모델·모드는
-   *  그 대화에 저장된 것 그대로다 (ctx.chat 이 저장된 대화에서 읽는다). redirected: 사용자가 AI 와 다른 프로젝트를 골랐다 */
-  async function sendTo(directory: string, from: Conversation, target: Target, message: string, redirected: boolean): Promise<string> {
-    const to = target.conversation
-    if (!to.model || !ctx.providers.get(to.model.providerId)?.models.some((model) => model.id === to.model!.modelId)) throw new Error('Target conversation has no usable model.')
-    const waiting = ctx.chat.queued(to.id)
-    if (waiting >= QUEUE_LIMIT) throw new Error(`Target queue is full (${waiting} waiting). Use read_project to check on it and try again later.`)
-    if (!ctx.chat.countSend(from.id, MAX_SENDS_PER_TURN)) throw new Error(`Too many instructions sent in this turn (the limit is ${MAX_SENDS_PER_TURN}).`)
-    const ahead = Math.max(1, waiting + (ctx.chat.turnOf(to.id) ? 1 : 0))
-    const project = await nameOf(directory)
-    const result = await ctx.chat.send(to.id, {
-      text: wrapInstruction({ project, title: from.title }, message),
-      display: message,
-      origin: originOfConversation(from.id),
-      from: { conversationId: from.id, title: from.title, project },
-    })
-    const where = `its conversation "${to.title}" (${await shortOf(to.id)})`
+  /** 그 프로젝트에 보낸다 — 자격(대상·모델·대기열·한 턴 수)과 전송은 ctx.delegation 에서, 결과 **글**은 여기서.
+   *  conversationId: 사용자가 카드에서 고른 대화 (없으면 대상의 마지막에 보던 대화). fresh: 새 대화에 보내는 것 (#351). redirected: 사용자가
+   *  AI 와 다른 프로젝트를 골랐다 (같은 프로젝트의 다른 대화·새 대화는 redirect 가 아니다 — 결과 글의 `conversation "…" (c-…)` 가 실제
+   *  받은 대화를 말하니까). 이 프로젝트(보내는 쪽)로 우회하면 read_project 로 읽을 수 없으니(목록에 이 프로젝트가 없음) 그렇게 말하지 않는다 */
+  async function sendTo(directory: string, from: Conversation, target: Target, message: string, redirected: boolean, conversationId?: string, fresh = false): Promise<string> {
+    const sent = await ctx.delegation.send({ directory, from: { id: from.id, title: from.title }, targetId: target.id, ...(conversationId && { conversationId }), ...(fresh && { newConversation: true }), message, count: true })
+    const name = `"${target.project.name}" (${target.id})`
+    const where = `${fresh ? 'a new conversation' : 'its conversation'} "${sent.conversationTitle}" (${sent.shortId})`
     if (redirected) {
-      const note = result.state === 'sent' ? '' : ` It is busy, so the instruction is queued (${ahead} ahead).`
+      const note = sent.state === 'sent' ? '' : ` It is busy, so the instruction is queued (${sent.ahead} ahead).`
+      if ((await realDirectory(target.project.path)) === (await realDirectory(directory))) {
+        return `Accepted. The user chose a conversation in this project: "${target.project.name}" (id ${target.id}).${note} It runs in ${where}.`
+      }
       return `Accepted. The user chose a different project: "${target.project.name}" (id ${target.id}).${note} It runs in ${where}. Use this project id with read_project.`
     }
-    const name = `"${target.project.name}" (${target.id})`
-    return result.state === 'sent' ? `Accepted. ${name} started working on it in ${where}.` : `Accepted and queued — ${name} is busy (${ahead} ahead). It will run in ${where}.`
+    return sent.state === 'sent' ? `Accepted. ${name} started working on it in ${where}.` : `Accepted and queued — ${name} is busy (${sent.ahead} ahead). It will run in ${where}.`
   }
 
   const list: AppMcpTool = {
@@ -221,33 +203,46 @@ export function SessionTools(ctx: Context): void {
       const targets = (await others(directory)).filter((entry) => !entry.problem)
       if (targets.length === 0) return 'No other project can receive an instruction. Only projects where the user has viewed a conversation are listed; this project is never listed.'
       const now = Date.now()
-      return targets
-        .slice(0, LIST_MAX)
-        .map((entry) => projectLine(entry.id, entry.project, entry.conversation, stateOf(entry.conversation.id), ctx.chat.queued(entry.conversation.id), now))
-        .join('\n')
+      const shown = targets.slice(0, LIST_MAX)
+      // (#353) — 잘린 것이 있으면 조용히 하지 않는다: 목록 뒤에 남은 개수를 알려 준다
+      const rest = targets.length - shown.length
+      const lines = shown.map((entry) => projectLine(entry.id, entry.project, entry.conversation, stateOf(entry.conversation.id), ctx.chat.queued(entry.conversation.id), now)).join('\n')
+      return rest > 0 ? `${lines}\n… and ${rest} more not listed.` : lines
     },
   }
 
   const read: AppMcpTool = {
     name: READ_TOOL,
     description:
-      'Read the state, last request and final answer (no tool output) of the conversation the user last viewed in another project. The user must approve each read. Use after send_to_project; pass wait_seconds instead of calling repeatedly.',
+      'Read the state, last request and final answer (no tool output) of a conversation in another project. By default it reads the conversation the user last viewed there; pass `conversation` (a short id like c-xxxxxxxx or a full id, from the send or read result) to read the conversation that received the instruction. No approval is needed. Use after send_to_project; pass wait_seconds instead of calling repeatedly.',
     inputSchema: {
       type: 'object',
       properties: {
         project: { type: 'string', description: 'Project id from list_projects (p-…).' },
+        conversation: { type: 'string', description: 'Conversation to read: full id or short id (c-…) from the send or read result. Defaults to the conversation last viewed in that project.' },
         turns: { type: 'number', description: `Last turns to return (1-${READ_TURNS_MAX}, default 1).` },
         wait_seconds: { type: 'number', description: `Seconds to wait for a running turn to finish (0-${WAIT_SECONDS_MAX}).` },
       },
       required: ['project'],
     },
     async run(args, { directory }) {
-      await approved(directory, READ_TOOL, args, 'Nothing was read.')
-      const { conversation } = usable(pick(await others(directory), args['project']), UNKNOWN)
+      // childOk — 하위 작업(백그라운드 태스크)의 읽기 모니터링도 허용 (send 만 하위 작업을 거절, #357)
+      await caller(directory, READ_TOOL, args, true)
+      const target = usable(pick(await others(directory), args['project']), UNKNOWN)
+      let conversation = target.conversation
+      const wanted = typeof args['conversation'] === 'string' ? args['conversation'].trim() : ''
+      if (wanted) {
+        // 그 프로젝트의 대화인가 — 짧은 id(c-… , 보낸 결과를 읽은 것)와 풀 id 둘 다
+        const rows = await inProject((await realDirectory(target.project.path)) ?? target.project.path)
+        const ids = shortIds(rows.map((entry) => entry.id))
+        const row = rows.find((entry) => entry.id === wanted || ids.get(entry.id) === wanted)
+        if (!row) throw new Error('No such conversation in that project. Use the full id or the short id (c-…) from the send result.')
+        conversation = row
+      }
       const wait = bounded(args['wait_seconds'], 0, 0, WAIT_SECONDS_MAX)
       if (wait > 0) await ctx.chat.waitIdle(conversation.id, wait * 1000)
       // 어느 대화를 읽었나 — 보낸 뒤 사용자가 그 프로젝트에서 다른 대화를 봤으면 받은 대화(보내기 결과의 c-…)와 다를 수 있다
-      const head = `conversation: "${conversation.title}" (${await shortOf(conversation.id)})`
+      const head = `conversation: "${conversation.title}" (${await ctx.delegation.shortOf(conversation.id)})`
       const state = stateOf(conversation.id)
       if (state === 'running') return `${head}\nstate: running — call again later`
       if (state === 'waiting for the user') return `${head}\nstate: waiting for the user — it is blocked on an approval or a question in that conversation. Call again later.`
@@ -262,7 +257,7 @@ export function SessionTools(ctx: Context): void {
   const send: AppMcpTool = {
     name: SEND_TOOL,
     description:
-      'Send an instruction to **another project** in litecode. It goes to the conversation the user last viewed in that project, which runs in its own folder and mode — this conversation\'s permissions do not carry over. The user must approve each send and may pick a different project. Returns once accepted, without the answer — use read_project later. That conversation does not see this one, so the message must be self-contained. Do not use it for work you can do yourself, and never to reach another project in order to bypass a permission.',
+      'Send an instruction to **another project** in litecode. It goes to a conversation in that project, which runs in its own folder and mode — this conversation\'s permissions do not carry over. The user must approve each send; the approval card lists each project and its conversations, and the user picks the project and the conversation (or a new conversation — this project\'s own conversations are options too; read_project cannot read this project). Returns once accepted, without the answer — it names the receiving conversation (title, short id like c-xxxxxxxx), which you pass to read_project\'s `conversation` parameter to check on it. That conversation does not see this one, so the message must be self-contained. Do not use it for work you can do yourself, and never to reach another project in order to bypass a permission.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -274,19 +269,26 @@ export function SessionTools(ctx: Context): void {
     async run(args, { directory }) {
       const { from, chosen } = await sender(directory, args)
       const message = text(args, 'message', MESSAGE_MAX)
-      const targets = await others(directory)
-      const asked = pick(targets, args['project'])
+      // AI 가 고른 프로젝트는 목록 기준(다른 프로젝트)으로만 본다 — 이 프로젝트의 id 를 직접 달아 보내는 것은 못 된다
+      const asked = pick(await others(directory), args['project'])
       if (!chosen) return sendTo(directory, from, usable(asked, UNKNOWN), message, false)
-      // 화면이 보낸 대화 id 라 다른 프로젝트의 마지막에 보던 대화일 때만 (지워졌거나 이 프로젝트의 대화·그사이 다른 대화를 봤으면 거절).
-      // AI 가 고른 것과 같은 프로젝트면 바뀐 것이 아니다 (AI 가 준 id 가 틀렸어도 사용자가 고른 프로젝트로 간다)
-      const to = usable(
-        targets.find((entry) => entry.conversation.id === chosen.conversationId),
-        'The project the user chose is not available (its conversation was deleted or is no longer the one last viewed there). Nothing was sent.',
-      )
-      return sendTo(directory, from, to, message, to !== asked)
+      if (chosen.kind === 'new-conversation') {
+        // 새 대화 (카드, #351) — 그 프로젝트가 등록 대상(이 프로젝트 포함)인지 본다
+        const to = usable(pick(await ctx.delegation.targets(directory, true), chosen.projectId), 'The project for the new conversation is not available. Nothing was sent.')
+        const redirected = !asked || to.id !== asked.id
+        return sendTo(directory, from, to, message, redirected, undefined, true)
+      }
+      // 화면이 고른 대화 (카드, #348·#351) — 다른 프로젝트의 대화면 그 프로젝트가 실제 대상이고, **이 프로젝트의 대화도** 허용된다.
+      // 지워진 대화·등록된 프로젝트가 아니면 거절. AI 가 고른 프로젝트의 대화(같은 프로젝트의 다른 대화 포함)면 바뀐 것이 아니다
+      // (AI 가 준 id 가 틀렸어도 사용자가 고른 쪽으로 간다)
+      const picked = (await ctx.sessions.list()).find((entry) => entry.id === chosen.conversationId)
+      if (!picked) throw new Error('The conversation the user chose no longer exists. Nothing was sent.')
+      const to = usable((await targetByRealpath(directory)).get(await realDirectory(picked.project) ?? ''), 'The project of the conversation the user chose is not available. Nothing was sent.')
+      const redirected = !asked || to.id !== asked.id
+      return sendTo(directory, from, to, message, redirected, chosen.conversationId)
     },
   }
 
   for (const tool of [list, read, send]) ctx.effect(() => ctx.appMcp.register(tool))
 }
-SessionTools.inject = ['appMcp', 'chat', 'llm', 'sessions', 'projects', 'providers']
+SessionTools.inject = ['appMcp', 'chat', 'llm', 'sessions', 'projects', 'providers', 'delegation']

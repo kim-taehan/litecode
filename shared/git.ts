@@ -46,6 +46,89 @@ export interface GitCommit {
   pushed: boolean
 }
 
+/** 커밋을 가리키는 레프 (%D 파싱, 기록 탭 #400) — head: HEAD(브랜치 위면 name = 그 브랜치, 분리된 HEAD 면 이름 없음) · branch: 로컬 브랜치 ·
+ *  remote: 원격 브랜치(`origin/…`) · tag: 태그 */
+export interface GitLogRef {
+  kind: 'head' | 'branch' | 'remote' | 'tag'
+  name: string
+}
+
+/** 기록 탭(#400) 커밋 — GitCommit 에 더해서 그래프를 그릴 부모와 칩을 그릴 레프 */
+export interface GitLogCommit extends GitCommit {
+  /** 부모 해시 (첫 부모 0, 머지는 그 뒤) — root 는 없다 */
+  parents: string[]
+  refs: GitLogRef[]
+}
+
+export interface GitLogPage {
+  commits: GitLogCommit[]
+  hasMore: boolean
+}
+
+/** 기록 탭 페이징 읽기 (#400) — skip·limit + 필터(#409). 필터가 있으면 '올리지 않음' 집합도 같은 필터로 */
+export interface GitLogPageQuery {
+  /** 최근 쪽에서 몇 개를 거를 가 */
+  skip?: number
+  /** 페이지 크기 (기본 200) */
+  limit?: number
+  /** 검색 텍스트 — 해시처럼 보이면(16진 4~40자) rev-parse 로 그 커밋을 해석해 그 역사를 본다. 아니면 `--grep` */
+  text?: string
+  /** `.*` 토글 — 텍스트를 패턴으로(`-E`), 꺼지면 고정 문자열(`-F`) */
+  regex?: boolean
+  /** `Cc` 토글 — 대소문자 구분(기본 true), 꺼지면 `--regexp-ignore-case` */
+  caseSensitive?: boolean
+  /** 브랜치 — `all` = `--all`, 로컬 브랜치 이름, 원격 브랜치(`origin/x`). 비어 있으면 HEAD */
+  branch?: string
+  /** 작성자 (`--author`) */
+  author?: string
+  /** 날짜 범위 — 로컬 시각 `YYYY-MM-DD HH:MM:SS` (`--since`/`--until`) */
+  since?: string
+  until?: string
+  /** 경로(`-- <경로>`, literal-pathspecs) */
+  paths?: string[]
+}
+
+/** 마지막 커밋 (#387 마지막 커밋 고치기) — 전체 메시지와 올렸는지 */
+export interface GitLastCommit {
+  message: string
+  /** 원격 브랜치 어디에 있다 — 고칠 수 없다 */
+  pushed: boolean
+}
+
+/** 보관(stash) 한 개 (#389 보관함) — index 는 `stash@{index}`, hash 는 그 보관 커밋 (적용·삭제 때 같은 것인지 확인) */
+export interface GitStash {
+  index: number
+  hash: string
+  message: string
+  /** 보관한 브랜치 — 분리된 HEAD 였으면 없다 */
+  branch?: string
+  /** ms */
+  time: number
+}
+
+/** 무시된 것 한 줄 (#390 .gitignore 연계) — path 는 저장소 루트 기준(폴더는 `/` 로 끝난다). 어느 규칙이 가렸는지는 git check-ignore 의 답:
+ *  source = 규칙 파일(루트 기준 — `.gitignore`·`sub/.gitignore`·`.git/info/exclude`, 전역 설정이면 절대 경로), line = 줄 번호, pattern = 그 줄 */
+export interface GitIgnored {
+  path: string
+  source: string
+  line: number
+  pattern: string
+}
+
+/** 무시에 추가할 파일 (#390, IntelliJ 의 Add to .gitignore · Add to .git/info/exclude) */
+export type GitIgnoreWhere = 'gitignore' | 'exclude'
+
+/** 새 파일 경로(저장소 루트 기준, 폴더는 `/` 로 끝남) → .gitignore 에 쓸 한 줄 (#390). 경로 그대로 쓰되:
+ *  - 그 자리에만 걸리게 — 중간에 `/` 가 없으면 맨 앞에 `/` (git: 앞·가운데에 / 가 있으면 .gitignore 자리 기준, 없으면 아무 깊이의 같은 이름까지 가린다)
+ *  - `* ? [ ] \` 는 앞에 `\`, (앞에 / 가 없을 때) 맨 앞 `!`·`#` 는 `\`, 끝 공백은 `\ ` (git 이 끝 공백을 지운다) */
+export function ignoreLine(path: string): string {
+  const folder = path.endsWith('/')
+  const target = folder ? path.slice(0, -1) : path
+  const text = target.replace(/[*?[\]\\]/g, '\\$&')
+  const anchored = target.includes('/') ? text.replace(/^[!#]/, '\\$&') : `/${text}`
+  return folder ? `${anchored}/` : anchored.replace(/ +$/, (spaces) => '\\ '.repeat(spaces.length))
+}
+
 export interface GitBranch {
   name: string
   current: boolean
@@ -70,8 +153,20 @@ export type GitResult<T extends object = object> = ({ ok: true } & T) | { ok: fa
 export type GitAction =
   | { kind: 'stage' | 'unstage' | 'discard'; paths: string[] }
   | { kind: 'commit'; message: string }
-  | { kind: 'createBranch' | 'switchBranch' | 'deleteBranch'; name: string }
+  /** 마지막 커밋 고치기 (#387) — stage 된 것을 합치고 메시지를 바꾼다. 원격 어디에도 없는 커밋만 (아니면 pushed) */
+  | { kind: 'amend'; message: string }
+  | { kind: 'switchBranch' | 'deleteBranch'; name: string }
+  /** from(로컬 브랜치)을 주면 그 끝에서 만든다 — 브랜치 팝업 줄 메뉴의 '여기서 새 브랜치' (#399). 없으면 지금 HEAD 에서 */
+  | { kind: 'createBranch'; name: string; from?: string }
+  /** 브랜치 팝업 (#386) — switchRemote: `origin/x` → 같은 이름 로컬 브랜치로(없으면 추적 브랜치를 만든다) · switchRevision: 태그·커밋 해시 → 분리된 HEAD */
+  | { kind: 'switchRemote' | 'switchRevision'; name: string }
   | { kind: 'addRemote'; url: string }
+  /** 변경 파일 우클릭 메뉴 (#389) — commitPaths: 그 파일만 커밋(다른 stage 는 그대로, 새 파일은 add 해서) · stash: 그 파일만 보관(새 파일 포함) */
+  | { kind: 'commitPaths' | 'stash'; paths: string[]; message: string }
+  /** 보관함 (#389) — stashPop: 적용(충돌이면 멈추고 보관은 남는다) · stashDrop: 삭제. hash 가 그 번호의 보관과 다르면 invalid */
+  | { kind: 'stashPop' | 'stashDrop'; index: number; hash: string }
+  /** 무시에 추가 (#390) — 새 파일 path(저장소 루트 기준)의 ignoreLine 한 줄을 where 파일 끝에 덧붙인다 */
+  | { kind: 'addIgnore'; path: string; where: GitIgnoreWhere }
   | { kind: 'undoCommit' | 'push' | 'pull' | 'abortMerge' | 'init' }
 
 /** 앱 MCP 서버의 git 도구 (모델이 보는 이름은 `litecode_<이름>`) — 읽기는 바로, 쓰기는 늘 승인 카드 (engineConfig.ts·modes.ts 의 규칙) */
