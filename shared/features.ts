@@ -11,8 +11,9 @@ export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 줄이 없다(#277 의 "항상 켜짐" 읽기 전용 줄은 #302 에서 뺐다).
  *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP, 훅(hooks — #302 에서 고르는 기능(기본 꺼짐)에서 필수로),
- *  같은 도구 반복 알림(repeatGuard — 작은 모델 루프를 끊는 수단이 필수라 토글할 필요가 없다, 사용자 결정 2026-10-15) */
-const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true, hooks: true, repeatGuard: true } as const satisfies Partial<Record<FeatureId, boolean>>
+ *  같은 도구 반복 알림(repeatGuard — 작은 모델 루프를 끊는 수단이 필수라 토글할 필요가 없다, 사용자 결정 2026-10-15),
+ *  터미널 탭(terminal)·다른 앱에서 열기(openIn) — 바탕 화면 구성이라 토글할 필요가 없다 (사용자 결정 2026-10-15) */
+const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true, hooks: true, repeatGuard: true, terminal: true, openIn: true } as const satisfies Partial<Record<FeatureId, boolean>>
 export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = FIXED
 
 /** 사용자가 켜고 끄는 기능의 id — 카드의 이름·설명 글(`feature.<id>`)은 이것에만 있다 */
@@ -27,7 +28,7 @@ export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
 /** 설정 > 기능의 중분류 (사용자 결정 2026-10-06, 시안 B) — 고르는 기능을 빠짐없이 한 번씩 담는다(단위 테스트가 댄다). 묶음 순서대로 이어 붙인 것이 줄 순서,
  *  묶음 이름은 줄마다 뱃지로 보인다 (#302 — 구역 제목은 없앴다). 자동화 묶음은 훅이 필수가 되며 비어 뺐다 */
 export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
-  { id: 'screen', features: ['terminal', 'trajectory', 'openIn', 'git', 'design'] },
+  { id: 'screen', features: ['trajectory', 'git', 'design'] },
   { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser'] },
   { id: 'devices', features: ['voice', 'remote', 'notifications', 'updates'] },
 ]
@@ -35,7 +36,7 @@ export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'devices'; feature
 /** 고르는 기능 중 기본 꺼짐 — 알림 (사용자 결정 2026-10-03), 모바일 연결(remote, 이슈 #56 — 포트를 여는 기능이라 사용자가 켠다),
  *  웹 가져오기(web — opencode 내장 webfetch, 이슈 #14·#103: 2026-10-03 에 늘 꺼짐으로 고정했다가 2026-10-05 사용자 결정으로 다시 고르게.
  *  폐쇄망에선 바깥 주소에 멈추므로 사내 주소용이다. 레거시 경로엔 websearch 가 없다).
- *  나머지(터미널 칸·추론 과정·다른 앱에서 열기·데스크탑 MCP)는 기본 켜짐.
+ *  나머지(추론 과정·데스크탑 MCP)는 기본 켜짐 (터미널 칸·다른 앱에서 열기는 2026-10-15 에 필수(FIXED)로 올라서 더 이상 고르는 기능이 아니다).
  *  목표(goal — ctx.goal, 이슈 #285)는 기본 켜짐 — `/goal` 로 목표를 정했을 때만 움직인다. 모델이 끝을 알리는 도구가 데스크탑 MCP 에 있어 그것이 켜져 있어야 한다.
  *  데스크탑 MCP(appMcp, 이슈 #99)는 앱 내장 MCP 서버(ctx.appMcp)와 그 도구 — 끄면 서버가 내려가고 다음 턴부터 엔진에서 `litecode_*` 도구가 빠진다.
  *  음성 입력(voice — ctx.speech)도 기본 꺼짐 — 마이크 권한을 묻고 쓰는 동안 메모리 ~1GB 인 기능이라 사용자가 켠다. 꺼져 있으면 마이크 권한도 거절한다.
