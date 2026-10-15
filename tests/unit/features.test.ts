@@ -100,7 +100,7 @@ async function start(bundles: FeatureDefinition[] = definitions()): Promise<{ ct
 /** 걸린 채널 (정렬) */
 const channels = () => [...ipc.handlers.keys()].sort()
 /** 기본으로 걸리는 채널 — 알림은 기본 꺼짐, 훅은 필수 (#302) */
-const ALL = ['appMcp:x', 'at:x', 'bang:x', 'goal:x', 'hooks:x', 'mcp:x', 'openIn:x', 'repeatGuard:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
+const ALL = ['appMcp:x', 'at:x', 'bang:x', 'hooks:x', 'mcp:x', 'openIn:x', 'repeatGuard:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
 
 beforeEach(async () => {
   ipc = new FakeIpc()
@@ -132,7 +132,7 @@ describe('FeaturesService', () => {
 
   it('끄고 바로 다시 켜도 핸들러가 겹치지 않고 돌아온다', async () => {
     const { ctx, settings, features } = await start()
-    settings.set({ features: { trajectory: false, goal: false } })
+    settings.set({ features: { trajectory: false } })
     settings.set({ features: {} })
     await features.idle()
     expect(channels()).toEqual(ALL)
@@ -163,20 +163,20 @@ describe('FeaturesService', () => {
 
   it('끈 값은 파일에 남아 다시 띄워도 꺼진 채로 뜬다', async () => {
     const first = await start()
-    first.settings.set({ features: { goal: false } })
+    first.settings.set({ features: { trajectory: false } })
     await first.features.idle()
     await first.fiber.dispose()
     ipc = new FakeIpc()
 
     const again = await start()
-    expect(channels()).toEqual(ALL.filter((channel) => channel !== 'goal:x'))
-    expect(again.seen).toEqual([DEFAULT_ON.filter((feature) => feature !== 'goal')])
+    expect(channels()).toEqual(ALL.filter((channel) => channel !== 'trajectory:load'))
+    expect(again.seen).toEqual([DEFAULT_ON.filter((feature) => feature !== 'trajectory')])
   })
 
   it('프로젝트 자리(directory)는 받지만 아직 전역 값을 따른다', async () => {
     const { settings, features } = await start()
-    settings.set({ features: { goal: false } })
-    expect(features.isEnabled('goal', '/some/project')).toBe(false)
+    settings.set({ features: { trajectory: false } })
+    expect(features.isEnabled('trajectory', '/some/project')).toBe(false)
     expect(features.isEnabled('at', '/some/project')).toBe(true)
   })
 
@@ -206,9 +206,9 @@ describe('FeaturesService', () => {
       expect(seen).toEqual([DEFAULT_ON])
       expect(logged.mock.calls.some((call) => String(call[0]).includes('at'))).toBe(true)
       // 그 뒤의 켜고 끄기도 그대로 돈다
-      settings.set({ features: { goal: false } })
+      settings.set({ features: { trajectory: false } })
       await features.idle()
-      expect(channels()).toEqual(ALL.filter((channel) => channel !== 'at:x' && channel !== 'goal:x'))
+      expect(channels()).toEqual(ALL.filter((channel) => channel !== 'at:x' && channel !== 'trajectory:load'))
       expect(seen).toHaveLength(2)
     } finally {
       logged.mockRestore()
@@ -286,14 +286,14 @@ describe('FeaturesService — 기능 상태', () => {
       }
     }
     const bundles = definitions().map((definition) =>
-      definition.id === 'goal' ? { ...definition, plugin: (ctx: Context) => void ctx.plugin(Broken) } : definition,
+      definition.id === 'openIn' ? { ...definition, plugin: (ctx: Context) => void ctx.plugin(Broken) } : definition,
     )
     const { features } = await quiet(async () => {
       const started = await start(bundles)
-      await vi.waitFor(() => expect(started.features.status('goal')?.state).toBe('failed'))
+      await vi.waitFor(() => expect(started.features.status('openIn')?.state).toBe('failed'))
       return started
     })
-    expect(features.status('goal')).toEqual({ state: 'failed', reason: 'service ctor failed' })
+    expect(features.status('openIn')).toEqual({ state: 'failed', reason: 'service ctor failed' })
     expect(features.status('trajectory')).toEqual({ state: 'on' })
   })
 
@@ -316,7 +316,7 @@ describe('FeaturesService — 기능 상태', () => {
   it('던진 묶음을 끄면 상태가 지워지고, 다시 켜면 다시 시도한다', async () => {
     let fail = true
     const bundles = definitions().map((definition) =>
-      definition.id === 'goal'
+      definition.id === 'trajectory'
         ? {
             ...definition,
             plugin: (ctx: Context) => {
@@ -327,32 +327,32 @@ describe('FeaturesService — 기능 상태', () => {
         : definition,
     )
     const { settings, features } = await quiet(() => start(bundles))
-    expect(features.status('goal')).toEqual({ state: 'failed', reason: 'boom' })
-    settings.set({ features: { goal: false } })
+    expect(features.status('trajectory')).toEqual({ state: 'failed', reason: 'boom' })
+    settings.set({ features: { trajectory: false } })
     await features.idle()
-    expect(features.status('goal')).toBeUndefined()
+    expect(features.status('trajectory')).toBeUndefined()
     fail = false
     settings.set({ features: {} })
     await features.idle()
-    expect(features.status('goal')).toEqual({ state: 'on' })
+    expect(features.status('trajectory')).toEqual({ state: 'on' })
     expect(channels()).toEqual(ALL)
   })
 
   it('묶음이 스스로 문제를 알리고(problem) 풀 수 있다 — 꺼진 기능의 알림은 버리고, 끄면 문제도 지운다', async () => {
     const { settings, features } = await start()
-    features.problem('goal', { key: 'remote.bluetooth.unauthorized' })
-    expect(features.status('goal')).toEqual({ state: 'failed', reason: { key: 'remote.bluetooth.unauthorized' } })
-    features.problem('goal', undefined)
-    expect(features.status('goal')).toEqual({ state: 'on' })
+    features.problem('trajectory', { key: 'remote.bluetooth.unauthorized' })
+    expect(features.status('trajectory')).toEqual({ state: 'failed', reason: { key: 'remote.bluetooth.unauthorized' } })
+    features.problem('trajectory', undefined)
+    expect(features.status('trajectory')).toEqual({ state: 'on' })
     features.problem('notifications', 'x') // 꺼진 기능
     expect(features.status('notifications')).toBeUndefined()
-    features.problem('goal', 'line one\nline two')
-    expect(features.status('goal')).toEqual({ state: 'failed', reason: 'line one' })
-    settings.set({ features: { goal: false } })
+    features.problem('trajectory', 'line one\nline two')
+    expect(features.status('trajectory')).toEqual({ state: 'failed', reason: 'line one' })
+    settings.set({ features: { trajectory: false } })
     await features.idle()
     settings.set({ features: {} })
     await features.idle()
-    expect(features.status('goal')).toEqual({ state: 'on' })
+    expect(features.status('trajectory')).toEqual({ state: 'on' })
   })
 
   it('상태가 바뀌면 features/status 로 알린다 — 같은 값이면 다시 알리지 않는다', async () => {
@@ -371,9 +371,9 @@ describe('FeaturesService — 기능 상태', () => {
     expect((seen.at(-1) as Record<string, unknown>).terminal).toEqual({ state: 'failed', reason: 'no radio' })
     ready.features.problem('terminal', 'no radio')
     expect(seen).toHaveLength(before + 1)
-    ready.settings.set({ features: { goal: false } })
+    ready.settings.set({ features: { trajectory: false } })
     await ready.features.idle()
-    expect('goal' in (seen.at(-1) as Record<string, unknown>)).toBe(false)
+    expect('trajectory' in (seen.at(-1) as Record<string, unknown>)).toBe(false)
   })
 })
 
@@ -411,7 +411,7 @@ describe('featureOn', () => {
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(true) // 필수 — 꺼 둔 저장값이 있어도 켜짐
     expect(featureOn({ openIn: false }, 'openIn')).toBe(true)
-    expect(CHOOSABLE_FEATURES).toEqual(['trajectory', 'notifications', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'voice', 'browser', 'updates', 'git', 'design'])
+    expect(CHOOSABLE_FEATURES).toEqual(['trajectory', 'notifications', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'voice', 'browser', 'updates', 'git', 'design'])
     expect(featureOn(undefined, 'git')).toBe(false) // Git 은 기본 꺼짐, 데스크탑 MCP 가 꺼져도 켤 수 있다 (도구만 빠진다, 이슈 #290)
     expect(featureOn({ git: true, appMcp: false }, 'git')).toBe(true)
     expect(featureOn(undefined, 'updates')).toBe(false) // 새 버전 알림은 기본 꺼짐 — 켜기 전엔 바깥 요청 0 (이슈 #273)
