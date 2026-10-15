@@ -10,8 +10,9 @@ export const FEATURES = ['at', 'slash', 'bang', 'shell', 'terminal', 'trajectory
 export type FeatureId = (typeof FEATURES)[number]
 
 /** 고정 — 사용자가 못 바꾼다 (사용자 결정 2026-10-03). 저장된 값이 있어도 이 값이 이기고, 설정 > 기능에 줄이 없다(#277 의 "항상 켜짐" 읽기 전용 줄은 #302 에서 뺐다).
- *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP, 훅(hooks — #302 에서 고르는 기능(기본 꺼짐)에서 필수로) */
-const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true, hooks: true } as const satisfies Partial<Record<FeatureId, boolean>>
+ *  필수(늘 켜짐): 입력 트리거 @ · / · ! 와 !명령 실행, 스킬, MCP, 훅(hooks — #302 에서 고르는 기능(기본 꺼짐)에서 필수로),
+ *  같은 도구 반복 알림(repeatGuard — 작은 모델 루프를 끊는 수단이 필수라 토글할 필요가 없다, 사용자 결정 2026-10-15) */
+const FIXED = { at: true, slash: true, bang: true, shell: true, skills: true, mcp: true, hooks: true, repeatGuard: true } as const satisfies Partial<Record<FeatureId, boolean>>
 export const FEATURE_FIXED: Partial<Record<FeatureId, boolean>> = FIXED
 
 /** 사용자가 켜고 끄는 기능의 id — 카드의 이름·설명 글(`feature.<id>`)은 이것에만 있다 */
@@ -27,7 +28,7 @@ export const MOBILE_PATH_FEATURES: readonly FeatureId[] = ['lan', 'bluetooth']
  *  묶음 이름은 줄마다 뱃지로 보인다 (#302 — 구역 제목은 없앴다). 자동화 묶음은 훅이 필수가 되며 비어 뺐다 */
 export const FEATURE_GROUPS: readonly { id: 'screen' | 'ai' | 'devices'; features: readonly ChoosableFeatureId[] }[] = [
   { id: 'screen', features: ['terminal', 'trajectory', 'openIn', 'git', 'design'] },
-  { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser', 'repeatGuard'] },
+  { id: 'ai', features: ['appMcp', 'goal', 'web', 'browser'] },
   { id: 'devices', features: ['voice', 'remote', 'notifications', 'updates'] },
 ]
 

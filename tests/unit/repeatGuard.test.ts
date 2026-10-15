@@ -9,7 +9,7 @@ import { SettingsService } from '../../src/services/settings.ts'
 import { FeaturesService } from '../../src/services/features.ts'
 import { historyMessages } from '../../src/services/history.ts'
 import type { EngineMessage, ToolStarted } from '../../src/services/llm.ts'
-import { FEATURE_GROUPS, featureOn } from '../../shared/features.ts'
+import { CHOOSABLE_FEATURES, featureOn } from '../../shared/features.ts'
 
 // 같은 도구 반복 알림 (이슈 #284) — 순수 세기(repeatCounter.ts)와 'llm/tool-started' 를 듣는 묶음(repeatGuard.ts).
 // ctx.llm 은 remind 만 흉내 낸다 — 엔진에 실제로 끼워 넣는 길은 interject.test.ts 의 remind 묶음이 가짜 opencode 로 본다
@@ -135,13 +135,13 @@ describe('기능 묶음 repeatGuard', () => {
     await fs.rm(tmp, { recursive: true, force: true })
   })
 
-  it('고르는 기능·기본 켜짐·"AI 도구" 묶음', () => {
+  it('필수 기능 — 저장된 꺼짐 값이 있어도 켜지고, 고르는 기능에서 빠진다 (설정 > 기능 카드는 없다)', () => {
     expect(featureOn(undefined, 'repeatGuard')).toBe(true)
-    expect(featureOn({ repeatGuard: false }, 'repeatGuard')).toBe(false)
-    expect(FEATURE_GROUPS.find((group) => group.id === 'ai')?.features).toContain('repeatGuard')
+    expect(featureOn({ repeatGuard: false }, 'repeatGuard')).toBe(true)
+    expect(CHOOSABLE_FEATURES).not.toContain('repeatGuard')
   })
 
-  it('설정에서 끄면 같은 호출을 몇 번 해도 알림 0', async () => {
+  it('꺼짐 저장값이 남아 있어도 묶음은 내려가지 않는다 — 필수', async () => {
     const ctx = new Context()
     ctx.plugin(FakeLlm)
     ctx.plugin(SettingsService, { file: path.join(tmp, 'settings.json') })
@@ -150,8 +150,9 @@ describe('기능 묶음 repeatGuard', () => {
     await ready.features.idle()
     ready.settings.set({ features: { repeatGuard: false } })
     await ready.features.idle()
-    for (let i = 0; i < 8; i++) ctx.emit('llm/tool-started', running('ses_1', 'read', { filePath: 'a.ts' }))
-    expect((ready.llm as unknown as FakeLlm).reminded).toEqual([])
+    expect(ready.features.isEnabled('repeatGuard')).toBe(true)
+    for (let i = 0; i < 3; i++) ctx.emit('llm/tool-started', running('ses_1', 'read', { filePath: 'a.ts' }))
+    expect((ready.llm as unknown as FakeLlm).reminded).toEqual([{ sessionId: 'ses_1', text: repeatReminder('read', 3) }])
   })
 })
 
