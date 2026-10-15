@@ -24,6 +24,8 @@ export interface PanelState {
   jump?: { key: string; line: number; seq: number }
   /** Git 탭을 열며 고르라고 한 하위 탭 (이슈 #290) — seq 가 오를 때마다 그 하위 탭으로 */
   gitSub?: { sub: 'changes' | 'log'; seq: number }
+  /** 비교 보기 (이슈 #424) — 파일 탭 두 개를 위아래 50/50. 하나를 닫거나 다른 탭을 고르면 지워진다 */
+  compare?: { a: string; b: string }
 }
 
 let current: PanelState | undefined
@@ -38,6 +40,30 @@ function set(next: PanelState | undefined): void {
 /** 같은 프로젝트면 지금 상태, 아니면 새 상태 */
 function base(directory: string): PanelState {
   return current?.directory === directory ? current : { directory, open: false, tabs: [], fullscreen: false, focus: 0 }
+}
+
+/** 파일 탭인가 — 터미널·작업·턴 탭과 Git 은 아님 (비교 보기는 파일 탭만) */
+export function isFileTab(key: string): boolean {
+  return key !== GIT_TAB && !isTerminalTab(key) && !isTaskTab(key) && !isTurnTab(key)
+}
+
+/** 비교 보기 후보 — 같은 패널의 다른 연 파일 탭 (현재 탭 제외) */
+export function compareCandidates(tabs: readonly string[], current: string | undefined): string[] {
+  return tabs.filter((key) => key !== current && isFileTab(key))
+}
+
+/** 비교 보기 시작 — 둘 다 이 패널의 연 파일 탭이고 서로 다르면 { a: 고른 것(위), b: 후보(아래) } 로. 아니면 아무 일도 없다 */
+export function startCompare(directory: string, a: string, b: string): void {
+  const state = current
+  if (!state || state.directory !== directory) return
+  if (a === b || !isFileTab(a) || !isFileTab(b)) return
+  if (!state.tabs.includes(a) || !state.tabs.includes(b)) return
+  set({ ...state, compare: { a, b }, active: a })
+}
+
+/** 비교 보기 종료 — 위 탭(a) 을 고른 채로 남는다 */
+export function exitCompare(): void {
+  if (current?.compare) set({ ...current, compare: undefined })
 }
 
 /** 칩·트리의 글자를 탭 열쇠로 — `./a.ts`·`src/../a.ts`·프로젝트 안 절대 경로가 `a.ts` 와 한 탭이 되게. 메인이 풀어도 같은 파일이다
@@ -65,7 +91,9 @@ export function openFilePreview(directory: string, token: string, line?: number,
   const key = tabKey(directory, token)
   const focus = quiet ? state.focus : state.focus + 1
   const jump = line !== undefined ? { key, line, seq: ++jumps } : state.jump?.key === key ? undefined : state.jump
-  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, quiet, jump })
+  // 비교 보기 중 다른 파일을 열면 비교를 끝낸다 (위 탭 a 를 다시 여는 것만 예외)
+  const compare = state.compare && key !== state.compare.a ? undefined : state.compare
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus, quiet, jump, compare })
 }
 
 /** Git 탭의 열쇠 (이슈 #290) — 파일 탭 열쇠(프로젝트 기준 경로)와 겹치지 않는 글자. 고정 탭이라 tabs 에는 없다 */
@@ -175,9 +203,13 @@ export function revealPanel(directory: string): void {
   set({ ...state, open: true, focus: state.focus + 1, quiet: false })
 }
 
-/** 탭을 고른다(사용자가 누른 것) — quiet 를 푼다: AI 가 조용히 연 터미널 탭도 사용자가 직접 고르면 키를 가져간다 */
+/** 탭을 고른다(사용자가 누른 것) — quiet 를 푼다: AI 가 조용히 연 터미널 탭도 사용자가 직접 고르면 키를 가져간다.
+ *  비교 보기 중이라면 위 탭(a) 말고 고른 것은 비교를 끝낸다 */
 export function selectTab(key: string | undefined): void {
-  if (current && current.active !== key) set({ ...current, active: key, quiet: false })
+  if (!current) return
+  const compare = current.compare && key === current.compare.a ? current.compare : undefined
+  if (current.active === key && (compare ?? null) === (current.compare ?? null) && !current.quiet) return
+  set({ ...current, active: key, quiet: false, compare })
 }
 
 /** 탭 닫기 — 고른 탭이면 오른쪽 이웃, 없으면 왼쪽, 없으면 Files 탭 */
@@ -187,7 +219,9 @@ export function closeTab(key: string): void {
   if (index < 0) return
   const tabs = current.tabs.filter((tab) => tab !== key)
   const active = current.active === key ? (tabs[index] ?? tabs[index - 1]) : current.active
-  set({ ...current, tabs, active })
+  // 비교 보기 중 비교하는 탭을 닫으면 비교도 끝낸다
+  const compare = current.compare && (key === current.compare.a || key === current.compare.b) ? undefined : current.compare
+  set({ ...current, tabs, active, compare })
 }
 
 export function toggleFullscreen(): void {

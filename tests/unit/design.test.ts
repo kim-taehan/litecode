@@ -192,6 +192,12 @@ describe('DesignSkillService', () => {
     expect(DESIGN_SKILL_FILE).toContain('NO external fonts, CDNs, images or fetch')
     expect(DESIGN_SKILL_FILE).toContain('litecode_open')
   })
+
+  it('A/B 변형은 두 파일(-a·-b)로, 비교 보기(위아래)로 본다', () => {
+    expect(DESIGN_SKILL_FILE).toContain('mock-<screen>-a.html')
+    expect(DESIGN_SKILL_FILE).toContain('mock-<screen>-b.html')
+    expect(DESIGN_SKILL_FILE).toContain('stacked top/bottom 50/50')
+  })
 })
 
 // ── DesignService (진짜 fs.watch + cordis) ──
