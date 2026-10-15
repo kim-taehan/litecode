@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Subtask, TurnItem } from '../../shared/ipc.ts'
-import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, quietMinutes, recentLines, VISIBLE_ROWS } from '../../renderer/jobsView.ts'
+import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, quietMinutes, recentLines, runningLine, VISIBLE_ROWS } from '../../renderer/jobsView.ts'
 
 const subtask = (id: string, status: Subtask['status'], items: TurnItem[] = []): Subtask => ({ kind: 'subtask', id, agent: 'general', description: id, status, items })
 
@@ -49,6 +49,31 @@ describe('recentLines·lastLine — 생각·도구 줄만', () => {
     expect(lastLine(items.slice(0, 5))?.text).toBe('edit src/b.ts')
     expect(lastLine([])).toBeUndefined()
     expect(lastLine([{ kind: 'think', id: 'e', text: '', done: false }])).toBeUndefined()
+  })
+})
+
+describe('runningLine — 스트리밍 한 줄에 보일 지금 하는 일 (이슈 #416)', () => {
+  it('마지막 생각·도구 줄을 lastLine 과 같이 본다', () => {
+    const items: TurnItem[] = [
+      { kind: 'think', id: '1', text: '생각 요약', done: true },
+      { kind: 'text', id: '2', text: '글', done: true },
+      { kind: 'tool', id: '3', name: 'bash', status: 'running', summary: 'npm test' },
+    ]
+    expect(runningLine(items)).toEqual({ id: '3', text: 'bash npm test', mono: true, state: 'running' })
+    expect(runningLine(items.slice(0, 2))).toEqual({ id: '1', text: '생각 요약', mono: false })
+    expect(runningLine([])).toBeUndefined()
+  })
+
+  it('하위 작업 줄도 본다 — lastLine 과 달리 "agent · 설명"', () => {
+    const withSub: TurnItem[] = [
+      { kind: 'think', id: '1', text: '생각', done: true },
+      subtask('b', 'running'),
+    ]
+    expect(runningLine(withSub)).toEqual({ id: 'b', text: 'general · b', mono: false })
+    expect(lastLine(withSub)?.id).toBe('1')
+    // 설명도 에이전트도 없으면 건너뛴다
+    const empty = { ...subtask('c', 'running'), agent: '', description: '' }
+    expect(runningLine([empty])).toBeUndefined()
   })
 })
 

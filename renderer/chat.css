@@ -249,14 +249,46 @@ button.turn-row__line:disabled { cursor: default; }
 }
 .turn__work + .turn-running .turn-running__divider { display: block; }
 
-.turn-running__content {
+/* 진행 중 한 줄의 내용 (이슈 #416) — 누르면 우측 "이 턴의 작업" 탭이 열린다 */
+.turn-running__line {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
   min-width: 0;
+  padding: 1px 6px 1px 2px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.turn-running__line { cursor: pointer; }
+button.turn-running__line:hover { background: var(--fill-hover); }
+button.turn-running__line:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.turn-running__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, black calc(100% - 48px), transparent);
 }
 
-.turn-running__text { font-variant-numeric: tabular-nums; }
+.turn-running__dot {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.turn-running__seconds {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
 
 .turn-running__dots span {
   animation: turn-dot 1.2s infinite;

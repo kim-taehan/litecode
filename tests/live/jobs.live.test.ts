@@ -76,7 +76,8 @@ describe('도는 작업 목록 (이슈 #32)', () => {
   it('턴이 돌지 않을 때, 그리고 하위 작업이 없는 보통 턴이 도는 동안에는 머리에 작업 버튼이 없다', async () => {
     expect(await button().count()).toBe(0)
     await submit('plain [bash:sleep 2]')
-    await runningTurn().locator('.turn-row[data-kind="tool"][data-status="running"]').waitFor({ timeout: 20_000 })
+    // 도는 턴은 채팅에 한 줄 (이슈 #416) — 도구가 도는 동안 "bash fake"
+    await expect.poll(() => runningTurn().locator('.turn-running__summary').textContent().catch(() => ''), { timeout: 20_000 }).toBe('bash fake')
     expect(await button().count()).toBe(0)
     await expect.poll(() => runningTurn().count(), { timeout: 30_000 }).toBe(0)
     expect(await button().count()).toBe(0)
