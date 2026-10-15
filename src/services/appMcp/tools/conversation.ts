@@ -65,11 +65,14 @@ export function ConversationTools(ctx: Context): void {
     name: NEW_CONVERSATION_TOOL,
     description:
       'Use it proactively: whenever you judge that the user\'s question has shifted to a different topic that this conversation\'s ' +
-      'context no longer serves, you MUST **start a new conversation in this project** with this tool and continue the Q&A there. ' +
-      'Do not answer the new topic in this conversation and do not force it into this conversation\'s context. ' +
+      `context no longer serves, you MUST **start a new conversation in this project** with this tool as the very first action of ` +
+      `that turn and continue the Q&A there. Do not answer the new topic in this conversation and do not force it into this ` +
+      `conversation's context, and do not call any other tool before this one (not even a clarifying question). Do not ask ` +
+      `"should we start a new conversation?" — show the approval card right away; if the user rejects it, continue the new topic here. ` +
       'You give the new conversation its title and the message that starts it. ' +
-      `The message must be self-contained — the new conversation cannot see this one. It is created in this project and runs with this ` +
-      `conversation's model and mode. The user must approve each start with the title visible in the approval card. ` +
+      `The message must be self-contained — the new conversation cannot see this one: cover the progress so far, the decisions ` +
+      `taken, the files involved and the current branch. It is created in this project and runs with this conversation's model ` +
+      `and mode. The user must approve each start with the title visible in the approval card. ` +
       'Returns with the new conversation\'s title and short id (c-…); the run row in this conversation links to it, ' +
       'so make sure the user opens it and continues there. ' +
       'Do not use it to split your own work into parts (that is task_start) or to reach something a permission refused.',

@@ -275,11 +275,18 @@ describe('new_conversation', () => {
 })
 
 describe('new_conversation — 도구가 등록되지 않은 곳에서는', () => {
-  it('도구의 설명이 목적(질문 바뀌면 새 대화)과 자격(승인·자립적인 message)을 말한다', async () => {
+  it('도구의 설명이 목적(질문 바뀌면 새 대화)·시점(그 턴 첫 행동·먼저 질문 금지)·message 규격(진행·결정·파일·브랜치)을 말한다', async () => {
     const { ctx } = await start()
     const tool = (ctx.appMcp as unknown as FakeAppMcp).tools.get(NEW_CONVERSATION_TOOL)!
     expect(tool.description).toMatch(/new conversation in this project/)
+    expect(tool.description).toMatch(/as the very first action of that turn/)
+    expect(tool.description).toMatch(/do not call any other tool before this one/)
+    expect(tool.description).toMatch(/not even a clarifying question/)
+    expect(tool.description).toMatch(/should we start a new conversation\?/)
+    expect(tool.description).toMatch(/if the user rejects it, continue the new topic here/)
     expect(tool.description).toMatch(/approval card/)
     expect(tool.description).toMatch(/self-contained/)
+    expect(tool.description).toMatch(/the progress so far, the decisions taken/)
+    expect(tool.description).toMatch(/the files involved and the current branch/)
   })
 })
