@@ -56,14 +56,14 @@ describe('layoutGraph — 고정 입력', () => {
   })
 
   it('레인 재사용 — 끝난 레인 자리가 같은 색으로 다시 쓰인다', () => {
-    // 다이아몬드 2개 — 두 번째 분기의 옆 레인은 첫 번째의 자리(번호 1)와 색을 쓴다
+    // 진짜 다이아몬드 2개(분기점이 첫 부모가 아님) — 두 번째 분기의 옆 레인은 첫 번째의 자리(번호 1)와 색을 쓴다
     const { rows } = rowsOf([
       c('m2', ['a2', 'b2']),
-      c('b2', ['a2']),
       c('a2', ['m1']),
+      c('b2', ['m1']),
       c('m1', ['a1', 'b1']),
-      c('b1', ['a1']),
       c('a1', ['c1']),
+      c('b1', ['c1']),
       c('c1'),
     ])
     const [b2] = rows.filter((row) => row.lane === 1)
@@ -71,7 +71,8 @@ describe('layoutGraph — 고정 입력', () => {
     expect(b2.color).toBe(laneColor(1))
     expect(b1.color).toBe(b2.color) // 같은 자리(번호 1) 재사용
     expect(rows[0]).toMatchObject({ lane: 0, diagonal: [{ from: 0, to: 1 }] }) // m2: 갈라짐
-    expect(rows[3]).toMatchObject({ lane: 0, diagonal: [{ from: 0, to: 1 }] }) // m1: 같은 레인에 다시 갈라짐
+    // m1: b2 레인이 합류(1→0)하고 다시 b1 로 갈라짐(0→1)
+    expect(rows[3]).toMatchObject({ lane: 0, diagonal: [{ from: 1, to: 0 }, { from: 0, to: 1 }] })
     expect(rows.every((row) => row.lane <= 1)).toBe(true)
   })
 
@@ -121,15 +122,18 @@ describe('layoutGraph — 고정 입력', () => {
   it('1000개 — 100마다 분기·머지가 이어지는 이력, 줄이 일탈하지 않는다', () => {
     const list: GitLogCommit[] = [c('root')]
     let prev = 'root'
+    let base = 'root' // prev 의 부모(분기점) — 사선 분기는 base 에서 갈라져 직선은 피한다
     for (let i = 1; i < 1000; i++) {
       if (i % 100 === 0) {
         const side = `s${i}`
-        list.push(c(side, [prev]))
+        list.push(c(side, [base]))
         const merge = `m${i}`
         list.push(c(merge, [prev, side]))
+        base = prev
         prev = merge
       } else {
         list.push(c(`c${i}`, [prev]))
+        base = prev
         prev = `c${i}`
       }
     }
@@ -145,6 +149,43 @@ describe('layoutGraph — 고정 입력', () => {
   it('빈 입력', () => {
     expect(rowsOf([])).toEqual({ rows: [], state: { lanes: [] } })
     expect(rowsOf([], { lanes: ['h1', null] })).toMatchObject({ rows: [], state: { lanes: ['h1', null] } })
+  })
+})
+
+describe('layoutGraph — 직선 브랜치 (#413)', () => {
+  it('첫 부모 바로 위의 1커밋 — 별도 레인·곡선 없이 같은 줄로 내려간다', () => {
+    // M 의 두 번째 부모 B 가 첫 부모 A 의 바로 위(분기점 = A) — 볼록대 없이 곧은 한 줄
+    const { rows, state } = rowsOf([c('M', ['A', 'B']), c('B', ['A']), c('A', ['R']), c('R')])
+    expect(shape(rows)).toEqual([
+      { lane: 0, up: [], down: [0], diagonal: [], folded: false }, // M — 갈라짐 없음
+      { lane: 0, up: [0], down: [0], diagonal: [], folded: false }, // B — 같은 줄
+      { lane: 0, up: [0], down: [0], diagonal: [], folded: false }, // A
+      { lane: 0, up: [0], down: [], diagonal: [], folded: false }, // R
+    ])
+    expect(state.lanes).toEqual([])
+  })
+
+  it('두 번째 부모가 2커밋(진짜 분기)이면 — 그대로 옆 레인', () => {
+    // B 가 C 를 거쳐 A 까지 — 분기점이 A 가 아니므로 곡선 유지
+    const { rows } = rowsOf([c('M', ['A', 'B']), c('B', ['C']), c('A', ['D']), c('C', ['D']), c('D')])
+    expect(rows[0]).toMatchObject({ lane: 0, diagonal: [{ from: 0, to: 1 }] }) // M: 갈라짐
+    expect(rows[1].lane).toBe(1) // B
+  })
+
+  it('두 번째 부모가 머지 커밋이면 — 접지 않는다(나뉜 역사 있음)', () => {
+    // B 는 [A, X] — A 바로 위가 아니라 X 역사까지 있어서 옆 레인 유지
+    const { rows } = rowsOf([c('M', ['A', 'B']), c('B', ['A', 'X']), c('A'), c('X')])
+    expect(rows[0]).toMatchObject({ lane: 0, diagonal: [{ from: 0, to: 1 }] })
+  })
+
+  it('페이지 연속 — 접힌 커밋이 한 페이지에 있으면 끊기지 않고 이어진다', () => {
+    // 접힘에 필요한 B 가 M 과 같은 페이지에 든다(별도로는 B 없는 페이지에서 접을 수 없음)
+    const all = [c('X', ['M']), c('M', ['A', 'B']), c('B', ['A']), c('A', ['R']), c('R')]
+    const one = rowsOf(all)
+    const first = rowsOf(all.slice(0, 3)) // X, M, B
+    const second = rowsOf(all.slice(3), first.state)
+    expect(first.state.lanes).toEqual(['A']) // B 줄 — 도트 레인을 A 로 이어둔다
+    expect(shape(second.rows)).toEqual(shape(one.rows.slice(3)))
   })
 })
 
