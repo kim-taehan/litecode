@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import { ko } from '../../shared/i18n/ko.ts'
 import { en } from '../../shared/i18n/en.ts'
-import { CHOOSABLE_FEATURES, FEATURE_FIXED, FEATURE_GROUPS, FEATURE_REQUIRES, MOBILE_PATH_FEATURES, type ChoosableFeatureId, type FeatureId, type FeatureStatuses, type FeatureSwitches } from '../../shared/features.ts'
+import { CHOOSABLE_FEATURES, FEATURE_FIXED, FEATURE_GROUPS, FEATURE_REQUIRES, FEATURE_SCREEN_HIDDEN, type ChoosableFeatureId, type FeatureId, type FeatureStatuses, type FeatureSwitches } from '../../shared/features.ts'
 import { FeaturesPage } from '../../renderer/FeaturesSettings.tsx'
 
 // 설정 > 기능 — 한 줄에 기능 하나, 줄을 누르면 아래로 자세한 설명 (시안 _workspace/mock-features Main·Detail).
@@ -26,8 +26,8 @@ function render(features: FeatureSwitches = {}, initialExpanded: ChoosableFeatur
   return renderToStaticMarkup(createElement(FeaturesPage, { initialExpanded, initialQuery }))
 }
 
-// 설정 > 기능에 카드가 있는 기능 — 모바일 연결의 길(사내망·블루투스)은 설정 > 모바일 에만 있다
-const CARDS = CHOOSABLE_FEATURES.filter((feature) => !MOBILE_PATH_FEATURES.includes(feature))
+// 설정 > 기능에 카드가 있는 기능 — 모바일 연결의 길(사내망·블루투스)은 설정 > 모바일 에만, 새 버전 알림(updates)은 잠정 숨김 (FEATURE_SCREEN_HIDDEN)
+const CARDS = CHOOSABLE_FEATURES.filter((feature) => !FEATURE_SCREEN_HIDDEN.includes(feature))
 
 const count = (html: string, needle: string): number => html.split(needle).length - 1
 
@@ -52,15 +52,15 @@ describe('FeaturesPage — 접힌 첫 그림', () => {
 
   it('스위치는 펼침 버튼 밖의 따로 눌리는 요소이고 이름을 단다', () => {
     const html = render()
-    const row = html.slice(html.indexOf('data-feature="terminal"'))
+    const row = html.slice(html.indexOf('data-feature="trajectory"'))
     const toggle = row.slice(0, row.indexOf('role="switch"'))
     expect(count(toggle, '</button>')).toBe(1) // 스위치 앞에서 펼침 버튼이 닫혔다 — 버튼 안에 버튼이 없다
-    expect(html).toContain('aria-label="터미널 탭"')
+    expect(html).toContain('aria-label="추론 과정"')
   })
 
-  it('모바일 연결의 길(사내망·블루투스)은 이 화면에 줄이 없다 — 설정 > 모바일 에서만 켜고 끈다', () => {
+  it('카드가 없는 기능(모바일 연결의 길 · 새 버전 알림)은 이 화면에 줄이 없다 — 모바일의 길은 설정 > 모바일 에서만 켜고 끈다', () => {
     const html = render({ remote: true })
-    for (const feature of MOBILE_PATH_FEATURES) expect(html).not.toContain(`data-feature="${feature}"`)
+    for (const feature of FEATURE_SCREEN_HIDDEN) expect(html).not.toContain(`data-feature="${feature}"`)
   })
 })
 
@@ -78,11 +78,11 @@ describe('FeaturesPage — 펼친 그림', () => {
   })
 
   it('필요한 기능이 없는 기능엔 필요 칩이 없다', () => {
-    const html = render({}, 'terminal')
+    const html = render({}, 'trajectory')
     expect(count(html, ROW_OPEN)).toBe(1) // 한 번에 펼칠 수 있는 줄은 하나 (#251)
-    const terminal = html.slice(html.indexOf('data-feature="terminal"'), html.indexOf('data-feature="trajectory"'))
-    expect(terminal).not.toContain('필요:')
-    expect(terminal).toContain('>기본값: 켜짐<')
+    const trajectory = html.slice(html.indexOf('data-feature="trajectory"'), html.indexOf('data-feature="git"'))
+    expect(trajectory).not.toContain('필요:')
+    expect(trajectory).toContain('>기본값: 켜짐<')
   })
 
   it('필요한 기능이 있는 기능엔 필요 칩이 있다', () => {
@@ -102,7 +102,7 @@ describe('FeaturesPage — 기능 상태', () => {
   }
 
   it('정상 상태(on·mounting·없음)는 태그도 상자도 그리지 않는다', () => {
-    const html = render({ voice: true }, 'voice', { terminal: { state: 'on' }, voice: { state: 'mounting' } })
+    const html = render({ voice: true }, 'voice', { trajectory: { state: 'on' }, voice: { state: 'mounting' } })
     expect(html).not.toContain('feature-row__status')
     expect(html).not.toContain('feature-row__failure')
     expect(html).not.toContain('켜지 못함')

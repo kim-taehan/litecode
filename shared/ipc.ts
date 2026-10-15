@@ -21,8 +21,6 @@ import type { HookCandidate, HookDraft, HookRecent, HookRow, HookScope, HookTest
 import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 import type { UpdateStatus } from './updates.ts'
-import type { Goal } from './goal.ts'
-import type { GoalReply } from '../src/services/goal.ts'
 import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
@@ -122,6 +120,11 @@ export const Channel = {
   REVEAL_FILE: 'chat:reveal-file',
   PREVIEW_FILE: 'chat:preview-file',
   PREVIEW_ASSETS: 'chat:preview-assets',
+  /** 라이트코드 디자인 (#422) — 우측 패널 미리보기의 파일을 메인이 보기 시작(멈춤). token 은 previewFile 과 같은 글자 */
+  PREVIEW_WATCH: 'preview:watch',
+  PREVIEW_UNWATCH: 'preview:unwatch',
+  /** 메인 → 화면 (absolute) — 보고 있는 미리보기 파일이 디스크에서 바뀌었다 (라이브 갱신) */
+  PREVIEW_CHANGED: 'preview:changed',
   LIST_DIRECTORY: 'chat:list-directory',
   RUN_SHELL: 'shell:run',
   STOP_SHELL: 'shell:stop',
@@ -211,12 +214,6 @@ export const Channel = {
   UPDATES_OPEN: 'updates:open',
   /** 메인 → 화면 (UpdateStatus) */
   UPDATES_CHANGED: 'updates:changed',
-  /** 목표(ctx.goal, 이슈 #285) — 기능 `goal` 이 켜졌을 때만 있다. 화면 → 메인 (conversationId, args) → GoalReply — `/goal` 뒤의 글·입력 카드 위 줄의 버튼 */
-  GOAL_COMMAND: 'goal:command',
-  /** 화면 → 메인 (conversationId) → Goal | null */
-  GOAL_GET: 'goal:get',
-  /** 메인 → 화면 (conversationId, Goal | null) */
-  GOAL_CHANGED: 'goal:changed',
   /** Git(ctx.git, 이슈 #290) — 기능 `git` 이 켜졌을 때만 있다. 화면 → 메인 (directory) → GitView. directory 는 등록된 프로젝트여야 한다 */
   GIT_VIEW: 'git:view',
   /** 화면 → 메인 (directory, path, staged) → unified diff. staged 가 'head' 면 HEAD 대비(stage 된 것 + 안 된 것, #389 패치로 복사) */
@@ -366,6 +363,12 @@ export interface LitecodeBridge {
   previewFile(directory: string, token: string): Promise<FilePreview>
   /** HTML 미리보기 — 그 HTML 파일 폴더 기준 상대 경로 리소스(스크립트·스타일 글, 이미지 data: 주소). 프로젝트 밖·링크로 밖·없는 것은 빠진다 */
   previewAssets(directory: string, token: string, references: string[]): Promise<HtmlAsset[]>
+  /** 라이트코드 디자인 (#422) — 보고 있는 미리보기 파일을 보기 시작(바뀌면 onPreviewChanged). 프로젝트 밖·없는 파일이면 false */
+  watchPreview(directory: string, token: string): Promise<boolean>
+  /** 보기를 멈춘다 (탭 닫기·기능 꺼짐) */
+  unwatchPreview(directory: string, token: string): Promise<void>
+  /** 보는 파일이 바뀌었다 (absolute) — 화면은 지금 보는 미리보기일 때만 다시 읽는다 */
+  onPreviewChanged(listener: (absolute: string) => void): () => void
   /** 오른쪽 패널 Files 탭 — 프로젝트 안 폴더 한 단계(relative '' = 루트). 밖을 가리키는 링크는 빠지고, 등록 안 된 폴더·밖이면 unavailable */
   listDirectory(directory: string, relative: string): Promise<DirectoryListing>
   /** `!명령` — 그 대화의 프로젝트 폴더에서 한 번 돌리고, 끝나면 그 대화에 카드로 저장한 것을 준다. runId 는 화면이 정한다(출력 조각을
@@ -481,11 +484,6 @@ export interface LitecodeBridge {
   /** [내려받기] — 릴리즈 페이지를 기본 브라우저로. https 이고 github.com 이거나 확인 주소의 호스트일 때만 (아니면 false) */
   openUpdate(url: string): Promise<boolean>
   onUpdateChanged(listener: (status: UpdateStatus) => void): () => void
-  /** 목표 (ctx.goal, 이슈 #285) — **기능 `goal` 이 켜져 있을 때만 부른다**. args 는 `/goal` 뒤의 글 (빈 글 = 보기, pause·resume·clear, 그 밖 = 새 목표).
-   *  message 가 오면 입력창 아래 한 줄로, send 가 오면 평소 보내기로 보낸다(말풍선엔 display) */
-  goalCommand(conversationId: string, args: string): Promise<GoalReply>
-  goal(conversationId: string): Promise<Goal | null>
-  onGoalChanged(listener: (conversationId: string, goal: Goal | null) => void): () => void
   /** Git (ctx.git, 이슈 #290) — **기능 `git` 이 켜져 있을 때만 부른다**. directory 는 등록된 프로젝트 (아니면 거절) */
   gitView(directory: string): Promise<GitView>
   gitDiff(directory: string, path: string, staged: boolean | 'head'): Promise<string>

@@ -22,7 +22,6 @@ import { useFileDrop } from './dropPaste.ts'
 import { DropVeil } from './DropVeil.tsx'
 import { countOf } from './attachmentsView.ts'
 import { FilePreviewPanel } from './FilePreview.tsx'
-import { useGoal } from './Goal.tsx'
 import { DelegationContext } from './Delegation.tsx'
 import { peerOf, projectTargets } from './delegationView.ts'
 import { runningIn } from './backgroundView.ts'
@@ -288,15 +287,9 @@ export function App() {
     setDraft,
     onSend: (text, display) => send({ text, display }),
     onShell: (_directory, command) => void runShell(command),
-    onApp: async (command, args) => {
+    onApp: async (command) => {
       if (command === 'clear') return void startNewChat()
       if (!active) return undefined
-      // `/goal …` (이슈 #285) — 메인이 목표를 바꾸고, 새 목표면 첫 프롬프트를 평소 보내기로 보낸다(말풍선엔 친 글)
-      if (command === 'goal') {
-        const reply = await window.litecode.goalCommand(active.id, args ?? '')
-        if (reply.send) send(reply.send)
-        return reply.message
-      }
       // 아직 한 번도 안 보낸 대화(메인에 없다)도 메인이 "요약할 내용이 없다" 로 답한다
       const started = await window.litecode.compactChat(active.id)
       return started.ok ? undefined : started.error
@@ -319,13 +312,8 @@ export function App() {
     trigger.inputRef.current?.focus()
   }, [active?.id, view, trajectoryOn])
 
-  /** 지금 대화의 목표 (이슈 #285) — 입력 카드 위 줄 */
-  const goal = useGoal(features.has('goal'), active?.id)
   // Git 상태 다시 읽기 (이슈 #290) — 작업 뒤·턴 끝·창 포커스. 탭 숫자와 브랜치 알약이 같은 값을 본다
   useGitWatch(features.has('git'), active?.project)
-  /** 목표 줄의 버튼 — 못 했으면(그사이 상태가 바뀌었다) 그 사유를 알린다 */
-  const goalAction = (id: string, action: 'pause' | 'resume' | 'clear') =>
-    void window.litecode.goalCommand(id, action).then((reply) => reply.message && notices.say(reply.message), () => {})
   /** 음성 대화가 보는 지금 대화의 턴 상태 — 도는 턴·대기열·붙잡힌 대기열, 승인·질문 카드 */
   const voiceActivity = {
     busy: !!active && (!!active.pending || (active.queue?.length ?? 0) > 0 || !!active.held),
@@ -789,8 +777,6 @@ export function App() {
             <Composer
               t={t}
               active={active}
-              goal={goal}
-              goalAction={goalAction}
               restoreQueued={restoreQueued}
               trigger={trigger}
               draft={draft}

@@ -16,7 +16,6 @@ import { pasteIntent } from './dropPaste.ts'
 import { QueueDock } from './QueueDock.tsx'
 import { TodoDock } from './Todo.tsx'
 import { JobsDock, useBackgroundTasks } from './Jobs.tsx'
-import { GoalDock, type useGoal } from './Goal.tsx'
 import { StopIcon } from './stopTurn.tsx'
 import { browseHistory, sentTexts } from './inputHistory.ts'
 import { canWrite, type Session } from './session.ts'
@@ -24,9 +23,6 @@ import { canWrite, type Session } from './session.ts'
 interface ComposerProps {
   t: Translate
   active: Session
-  /** 지금 대화의 목표 (이슈 #285) */
-  goal: ReturnType<typeof useGoal>
-  goalAction(id: string, action: 'pause' | 'resume' | 'clear'): void
   restoreQueued(id: string, taken: QueuedSend): void
   trigger: Triggers
   /** 지금 대화의 초안 — 글과 붙여 둔 칩 */
@@ -50,12 +46,10 @@ interface ComposerProps {
   addAttachments(kind: AttachmentKind): Promise<void>
 }
 
-/** 입력 카드 — 목표·할 일·대기열 줄, 입력칸과 아래 줄(+ · 모드 · 모델 · 음성 · 보내기), 통계 줄. 상태는 App 이 쥐고 여기는 그리기만 한다 */
+/** 입력 카드 — 할 일·대기열 줄, 입력칸과 아래 줄(+ · 모드 · 모델 · 음성 · 보내기), 통계 줄. 상태는 App 이 쥐고 여기는 그리기만 한다 */
 export function Composer({
   t,
   active,
-  goal,
-  goalAction,
   restoreQueued,
   trigger,
   draft,
@@ -79,8 +73,6 @@ export function Composer({
   const backgroundTasks = useBackgroundTasks(active.id)
   return (
     <div className="composer">
-      {/* 이 대화의 목표 (이슈 #285) — 판이 여럿이면 맨 위 */}
-      {goal && <GoalDock goal={goal} onCommand={(action) => goalAction(active.id, action)} />}
       {/* AI 의 지금 할 일 목록 (이슈 #83) — 남은 일이 있을 때만. 대화를 바꾸면 접힌다 (key) */}
       <TodoDock key={active.id} messages={active.messages} progress={active.progress} running={!!active.pending} />
       {/* 작업 목록 (이슈 #295, 머리 버튼 #32 를 대신한다) — 하위 작업이 있는 턴만, 누르면 그 자리에서 목록. 턴이 끝나도 새 턴 전까지 끝난 작업을 남긴다.

@@ -65,7 +65,6 @@ opencode(1.18.18 고정) ──▶ 사내 LLM 게이트웨이 (LiteLLM 등)   �
 | `trajectory` | `trajectory` | 레거시 기록 읽기 (llm) |
 | `openIn` | `openIn` | 허용 목록 앱으로 폴더/파일 열기 (projects) |
 | `appMcp` | `appMcp` | 앱 내장 MCP 서버 — `litecode_*` 도구 (mcp) |
-| `goal` | `goal` | 대화별 목표·자동 이어가기 (chat, sessions), `goal/changed` |
 | `notifications` | `notifications` | 턴 끝/승인 대기 알림·토스트 (settings, sessions, projects) |
 | `remote` | `remote` | 모바일 계약·인증·짝짓기·이벤트 링 (chat, sessions, projects, providers, settings) — `remote/` 디렉터리로 책임별 분할(#298): service(상태·운반·이벤트 링)·routes(REST 표)·pairRequest(pairing)·chatEvents(폰 이벤트)·wire(계약 순수 함수)·types·limits |
 | `hooks` | `hooks` | 사용자 셸 훅, 메인에서 실행 (chat, sessions, llm) |
@@ -92,7 +91,7 @@ opencode(1.18.18 고정) ──▶ 사내 LLM 게이트웨이 (LiteLLM 등)   �
 
 ### 2.4 이벤트 계약
 
-- **엔진의 사실** = `llm/*` (turn-started/ended, attention, tool-started/done, before-turn serial, pre-tool serial) — notifications·hooks·repeatGuard·goal이 경청.
+- **엔진의 사실** = `llm/*` (turn-started/ended, attention, tool-started/done, before-turn serial, pre-tool serial) — notifications·hooks·repeatGuard 이 경청.
 - **화면/모바일이 보는 상태** = `chat/*` (turn-started/progress/attention/ended, interjected, queue-changed, conversations-changed, before-send/after-turn serial) — chat이 브리지로 broadcast.
 - `sessions/removed` → chat(큐/턴 abort) + notifications + sweep(llm.deleteSession + purgeDeleted).
 

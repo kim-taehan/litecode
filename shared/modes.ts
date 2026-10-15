@@ -33,6 +33,8 @@ const APP_SEND_TOOL = 'litecode_send_to_project'
 const APP_READ_TOOL = 'litecode_read_project'
 /** 스킬·MCP 서버·훅 만들기 (이슈 #145) — 전체 권한에서도 묻는다, 계획·하위 작업에는 없다 */
 const APP_MAKE_TOOL = 'litecode_create'
+/** 이 프로젝트에 새 대화 만들기 (이슈 #415) — 보내기처럼 전체 권한에서도 묻고, 계획·하위 작업에는 없다 */
+const APP_NEW_CONVERSATION_TOOL = 'litecode_new_conversation'
 const GIT_READ_PERMISSIONS: readonly string[] = GIT_READ_TOOLS.map((tool) => `litecode_${tool}`)
 const GIT_WRITE_PERMISSIONS: readonly string[] = GIT_WRITE_TOOLS.map((tool) => `litecode_${tool}`)
 
@@ -64,7 +66,7 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
     // 하위 작업은 못 쓴다 (engineConfig.ts 와 같은 표)
     if (GIT_READ_PERMISSIONS.includes(permission)) return child ? 'deny' : 'allow'
     if (GIT_WRITE_PERMISSIONS.includes(permission)) return child || mode === 'plan' ? 'deny' : mode === 'full' ? 'allow' : 'ask'
-    if (permission === APP_SEND_TOOL || permission === APP_MAKE_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
+    if (permission === APP_SEND_TOOL || permission === APP_MAKE_TOOL || permission === APP_NEW_CONVERSATION_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
     if (permission === APP_READ_TOOL) return child ? 'deny' : asking ? 'ask' : 'allow'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'
     if (child) return asking ? 'ask' : 'allow'

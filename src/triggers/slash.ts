@@ -14,12 +14,10 @@ import { tr } from '../i18n.ts'
 // 친 글 그대로(`/이름 인자`). 스킬은 기능 묶음(ctx.skills)이라 꺼져 있으면 없다 — 그래서 inject 가 아니라 쓸 때 ctx.get 으로 본다
 // 앱 명령(이슈 #144, 사용자 결정 2026-10-06 — 둘뿐이다)은 맨 위 "앱" 그룹이고 엔진에 보내지 않는다: 화면이 결과를 받아 그 동작을 한다.
 // 이름이 겹치면 앱 명령 > 엔진 명령 > 스킬. 인자를 받지 않는다 — 인자가 있으면 무시하지 않고 막고 알린다.
-// `/goal`(이슈 #285)만 인자를 받는다(목표 본문·pause·resume·clear — 풀이는 ctx.goal). 기능 묶음(ctx.goal)이라 꺼져 있으면 없다 — 스킬처럼 ctx.get 으로 본다
 
-const APP_COMMANDS: readonly { name: AppCommand; detail: 'trigger.app.compact' | 'trigger.app.clear' | 'trigger.app.goal' }[] = [
+const APP_COMMANDS: readonly { name: AppCommand; detail: 'trigger.app.compact' | 'trigger.app.clear' }[] = [
   { name: 'compact', detail: 'trigger.app.compact' },
   { name: 'clear', detail: 'trigger.app.clear' },
-  { name: 'goal', detail: 'trigger.app.goal' },
 ]
 
 /** opencode 의 치환 규칙 (01d 레거시 실측): `$ARGUMENTS` = 인자 전체, `$1`·`$2`… = 공백으로 나눈 조각. 없는 조각은 빈 글자 */
@@ -29,9 +27,7 @@ export function expandTemplate(template: string, args: string): string {
 }
 
 export function SlashTrigger(ctx: Context): void {
-  /** 지금 쓸 수 있는 앱 명령 — 목표 기능이 꺼져 있으면 `/goal` 은 없다 (모르는 명령으로 막힌다) */
-  const appCommands = () => APP_COMMANDS.filter((app) => app.name !== 'goal' || !!ctx.get('goal'))
-  const isApp = (name: string): boolean => appCommands().some((app) => app.name === name)
+  const isApp = (name: string): boolean => APP_COMMANDS.some((app) => app.name === name)
 
   ctx.effect(() =>
     ctx.triggers.register({
@@ -39,7 +35,7 @@ export function SlashTrigger(ctx: Context): void {
       opensAt: 'start',
       async candidates(scope, query) {
         const needle = query.toLowerCase()
-        const apps = appCommands().filter((app) => app.name.includes(needle))
+        const apps = APP_COMMANDS.filter((app) => app.name.includes(needle))
         const all = await ctx.llm.listCommands(scope.directory)
         const commands = all.filter((command) => command.name.toLowerCase().includes(needle) && !isApp(command.name))
         const skills = (await listSkills(scope.directory)).filter(
@@ -63,8 +59,7 @@ export function SlashTrigger(ctx: Context): void {
       async submit(scope, line) {
         const match = /^\/(\S*)\s*([\s\S]*)$/.exec(line)
         const name = match?.[1] ?? ''
-        const app = appCommands().find((entry) => entry.name === name)
-        if (app?.name === 'goal') return { kind: 'app', command: 'goal', args: match![2]!.trim() }
+        const app = APP_COMMANDS.find((entry) => entry.name === name)
         if (app) return match![2]!.trim() ? { kind: 'error', message: tr('error.commandNoArgs', { name }) } : { kind: 'app', command: app.name }
         const command = name ? (await ctx.llm.listCommands(scope.directory)).find((entry) => entry.name === name) : undefined
         if (command) return { kind: 'send', text: expandTemplate(command.template, match![2]!.trim()), display: line }

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
+  GIT_TAB,
   closeFilePreview,
   closeTab,
+  compareCandidates,
   cycleTerminalTab,
+  exitCompare,
+  isFileTab,
   isTerminalTab,
   openFilePreview,
   openFilesTab,
   openTerminalTab,
+  startCompare,
   panelTakesFocus,
   revealPanel,
   selectTab,
@@ -227,5 +232,72 @@ describe('터미널 탭', () => {
     expect(cycleTerminalTab('/term-c', -1)).toBe(true)
     expect(read()!.active).toBe(term(2))
     closeFilePreview()
+  })
+})
+
+// 비교 보기 (이슈 #424) — 파일 탭 둘을 위아래로. 고른 탭(a)이 위, 후보(b)가 아래. 다른 탭을 고르거나
+// 비교 탭을 닫거나 다른 파일을 열면 끝난다
+describe('비교 보기 (A/B)', () => {
+  const term = (id: number) => terminalTabKey(id)
+
+  it('isFileTab — Git·터미널은 파일 탭이 아니다', () => {
+    expect(isFileTab('src/a.ts')).toBe(true)
+    expect(isFileTab(GIT_TAB)).toBe(false)
+    expect(isFileTab(term(1))).toBe(false)
+  })
+
+  it('compareCandidates — 현재 탭을 뺀 다른 연 파일 탭만 (터미널·Git 제외)', () => {
+    openFilePreview('/cmp', 'a.ts')
+    openFilePreview('/cmp', 'b.ts')
+    openTerminalTab('/cmp', 1)
+    expect(compareCandidates(read()!.tabs, 'a.ts')).toEqual(['b.ts'])
+    expect(compareCandidates(read()!.tabs, 'b.ts')).toEqual(['a.ts'])
+  })
+
+  it('startCompare — 위( a )는 고른 탭, 아래( b )는 후보, active 는 위 탭', () => {
+    openFilePreview('/cmp', 'x.ts')
+    openFilePreview('/cmp', 'y.ts')
+    startCompare('/cmp', 'y.ts', 'x.ts')
+    expect(read()).toMatchObject({ compare: { a: 'y.ts', b: 'x.ts' }, active: 'y.ts' })
+  })
+
+  it('잘못된 startCompare 는 아무 일도 없다 — 같은 탭·비파일 탭·안 연 탭·다른 프로젝트', () => {
+    startCompare('/cmp', 'y.ts', 'y.ts')
+    startCompare('/cmp', 'y.ts', term(1))
+    startCompare('/cmp', 'y.ts', 'gone.ts')
+    startCompare('/other', 'y.ts', 'x.ts')
+    expect(read()!.compare).toEqual({ a: 'y.ts', b: 'x.ts' })
+    expect(read()!.active).toBe('y.ts')
+  })
+
+  it('다른 탭을 고르면 비교가 끝난다 — 위 탭(a) 을 재고르면 그대로', () => {
+    selectTab('x.ts')
+    expect(read()).toMatchObject({ compare: undefined, active: 'x.ts' })
+    startCompare('/cmp', 'y.ts', 'x.ts')
+    selectTab('y.ts')
+    expect(read()!.compare).toEqual({ a: 'y.ts', b: 'x.ts' })
+  })
+
+  it('비교 중 다른 파일을 열면 끝난다 — 위 탭(a) 을 여는 것만 예외', () => {
+    openFilePreview('/cmp', 'y.ts')
+    expect(read()!.compare).toEqual({ a: 'y.ts', b: 'x.ts' })
+    openFilePreview('/cmp', 'a.ts')
+    expect(read()).toMatchObject({ compare: undefined, active: 'a.ts' })
+  })
+
+  it('비교 탭을 닫으면 끝난다 (active 는 이웃)', () => {
+    startCompare('/cmp', 'a.ts', 'y.ts')
+    closeTab('y.ts')
+    expect(read()!.compare).toBeUndefined()
+  })
+
+  it('exitCompare — 비교가 없으면 아무 일도 없다. 프로젝트를 옮기면 compare 도 초기화', () => {
+    expect(read()!.compare).toBeUndefined()
+    exitCompare()
+    expect(read()!.compare).toBeUndefined()
+    startCompare('/cmp', 'a.ts', 'x.ts')
+    openFilePreview('/cmp2', 'p.ts')
+    expect(read()!.compare).toBeUndefined()
+    expect(read()!.directory).toBe('/cmp2')
   })
 })

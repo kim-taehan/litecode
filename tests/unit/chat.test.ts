@@ -1015,7 +1015,7 @@ describe('ChatService — 백그라운드 하위 작업 (이슈 #319)', () => {
     return { ...harness, tasks }
   }
 
-  it('띄우면 번호를 곧바로 준다 — 따로 만든 세션(sessionId 없음)에서 explore 는 계획 모드로, 작업·목표 도구를 숨겨 돈다', async () => {
+  it('띄우면 번호를 곧바로 준다 — 따로 만든 세션(sessionId 없음)에서 explore 는 계획 모드로, 작업 도구를 숨겨 돈다', async () => {
     const { chat, turn, tasks } = await withConversation()
     expect(await chat.startTask('c1', explore)).toEqual({ number: 1, id: 'bgtask:c1:1', queued: false, limit: 2 })
     expect(await chat.startTask('c1', { ...explore, agent: 'general' })).toEqual({ number: 2, id: 'bgtask:c1:2', queued: false, limit: 2 })
@@ -1023,7 +1023,7 @@ describe('ChatService — 백그라운드 하위 작업 (이슈 #319)', () => {
     expect(first).toMatchObject({ sessionId: undefined, mode: 'plan', directory: '/work/a', providerId: 'gw', modelId: 'm1' })
     expect(first.prompt).toContain('Task: 파일 조사')
     expect(first.prompt).toContain('find the config')
-    expect(first.hide).toEqual({ litecode: [TASK_START_TOOL, TASK_STATUS_TOOL, 'goal_get', 'goal_update'] })
+    expect(first.hide).toEqual({ litecode: [TASK_START_TOOL, TASK_STATUS_TOOL] })
     expect(first.stall).toBe(TASK_STALL_TIMEOUT_MS) // 평소 무응답 한도 대신 하드 한도 하나
     expect((await turn(1)).stall).toBeUndefined() // 메인 대화 턴은 평소 무응답 감시(#264) 그대로
     expect((await turn(3)).mode).toBe('build') // general 은 그 대화의 모드

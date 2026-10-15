@@ -26,6 +26,8 @@ import { AtTrigger } from '../src/triggers/at.ts'
 import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
 import { TrajectoryService } from '../src/services/trajectory.ts'
+import { DesignService } from '../src/services/design.ts'
+import { DesignSkillService } from '../src/services/designSkill.ts'
 import { existingFiles, projectFile } from '../src/services/fileMentions.ts'
 import { previewFile, readHtmlAssets, type FilePreview, type HtmlAsset } from '../src/services/filePreview.ts'
 import { listDirectory, type DirectoryListing } from '../src/services/fileTree.ts'
@@ -59,9 +61,8 @@ import { RemoteBluetooth, bluetoothProblem, type BlenoLike } from '../src/servic
 import { ForwardSkillService } from '../src/services/appMcp/forwardSkill.ts'
 import { DelegationService } from '../src/services/delegation.ts'
 import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
+import { ConversationTools } from '../src/services/appMcp/tools/conversation.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
-import { GoalService } from '../src/services/goal.ts'
-import { GoalTools } from '../src/services/appMcp/tools/goal.ts'
 import { TaskTools } from '../src/services/appMcp/tools/tasks.ts'
 import { GitService } from '../src/services/git.ts'
 import { GitTools } from '../src/services/appMcp/tools/git.ts'
@@ -401,6 +402,19 @@ function trajectoryBridge(ctx: Context): void {
 }
 trajectoryBridge.inject = ['trajectory']
 
+// 라이트코드 디자인 (이슈 #422) — 보고 있는 미리보기 파일(registered 프로젝트 안만)이 바뀌면 모든 창에 흘린다.
+// 화면은 absolute 로 지금 보는 탭만 다시 읽는다. 시안 스킬 파일은 DesignSkillService 가 묶음과 같은 운명으로 쓴다·지운다
+function designBridge(ctx: Context): void {
+  const project = async (directory: unknown): Promise<string> => {
+    if (typeof directory !== 'string' || !(await ctx.projects.has(directory))) throw new Error('not a registered project')
+    return directory
+  }
+  handle(ctx, Channel.PREVIEW_WATCH, async (_event, directory: string, token: string) => ctx.design.watch(await project(directory), String(token)))
+  handle(ctx, Channel.PREVIEW_UNWATCH, async (_event, directory: string, token: string) => ctx.design.unwatch(await project(directory), String(token)))
+  ctx.on('design/changed', (absolute) => broadcast(Channel.PREVIEW_CHANGED, absolute))
+}
+designBridge.inject = ['design', 'projects']
+
 // 알림 IPC — ctx.notifications 를 빼면 이 줄들만 사라지고 나머지 앱은 그대로다
 function notificationsBridge(ctx: Context): void {
   handle(ctx, Channel.GET_NOTIFICATIONS, async () => ctx.notifications.snapshot())
@@ -561,14 +575,6 @@ function updatesBridge(ctx: Context): void {
   ctx.on('updates/changed', (status) => broadcast(Channel.UPDATES_CHANGED, status))
 }
 updatesBridge.inject = ['updates']
-
-// 목표 (ctx.goal, 이슈 #285) — `/goal`·입력 카드 위 줄의 버튼과, 바뀐 목표를 모든 창에
-function goalBridge(ctx: Context): void {
-  handle(ctx, Channel.GOAL_COMMAND, async (_event, conversationId: string, args: string) => ctx.goal.command(String(conversationId), String(args ?? '')))
-  handle(ctx, Channel.GOAL_GET, async (_event, conversationId: string) => (await ctx.goal.get(String(conversationId))) ?? null)
-  ctx.on('goal/changed', (conversationId, goal) => broadcast(Channel.GOAL_CHANGED, conversationId, goal ?? null))
-}
-goalBridge.inject = ['goal']
 
 // Git (ctx.git, 이슈 #290) — 오른쪽 패널 Git 탭·브랜치 알약. 등록된 프로젝트 폴더에서만 돈다(화면이 오염돼도 아무 폴더에서나 git 을 돌리지 않는다).
 // 바뀌면(화면·AI 도구의 작업 뒤) 모든 창에 알린다 — 화면은 그 폴더를 보고 있으면 다시 읽는다
@@ -754,22 +760,12 @@ const features: FeatureDefinition[] = [
       ctx.plugin(OpenTool) // 앱 MCP 의 open — 파일(오른쪽 패널)·터미널(채워만 둠)
       ctx.plugin(PresentTool) // 앱 MCP 의 present — 결과물 선언, 화면은 턴 끝 카드로 그린다 (이슈 #91)
       ctx.plugin(SessionTools) // 앱 MCP 의 세션 도구 셋 — 다른 프로젝트 보기·지시 보내기 (이슈 #55·#137)
+      ctx.plugin(ConversationTools) // 앱 MCP 의 new_conversation — 질문이 바뀌면 이 프로젝트의 새 대화로 이어 가기 (이슈 #415)
       ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
       ctx.plugin(TaskTools) // 앱 MCP 의 task_start — 백그라운드 하위 작업, 내장 task 를 대신한다 (이슈 #319)
       ctx.plugin(DelegationService) // 프로젝트 간 지시의 대상·자격·전송 — 세션 도구와 Projects 탭의 단일 결정지 (이슈 #55·#341)
       ctx.plugin(ForwardSkillService, { appDir: path.join(userData, 'opencode', 'skills') }) // 내장 /forward 스킬 — 기능이 꺼지면 스킬도 함께 사라진다 (이슈 #341)
       ctx.plugin(appMcpBridge)
-    },
-  },
-  {
-    // 목표 (이슈 #285) — 기본 켜짐, 데스크탑 MCP 가 켜져 있어야 한다(모델이 끝을 알리는 litecode_goal_* 가 거기 붙는다). 끄면 `/goal`(ctx.get 으로 본다)·
-    // 도구·자동 이어가기·IPC 가 함께 내려간다. 다시 켜면 진행 중이던 목표는 일시 정지로 돌아온다
-    id: 'goal',
-    service: 'goal',
-    plugin: (ctx) => {
-      ctx.plugin(GoalService)
-      ctx.plugin(GoalTools)
-      ctx.plugin(goalBridge)
     },
   },
   {
@@ -831,6 +827,18 @@ const features: FeatureDefinition[] = [
       ctx.plugin(GitService)
       ctx.plugin(GitTools)
       ctx.plugin(gitBridge)
+    },
+  },
+  {
+    // 라이트코드 디자인 (이슈 #422) — 기본 꺼짐(사용자 결정 2026-10-15). ① 라이브 미리보기: 우측 패널이 보고 있는 파일이 바뀌면
+    // 알아서 다시 렌더 (ctx.design — 파일 watch, 바깥 요청 0, 등록된 프로젝트 안만) ② 시안 스킬: /design 으로 self-contained HTML
+    // 시안을 만들어 litecode_open 으로 우측 패널에 열게 한다 (DesignSkillService — forward 스킬과 같은 물질화)
+    id: 'design',
+    service: 'design',
+    plugin: (ctx) => {
+      ctx.plugin(DesignService)
+      ctx.plugin(designBridge)
+      ctx.plugin(DesignSkillService, { appDir: path.join(userData, 'opencode', 'skills') })
     },
   },
 ]

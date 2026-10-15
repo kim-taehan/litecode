@@ -312,7 +312,7 @@ button.jobs__cells:focus-visible {
   white-space: normal;
 }
 
-/* 입력 카드 위 작업 줄 (이슈 #295) — 판 치수·글자는 할 일 줄(todo.css .todo-dock)·목표 줄(goal.css)과 같다. 목표 → 할 일 → 작업 → 대기열 → 카드 */
+/* 입력 카드 위 작업 줄 (이슈 #295) — 판 치수·글자는 할 일 줄(todo.css .todo-dock)과 같다. 할 일 → 작업 → 대기열 → 카드 */
 .jobs-dock {
   box-sizing: border-box;
   width: calc(100% - 32px);
@@ -326,8 +326,7 @@ button.jobs__cells:focus-visible {
   backdrop-filter: blur(20px);
 }
 
-/* 위에 목표·할 일 판이 있으면 이어 붙게 작업 줄의 위 모서리를, 아래 대기열이 있으면 대기열의 위 모서리를 편다 */
-.goal-dock + .jobs-dock,
+/* 위에 할 일 판이 있으면 이어 붙게 작업 줄의 위 모서리를, 아래 대기열이 있으면 대기열의 위 모서리를 편다 */
 .todo-dock + .jobs-dock,
 .jobs-dock + .queue-dock {
   border-radius: 0;

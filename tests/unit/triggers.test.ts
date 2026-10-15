@@ -275,36 +275,6 @@ describe('/ 앱 명령', () => {
   })
 })
 
-// `/goal` (이슈 #285): 앱 명령 중 하나만 인자를 받는다 — 글은 그대로 ctx.goal 에 넘긴다(풀이는 shared/goal.ts). 목표 기능(ctx.goal)이 꺼져 있으면
-// 후보도 없고 모르는 명령으로 막힌다
-describe('/goal', () => {
-  class FakeGoal extends Service {
-    constructor(ctx: Context) {
-      super(ctx, 'goal')
-    }
-  }
-
-  it('목표 기능이 켜져 있으면 앱 그룹 후보로 나오고, 낼 때 뒤의 글을 args 로 준다', async () => {
-    const { ctx, triggers } = await start()
-    ctx.plugin(FakeGoal)
-    ctx.plugin(SlashTrigger)
-    await settle()
-    const hits = (await triggers.query(scope, '/go', 3))!.candidates
-    expect(hits.map(({ label, group, detail }) => ({ label, group, detail }))).toEqual([{ label: '/goal', group: tr('trigger.group.app'), detail: tr('trigger.app.goal') }])
-    expect(await triggers.submit(scope, '/goal  테스트 모두 초록으로 \n둘째 줄 ')).toEqual({ kind: 'app', command: 'goal', args: '테스트 모두 초록으로 \n둘째 줄' })
-    expect(await triggers.submit(scope, '/goal')).toEqual({ kind: 'app', command: 'goal', args: '' })
-    expect(await triggers.submit(scope, '/goal pause')).toEqual({ kind: 'app', command: 'goal', args: 'pause' })
-  })
-
-  it('목표 기능이 꺼져 있으면 없다 — 후보에 없고 내면 모르는 명령', async () => {
-    const { ctx, triggers } = await start()
-    ctx.plugin(SlashTrigger)
-    await settle()
-    expect((await triggers.query(scope, '/go', 3))!.candidates.map((entry) => entry.label)).not.toContain('/goal')
-    expect(await triggers.submit(scope, '/goal 무언가')).toEqual({ kind: 'error', message: tr('error.unknownCommand', { name: 'goal' }) })
-  })
-})
-
 // 스킬 (이슈 #7): `/` 에 "스킬" 그룹으로 섞는다 — 명령과 이름이 겹치면 명령, 내장(<built-in>)은 없다. 내면 SKILL.md 를 직접 읽어(엔진 본문은
 // 재시작 전까지 옛것) 본문을 붙여 보내고 말풍선엔 친 글. 스킬 기능(ctx.skills)이 꺼져 있으면 후보도 실행도 없다
 describe('/ 스킬', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PICK_CONVERSATION_LIMIT, delegationLine, peerOf, projectTargets, readRequest, runningOrigin, sidebarMark, targetPicker, type Peer, type ProjectTarget } from '../../renderer/delegationView.ts'
+import { PICK_CONVERSATION_LIMIT, delegationLine, newConversationRequest, peerOf, projectTargets, readRequest, runningOrigin, sidebarMark, targetPicker, type Peer, type ProjectTarget } from '../../renderer/delegationView.ts'
 import { projectId } from '../../shared/delegation.ts'
 import type { Attention, HistoryMessage, TurnItem } from '../../shared/contract.ts'
 
@@ -120,6 +120,27 @@ describe('보낸 줄 — "지시 보냄 → 프로젝트 · 대화 · 상태"', 
     expect(line(tool('start_session', { input: JSON.stringify({ title: 'x', message: 'y' }) }))).toBeUndefined()
     expect(line({ ...tool('send_to_project', {}), mcp: { server: 'other', tool: 'send_to_project' } } as TurnItem)).toBeUndefined()
     expect(line({ kind: 'think', id: 't', text: '', done: true })).toBeUndefined()
+  })
+})
+
+describe('새 대화 줄 — "새 대화 열기 → · 대화 제목 · 상태" (이슈 #415)', () => {
+  /** 같은 프로젝트(shop-web)의 새 대화 */
+  const N = 'eeeeeeee-0000-4000-8000-000000000005'
+  const RESULT = `Started a new conversation "API 문서" (c-eeeeeeee) in this project. It runs with the model and mode of "주문 화면".`
+  const input = JSON.stringify({ title: 'API 문서', message: '문서를 써 줘' })
+  const withNew = (patch: Partial<Peer> = {}) => peers({}, {}, [{ id: N, project: WEB, title: 'API 문서', running: false, updatedAt: 100, ...patch }])
+
+  it('새 대화의 지금 상태를 따라간다 — 같은 프로젝트라 프로젝트 이름이 안 붙는다 (new 표식)', () => {
+    const item = tool('new_conversation', { input, result: RESULT })
+    expect(line(item, withNew({ running: true, startedAt: 5_000 }))).toEqual({ kind: 'sent', title: 'API 문서', targetId: N, state: 'running', startedAt: 5_000, new: true })
+    expect(line(item, withNew())).toEqual({ kind: 'sent', title: 'API 문서', targetId: N, state: 'done', new: true })
+    expect(line(item, withNew({ outcome: 'failed' }))).toMatchObject({ state: 'failed', new: true })
+  })
+
+  it('승인을 기다리는 중·거절(오류)·대화가 지워진 모양', () => {
+    expect(line(tool('new_conversation', { status: 'running', input }))).toEqual({ kind: 'sent', title: '', state: 'asking', new: true })
+    expect(line(tool('new_conversation', { status: 'error', input, error: 'not approved' }))).toMatchObject({ state: 'notSent', new: true })
+    expect(line(tool('new_conversation', { input, result: RESULT }), peers())).toEqual({ kind: 'sent', title: 'API 문서', state: 'gone', new: true })
   })
 })
 
@@ -265,6 +286,13 @@ describe('승인 카드 — 받을 프로젝트·대화 목록', () => {
     expect(targetPicker(request('start_session', { title: 'x', message: 'y' }), targets, peers(), self)).toBeUndefined()
     expect(targetPicker({ ...request('send_to_project', {}), mcp: { server: 'other', tool: 'send_to_project' } }, targets, peers(), self)).toBeUndefined()
     expect(targetPicker({ kind: 'permission', id: 'p', sessionId: 's', action: 'bash', resources: ['ls'] }, targets, peers(), self)).toBeUndefined()
+  })
+
+  it('새 대화 승인 (이슈 #415) — AI 가 고른 제목과 보낼 글 전문을 보인다. 인자를 못 이었거나 다른 도구면 보통의 카드', () => {
+    expect(newConversationRequest(request('new_conversation', { title: 'API 문서', message: '문서를 써 줘' }))).toEqual({ title: 'API 문서', message: '문서를 써 줘' })
+    expect(newConversationRequest(request('new_conversation'))).toBeUndefined()
+    expect(newConversationRequest(request('send_to_project', SEND))).toBeUndefined()
+    expect(newConversationRequest({ ...request('new_conversation', { title: 'x', message: 'y' }), mcp: { server: 'other', tool: 'new_conversation' } })).toBeUndefined()
   })
 
   it('읽기 승인 (이슈 #137) — 읽을 프로젝트와 그 대화를 보인다. 모르는 id 면 그 id, 다른 도구면 보통의 카드', () => {
