@@ -52,10 +52,10 @@ describe('FeaturesPage — 접힌 첫 그림', () => {
 
   it('스위치는 펼침 버튼 밖의 따로 눌리는 요소이고 이름을 단다', () => {
     const html = render()
-    const row = html.slice(html.indexOf('data-feature="terminal"'))
+    const row = html.slice(html.indexOf('data-feature="trajectory"'))
     const toggle = row.slice(0, row.indexOf('role="switch"'))
     expect(count(toggle, '</button>')).toBe(1) // 스위치 앞에서 펼침 버튼이 닫혔다 — 버튼 안에 버튼이 없다
-    expect(html).toContain('aria-label="터미널 탭"')
+    expect(html).toContain('aria-label="추론 과정"')
   })
 
   it('모바일 연결의 길(사내망·블루투스)은 이 화면에 줄이 없다 — 설정 > 모바일 에서만 켜고 끈다', () => {
@@ -78,11 +78,11 @@ describe('FeaturesPage — 펼친 그림', () => {
   })
 
   it('필요한 기능이 없는 기능엔 필요 칩이 없다', () => {
-    const html = render({}, 'terminal')
+    const html = render({}, 'trajectory')
     expect(count(html, ROW_OPEN)).toBe(1) // 한 번에 펼칠 수 있는 줄은 하나 (#251)
-    const terminal = html.slice(html.indexOf('data-feature="terminal"'), html.indexOf('data-feature="trajectory"'))
-    expect(terminal).not.toContain('필요:')
-    expect(terminal).toContain('>기본값: 켜짐<')
+    const trajectory = html.slice(html.indexOf('data-feature="trajectory"'), html.indexOf('data-feature="git"'))
+    expect(trajectory).not.toContain('필요:')
+    expect(trajectory).toContain('>기본값: 켜짐<')
   })
 
   it('필요한 기능이 있는 기능엔 필요 칩이 있다', () => {

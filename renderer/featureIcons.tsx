@@ -2,9 +2,7 @@ import type { ChoosableFeatureId } from '../shared/features.ts'
 
 // 설정 > 기능 줄 왼쪽 아이콘 칸 (2026-10-12, 사용자 시안 D) — 20×20 선 아이콘. 새 고르는 기능은 여기에도 넣는다(타입이 댄다).
 const PATHS: Record<ChoosableFeatureId, string> = {
-  terminal: 'M3 3h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM6 8l3 2-3 2M11 13h3',
   trajectory: 'M3 5h8M3 10h12M3 15h6',
-  openIn: 'M8 4H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3M11 3h6v6M17 3l-8 8',
   git: 'M6 7v6M6 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM14 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM14 11c0 2-8 0-8 2',
   appMcp: 'M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z',
   goal: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',

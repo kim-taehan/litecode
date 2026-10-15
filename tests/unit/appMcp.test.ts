@@ -385,12 +385,12 @@ describe('open — kind terminal', () => {
     expect(events).toEqual([])
   })
 
-  it('터미널 칸을 끄면(ctx.terminals 가 내려가면) 도구는 남고 터미널 갈래만 "꺼져 있다" 를 돌려준다 — 파일 갈래는 그대로', async () => {
+  it('ctx.terminals 가 내려가면(필수라 기능이 꺼지는 경우는 사라졌지만) 도구는 남고 터미널 갈래만 "없다" 를 돌려준다 — 파일 갈래는 그대로', async () => {
     const { appMcp, terminals, terminalsFiber, toolNames, tool, events } = await start()
     appMcp.view(project)
     await terminalsFiber.dispose()
     expect(await toolNames()).toEqual(['open'])
-    expect(await tool('open', { kind: 'terminal', command: 'ls' })).toEqual({ text: 'The terminal pane is turned off in Settings > Features, so nothing was opened.', isError: true })
+    expect(await tool('open', { kind: 'terminal', command: 'ls' })).toEqual({ text: 'The terminal pane is not available, so nothing was opened.', isError: true })
     expect(terminals.written).toEqual([])
     expect(await tool('open', { kind: 'file', path: 'src/a.ts' })).toMatchObject({ isError: false })
     expect(events).toEqual([['file', project, 'src/a.ts', undefined]])

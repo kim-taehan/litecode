@@ -16,7 +16,8 @@ import '../../terminals.ts'
 // (바로 돌릴 것이면 모델에게는 bash 도구가 있다). 그래서 실행돼 버리는 글자를 막는다:
 // 개행(\n·\r)이 섞이면 셸에 들어가는 즉시 그 자리까지 실행된다(closed-code 실측, opencode 1.18.18 pty·zsh). ESC·탭 같은 다른 C0 제어문자·DEL 도
 // 셸에서 제 뜻대로 움직인다(완성·키 바인딩) — 한 줄 명령에 필요 없으니 통째로 거절한다.
-// 터미널 칸(기능)을 끄면 도구는 남고 이 갈래만 "꺼져 있다" 를 돌려준다 (만들기 도구의 훅 갈래와 같은 모양 — 도구 하나라 목록에서 뺄 수 없다).
+// 터미널 칸은 필수 기능이 되어 끄지 못하나(2026-10-15) \`ctx.terminals\` 묶음이 없으면(내려간 경우) 이 갈래만 "없다" 를 돌려준다
+// (만들기 도구의 훅 갈래와 같은 모양 — 도구 하나라 목록에서 뺄 수 없다).
 //
 // 설명·결과 글은 모델이 읽는다 — 화면 언어와 무관하게 영어 (tr() 을 타지 않는다)
 
@@ -67,7 +68,7 @@ export function OpenTool(ctx: Context): void {
   async function openTerminal(directory: string, args: Record<string, unknown>): Promise<string> {
     const command = terminalCommand(args)
     const terminals = ctx.get('terminals')
-    if (!terminals) throw new Error('The terminal pane is turned off in Settings > Features, so nothing was opened.')
+    if (!terminals) throw new Error('The terminal pane is not available, so nothing was opened.')
     ctx.appMcp.requireViewed(directory)
     const id = await terminals.openOrReuse(directory) // 켜져 있으면 마지막 연 탭, 없으면 새 탭
     if (command) await terminals.write(directory, id, command)
