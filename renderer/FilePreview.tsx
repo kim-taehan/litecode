@@ -7,6 +7,9 @@ import {
   GIT_TAB,
   closeFilePreview,
   closeTab,
+  compareCandidates,
+  exitCompare,
+  isFileTab,
   isTaskTab,
   isTerminalTab,
   isTurnTab,
@@ -16,6 +19,7 @@ import {
   openTerminalTab,
   revealPanel,
   selectTab,
+  startCompare,
   taskIdOf,
   terminalIdOf,
   toggleFullscreen,
@@ -98,6 +102,16 @@ export function RightPanelButton({ directory }: { directory: string }) {
   )
 }
 
+/** 비교 보기 아이콘 — 상하로 쪼개진 판 (위아래 50/50, 이슈 #424) */
+function CompareIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2.5" y="2.75" width="11" height="10.5" rx="1.5" />
+      <path d="M2.5 8h11" />
+    </svg>
+  )
+}
+
 function Panel({ state }: { state: PanelState }) {
   const t = useT()
   const [width, setWidth] = useState(readWidth)
@@ -112,6 +126,11 @@ function Panel({ state }: { state: PanelState }) {
   // 기능이 꺼지면(셸도 다 끝났다) 터미널 탭은 보이지 않는다
   const tabs = terminalOn ? allTabs : allTabs.filter((key) => !isTerminalTab(key))
   const active = state.active === GIT_TAB && !gitOn ? undefined : isTerminalTab(state.active) && !terminalOn ? undefined : state.active
+  // 비교 보기 (이슈 #424) — 비교하는 파일 탭 둘 다 남아 있을 때만 (닫거나 프로젝트를 옮기면 저장소가 먼저 지운다 — 여기서는 안전망)
+  const compare =
+    state.compare && isFileTab(state.compare.a) && isFileTab(state.compare.b) && allTabs.includes(state.compare.a) && allTabs.includes(state.compare.b)
+      ? state.compare
+      : undefined
   // 파일 탭은 한 번 본 뒤부터 계속 마운트 — 다른 탭에 갔다 와도 펼친 폴더·스크롤이 그대로 (dsh keepMounted, 안 본 탭은 미리 안 그린다)
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
@@ -148,11 +167,12 @@ function Panel({ state }: { state: PanelState }) {
     closeTab(key)
   }
 
-  // Esc — 전체 화면이면 먼저 풀고, 아니면 닫는다
+  // Esc — 비교 보기면 먼저 끝내고, 전체 화면이면 풀고, 아니면 닫는다
   function onKeyDown(event: KeyboardEvent<HTMLElement>): void {
     if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return
     event.preventDefault()
-    if (fullscreen) toggleFullscreen()
+    if (compare) exitCompare()
+    else if (fullscreen) toggleFullscreen()
     else close()
   }
 
@@ -356,6 +376,22 @@ function Panel({ state }: { state: PanelState }) {
           />
         </div>
         <span className="file-preview__chrome">
+          {compare && (
+            <>
+              <span className="file-preview__compare-pill" title={t('filePreview.comparePill')}>
+                A|B
+              </span>
+              <button
+                type="button"
+                className="file-preview__tool file-preview__compare-off"
+                aria-label={t('filePreview.compareOff')}
+                title={t('filePreview.compareOff')}
+                onClick={exitCompare}
+              >
+                <CompareIcon />
+              </button>
+            </>
+          )}
           <button
             type="button"
             className="file-preview__tool file-preview__fullscreen"
@@ -387,7 +423,7 @@ function Panel({ state }: { state: PanelState }) {
         isTurnTab(active) &&
         <TurnTab key={active} conversationId={turnRefOf(active)!.conversationId} startedAt={turnRefOf(active)!.startedAt} directory={directory} />}
       {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && active !== GIT_TAB && (
-        <FileView key={active} directory={directory} token={active} jump={jump?.key === active ? jump : undefined} />
+        <CompareSplit compare={compare} directory={directory} active={active} jump={jump} tabs={tabs} />
       )}
     </aside>
   )
@@ -401,6 +437,95 @@ function activateOnKey(event: KeyboardEvent<HTMLElement>, activate: () => void):
 
 function baseName(key: string): string {
   return key.slice(key.lastIndexOf('/') + 1) || key
+}
+
+/** 파일 탭 자리 — 보통은 FileView 하나. 비교 보기면 FileView 두 개를 위아래 50/50 (각각의 미리보기·워치가 그대로 — 그 파일만 바뀌면 그 절반만 다시 그린다) */
+function CompareSplit({
+  compare,
+  directory,
+  active,
+  jump,
+  tabs,
+}: {
+  compare: { a: string; b: string } | undefined
+  directory: string
+  active: string
+  jump?: { key: string; line: number; seq: number }
+  tabs: string[]
+}) {
+  if (compare && compare.a === active) {
+    return (
+      <div className="file-preview__compare">
+        <FileView key={compare.a} directory={directory} token={compare.a} compareOn />
+        <FileView key={compare.b} directory={directory} token={compare.b} compareOn />
+      </div>
+    )
+  }
+  return (
+    <FileView
+      key={active}
+      directory={directory}
+      token={active}
+      jump={jump?.key === active ? jump : undefined}
+      compareCandidates={compareCandidates(tabs, active)}
+      onCompare={(other) => startCompare(directory, active, other)}
+    />
+  )
+}
+
+/** 비교 보기 열기 — 다른 연 파일 탭이 후보. 메뉴는 + 버튼(TabAddMenu)과 같은 모양 */
+function CompareMenu({ candidates, onPick }: { candidates: string[]; onPick(key: string): void }) {
+  const t = useT()
+  const [at, setAt] = useState<{ left: number; top: number }>()
+  const root = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!at) return
+    root.current?.querySelector<HTMLButtonElement>('.open-in__item')?.focus()
+    const onMouseDown = (event: globalThis.MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setAt(undefined)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [at])
+
+  return (
+    <span ref={root} onKeyDown={(event) => event.key === 'Escape' && setAt(undefined)}>
+      <button
+        type="button"
+        className="file-preview__tool"
+        aria-label={t('filePreview.compare')}
+        title={t('filePreview.compare')}
+        aria-haspopup="menu"
+        aria-expanded={at !== undefined}
+        onClick={(event) => {
+          if (at) return setAt(undefined)
+          const rect = event.currentTarget.getBoundingClientRect()
+          setAt({ left: rect.left, top: rect.bottom + 4 })
+        }}
+      >
+        <CompareIcon />
+      </button>
+      {at && (
+        <div className="open-in__menu file-preview__add-menu" role="menu" style={{ left: at.left, top: at.top }}>
+          {candidates.map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="menuitem"
+              className="open-in__item"
+              onClick={() => {
+                setAt(undefined)
+                onPick(key)
+              }}
+            >
+              {baseName(key)}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
 }
 
 // ── 파일 탭 (dsh ui-sidebar-files) — 루트 경로 줄 + 다시 읽기, 그 아래 한 단계씩 펼치는 나무. 폴더 먼저·이름 순서는 메인이 정한다 ──
@@ -526,7 +651,22 @@ function TreeLevel({
 // ── 파일 탭 하나 — 경로 줄 + 본문 ──
 
 /** jump — 그 줄로 가서 강조한다 (AI 의 open(파일)). 줄은 원문의 줄이라 마크다운·HTML 도 원문 보기로 바꾼다 */
-function FileView({ directory, token, jump }: { directory: string; token: string; jump?: { line: number; seq: number } }) {
+function FileView({
+  directory,
+  token,
+  jump,
+  compareOn = false,
+  compareCandidates,
+  onCompare,
+}: {
+  directory: string
+  token: string
+  jump?: { line: number; seq: number }
+  /** 비교 보기(위아래)의 절반이면 후보 메뉴를 안 그린다 — 끝내기·다시 열기는 패널 머리(알약·버튼)에서 */
+  compareOn?: boolean
+  compareCandidates?: string[]
+  onCompare?: (other: string) => void
+}) {
   const t = useT()
   const [preview, setPreview] = useState<FilePreview | 'loading'>('loading')
   const [revision, setRevision] = useState(0)
@@ -619,6 +759,9 @@ function FileView({ directory, token, jump }: { directory: string; token: string
             >
               {copied ? <CheckIcon /> : <CopyIcon />}
             </button>
+          )}
+          {!compareOn && compareCandidates && compareCandidates.length > 0 && onCompare && (
+            <CompareMenu candidates={compareCandidates} onPick={onCompare} />
           )}
         </span>
       </div>

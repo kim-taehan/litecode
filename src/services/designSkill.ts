@@ -42,6 +42,9 @@ When the user invokes this skill as \`/design <screen>\`, everything after \`/de
 The panel watches the open mockup file: every edit to it re-renders the preview by itself, without anyone opening or reloading anything. So when the user asks for a change ("make the button blue", "move the title up", "라벨을 아이디로"), edit the SAME file and reply in one short line — do not recreate the mockup, do not rename or move it, do not tell the user to refresh.
 If the user wants a different screen, create the other file (mock-<other>.html) and open it; earlier mockups stay where they are.
 
+## A/B variants
+When the user wants two versions of one screen compared ("A/B 로", "두 변형 비교해줘"), make them as TWO files — \`mock-<screen>-a.html\` and \`mock-<screen>-b.html\` — same base, only the differing parts changed, and open both. Then tell the user: the compare (AB) button in the panel's file toolbar shows the two tabs stacked top/bottom 50/50, and editing one file updates only its half.
+
 ## Limits (do not violate)
 - A mockup is a design proposal, not production code: do not wire it to the app's framework, routing or data, and do not touch the real screen unless the user asks to apply the design to it.
 - One file per screen, self-contained, offline-safe.`

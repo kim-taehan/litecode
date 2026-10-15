@@ -570,3 +570,32 @@ html[data-platform='darwin']:not([data-fullscreen]) .file-preview--full .file-pr
   min-height: 0;
   padding: 4px 0 6px 10px;
 }
+
+/* 비교 보기 (이슈 #424) — 파일 탭 둘을 위아래 50/50. 각 절반은 완전한 파일 보기(자신의 도구줄·미리보기·워칭 그대로) */
+.file-preview__compare {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-preview__compare > .file-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.file-preview__compare > .file-view + .file-view {
+  border-top: 0.5px solid var(--border-ring);
+}
+
+/* 패널 머리 알약 — 비교 보기 중인 표시 */
+.file-preview__compare-pill {
+  flex: none;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 5px;
+}
