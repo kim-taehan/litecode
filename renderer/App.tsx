@@ -39,6 +39,7 @@ import { canWrite, fromConversation, isBlank, newSession, toConversation, withBl
 import { useSidebarLayout } from './useSidebarLayout.ts'
 import { useLastModel } from './useLastModel.ts'
 import { useChatEvents } from './useChatEvents.ts'
+import { feedTurnSnapshot } from './turnDetailStore.ts'
 import { useTerminalKeys } from './useTerminalKeys.ts'
 import { useSessionNav } from './useSessionNav.ts'
 import { Sidebar } from './Sidebar.tsx'
@@ -123,8 +124,13 @@ export function App() {
     // 목록은 그 뒤에 보인다 (열어 보는 동안 안내 화면이 번쩍이지 않게). 켠 직후에는 저장된 대화 위의 새 대화에서 시작한다
     void (async () => {
       const stored = (await window.litecode.listConversations()).map(fromConversation)
-      // 메인이 쥔 도는 턴·대기열을 입힌다 — 창을 닫았다 열어도 진행 줄·대기열이 이어져 보인다 (그 뒤는 이벤트로)
+      // 메인이 쥔 도는 턴·대기열을 입힌다 — 창을 닫았다 열어도 진행 줄·대기열이 이어져 보인다 (그 뒤는 이벤트로).
+      // "이 턴의 작업" 탭(이슈 #416) 도 같은 스냅샷으로 이어 붙인다
       const live = await window.litecode.chatSnapshot()
+      for (const session of stored) {
+        const turn = live[session.id]?.turn
+        if (turn) feedTurnSnapshot(session.id, turn.startedAt, turn.progress)
+      }
       setSessions(stored.map((session) => applyLive(session, live[session.id])))
       const list = await window.litecode.listProjects()
       if (list[0] && (await pick(() => window.litecode.openProject(list[0]!.path), cannotOpen(list[0].path), list[0].path)) === 'opened') {

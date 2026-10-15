@@ -149,6 +149,7 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
             items={active.progress ?? NO_ITEMS}
             text=""
             startedAt={active.sentAt}
+            conversationId={active.id}
             directory={active.project}
             attention={active.attention}
             onAnswer={answerAttention}

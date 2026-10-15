@@ -115,6 +115,32 @@ export function openTaskTab(directory: string, taskId: string): void {
   set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus: state.focus + 1, quiet: false })
 }
 
+/** "이 턴의 작업" 탭의 열쇠 (이슈 #416) — `\0turn/<대화 id>/<보낸 시각>`, 턴마다 하나.
+ *  턴이 끝나도 탭은 남고 사용자가 닫는다 (작업 탭과 같은 길) */
+export const TURN_PREFIX = '\0turn/'
+export function turnTabKey(conversationId: string, startedAt: number): string {
+  return `${TURN_PREFIX}${conversationId}:${startedAt}`
+}
+export function turnRefOf(key: string | undefined): { conversationId: string; startedAt: number } | undefined {
+  if (!key?.startsWith(TURN_PREFIX)) return undefined
+  const rest = key.slice(TURN_PREFIX.length)
+  const at = rest.lastIndexOf(':')
+  if (at <= 0) return undefined
+  const startedAt = Number(rest.slice(at + 1))
+  const conversationId = rest.slice(0, at)
+  return Number.isInteger(startedAt) && startedAt > 0 ? { conversationId, startedAt } : undefined
+}
+export function isTurnTab(key: string | undefined): key is string {
+  return turnRefOf(key) !== undefined
+}
+
+/** 턴 탭을 연다 — 이미 열려 있으면 그 탭을 고른다 (진행 중 턴의 한 줄) */
+export function openTurnTab(directory: string, conversationId: string, startedAt: number): void {
+  const state = base(directory)
+  const key = turnTabKey(conversationId, startedAt)
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus: state.focus + 1, quiet: false })
+}
+
 /** ⌘[·⌘] — 터미널 탭을 넘나든다 (이전·다음). 고른 것이 없으면 마지막 연 것으로. 하나 없으면 false */
 export function cycleTerminalTab(directory: string, delta: 1 | -1): boolean {
   if (!current || current.directory !== directory) return false

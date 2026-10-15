@@ -358,6 +358,10 @@ export const ko = {
   'taskTab.collapse': '접기',
   'taskTab.showAll': '전체 보기',
   'taskTab.showAllLines': '전체 보기 ({count}줄)',
+  // 이 턴의 작업 탭 (이슈 #416)
+  'turnTab.tab': '이 턴의 작업',
+  'turnTab.gone': '이 턴의 기록이 없습니다 — 앱을 다시 켰거나 오래된 턴이라 지워졌습니다.',
+  'turnTab.showAll': '이 턴의 진행 전체 보기',
   // 추론 과정(Trajectory) 탭
   'trajectory.loading': '불러오는 중…',
   'trajectory.toolbar': 'Trajectory 도구',

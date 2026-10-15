@@ -97,21 +97,26 @@ describe('하위 작업 (이슈 #31)', () => {
       `parallel ${tasks(['general', 'alpha job', '[bash:sleep 4; echo A > sub-a.txt] child A'], ['general', 'beta job', '[bash:sleep 4; echo B > sub-b.txt] child B'])}`,
     )
     await runningTurn().waitFor({ timeout: 10_000 })
-    // 두 하위 작업이 함께 진행 중 — 줄마다 "하위 작업 · general · 설명"
-    await expect.poll(() => runningTurn().locator('.turn-row[data-kind="subtask"][data-status="running"]').count(), { timeout: 20_000 }).toBe(2)
-    expect(await subtask('alpha job').locator('.turn-row__title').textContent()).toBe('하위 작업')
-    expect(await subtask('alpha job').locator('.turn-row__summary').textContent()).toBe('general · alpha job')
-    expect(await subtask('beta job').locator('.turn-row__summary').textContent()).toBe('general · beta job')
+    // 두 하위 작업이 함께 진행 중 — 도는 턴은 채팅에 한 줄(이슈 #416), 하위 작업 줄은 우측 "이 턴의 작업" 탭에
+    const runningLine = runningTurn().locator('.turn-running__line')
+    await runningLine.waitFor({ timeout: 20_000 })
+    await runningLine.click()
+    const workTab = page.locator('.turn-tab')
+    await expect.poll(() => workTab.locator('.turn-row[data-kind="subtask"][data-status="running"]').count(), { timeout: 20_000 }).toBe(2)
+    const liveSubtask = (name: string) => workTab.locator('.turn-row[data-kind="subtask"]', { hasText: name })
+    expect(await liveSubtask('alpha job').locator('.turn-row__title').textContent()).toBe('하위 작업')
+    expect(await liveSubtask('alpha job').locator('.turn-row__summary').textContent()).toBe('general · alpha job')
+    expect(await liveSubtask('beta job').locator('.turn-row__summary').textContent()).toBe('general · beta job')
     // 각자 초가 오른다
-    const status = (name: string) => subtask(name).locator('.turn-subtask__status').textContent({ timeout: 1_000 })
+    const status = (name: string) => liveSubtask(name).locator('.turn-subtask__status').textContent({ timeout: 1_000 })
     const firstA = await status('alpha job')
     expect(firstA).toMatch(/^진행 중 · \d+초/)
     await expect.poll(() => status('alpha job'), { timeout: 3_000 }).not.toBe(firstA)
     expect(await status('beta job')).toMatch(/^진행 중 · \d+초/)
     // 펼치면 그 자식의 줄이 실시간으로 — 자식이 부른 bash
-    await subtask('alpha job').locator('.turn-row__line').first().click()
-    await expect.poll(() => subtask('alpha job').locator('.turn-subtask__body .turn-row[data-kind="tool"]').count(), { timeout: 10_000 }).toBeGreaterThan(0)
-    expect(await subtask('alpha job').locator('.turn-subtask__body .turn-row[data-kind="tool"] .turn-row__title').first().textContent()).toBe('Bash')
+    await liveSubtask('alpha job').locator('.turn-row__line').first().click()
+    await expect.poll(() => liveSubtask('alpha job').locator('.turn-subtask__body .turn-row[data-kind="tool"]').count(), { timeout: 10_000 }).toBeGreaterThan(0)
+    expect(await liveSubtask('alpha job').locator('.turn-subtask__body .turn-row[data-kind="tool"] .turn-row__title').first().textContent()).toBe('Bash')
     expect(await exists('sub-a.txt')).toBe(false) // 자식 bash 가 아직 도는 중 — 자식 idle 이 와도 부모 턴은 안 끝난다
 
     // 둘 다 끝난 뒤 부모 답 — 턴은 한 번만 끝난다(답 하나)
@@ -156,7 +161,10 @@ describe('하위 작업 (이슈 #31)', () => {
   it('중지하면 부모와 진행 중 하위 작업이 모두 멈춘다 — 턴은 "중단됨", 하위 작업 줄도 중단됨, 자식 bash 의 파일은 안 생긴다', async () => {
     await page.locator('.new-chat').click()
     await submit(`stop chat ${tasks(['general', 'slow one', '[bash:sleep 6; echo 1 > stop-1.txt] c1'], ['general', 'slow two', '[bash:sleep 6; echo 2 > stop-2.txt] c2'])}`)
-    await expect.poll(() => runningTurn().locator('.turn-row[data-kind="subtask"][data-status="running"]').count(), { timeout: 20_000 }).toBe(2)
+    const runningLine = runningTurn().locator('.turn-running__line')
+    await runningLine.waitFor({ timeout: 20_000 })
+    await runningLine.click()
+    await expect.poll(() => page.locator('.turn-tab .turn-row[data-kind="subtask"][data-status="running"]').count(), { timeout: 20_000 }).toBe(2)
     await page.waitForTimeout(1_000) // 자식 bash 가 시작되게
     await page.locator('.composer__stop').click()
     await expect.poll(() => runningTurn().count(), { timeout: 15_000 }).toBe(0)

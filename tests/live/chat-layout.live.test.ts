@@ -73,7 +73,10 @@ afterAll(async () => {
 const replies = () => page.locator('.bubble--assistant')
 const running = () => page.locator('.turn[data-state="running"]')
 const lastTurn = () => page.locator('.turn').last()
-const seconds = async () => Number(/(\d+)초/.exec((await page.locator('.turn-running__text').textContent()) ?? '')?.[1] ?? NaN)
+/** 진행 중 턴의 한 줄 (이슈 #416) — 지금 하는 일 + 경과 초. 누르면 우측 "이 턴의 작업" 탭 */
+const runningLine = () => running().locator('.turn-running__line')
+const workTab = () => page.locator('.turn-tab')
+const seconds = async () => Number(/(\d+)초/.exec((await page.locator('.turn-running__seconds').textContent()) ?? '')?.[1] ?? NaN)
 
 async function type(text: string): Promise<void> {
   await page.getByPlaceholder('메시지를 입력하세요…').fill(text)
@@ -86,16 +89,22 @@ async function waitReply(before: number): Promise<void> {
 }
 
 describe('채팅 답 모양·진행 표시', () => {
-  it('[think]: 진행 중에 생각 줄이 조각으로 채워지고(생각이 끝나기 전) 파란 진행 줄이 돈다 → 끝나면 "완료 · N초" 머리 아래로 접힌다', async () => {
+  it('[think]: 진행 중엔 채팅에 한 줄(지금 하는 일 + 초)만 — 생각 전문은 우측 "이 턴의 작업" 탭에 조각으로 차고 → 끝나면 "완료 · N초" 머리 아래로 접힌다', async () => {
     await type('[think] 생각 테스트')
-    // 생각 첫 조각은 전역 스트림(reasoning.delta)에만 온다 — 세션 SSE 만이면 생각이 끝날 때(THINK_MS×2 뒤)에야 글이 생긴다
-    const think = running().locator('.turn-row[data-kind="think"]')
-    await expect.poll(() => think.getAttribute('data-done').catch(() => null), { timeout: 15_000 }).toBe('false')
-    await expect.poll(() => think.locator('.turn-row__summary').textContent().catch(() => ''), { timeout: THINK_MS }).toBe('Planning the answer line one')
-    expect(await think.getAttribute('data-done')).toBe('false') // 아직 생각 중
-    expect(await think.locator('.turn-row__title').textContent()).toBe('생각')
-    expect(await page.locator('.turn-running__text').textContent()).toMatch(/^작업 중 · \d+초$/)
+    // 생각 첫 조각은 전역 스트림(reasoning.delta)에만 온다 — 세션 SSE 만이면 생각이 끝날 때(THINK_MS×2 뒤)에야 글이 생긴다.
+    // 한 줄의 요약도 같은 조각으로 채워진다 (이슈 #416 — 생각·도구 줄은 채팅에 안 쌓고 탭으로)
+    await expect.poll(() => runningLine().locator('.turn-running__summary').textContent().catch(() => ''), { timeout: 15_000 }).toBe('Planning the answer line one')
+    expect(await running().locator('.turn-row').count()).toBe(0) // 채팅엔 줄이 쌓이지 않는다
+    expect(await page.locator('.turn-running__seconds').textContent()).toMatch(/\d+초/)
     expect(await replies().count()).toBe(0) // 답은 끝난 뒤에야 답 자리에
+
+    // 한 줄을 누르면 우측 탭 — 생각 줄이 실시간 (아직 끝 안 난 채로)
+    await runningLine().click()
+    await expect.poll(() => workTab().count(), { timeout: 5_000 }).toBe(1)
+    const think = workTab().locator('.turn-row[data-kind="think"]')
+    await expect.poll(() => think.getAttribute('data-done').catch(() => null), { timeout: 15_000 }).toBe('false')
+    expect(await think.locator('.turn-row__summary').textContent()).toBe('Planning the answer line one')
+    expect(await think.locator('.turn-row__title').textContent()).toBe('생각')
 
     await waitReply(0)
     expect(await replies().last().textContent()).toBe('echo: [think] 생각 테스트')
@@ -114,18 +123,22 @@ describe('채팅 답 모양·진행 표시', () => {
     expect(await done.locator('.turn-row__body').textContent()).toContain('Second paragraph of thought.')
   })
 
-  it('[bash:sleep 2]: 진행 중 "Bash · fake" 줄이 실행 중으로 보이고 진행 줄의 초가 올라간다 → 끝나면 접히고 펼치면 완료 표시', async () => {
+  it('[bash:sleep 2]: 진행 중 "bash fake" 한 줄의 초가 올라가고 우측 탭의 도구 줄이 실행 중 → 끝나면 탭 줄은 완료, 채팅은 접혀 펼치면 완료 표시', async () => {
     const before = await replies().count()
     await type('[bash:sleep 2]')
-    const tool = running().locator('.turn-row[data-kind="tool"]')
-    await expect.poll(() => tool.getAttribute('data-status').catch(() => null), { timeout: 15_000 }).toBe('running')
-    expect(await tool.locator('.turn-row__line').textContent()).toBe('Bashfake')
-    expect(await tool.locator('.turn-row__title').textContent()).toBe('Bash')
+    await expect.poll(() => runningLine().locator('.turn-running__summary').textContent().catch(() => ''), { timeout: 15_000 }).toBe('bash fake')
     const first = await seconds()
     await expect.poll(seconds, { timeout: 3_000 }).toBeGreaterThan(first)
 
+    const tool = workTab().locator('.turn-row[data-kind="tool"]')
+    await runningLine().click()
+    await expect.poll(() => tool.count(), { timeout: 5_000 }).toBe(1)
+    await expect.poll(() => tool.getAttribute('data-status').catch(() => null), { timeout: 15_000 }).toBe('running')
+    expect(await tool.locator('.turn-row__title').textContent()).toBe('Bash')
+
     await waitReply(before)
     expect(await replies().last().textContent()).toMatch(/^tool: /)
+    expect(await tool.getAttribute('data-status')).toBe('done') // 탭은 끝난 줄로 남는다
     const head = lastTurn().locator('.turn__head')
     expect(await head.getAttribute('aria-expanded')).toBe('false')
     await head.click()
@@ -213,15 +226,15 @@ describe('채팅 답 모양·진행 표시', () => {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 800))
   })
 
-  it('진행 중 다른 대화로 갔다 돌아와도 진행 줄이 그대로 이어지고 끝난다', async () => {
+  it('진행 중 다른 대화로 갔다 돌아와도 한 줄과 진행이 그대로 이어지고 끝난다', async () => {
     const conversation = page.locator('.session-item', { hasText: '[think] 생각 테스트' }).locator('.session-item__main')
     const before = await replies().count()
     await type('[think] 오가기')
-    await expect.poll(() => running().locator('.turn-row[data-kind="think"]').count(), { timeout: 15_000 }).toBe(1)
+    await expect.poll(() => runningLine().count(), { timeout: 15_000 }).toBe(1)
     await page.getByRole('button', { name: '+ 새 대화' }).click()
     expect(await running().count()).toBe(0)
     await conversation.click()
-    expect(await running().locator('.turn-row[data-kind="think"]').count()).toBe(1)
+    expect(await runningLine().count()).toBe(1)
     await waitReply(before)
     expect(await replies().last().textContent()).toBe('echo: [think] 오가기')
   })
@@ -261,13 +274,12 @@ describe('채팅 답 모양·진행 표시', () => {
 
   // 게이트웨이 500 은 레거시 opencode 가 재시도한다(5번, 합계 ~71초 — 01w). 그동안 화면이 멈춘 듯 보이지 않게 진행 줄로 알린다 (이슈 #20).
   // 가짜 LLM `[flaky]` 는 첫 요청만 500(retry-after-ms 1.5초) — opencode 가 session.status retry 를 낸 뒤 다시 보내 답한다
-  it('[flaky]: 재시도하는 동안 "재시도 중 (1번째) · 사유" 줄이 보이고, 다시 보내 답이 오면 그 줄은 사라진다', async () => {
+  it('[flaky]: 재시도하는 동안 "재시도 중 (1번째) · 사유" 가 한 줄에 보이고, 다시 보내 답이 오면 사라진다', async () => {
     await page.getByRole('button', { name: '+ 새 대화' }).click()
     await type('[flaky] 재시도 테스트')
-    const retry = running().locator('.turn-row[data-kind="retry"]')
-    await expect.poll(() => retry.count(), { timeout: 15_000 }).toBe(1)
-    expect(await retry.locator('.turn-row__title').textContent()).toBe('재시도 중 (1번째)')
-    expect(await retry.locator('.turn-row__summary').textContent()).toBe('fake-llm: 잠깐 실패 (다시 시도하면 된다)')
+    await expect.poll(() => runningLine().locator('.turn-running__summary').textContent().catch(() => ''), { timeout: 15_000 }).toBe(
+      '재시도 중 (1번째) · fake-llm: 잠깐 실패 (다시 시도하면 된다)',
+    )
 
     await waitReply(0)
     expect(await replies().last().textContent()).toBe('echo: [flaky] 재시도 테스트')

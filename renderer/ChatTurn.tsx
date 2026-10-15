@@ -8,6 +8,8 @@ import { takeCompactions } from './compaction.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
+import { openTurnTab } from './filePreviewStore.ts'
+import { runningLine } from './jobsView.ts'
 import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import type { MessageOrigin } from '../shared/contract.ts'
 import { DelegationRow, OriginTag, useDelegation } from './Delegation.tsx'
@@ -106,9 +108,11 @@ interface AssistantTurnProps {
   declined?: boolean
   /** 끝난 턴의 걸린 시간(ms) */
   duration?: number
-  /** 답을 기다리는 중 — startedAt 부터 시계가 돈다 */
+  /** 답을 기다리는 중 — startedAt 부터 시계가 돈다. startedAt·directory·conversationId 는 진행 중 한 줄(이슈 #416)의
+   *  "이 턴의 작업" 탭 열기에 쓰인다 */
   running?: boolean
   startedAt?: number
+  conversationId?: string
   /** 파일 언급 칩을 찾을 프로젝트 */
   directory: string
   /** 진행 중 턴이 기다리는 승인·질문 — 작업 줄 아래 카드로 */
@@ -118,11 +122,16 @@ interface AssistantTurnProps {
 
 const NO_ATTENTION: readonly Attention[] = []
 
-export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
+export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, conversationId, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
   // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다.
   // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
   const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
-  const { work, answer } = running ? { work: [...items], answer: [] } : splitTurn(rest)
+  const { work, answer } = running ? { work: [] as TurnItem[], answer: [] } : splitTurn(rest)
+  // 진행 중(이슈 #416) — 생각·도구 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "이 턴의 작업" 탭으로.
+  // 채팅에는 진행 중 답 글(글 줄)과 상태 알림인 요약 중(compaction)만 그대로
+  const liveRows = running
+    ? items.filter((item): item is Extract<TurnItem, { kind: 'text' }> | Extract<TurnItem, { kind: 'compaction' }> => item.kind === 'compaction' || (item.kind === 'text' && item.text.trim() !== ''))
+    : []
   const foldable = !running && !failed && work.length > 0
   const [open, setOpen] = useState(false)
   const t = useT()
@@ -164,6 +173,20 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
           )}
         </div>
       )}
+      {/* 진행 중 — 답 글(글 줄)·요약 중은 채팅에, 생각·도구 줄은 아래 한 줄과 우측 탭으로 (이슈 #416) */}
+      {liveRows.length > 0 && (
+        <div className="turn__work">
+          {liveRows.map((item) =>
+            item.kind === 'compaction' ? (
+              <CompactionMark key={item.id} item={item} />
+            ) : (
+              <div key={item.id} className="turn-row turn-row--text" data-kind="text">
+                <Markdown text={item.text.trim()} directory={directory} streaming />
+              </div>
+            ),
+          )}
+        </div>
+      )}
       {/* 답 — 기존 셀렉터(.bubble--assistant)를 그대로 쓴다. 모양은 말풍선이 아니다. 모델이 빈 줄로 답을 시작하기도 해서 앞뒤 공백은 뗀다 */}
       {!running && (
         <div className="bubble bubble--assistant">
@@ -188,13 +211,14 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
       )}
       {running &&
         attention.map((request) => <AttentionCard key={request.id} request={request} onAnswer={(answer, target) => onAnswer?.(request, answer, target) ?? Promise.resolve()} />)}
-      {running && <RunningStatus startedAt={startedAt} />}
+      {running && <RunningLine items={items} startedAt={startedAt} directory={directory} conversationId={conversationId} />}
     </div>
   )
 })
 
-/** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다) */
-function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
+/** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다).
+ *  우측 "이 턴의 작업" 탭(TurnTab)도 같은 줄을 그린다 (이슈 #416) */
+export function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
   const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
@@ -380,28 +404,53 @@ function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory
   )
 }
 
-/** 진행 중 맨 아래 파란 줄 — 보낸 시각부터 초가 올라가고 점이 움직인다 (dsh RunningStatus). 시계는 이 줄만 다시 그린다 */
-function RunningStatus({ startedAt }: { startedAt?: number }) {
+/** 진행 중 맨 아래 한 줄 (이슈 #416) — 지금 하는 일(마지막 생각·도구·하위 작업 줄) + 보낸 시각부터 경과 + 움직이는 점.
+ *  누르면 우측 패널의 "이 턴의 작업" 탭이 열려 전체 진행을 실시간으로 보인다. 시계는 이 줄만 다시 그린다 (dsh RunningStatus) */
+function RunningLine({ items, startedAt, directory, conversationId }: { items: readonly TurnItem[]; startedAt?: number; directory: string; conversationId?: string }) {
   const t = useT()
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1_000)
     return () => clearInterval(timer)
   }, [])
+  const line = runningLine(items)
+  // 재시도 대기(게이트웨이 500 등)는 지금 하는 일을 덮는 상태 — 사유까지 한 줄로 (이슈 #20 의 진행 줄을 한 줄로 받은 것)
+  const retry = [...items].reverse().find((item): item is Extract<TurnItem, { kind: 'retry' }> => item.kind === 'retry' && item.status === 'waiting')
+  const summary = retry ? [t('chat.retrying', { attempt: retry.attempt }), retry.message].filter(Boolean).join(' · ') : line?.text ?? t('chat.working')
+  const canOpen = conversationId !== undefined && startedAt !== undefined
+  const inner = (
+    <>
+      <SparkIcon />
+      <span className="turn-running__summary">{summary}</span>
+      {startedAt !== undefined && (
+        <>
+          <span className="turn-running__dot" aria-hidden="true" />
+          <span className="turn-running__seconds">{formatDuration(t, now - startedAt)}</span>
+        </>
+      )}
+      <span className="turn-running__dots" aria-hidden="true">
+        <span>·</span>
+        <span>·</span>
+        <span>·</span>
+      </span>
+    </>
+  )
   return (
     <div className="turn-running">
       <span className="turn-running__divider" aria-hidden="true" />
-      <span className="turn-running__content">
-        <SparkIcon />
-        <span className="turn-running__text">
-          {startedAt === undefined ? t('chat.working') : t('chat.workingFor', { duration: formatDuration(t, now - startedAt) })}
-        </span>
-        <span className="turn-running__dots" aria-hidden="true">
-          <span>·</span>
-          <span>·</span>
-          <span>·</span>
-        </span>
-      </span>
+      {canOpen ? (
+        <button
+          type="button"
+          className="turn-running__line"
+          title={t('turnTab.showAll')}
+          aria-label={t('turnTab.showAll')}
+          onClick={() => canOpen && openTurnTab(directory, conversationId, startedAt!)}
+        >
+          {inner}
+        </button>
+      ) : (
+        <span className="turn-running__line">{inner}</span>
+      )}
     </div>
   )
 }

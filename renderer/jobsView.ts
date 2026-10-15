@@ -82,6 +82,22 @@ export function lastLine(items: readonly TurnItem[]): JobLine | undefined {
   return recentLines(items, 1)[0]
 }
 
+/** 스트리밍 한 줄(이슈 #416) 에 보일 지금 하는 일 — lastLine 과 비슷하되 하위 작업 줄도 본다
+ *  (하위 작업만 도는 턴은 생각·도구 줄이 없어도 그 설명으로). 없으면 undefined */
+export function runningLine(items: readonly TurnItem[]): JobLine | undefined {
+  for (let at = items.length - 1; at >= 0; at--) {
+    const item = items[at]!
+    if (item.kind === 'subtask') {
+      const text = [item.agent, item.description].filter(Boolean).join(' · ')
+      if (text) return { id: item.id, text, mono: false }
+      continue
+    }
+    const line = jobLine(item)
+    if (line) return line
+  }
+  return undefined
+}
+
 /** 백그라운드 작업 줄의 훑어보기 한 줄 (#325) — 실패·중단 사유가 있으면 그것, 아니면 마지막 활동(생각·도구·응답 글의 첫 줄). 없으면 undefined */
 export function peekLine(item: Subtask): JobLine | undefined {
   if (item.error) return { id: 'error', text: item.error, mono: false, state: 'error' }
