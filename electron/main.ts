@@ -26,6 +26,8 @@ import { AtTrigger } from '../src/triggers/at.ts'
 import { SlashTrigger } from '../src/triggers/slash.ts'
 import { BangTrigger } from '../src/triggers/bang.ts'
 import { TrajectoryService } from '../src/services/trajectory.ts'
+import { DesignService } from '../src/services/design.ts'
+import { DesignSkillService } from '../src/services/designSkill.ts'
 import { existingFiles, projectFile } from '../src/services/fileMentions.ts'
 import { previewFile, readHtmlAssets, type FilePreview, type HtmlAsset } from '../src/services/filePreview.ts'
 import { listDirectory, type DirectoryListing } from '../src/services/fileTree.ts'
@@ -401,6 +403,19 @@ function trajectoryBridge(ctx: Context): void {
   handle(ctx, Channel.LOAD_TRAJECTORY, async (_event, directory: string, sessionId: string) => ctx.trajectory.read(directory, sessionId))
 }
 trajectoryBridge.inject = ['trajectory']
+
+// 라이트코드 디자인 (이슈 #422) — 보고 있는 미리보기 파일(registered 프로젝트 안만)이 바뀌면 모든 창에 흘린다.
+// 화면은 absolute 로 지금 보는 탭만 다시 읽는다. 시안 스킬 파일은 DesignSkillService 가 묶음과 같은 운명으로 쓴다·지운다
+function designBridge(ctx: Context): void {
+  const project = async (directory: unknown): Promise<string> => {
+    if (typeof directory !== 'string' || !(await ctx.projects.has(directory))) throw new Error('not a registered project')
+    return directory
+  }
+  handle(ctx, Channel.PREVIEW_WATCH, async (_event, directory: string, token: string) => ctx.design.watch(await project(directory), String(token)))
+  handle(ctx, Channel.PREVIEW_UNWATCH, async (_event, directory: string, token: string) => ctx.design.unwatch(await project(directory), String(token)))
+  ctx.on('design/changed', (absolute) => broadcast(Channel.PREVIEW_CHANGED, absolute))
+}
+designBridge.inject = ['design', 'projects']
 
 // 알림 IPC — ctx.notifications 를 빼면 이 줄들만 사라지고 나머지 앱은 그대로다
 function notificationsBridge(ctx: Context): void {
@@ -833,6 +848,18 @@ const features: FeatureDefinition[] = [
       ctx.plugin(GitService)
       ctx.plugin(GitTools)
       ctx.plugin(gitBridge)
+    },
+  },
+  {
+    // 라이트코드 디자인 (이슈 #422) — 기본 꺼짐(사용자 결정 2026-10-15). ① 라이브 미리보기: 우측 패널이 보고 있는 파일이 바뀌면
+    // 알아서 다시 렌더 (ctx.design — 파일 watch, 바깥 요청 0, 등록된 프로젝트 안만) ② 시안 스킬: /design 으로 self-contained HTML
+    // 시안을 만들어 litecode_open 으로 우측 패널에 열게 한다 (DesignSkillService — forward 스킬과 같은 물질화)
+    id: 'design',
+    service: 'design',
+    plugin: (ctx) => {
+      ctx.plugin(DesignService)
+      ctx.plugin(designBridge)
+      ctx.plugin(DesignSkillService, { appDir: path.join(userData, 'opencode', 'skills') })
     },
   },
 ]

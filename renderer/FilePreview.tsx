@@ -547,6 +547,24 @@ function FileView({ directory, token, jump }: { directory: string; token: string
     }
   }, [directory, token, revision])
 
+  // 라이트코드 디자인 (이슈 #422) — 기능이 켜져 있으면 탭이 열려 있는 동안(이 컴포넌트가 마운트) 메인이 이 파일을 본다.
+  // 파일이 디스크에서 바뀌면(AI 수정·터미널·바깥 에디터) 다시 읽어서 렌더링이 갱신된다
+  const designOn = useFeatures().has('design')
+  const watchedAbsolute = preview !== 'loading' && preview.status !== 'unavailable' ? preview.absolute : undefined
+  useEffect(() => {
+    if (!designOn) return
+    void window.litecode.watchPreview(directory, token).catch(() => {})
+    return () => {
+      void window.litecode.unwatchPreview(directory, token).catch(() => {})
+    }
+  }, [directory, token, designOn])
+  useEffect(() => {
+    if (!designOn || !watchedAbsolute) return
+    return window.litecode.onPreviewChanged((changed) => {
+      if (changed === watchedAbsolute) setRevision((now) => now + 1)
+    })
+  }, [designOn, watchedAbsolute])
+
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), COPIED_MS)

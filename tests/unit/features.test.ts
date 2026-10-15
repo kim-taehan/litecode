@@ -47,9 +47,10 @@ let file: string
 
 /** 기본 켜짐인 기능 — 웹 도구(web)는 늘 꺼짐(고정), 알림·모바일 연결(remote)·음성 입력(voice)은 고르는 기능 중 기본 꺼짐 (사용자 결정 2026-10-03, 이슈 #56). 훅(hooks)은 #302 부터 필수(늘 켜짐).
  *  사내망 연결(lan)·블루투스 연결(bluetooth)은 기본 꺼짐 (이슈 #210, 사내망은 #268 부터 — 켜는 순간 키체인의 TLS 키를 읽는다).
- *  새 버전 알림(updates)도 기본 꺼짐 (이슈 #273 — 켜기 전엔 바깥 요청 0). Git(git, 이슈 #290)도 기본 꺼짐 */
+ *  새 버전 알림(updates)도 기본 꺼짐 (이슈 #273 — 켜기 전엔 바깥 요청 0). Git(git, 이슈 #290)도 기본 꺼짐.
+ *  라이트코드 디자인(design, 이슈 #422)도 기본 꺼짐 (사용자 결정 2026-10-15) */
 const DEFAULT_ON = FEATURES.filter(
-  (feature) => !['web', 'notifications', 'remote', 'lan', 'bluetooth', 'voice', 'browser', 'updates', 'git'].includes(feature),
+  (feature) => !['web', 'notifications', 'remote', 'lan', 'bluetooth', 'voice', 'browser', 'updates', 'git', 'design'].includes(feature),
 )
 /** 묶음이 있는 기능 (web 은 없다) */
 const BUNDLED = FEATURES.filter((feature) => feature !== 'web')
@@ -407,7 +408,7 @@ describe('featureOn', () => {
     expect(featureOn({ notifications: true }, 'notifications')).toBe(true)
     expect(featureOn({}, 'terminal')).toBe(true)
     expect(featureOn({ terminal: false }, 'terminal')).toBe(false)
-    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'voice', 'browser', 'updates', 'repeatGuard', 'git'])
+    expect(CHOOSABLE_FEATURES).toEqual(['terminal', 'trajectory', 'notifications', 'openIn', 'web', 'remote', 'lan', 'bluetooth', 'appMcp', 'goal', 'voice', 'browser', 'updates', 'repeatGuard', 'git', 'design'])
     expect(featureOn(undefined, 'git')).toBe(false) // Git 은 기본 꺼짐, 데스크탑 MCP 가 꺼져도 켤 수 있다 (도구만 빠진다, 이슈 #290)
     expect(featureOn({ git: true, appMcp: false }, 'git')).toBe(true)
     expect(featureOn(undefined, 'updates')).toBe(false) // 새 버전 알림은 기본 꺼짐 — 켜기 전엔 바깥 요청 0 (이슈 #273)
