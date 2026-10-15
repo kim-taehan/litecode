@@ -4,6 +4,7 @@
 // 레인은 "각 레인이 기다리는 부모 해시" 배열이다. 커밋(최근→옛순)을 하나씩 처리하며:
 // - 이 커밋을 기다리던 레인(위 커밋의 부모)이 있으면 그 레인에 점(왼쪽이 도트 레인), 없으면 빈 레인에 새로 잡는다(새 페이지 첫 줄도 여기)
 // - 첫 부모는 도트 레인을 그대로 잇고, 다른 부모(머지)는 기다리는 레인에 합류하거나 빈 레인에 새로 잡아 곡선으로 잇는다
+//   (그 부모가 첫 부모의 바로 위 — 분기점 = 첫 부모 커밋 자체 — 면 같은 직선이므로 별도 레인·곡선 없이 그대로 잇는다, #413)
 // - 아직 안 읽힌 부모(다음 페이지에 올 커밋)는 그 레인을 기다리며 남긴다 — 그래서 state 를 이어줘야 한다.
 //   (P3 의 필터로 부모가 아예 목록에서 빠지면 그 레인은 기다림이 남는다 — P3 에서 다룬다)
 // 상태(state.lanes)를 넘겨주면 페이지 단위로 이어 계산된다.
@@ -69,6 +70,14 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
   const maxLanes = options.maxLanes ?? Infinity
   const lanes: Array<string | null> = state.lanes ? state.lanes.slice() : []
   const rows: GraphRow[] = []
+  // 직선 브랜치 판정(#413)은 부모 커밋 객체가 필요 — 이미 읽힌(페이지에 든) 커밋만 보인다
+  const byHash = new Map(commits.map((commit): [string, GitLogCommit] => [commit.hash, commit]))
+
+  /** second 가 first 라는 1커밋 브랜치의 끝이면 true — first 의 바로 위(분기점 = first)에서 갈라진 1커밋 */
+  const isStraightChild = (first: string, second: string): boolean => {
+    const obj = byHash.get(second)
+    return Boolean(obj && obj.parents.length === 1 && obj.parents[0] === first)
+  }
 
   /** 가장 왼쪽 빈 레인 — 없으면 맨 오른쪽에 하나 더한다 */
   const freeLane = (): number => {
@@ -112,10 +121,15 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
       }
     }
 
-    // 첫 부모 — 도트 레인을 그대로 잇는다
     const parents = commit.parents ?? []
+    // 직선 브랜치 (#413) — 두 번째 부모가 첫 부모 바로 위의 1커밋이면(분기점 = 첫 부모 커밋) 별도 레인·곡선 없이
+    // 도트 레인을 두 번째 부모로 잇는다 — 그 다음 줄(두 번째 부모)에서 도트가 같은 레인에 내려앉아 첫 부모까지 곧게 이어진다
+    const first = parents[0]
+    const straight = parents.length === 2 && first && isStraightChild(first, parents[1]!) ? parents[1]! : undefined
+
+    // 첫 부모 — 도트 레인을 그대로 잇는다 (직선 브랜치면 두 번째 부모가 먼저, 첫 부모는 그 뒤에서 이어진다)
     if (parents[0]) {
-      lanes[lane] = parents[0]!
+      lanes[lane] = straight ?? parents[0]!
       down.add(lane)
     }
 
@@ -131,6 +145,7 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
     // 다른 부모 (머지) — 기다리는 레인이 있으면 그 레인(지나가는 세로선에 곡선이 잇힘), 없으면 빈 레인에 새로 내린다
     for (let k = 1; k < parents.length; k++) {
       const parent = parents[k]!
+      if (parent === straight) continue // 도트 레인에 이미 이어둔 직선 브랜치
       let other = lanes.indexOf(parent)
       if (other < 0) {
         const free = freeLane()
