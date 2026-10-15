@@ -769,7 +769,7 @@ export const en = {
   'feature.bluetooth.detail': 'When you choose Bluetooth in the litecode phone app, a phone nearby (about 10 m) connects to this PC without Wi-Fi or the company network. What goes over it is encrypted.\nIt is much slower than Wi-Fi, so opening a long chat takes a while.\nmacOS asks for Bluetooth access the moment you turn it on.\nYour company security policy may block Bluetooth — check before you use it.',
   'feature.bluetooth.where': 'Settings > Mobile',
   'feature.hooks': 'Hooks',
-  'feature.browser': 'Browser',
+  'feature.browser': 'Chrome in litecode',
   'feature.browser.description': 'Lets the AI open a Chrome window to read and click pages',
   'feature.browser.detail': 'The AI reads pages, clicks and types in a separate, dedicated Chrome window. It has its own profile, so your everyday Chrome is left alone and logins in that window are kept.\nChrome starts the first time the AI uses a browser tool (on Windows, Edge if Chrome is missing).\nWhile on, the descriptions of the 12 browser tools go with every request.\nRisky tools such as file upload and running arbitrary code are blocked.\nIn Default and Full access it clicks and types without asking — use Ask every time mode for sensitive work. In Plan mode it only reads.',
   'feature.browser.where': 'A separate Chrome window',

@@ -798,7 +798,7 @@ export const ko = {
   'feature.bluetooth.detail': '폰의 litecode 앱에서 블루투스를 고르면 Wi-Fi·사내망 없이 근처(약 10m)의 폰이 이 PC 에 붙습니다. 오가는 내용은 암호화됩니다.\nWi-Fi 보다 훨씬 느려서 긴 대화를 열 때 시간이 걸립니다.\n켜는 순간 macOS 가 블루투스 허용을 묻습니다.\n사내 보안 정책에 따라 블루투스가 막혀 있을 수 있습니다 — 쓰기 전에 확인하세요.',
   'feature.bluetooth.where': '설정 > 모바일',
   'feature.hooks': '훅',
-  'feature.browser': '브라우저',
+  'feature.browser': 'Chrome in litecode',
   'feature.browser.description': 'AI 가 Chrome 창을 열어 페이지를 읽고 누릅니다',
   'feature.browser.detail': 'AI 가 따로 뜨는 전용 Chrome 창에서 페이지를 읽고, 누르고, 글자를 입력합니다. 프로필이 따로라 평소 쓰는 Chrome 은 건드리지 않고, 그 창의 로그인은 남습니다.\nChrome 은 AI 가 처음 브라우저 도구를 쓸 때 뜹니다 (Windows 에서 Chrome 이 없으면 Edge).\n켜 두면 브라우저 도구 12개의 설명이 매 요청에 실립니다.\n파일 올리기·임의 코드 실행 같은 위험한 도구는 막혀 있습니다.\n기본·전체 권한에서는 묻지 않고 누르고 입력합니다 — 민감한 일은 매번 묻기 모드로 하세요. 계획 모드에서는 읽기만 합니다.',
   'feature.browser.where': '따로 뜨는 Chrome 창',
