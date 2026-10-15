@@ -1,6 +1,6 @@
 import type { Attention, ConversationStatus, HistoryMessage, Mode, Project, TurnItem } from '../shared/ipc.ts'
 import type { AttentionTarget, MessageOrigin } from '../shared/contract.ts'
-import { DELEGATION_SERVER, projectId, READ_TOOL, SEND_TOOL, shortIds, widerMode } from '../shared/delegation.ts'
+import { DELEGATION_SERVER, NEW_CONVERSATION_TOOL, projectId, READ_TOOL, SEND_TOOL, shortIds, widerMode } from '../shared/delegation.ts'
 
 // 다른 프로젝트에 지시 보내기 (이슈 #55·#137) 의 화면 모양 — 보낸 대화의 진행 줄("지시 보냄 → 프로젝트 · 대화 · 상태", "결과 읽기 · … · 상태"),
 // 승인 카드의 내용, 사이드바 표시를 정한다. 순수 함수다 (React·IPC 없음). 도구의 인자·결과 글(영어, 모델용)은
@@ -80,9 +80,10 @@ export type SentState = 'asking' | 'notSent' | 'running' | 'done' | 'failed' | '
 /** reading: 승인을 기다리거나 읽는(기다리는) 중. running·waiting: 읽었더니 아직 돌거나 사람 답을 기다린다. read: 읽었다. failed: 못 읽었다(거절 포함) */
 export type ReadState = 'reading' | 'running' | 'waiting' | 'read' | 'failed'
 
-/** title: 받는 곳 — "프로젝트 이름 · 대화 제목" (아는 만큼). targetId: 누르면 갈 대화 */
+/** title: 받는 곳 — "프로젝트 이름 · 대화 제목" (아는 만큼). targetId: 누르면 갈 대화. new: 이 프로젝트의 새 대화를 만든 줄 (이슈 #415) —
+ *  제목은 대화 제목뿐(프로젝트 이름이 안 붙는다) */
 export type DelegationLine =
-  | { kind: 'sent'; title: string; targetId?: string; state: SentState; startedAt?: number }
+  | { kind: 'sent'; title: string; targetId?: string; state: SentState; startedAt?: number; new?: boolean }
   | { kind: 'read'; title: string; targetId?: string; state: ReadState }
 
 function parse(json: string | undefined): Record<string, unknown> {
@@ -111,7 +112,7 @@ function namedConversation(result: string): { title?: string; short?: string } {
 export function delegationLine(item: TurnItem, targets: readonly ProjectTarget[], peers: readonly Peer[]): DelegationLine | undefined {
   if (item.kind !== 'tool' || item.mcp?.server !== DELEGATION_SERVER) return undefined
   const tool = item.mcp.tool
-  if (tool !== SEND_TOOL && tool !== READ_TOOL) return undefined
+  if (tool !== SEND_TOOL && tool !== READ_TOOL && tool !== NEW_CONVERSATION_TOOL) return undefined
   const input = parse(item.input)
   const asked = typeof input['project'] === 'string' ? input['project'].trim() : undefined
   const result = item.status === 'done' ? (item.result ?? '') : ''
@@ -130,10 +131,11 @@ export function delegationLine(item: TurnItem, targets: readonly ProjectTarget[]
       item.status === 'error' ? 'failed' : item.status !== 'done' ? 'reading' : /^state: running/m.test(result) ? 'running' : /^state: waiting/m.test(result) ? 'waiting' : 'read'
     return { kind: 'read', title, ...link, state }
   }
-  if (item.status === 'error') return { kind: 'sent', title, ...link, state: 'notSent' }
-  if (item.status !== 'done') return { kind: 'sent', title, ...link, state: 'asking' }
-  if (!peer) return { kind: 'sent', title, state: 'gone' }
-  return { kind: 'sent', title, targetId: peer.id, state: peer.running ? 'running' : (peer.outcome ?? 'done'), ...(peer.running && peer.startedAt !== undefined && { startedAt: peer.startedAt }) }
+  const isNew = tool === NEW_CONVERSATION_TOOL && { new: true as const }
+  if (item.status === 'error') return { kind: 'sent', title, ...link, ...isNew, state: 'notSent' }
+  if (item.status !== 'done') return { kind: 'sent', title, ...link, ...isNew, state: 'asking' }
+  if (!peer) return { kind: 'sent', title, ...isNew, state: 'gone' }
+  return { kind: 'sent', title, targetId: peer.id, ...isNew, state: peer.running ? 'running' : (peer.outcome ?? 'done'), ...(peer.running && peer.startedAt !== undefined && { startedAt: peer.startedAt }) }
 }
 
 /** 카드의 대화 목록 크기 (이슈 #348) — 프로젝트마다 최근 활동 순으로 이만큼. 마지막에 보던 대화는 항상 넣는다 */
@@ -229,6 +231,15 @@ export function targetPicker(request: PermissionRequest, targets: readonly Proje
   }
   const initial = choices.find((choice) => choice.byAi)?.key
   return { message, choices, ...(initial && { initial }), ...(!initial && asked !== undefined && { missing: asked }) }
+}
+
+/** 새 대화 도구(new_conversation, 이슈 #415)의 승인 요청이면 모델이 고른 제목과 보낼 글 전문을, 아니면 undefined — 보통의 승인 카드에 실린다 */
+export function newConversationRequest(request: PermissionRequest): { title: string; message: string } | undefined {
+  if (request.mcp?.server !== DELEGATION_SERVER || request.mcp.tool !== NEW_CONVERSATION_TOOL || request.input === undefined) return undefined
+  const input = parse(request.input)
+  const title = typeof input['title'] === 'string' ? input['title'] : ''
+  const message = typeof input['message'] === 'string' ? input['message'] : ''
+  return title || message ? { title, message } : undefined
 }
 
 /** 읽기 도구의 승인 요청이면 읽을 곳("프로젝트 이름 · 대화 제목", 모르는 id 면 그 id)을, 아니면 undefined (이슈 #137 — 읽기도 묻는다) */

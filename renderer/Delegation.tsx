@@ -92,7 +92,7 @@ export function DelegationRow({ line }: { line: DelegationLine }) {
     <div className="turn-row delegation-row" data-kind="delegation-sent" data-state={line.state}>
       <div className="turn-row__line">
         <SendIcon />
-        <span className="turn-row__title">{t('delegate.sent')}</span>
+        <span className="turn-row__title">{t(line.new ? 'delegate.new' : 'delegate.sent')}</span>
         <Target title={line.title} targetId={line.targetId} />
         <span className="delegation-row__state">
           {running ? t('delegate.state.runningFor', { duration: formatDuration(t, now - line.startedAt!) }) : t(`delegate.state.${line.state}`)}

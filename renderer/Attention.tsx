@@ -5,7 +5,7 @@ import { reason } from './ipcError.ts'
 import { BROWSER_MCP_NAME, browserApprovalDetail } from '../shared/browser.ts'
 import { gitApprovalText, isGitWriteTool } from '../shared/git.ts'
 import { TargetPickerBody, useDelegation } from './Delegation.tsx'
-import { readRequest, targetPicker } from './delegationView.ts'
+import { newConversationRequest, readRequest, targetPicker } from './delegationView.ts'
 import { MakeBody } from './Make.tsx'
 import { makeCard } from './makeView.ts'
 import { QuestionDrafts } from './questionDrafts.ts'
@@ -64,6 +64,8 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
   const delegation = targetPicker(request, targets, peers, self)
   /** 다른 프로젝트의 대화 읽기 (이슈 #137) — 읽을 곳(프로젝트 · 대화)을 보이는 보통의 승인 카드 */
   const reading = readRequest(request, targets)
+  /** 이 프로젝트의 새 대화 만들기 (이슈 #415) — AI 가 고른 제목과 보낼 글 전문을 보이는 보통의 승인 카드 */
+  const newConversation = newConversationRequest(request)
   const [picked, setPicked] = useState(delegation?.initial)
   /** 지금 고른 줄 — 고른 대화가 그사이 목록에서 빠졌으면(지워짐) 없다. 없으면 보낼 수 없다 */
   const chosen = delegation?.choices.find((choice) => choice.key === picked)
@@ -104,11 +106,20 @@ function ApprovalCard({ request, onAnswer }: CardProps<Extract<Attention, { kind
           <TargetPickerBody picker={delegation} selected={chosen?.key} disabled={busy} onSelect={setPicked} />
         ) : (
           <div className="attention-card__headline">
-            {reading !== undefined ? t('delegate.card.read') : git ? t(`git.card.${git.tool}`) : request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
+            {newConversation ? t('delegate.card.newConversation') : reading !== undefined ? t('delegate.card.read') : git ? t(`git.card.${git.tool}`) : request.mcp ? t('approval.mcp') : known ? t(`approval.${known}`) : t('approval.other', { action: request.action })}
           </div>
         )}
         {/* MCP 도구 요청의 patterns 는 늘 ["*"] 라 서버·도구 이름을 보인다 (이슈 #28) */}
-        {delegation || make ? null : reading !== undefined ? (
+        {delegation || make ? null : newConversation ? (
+          <>
+            {newConversation.title && (
+              <div className="attention-card__command">
+                {`${t('delegate.card.newTitle')}: ${newConversation.title}`}
+              </div>
+            )}
+            {newConversation.message && <div className="delegation-card__message">{newConversation.message}</div>}
+          </>
+        ) : reading !== undefined ? (
           <div className="attention-card__command">{reading}</div>
         ) : request.mcp ? (
           <>
