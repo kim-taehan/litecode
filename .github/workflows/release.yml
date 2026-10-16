@@ -36,7 +36,6 @@ jobs:
           fi
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "릴리스 버전: $NEXT"
-          npm pkg set version="$NEXT"
 
   mac:
     needs: next-version
@@ -50,6 +49,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm pkg set version="${{ needs.next-version.outputs.version }}"
+      # dist 스크립트의 fetch-*.mjs --check 는 "있으면 통과" — 없으면 실패. 그래서 여기에서 먼저 받는다 (캐시 포함)
+      - uses: actions/cache@v4
+        with:
+          path: build/vendor
+          key: vendor-mac-${{ hashFiles('scripts/fetch-opencode.mjs', 'scripts/fetch-speech.mjs', 'scripts/fetch-browser.mjs') }}
+      - name: Fetch bundled binaries
+        run: |
+          node scripts/fetch-opencode.mjs mac-arm64 mac-x64
+          node scripts/fetch-speech.mjs mac-arm64 mac-x64
+          node scripts/fetch-browser.mjs
       - run: npm run dist:mac
       - uses: actions/upload-artifact@v4
         with:
@@ -70,6 +79,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm pkg set version="${{ needs.next-version.outputs.version }}"
+      # dist 스크립트의 fetch-*.mjs --check 는 "있으면 통과" — 없으면 실패. 그래서 여기에서 먼저 받는다 (캐시 포함)
+      - uses: actions/cache@v4
+        with:
+          path: build/vendor
+          key: vendor-win-${{ hashFiles('scripts/fetch-opencode.mjs', 'scripts/fetch-speech.mjs', 'scripts/fetch-browser.mjs') }}
+      - name: Fetch bundled binaries
+        run: |
+          node scripts/fetch-opencode.mjs win-x64
+          node scripts/fetch-speech.mjs win-x64
+          node scripts/fetch-browser.mjs
       - run: npm run dist:win
       - uses: actions/upload-artifact@v4
         with:
@@ -92,6 +111,7 @@ jobs:
         run: |
           VER="${{ needs.next-version.outputs.version }}"
           gh release create "v$VER" --title "litecode $VER" --generate-notes \
+            --target "$GITHUB_SHA" \
             dist/m/litecode-mac-arm64.zip dist/m/litecode-mac-x64.zip dist/w/litecode-win-x64.exe
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
