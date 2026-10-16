@@ -8,8 +8,8 @@ import { hashToken } from '../../src/services/remote/devices.ts'
 import { EventLog } from '../../src/services/remote/eventLog.ts'
 import { confirmCode, newPairCode, newShortPairCode, normalizePairCode } from '../../src/services/remote/pairing.ts'
 import { tr } from '../../src/i18n.ts'
-import type { Attention, AttentionAnswer, ShellCard, TurnItem } from '../../shared/contract.ts'
-import type { ConversationSnapshot, Hello, PairRejected, RemoteConversation, RemoteModel } from '../../shared/remote.ts'
+import type { Attention, AttentionAnswer, HistoryMessage, ShellCard, TurnItem } from '../../shared/contract.ts'
+import { SNAPSHOT_DETAIL_MAX, SNAPSHOT_TEXT_MAX, type ConversationSnapshot, type Hello, type PairRejected, type RemoteConversation, type RemoteModel } from '../../shared/remote.ts'
 import { MODEL, box, parseFrames, setUp, start, tearDown, until } from './support/remoteHarness.ts'
 
 // ctx.remote — 모바일이 붙는 문 (이슈 #56, 설계 01t 2·3절). 서버는 진짜 HTTP(127.0.0.1 빈 포트)로 띄운다 (support/remoteHarness.ts).
@@ -599,6 +599,7 @@ describe('REST', () => {
     await until(() => ctx.chat.snapshot().c1 === undefined, '턴 끝')
     const idle = (await api<ConversationSnapshot>('GET', '/v1/conversations/c1', { token })).body
     expect(idle.live).toBeUndefined()
+    expect(idle.omitted).toBeUndefined() // 안 잘렸다 — 필드 자체가 없다
     expect(idle.history.messages.map((message) => message.text)).toEqual(['하나', 'echo: 하나'])
 
     await ctx.chat.send('c1', { text: '둘' })
@@ -609,7 +610,9 @@ describe('REST', () => {
     running.attention([ask])
     await ctx.chat.send('c1', { text: '셋' })
     const live = (await api<ConversationSnapshot>('GET', '/v1/conversations/c1', { token })).body
+    // 꼬리(SNAPSHOT_MESSAGE_MAX) 안이면(3개) 안 잘린다 (#365) — 쓰다 만 답은 live.progress
     expect(live.history.messages.map((message) => message.text)).toEqual(['하나', 'echo: 하나', '둘'])
+    expect(live.omitted).toBeUndefined()
     expect(live.live).toEqual({ progress: [tool], attention: [ask], queue: ['셋'] })
     expect(live.seq).toBe((await api<Hello>('GET', '/v1/hello', { token })).body.seq)
     expect((await api('GET', '/v1/conversations/nope', { token })).status).toBe(404)
@@ -632,6 +635,83 @@ describe('REST', () => {
     expect((await api<ConversationSnapshot>('GET', `/v1/conversations/${draft.id}`, { token })).body).not.toHaveProperty('shells')
     const list = (await api<RemoteConversation[]>('GET', `/v1/conversations?project=${encodeURIComponent(project)}`, { token })).body
     expect(list.every((entry) => !('shells' in entry))).toBe(true)
+  })
+
+  it('스냅샷 — 폰은 꼬리(SNAPSHOT_MESSAGE_MAX)만 받고, 큰 메시지는 캡, 잘린 수는 omitted, 카드는 보이는 위치로 (#365)', async () => {
+    const { ctx, api, pair, seed, turn } = await start()
+    const { token } = await pair()
+    const big: HistoryMessage = {
+      role: 'assistant',
+      text: '마지막 답',
+      items: [
+        { kind: 'think', id: 'th', text: '생각글'.repeat(SNAPSHOT_TEXT_MAX), done: true },
+        {
+          kind: 'tool',
+          id: 'to',
+          name: 'bash',
+          status: 'done',
+          input: 'i'.repeat(SNAPSHOT_DETAIL_MAX + 10),
+          result: 'r'.repeat(SNAPSHOT_DETAIL_MAX + 1),
+          diffs: [{ path: 'a.ts', status: 'modified', added: 1, removed: 0, patch: '@@ -1 +1 @@\nx' }],
+        },
+        {
+          kind: 'subtask',
+          id: 'st',
+          agent: 'general',
+          description: '작업',
+          status: 'done',
+          prompt: 'p'.repeat(SNAPSHOT_TEXT_MAX + 7),
+          items: [{ kind: 'text', id: 'inner', text: 'n'.repeat(30_000), done: true }],
+        },
+        { kind: 'changes', id: 'ch', diffs: [{ path: 'b.ts', status: 'modified', added: 2, removed: 0, patch: '@@' }] },
+        { kind: 'context', id: 'cx', text: 'c'.repeat(SNAPSHOT_TEXT_MAX + 1) },
+      ],
+    }
+    await seed('c1', [
+      { role: 'user', text: '첫 질문' },
+      { role: 'assistant', text: '첫 답' },
+      { role: 'user', text: '두 번째 질문' },
+      { role: 'assistant', text: '두 번째 답' },
+      { role: 'user', text: '세 번째 질문' },
+      big,
+    ])
+    // 잘려 나가는 카드(position 0)와 남는 카드 둘(position 4 · 끝)
+    await ctx.sessions.addShell('c1', { id: 's_front', at: 1, position: 0, command: 'ls', output: 'x', exitCode: 0, status: 'done', truncated: false })
+    await ctx.sessions.addShell('c1', { id: 's_mid', at: 2, position: 4, command: 'pwd', output: 'y', exitCode: 0, status: 'done', truncated: false })
+    await ctx.sessions.addShell('c1', { id: 's_end', at: 3, position: 6, command: 'pwd2', output: 'z', exitCode: 0, status: 'done', truncated: false })
+
+    const body = (await api<ConversationSnapshot>('GET', '/v1/conversations/c1', { token })).body
+    expect(body.live).toBeUndefined()
+    // 꼬리(SNAPSHOT_MESSAGE_MAX)만 — 질문 경계에서 잘린다, 앞의 Q&A 는 싣지 않는다
+    expect(body.history.messages.map((message) => `${message.role}:${message.text}`)).toEqual(['user:두 번째 질문', 'assistant:두 번째 답', 'user:세 번째 질문', 'assistant:마지막 답'])
+    expect(body.omitted).toBe(2)
+    // 메시지당 캡 — 자른 자리에 표시, diff 는 안 된다, 하위 작업의 중첩 줄은 안 된다
+    const items = body.history.messages[3]!.items!
+    const think = items[0]!
+    expect(think).toMatchObject({ kind: 'think', text: expect.stringContaining('…[truncated') })
+    const tool = items[1] as Extract<TurnItem, { kind: 'tool' }>
+    expect(tool).not.toHaveProperty('diffs')
+    expect(tool.input).toBe('i'.repeat(SNAPSHOT_DETAIL_MAX) + '\n…[truncated 10 chars]')
+    expect(items[2]).toMatchObject({ kind: 'subtask', items: [], prompt: expect.stringContaining('…[truncated') })
+    expect(items[3]).toMatchObject({ kind: 'changes', diffs: [] })
+    expect(items[4]).toMatchObject({ kind: 'context', text: expect.stringContaining('…[truncated') })
+    // 안 큰 것은 그대로 (캡이 없으면 그대로)
+    expect(body.history.messages[0]).toMatchObject({ role: 'user', text: '두 번째 질문' })
+    // 카드 — 잘린 것 없이, 남은 것은 보이는 말풍선 기준으로
+    expect(body.shells).toEqual([
+      { id: 's_mid', at: 2, position: 2, command: 'pwd', output: 'y', exitCode: 0, status: 'done', truncated: false },
+      { id: 's_end', at: 3, position: 4, command: 'pwd2', output: 'z', exitCode: 0, status: 'done', truncated: false },
+    ])
+
+    // 도는 턴 — 그 턴의 질문도 잘리면 안 된다(쓰다 만 답이 질문 없이 보이게 됨)
+    expect(await api('POST', '/v1/conversations/c1/messages', { token, body: { text: '네 번째 질문', clientMessageId: 'a' } })).toMatchObject({ status: 202, body: { state: 'sent' } })
+    const running = await turn(1)
+    const mid = (await api<ConversationSnapshot>('GET', '/v1/conversations/c1', { token })).body
+    expect(mid.history.messages.map((message) => message.text)).toEqual(['두 번째 질문', '두 번째 답', '세 번째 질문', '마지막 답', '네 번째 질문'])
+    expect(mid.omitted).toBe(2)
+    expect(mid.live).toBeDefined()
+    running.finish()
+    await until(() => ctx.chat.snapshot().c1 === undefined, '턴 끝')
   })
 
   it('끼워 넣기 (이슈 #250) — 폰 글은 202 interjected, turn.interjected 가 스트림에 가고, 스냅샷 기록에 얼린 답·끼워 넣은 말이 실린다. 턴 끝에 unanswered', async () => {

@@ -140,18 +140,20 @@ describe('느린 링크(20KB/s, 조각 185바이트) 위의 모바일 코어 ↔
     report['목록(프로젝트 + 대화)'] = `${await waitFor(() => listed, '목록')}ms`
     expect(connection.state.conversations[box.project]!.map((entry) => entry.id).sort()).toEqual(['c_big', 'c_small'])
 
-    // ── 큰 스냅샷 ──
+    // ── 큰 스냅샷 — 데스크탑의 기록은 300KB지만 폰에는 마지막 질문부터만 (#365) ──
     let before = { wire: pipe.bytes.bToA, raw: server.stats.rawBytes }
     let opened = false
     void connection.openConversation('c_big').then(() => (opened = true))
     const snapshotMs = await waitFor(() => opened, '큰 스냅샷')
     const snapshotRaw = server.stats.rawBytes - before.raw
     const snapshotWire = pipe.bytes.bToA - before.wire
-    expect(connection.state.views.c_big!.messages).toHaveLength(150)
-    expect(connection.state.views.c_big!.messages[149]!.text).toBe(history[149]!.text)
-    expect(snapshotRaw).toBeGreaterThan(300_000)
+    // 꼬리(SNAPSHOT_MESSAGE_MAX) — 질문 경계라 말풍선 4개
+    expect(connection.state.views.c_big!.messages).toHaveLength(4)
+    expect(connection.state.views.c_big!.messages[3]!.text).toBe(history[149]!.text)
+    expect(connection.state.views.c_big!.omitted).toBe(146)
+    expect(snapshotRaw).toBeLessThan(10_000) // 300KB 전체가 아니라 꼬리 몇 개
     expect(snapshotWire).toBeLessThan(snapshotRaw / 2)
-    report['스냅샷'] = `${kb(snapshotRaw)} → 링크 ${kb(snapshotWire)} (${(snapshotRaw / snapshotWire).toFixed(1)}배 압축), ${(snapshotMs / 1000).toFixed(1)}초 (압축 없이는 ${(snapshotRaw / LINK.bytesPerSecond).toFixed(1)}초)`
+    report['스냅샷(꼬리 4개, 앞 146개 생략 — #365)'] = `${kb(snapshotRaw)} → 링크 ${kb(snapshotWire)} (${(snapshotRaw / snapshotWire).toFixed(1)}배 압축), ${(snapshotMs / 1000).toFixed(1)}초 (전체 300KB였다면 ${(300_000 / LINK.bytesPerSecond).toFixed(0)}초)`
 
     // ── 보내기 → 누적 진행 이벤트 → 답 ──
     let opened2 = false

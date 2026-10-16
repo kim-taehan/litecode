@@ -164,10 +164,11 @@ describe('모바일 클라이언트 코어 ↔ ctx.remote', () => {
     await until(() => view().attention.length === 0, '카드 사라짐')
     expect(await client.reply(second.sessionId, 'per_9', 'once')).toEqual({ handled: 'elsewhere' })
 
-    // 도는 중에 다시 연 대화 — 스냅샷이 도는 턴을 싣는다
+    // 도는 중에 다시 연 대화 — 스냅샷이 도는 턴을 싣는다. 꼬리 안이면(3개) 안 잘린다 (#365)
     connection.closeConversation(cid)
     await connection.openConversation(cid)
     expect(view()).toMatchObject({ running: true, messages: [{ text: '안녕' }, { text: 'echo: 안녕' }, { text: '둘째' }] })
+    expect(view().omitted).toBeUndefined()
     expect((await client.stop(cid)).stopped).toBe(true)
     await until(() => !view().running, '중단')
     expect(view().messages.at(-1)).toMatchObject({ role: 'assistant', interrupted: true })
