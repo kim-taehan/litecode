@@ -9,7 +9,7 @@ import './mcp.css'
 
 // MCP 서버 팝업 (이슈 #43 — 입력창 `+` 메뉴 > MCP 서버, 시안 _workspace/mock-plus/Mcp.dc.html). 설정 > MCP(이슈 #28)에 있던 것을 프로젝트 기준으로 옮겼다.
 // - 두 묶음: "이 프로젝트만"(앱이 이 프로젝트에만 저장한 서버 + 프로젝트 폴더의 .mcp.json·opencode.json 정의) · "모든 프로젝트"(앱 서버 + 개인 설정).
-//   묶음마다 "+ 서버 추가" — 그 묶음에 저장된다. 묶음은 메인(ctx.mcp)이 정한 scope 로 가른다
+//   묶음은 메인(ctx.mcp)이 정한 scope 로 가른다. **추가 폼은 없다(#339)** — 생성은 LLM 대화(`litecode_create` kind=mcp_server)·프로젝트 `.mcp.json`
 // - 줄: 이름(+ 출처 배지: 폴더 정의는 파일 이름, 개인 설정) · 명령/주소 · 상태(연결됨 · 도구 N / 실패 · 사유 / 꺼짐) · 스위치.
 //   **스위치는 이 프로젝트에서만** 켜고 끈다. 줄을 누르면 도구 목록·편집·삭제가 펼쳐진다
 // - 앱 서버만 고칠 수 있다. 폴더 정의·개인 설정 서버는 읽기 전용이고 값은 안 보인다(이름만)
@@ -62,15 +62,7 @@ export function McpPopup({ project, onClose }: { project: Project; onClose(): vo
 
   const groups = byScope(servers ?? [])
   const group = (scope: McpScope) => (
-    <PlusGroup
-      label={t(`plus.scope.${scope}`)}
-      hint={t(`mcp.scope.${scope}.hint`, { project: project.name })}
-      action={
-        <button type="button" className="plus-group__action" disabled={editing === `new:${scope}`} onClick={() => setEditing(`new:${scope}`)}>
-          {t('mcp.add')}
-        </button>
-      }
-    >
+    <PlusGroup label={t(`plus.scope.${scope}`)} hint={t(`mcp.scope.${scope}.hint`, { project: project.name })}>
       {!servers && <p className="plus-group__note">{t('mcp.loading')}</p>}
       {servers && groups[scope].length === 0 && editing !== `new:${scope}` && <p className="plus-group__note">{t('mcp.empty')}</p>}
       {groups[scope].map((server) => (
@@ -93,12 +85,6 @@ export function McpPopup({ project, onClose }: { project: Project; onClose(): vo
           {server.source === 'app' && editing === server.name && <ServerEditor server={server} directory={directory} onDone={done} />}
         </div>
       ))}
-      {editing === `new:${scope}` && (
-        <div className="plus-card mcp-row" data-mcp="">
-          <div className="mcp-row__new">{t('mcp.newServer')}</div>
-          <ServerEditor scope={scope} directory={directory} onDone={done} />
-        </div>
-      )}
     </PlusGroup>
   )
 
@@ -341,16 +327,16 @@ export function maskCredentials(text: string | undefined): string | undefined {
   return text?.replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1••••@')
 }
 
-/** server 가 있으면 그 서버를 고치고, 없으면 scope 묶음에 새로 넣는다 */
-function ServerEditor({ server, scope, directory, onDone }: { server?: McpServerSummary; scope?: McpScope; directory: string; onDone(saved: boolean): void }) {
+/** 있는 앱 서버 편집 — 신규 추가는 없다 (#339. 추가는 LLM 대화 `litecode_create` · 프로젝트 `.mcp.json`) */
+function ServerEditor({ server, directory, onDone }: { server: McpServerSummary; directory: string; onDone(saved: boolean): void }) {
   const t = useT()
-  const [name, setName] = useState(server?.name ?? '')
-  const [type, setType] = useState<'local' | 'remote'>(server?.type ?? 'local')
-  const [command, setCommand] = useState(server?.command?.[0] ?? '')
-  const [args, setArgs] = useState(server?.command?.slice(1).join('\n') ?? '')
-  const [url, setUrl] = useState(server?.url ?? '')
+  const [name, setName] = useState(server.name)
+  const [type, setType] = useState<'local' | 'remote'>(server.type ?? 'local')
+  const [command, setCommand] = useState(server.command?.[0] ?? '')
+  const [args, setArgs] = useState(server.command?.slice(1).join('\n') ?? '')
+  const [url, setUrl] = useState(server.url ?? '')
   const [vars, setVars] = useState<VarDraft[]>(
-    () => server?.vars.map((entry) => ({ name: entry.name, value: entry.value ?? '', secret: entry.secret, stored: entry.secret && entry.hasValue })) ?? [],
+    () => server.vars.map((entry) => ({ name: entry.name, value: entry.value ?? '', secret: entry.secret, stored: entry.secret && entry.hasValue })),
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -358,7 +344,7 @@ function ServerEditor({ server, scope, directory, onDone }: { server?: McpServer
   const [testing, setTesting] = useState(false)
 
   const input = (): McpServerInput => ({
-    ...(server ? { originalName: server.name } : { scope }),
+    originalName: server.name,
     name,
     type,
     ...(type === 'local'
