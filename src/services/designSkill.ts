@@ -23,7 +23,7 @@ declare module 'cordis' {
 export const DESIGN_SKILL_NAME = 'design'
 
 export const DESIGN_SKILL_DESCRIPTION =
-  'Create a screen mockup (시안) as one self-contained HTML file and open it in the app right panel for live review. Use when the user asks for a design or mockup of a screen or page (/design).'
+  'Create a screen mockup (시안) as one self-contained HTML file and open it in the app right panel for live review. Use when the user asks for a design or mockup of a screen or page, or asks to see/preview an existing screen (/design).'
 
 const DESIGN_SKILL_BODY = `Create a screen mockup (시안) as a single self-contained HTML file and put it in the app's right panel, where it re-renders by itself whenever the file changes — that is the whole point of this skill.
 
@@ -37,6 +37,16 @@ When the user invokes this skill as \`/design <screen>\`, everything after \`/de
    - real content for that screen (labels, fields, states), not placeholder lorem
    - under 1 MB of a single document — the panel renders the file whole, so do not split it across files
 3. Open it in the panel: call \`litecode_open\` with the file if the Desktop MCP tools are available. If the tool is unavailable or refuses, the file chip in your reply is the way in — name the file plainly instead. Do not ask the user to open it.
+
+## Converting existing code screens (TSX, Python, …) to HTML
+When the screen already exists as code in this project — e.g. a React \`src/pages/**\` TSX component, or a Python (Flask/Jinja…) server-rendered template — replicate it as self-contained HTML as far as possible instead of designing from scratch. The mockup should start out as 1:1 the real screen, and design changes are applied on top of it:
+1. Read the screen file AND the design sources it leans on — never guess values. Find the project's theme tokens, shared components and env/config files first, then read them:
+   - React/TSX: the shared components the screen imports, the theme files (color/radius/spacing tokens, variant styles such as button gradients), env/badge config, the design system's spacing rule (e.g. MUI spacing = value × 8px) and the font stack. Example from one project: shared components \`src/components/common/Input.tsx\` · \`src/components/common/Button.tsx\`, tokens \`src/theme/token.ts\`, variant styles (a \`DAVIS_GRADIENT\` button gradient) \`src/theme/theme.ts\`, env badge colors \`src/config/environment.ts\` (DEV #2563EB, STG #F59E0B, LOCAL #6B7280), font stack \`'Pretendard', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif\` (offline).
+   - Python: the template plus its CSS/static assets; replace backend-only values (DB rows, sessions) with representative literals that look real.
+2. Convert the JSX/template markup to plain HTML and translate CSS-in-JS / templated styles into a plain \`<style>\` block using the exact token values.
+3. Keep the real labels, placeholders and texts from the code — no lorem.
+4. Inline the assets the screen actually uses (only those): SVGs imported \`?react\` → raw SVG markup sized via CSS (\`.wrap svg { height: Npx; width: auto; display: block; }\`); PNG/JPG → base64 data URIs. Write \`__PLACEHOLDER__\` tokens into the HTML first, then substitute with a \`python3 - <<'PY'\` heredoc through bash so large base64 never enters the conversation; print the final byte count.
+5. Reproduce the interactive states the code has, with minimal inline vanilla JS: input focus, button hover/active/disabled, checkbox, submit → short '… 중...' delay → mock error or success message.
 
 ## Iterating (this is the point)
 The panel watches the open mockup file: every edit to it re-renders the preview by itself, without anyone opening or reloading anything. So when the user asks for a change ("make the button blue", "move the title up", "라벨을 아이디로"), edit the SAME file and reply in one short line — do not recreate the mockup, do not rename or move it, do not tell the user to refresh.
