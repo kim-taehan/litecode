@@ -23,7 +23,7 @@ export function useChatEvents({ setSessions, setFresh, sessionsRef, updateSessio
     const apply = (event: ChatEvent & { data: { cid: string } }) => updateSession(event.data.cid, (session) => applyChat(session, event))
     const offs = [
       window.litecode.onTurnStarted((data) => {
-        // 우측 "이 턴의 작업" 탭(이슈 #416) 에도 같은 턴을 이어 붙인다
+        // 우측 "턴 작업" 탭(이슈 #416) 에도 같은 턴을 이어 붙인다
         feedTurnStarted(data.cid, data.message.at ?? Date.now())
         // 보는 대화의 턴일 때만 — 다른 대화의 턴이 지금 읽던 자리를 맨 아래로 끌고 가지 않게
         follow(data.cid)

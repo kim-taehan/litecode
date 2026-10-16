@@ -73,7 +73,7 @@ afterAll(async () => {
 const replies = () => page.locator('.bubble--assistant')
 const running = () => page.locator('.turn[data-state="running"]')
 const lastTurn = () => page.locator('.turn').last()
-/** 진행 중 턴의 한 줄 (이슈 #416) — 지금 하는 일 + 경과 초. 누르면 우측 "이 턴의 작업" 탭 */
+/** 진행 중 턴의 한 줄 (이슈 #416) — 지금 하는 일 + 경과 초. 누르면 우측 "턴 작업" 탭 */
 const runningLine = () => running().locator('.turn-running__line')
 const workTab = () => page.locator('.turn-tab')
 const seconds = async () => Number(/(\d+)초/.exec((await page.locator('.turn-running__seconds').textContent()) ?? '')?.[1] ?? NaN)
@@ -89,7 +89,7 @@ async function waitReply(before: number): Promise<void> {
 }
 
 describe('채팅 답 모양·진행 표시', () => {
-  it('[think]: 진행 중엔 채팅에 한 줄(지금 하는 일 + 초)만 — 생각 전문은 우측 "이 턴의 작업" 탭에 조각으로 차고 → 끝나면 "완료 · N초" 머리 아래로 접힌다', async () => {
+  it('[think]: 진행 중엔 채팅에 한 줄(지금 하는 일 + 초)만 — 생각 전문은 우측 "턴 작업" 탭에 조각으로 차고 → 끝나면 "완료 · N초" 머리 아래로 접힌다', async () => {
     await type('[think] 생각 테스트')
     // 생각 첫 조각은 전역 스트림(reasoning.delta)에만 온다 — 세션 SSE 만이면 생각이 끝날 때(THINK_MS×2 뒤)에야 글이 생긴다.
     // 한 줄의 요약도 같은 조각으로 채워진다 (이슈 #416 — 생각·도구 줄은 채팅에 안 쌓고 탭으로)

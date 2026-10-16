@@ -109,7 +109,7 @@ interface AssistantTurnProps {
   /** 끝난 턴의 걸린 시간(ms) */
   duration?: number
   /** 답을 기다리는 중 — startedAt 부터 시계가 돈다. startedAt·directory·conversationId 는 진행 중 한 줄(이슈 #416)의
-   *  "이 턴의 작업" 탭 열기에 쓰인다 */
+   *  "턴 작업" 탭 열기에 쓰인다 */
   running?: boolean
   startedAt?: number
   conversationId?: string
@@ -127,7 +127,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
   const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
   const { work, answer } = running ? { work: [] as TurnItem[], answer: [] } : splitTurn(rest)
-  // 진행 중(이슈 #416) — 생각·도구 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "이 턴의 작업" 탭으로.
+  // 진행 중(이슈 #416) — 생각·도구 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "턴 작업" 탭으로.
   // 채팅에는 진행 중 답 글(글 줄)과 상태 알림인 요약 중(compaction)만 그대로
   const liveRows = running
     ? items.filter((item): item is Extract<TurnItem, { kind: 'text' }> | Extract<TurnItem, { kind: 'compaction' }> => item.kind === 'compaction' || (item.kind === 'text' && item.text.trim() !== ''))
@@ -217,7 +217,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
 })
 
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다).
- *  우측 "이 턴의 작업" 탭(TurnTab)도 같은 줄을 그린다 (이슈 #416) */
+ *  우측 "턴 작업" 탭(TurnTab)도 같은 줄을 그린다 (이슈 #416) */
 export function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
   const bodyFold = useFindFold(open, () => setOpen(true))
@@ -405,7 +405,7 @@ function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory
 }
 
 /** 진행 중 맨 아래 한 줄 (이슈 #416) — 지금 하는 일(마지막 생각·도구·하위 작업 줄) + 보낸 시각부터 경과 + 움직이는 점.
- *  누르면 우측 패널의 "이 턴의 작업" 탭이 열려 전체 진행을 실시간으로 보인다. 시계는 이 줄만 다시 그린다 (dsh RunningStatus) */
+ *  누르면 우측 패널의 "턴 작업" 탭이 열려 전체 진행을 실시간으로 보인다. 시계는 이 줄만 다시 그린다 (dsh RunningStatus) */
 function RunningLine({ items, startedAt, directory, conversationId }: { items: readonly TurnItem[]; startedAt?: number; directory: string; conversationId?: string }) {
   const t = useT()
   const [now, setNow] = useState(Date.now)
