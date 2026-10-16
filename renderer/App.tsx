@@ -8,7 +8,7 @@ import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
 import { RemotePairPrompt } from './MobileSettings.tsx'
 import { useTriggers } from './useTriggers.ts'
-import { getPanelState, openTerminalTab, terminalIdOf } from './filePreviewStore.ts'
+import { closeFilePreview, getPanelState, openTerminalTab, revealPanel, terminalIdOf } from './filePreviewStore.ts'
 import { useAppMcp } from './useAppMcp.ts'
 import { useGitWatch } from './gitStore.ts'
 import type { ShellCardView } from './ShellCard.tsx'
@@ -484,6 +484,27 @@ export function App() {
       if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
       event.preventDefault()
       setSettingsOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // ⌘B / Ctrl+B — 우측 패널 토글 (이슈 #444). 열려 있으면 닫기 버튼(×) 처럼 숨긴다(탭은 남고), 닫혀 있으면 머리 버튼처럼 다시 연다.
+  // 닫으면 포커스는 입력창으로 (#382), 판(aria-modal)·프로젝트 빠른 열기 열려 있으면 다른 전역 키처럼 무시
+  const panelDirectoryRef = useRef(project?.path)
+  panelDirectoryRef.current = project?.path
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'b') return
+      if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+      const directory = panelDirectoryRef.current
+      if (!directory) return
+      event.preventDefault()
+      const state = getPanelState()
+      if (state?.open && state.directory === directory) {
+        closeFilePreview()
+        if (!focusComposerInput()) return
+      } else revealPanel(directory)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
