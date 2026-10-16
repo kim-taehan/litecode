@@ -23,7 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          # 태그를 안 받으면 git tag 가 비어 fall back 버전(0.0.2)이 박힌다 — fetch-depth: 0 만으론 태그가 안 온다
+          fetch-tags: true
       - id: bump
         run: |
           LATEST="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1 || true)"
@@ -101,6 +102,8 @@ jobs:
     needs: [next-version, mac, win]
     runs-on: ubuntu-latest
     steps:
+      # gh release create --target 이 태그를 만들 git 저장소가 필요하다 ("not a git repository" 로 죽음)
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: mac
