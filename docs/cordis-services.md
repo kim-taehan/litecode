@@ -48,9 +48,6 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `mcp` | `mcp` | `mcp.ts` `mcpClient.ts` | MCP 서버 목록·편집·연결 시험·서버 안 도구 고르기 | `llm` | 고정 켜짐 |
  | `terminal` | `terminals` | `terminals.ts` | 터미널 탭, 다중 — (프로젝트, 번호)별 pty + 출력 축적, 이벤트에 번호 (#303) | `llm` | 켜짐 (고정 — 2026-10-15 부터 기능 화면에 줄 없음) |
 | `trajectory` | `trajectory` | `trajectory.ts` | 추론 과정 보기 | `llm` | 켜짐 |
-| `openIn` | `openIn` | `openIn.ts` | 다른 앱에서 열기 | `projects` | 켜짐 (고정 — 2026-10-15 부터 기능 화면에 줄 없음) |
-| `appMcp` | `appMcp` | `appMcp.ts` + `appMcp/tools/*` | 앱 내장 MCP 서버(`litecode_*` 도구 — open·present·세션 셋·새 대화·만들기·작업·git) | `mcp` | 켜짐 |
-| `notifications` | `notifications` | `notifications.ts` | 턴 끝·승인 대기 알림·토스트 | `settings`, `sessions`, `projects` | **꺼짐** |
 | `remote` | `remote` | `remote.ts`(진입점)·`remote/*`(서비스·요청 표·짝짓기 요청·chat 이벤트 옮기기, #298) | 모바일 연결 — 계약·인증·기기·짝짓기·이벤트 링 (+평문 루프백 HTTP 운반) | `chat`, `sessions`, `projects`, `providers`, `settings` | **꺼짐** |
 | `lan` | — | `remote/https.ts` | 사내망 연결 — TLS 운반(설정 > 모바일의 토글, #210) | `remote` | 켜짐 (`remote` 를 켜면) |
 | `bluetooth` | — | `remote/bluetooth.ts` | 블루투스 연결 — BLE 운반(설정 > 모바일의 토글, #210). 네이티브 모듈은 켤 때 읽는다 | `remote` | **꺼짐** |

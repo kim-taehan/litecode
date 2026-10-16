@@ -139,6 +139,25 @@ describe('대화 글자 크기 변수', () => {
   })
 })
 
+describe('알림 채널 자 스위치 (settings.notifyChannels, 이슈 #372)', () => {
+  it('꺼진 채널만(false) 저장되고, 없는 키는 둘 다 켜짐. 글자·배열·모르는 키는 거절', async () => {
+    const { settings } = await service({ file })
+    expect(settings.get().notifyChannels).toBeUndefined()
+    settings.set({ notifyChannels: { system: false } })
+    settings.set({ notifyChannels: { system: false, app: false } })
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).notifyChannels).toEqual({ system: false, app: false })
+    expect(() => settings.set({ notifyChannels: { system: 'off' } as never })).toThrow()
+    expect(() => settings.set({ notifyChannels: [false] as never })).toThrow()
+    expect(() => settings.set({ notifyChannels: { bogus: false } as never })).toThrow()
+  })
+
+  it('파일을 손으로 고쳐 잘못된 값이면 그 값만 기본값(둘 다 켜짐)으로 돌린다', async () => {
+    await fs.writeFile(file, JSON.stringify({ language: 'ko', notifyChannels: { system: 'off', app: false } }))
+    const { settings } = await service({ file })
+    expect(settings.get().notifyChannels).toBeUndefined()
+  })
+})
+
 describe('다른 앱에서 열기 기본 앱 (settings.openInApp)', () => {
   it('처음엔 없다(목록 첫 앱), 고르면 settings.json 에 남고 다시 읽힌다. 문자열이 아니면 거절', async () => {
     const { settings } = await service({ file })

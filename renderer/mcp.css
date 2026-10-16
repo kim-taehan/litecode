@@ -96,11 +96,6 @@
   margin-top: 8px;
 }
 
-.mcp-row__new {
-  font-weight: 500;
-  line-height: 22px;
-}
-
 .mcp-card__readonly {
   align-self: center;
   font-size: 12px;

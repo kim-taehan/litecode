@@ -12,7 +12,7 @@ import './hooks.css'
 
 // 훅 팝업 (이슈 #102 3단계 — 입력창 `+` 메뉴 > 훅, 시안 _workspace/mock-hooks/Main.dc.html). 설정이 아니라 프로젝트 기준 팝업이다 (스킬·MCP 와 같은 자리,
 // 사용자 결정) — 판·묶음·줄 카드의 치수는 그 둘(PlusDialog)과 같고 구성·문구는 시안에서:
-// - 머리 아래 설명 한 줄 + [훅 추가]
+// - 머리 아래 설명 한 줄. **추가 폼은 없다(#339)** — 생성은 LLM 대화(`litecode_create` kind=hook)
 // - 가져오기 띠: 프로젝트 폴더가 가진 훅 정의가 있으면 "이 폴더에 훅 정의 N개가 있습니다 — 자동으로 실행하지 않습니다" + [확인하고 가져오기]
 //   (HooksImport — 고른 것만 복사한다. 이미 가져온 것은 메인이 후보에서 뺀다)
 // - 두 묶음 "이 프로젝트만" / "모든 프로젝트": 줄마다 이벤트 배지 · 매처 · 명령 · 기한 · 스위치. **스위치는 이 프로젝트에서만** 바뀐다
@@ -21,7 +21,6 @@ import './hooks.css'
 //   그 훅의 최근 실행, [삭제](두 번 눌러 확인) · [취소] · [저장]. 검증은 메인과 같은 함수 — 틀리면 저장을 못 누르고 메인도 거절한다
 // 채널은 기능 `hooks` 가 켜져 있을 때만 걸려 있다 — 이 팝업은 `+` 메뉴의 훅 줄로만 열리고 그 줄은 기능이 켜져 있을 때만 있다.
 
-const NEW = 'new'
 const rowId = (row: Pick<HookRow, 'scope' | 'key'>): string => `${row.scope}:${row.key}`
 
 export function HooksPopup({ project, onClose }: { project: Project; onClose(): void }) {
@@ -95,12 +94,7 @@ export function HooksPopup({ project, onClose }: { project: Project; onClose(): 
 
   return (
     <PlusDialog project={project} title={t('hooks.title')} subtitle={t('hooks.popup.subtitle', { project: project.name })} onClose={onClose}>
-      <div className="hooks-intro">
-        <p className="hooks-intro__text">{t('hooks.popup.intro')}</p>
-        <button type="button" className="settings-button settings-button--primary" data-hooks="add" disabled={editing === NEW} onClick={() => setEditing(NEW)}>
-          {t('hooks.popup.add')}
-        </button>
-      </div>
+      <p className="hooks-intro__text">{t('hooks.popup.intro')}</p>
       {error && (
         <p className="settings-error" role="alert">
           {error}
@@ -115,12 +109,6 @@ export function HooksPopup({ project, onClose }: { project: Project; onClose(): 
           <button type="button" className="settings-button settings-button--primary" onClick={() => setImporting(true)}>
             {t('hooks.popup.candidates.open')}
           </button>
-        </div>
-      )}
-      {editing === NEW && (
-        <div className="plus-card hook-row" data-hook-key="">
-          <div className="hook-row__new">{t('hooks.popup.new')}</div>
-          <HookEditor directory={directory} onDone={done} />
         </div>
       )}
       {group('project')}

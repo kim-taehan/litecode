@@ -6,6 +6,7 @@ import { tr } from '../i18n.ts'
 import type { RemoteDeviceInfo } from './remote.ts' // 'remote/changed' 이벤트 선언 — 값은 import 하지 않는다 (ctx.remote 는 알림을 모르고, 꺼져 있어도 된다)
 import { BLUETOOTH_CARRIER } from './remote/carrier.ts'
 import type { ConversationStatus, NoticeState } from '../../shared/contract.ts'
+import { channelsOn, type NotifyChannel, type NotifyChannels } from '../../shared/notifyChannels.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { ConversationStatus, NoticeEntry, NoticeState } from '../../shared/contract.ts'
@@ -16,7 +17,9 @@ export type { ConversationStatus, NoticeEntry, NoticeState } from '../../shared/
 // 판정 (사용자 결정 Q2, 01i 9절 G1): 사건 순간 앱 창이 없거나 포커스가 없으면 PC 알림, 앞이면 앱 알림(토스트 + 점).
 // 앞인데 보고 있는 그 대화면 아무것도 안 한다. "어느 대화를 보는지" 는 화면이 view() 로 알려 준다.
 // PC 알림은 대화마다 최신 하나(Q7) — 같은 대화의 이전 것은 닫는다. 문구는 대화 제목 + "프로젝트 · 상태" 뿐(Q5 — 답·질문·오류 원문 없음).
-// 중단(엔진 재시작)은 PC 알림 없이 앱 안 표시만(Q10). 설정 > 일반 "알림" 을 끄면 PC 알림만 없다(Q9).
+// 중단(엔진 재시작)은 PC 알림 없이 앱 안 표시만(Q10).
+// 채널 자 스위치(`settings.notifyChannels`, 이슈 #372) — 외부(system) 끄면 PC 알림·dock 배지·폰 재결합 알림만 없고,
+// 내부(app) 끄면 토스트만 없다. 점(대화 행·프로젝트의 상태 표시)은 채널과 무관하게 그대로 — 점 은 알람이 아니라 상태다.
 // 상태(실행 중 / 답 필요 / 안 본 완료·실패·중단)는 메인이 쥐는 정본이고 메모리에만 둔다 — 화면은 snapshot 을 받아 점을 그린다.
 // 누르면: 창을 앞으로(host.reveal) → 열 대상을 적어 두고 화면에 신호 → 화면이 takePendingOpen 으로 당겨 가 기존 프로젝트 열기 경로로 연다
 // (새로 만든 창은 리스너가 걸리기 전이라 신호만으로는 잃는다 — 01i 10-a). 앱 종료 때 남은 PC 알림은 다 닫는다(10-b).
@@ -102,12 +105,16 @@ export class NotificationsService extends Service {
   private deviceConnected = new Map<string, boolean>()
   private deviceNoticeAt = new Map<string, number>()
   private deviceNotes = new Map<string, SystemNotification>()
+  /** 채널 자 스위치 (이슈 #372) — settings/changed 로 바뀌면 PC 알림 닫고 배지를 갱신한다 */
+  private channels: Record<NotifyChannel, boolean>
 
   constructor(
     ctx: Context,
     private host: NotificationHost,
   ) {
     super(ctx, 'notifications')
+    this.channels = channelsOn(this.ctx.settings.get().notifyChannels)
+    ctx.on('settings/changed', (settings) => this.channelsChanged(settings.notifyChannels))
     ctx.on('llm/turn-started', (info) => this.enqueue(info.sessionId, (entry) => {
       entry.running = true
       entry.unread = undefined
@@ -193,16 +200,28 @@ export class NotificationsService extends Service {
     if (kind === 'done' || kind === 'failed' || kind === 'interrupted') entry.unread = kind
     const projectName = await this.projectName(conversation.project)
     if (where === 'app') {
-      this.ctx.emit('notifications/toast', { conversationId: conversation.id, project: conversation.project, projectName, title: conversation.title, kind })
+      if (this.channels.app) this.ctx.emit('notifications/toast', { conversationId: conversation.id, project: conversation.project, projectName, title: conversation.title, kind })
       return
     }
     if (kind === 'interrupted') return
+    if (!this.channels.system) return // 외부 알람 끔 — PC 알림·배지까지만 없다, 점은 이미 적혔다
     const target: OpenTarget = { conversationId: conversation.id, project: conversation.project }
     const note = this.host.show(
       { title: conversation.title || tr('sidebar.untitled'), body: tr('notify.body', { project: projectName, status: tr(`notify.${kind}`) }) },
       () => this.open(target),
     )
     this.shown.set(conversation.id, { note, attention: kind === 'question' || kind === 'permission' })
+  }
+
+  /** 채널 스위치가 도는 중에 바뀐 것 (이슈 #372) — 외부 알람이 꺼지면 떠 있는 PC 알림을 닫고 배지를 지운다 */
+  private channelsChanged(next: NotifyChannels | undefined): void {
+    const before = this.channels
+    this.channels = channelsOn(next)
+    if (before.system && !this.channels.system) {
+      for (const id of [...this.shown.keys()]) this.close(id)
+      for (const note of this.deviceNotes.values()) note.close()
+      this.publish()
+    }
   }
 
   /** 짝지은 폰이 끊겼다가 다시 붙었다 (connected false→true) — 창이 뒤면 PC 알림 하나. 이 실행에서 처음 본 기기가 이미 붙어 있으면 알리지 않는다 */
@@ -214,6 +233,7 @@ export class NotificationsService extends Service {
       const now = Date.now()
       const last = this.deviceNoticeAt.get(device.id)
       if (last !== undefined && now - last < DEVICE_NOTICE_COOLDOWN_MS) continue
+      if (!this.channels.system) continue // 외부 알람 끔 — 재결합 PC 알림도 없다. 알리지 않은 시간은 쿨다운에 적지 않는다
       this.deviceNoticeAt.set(device.id, now)
       this.deviceNotes.get(device.id)?.close()
       const via = tr(device.via === BLUETOOTH_CARRIER ? 'remote.via.bluetooth' : 'remote.via.wifi')
@@ -254,7 +274,8 @@ export class NotificationsService extends Service {
 
   private publish(): void {
     const state = this.snapshot()
-    this.host.setBadge(Object.values(state).filter((entry) => entry.status !== 'running').length)
+    // dock 배지는 외부 알람 쪽 (이슈 #372) — 채널이 꺼 있으면 0
+    this.host.setBadge(this.channels.system ? Object.values(state).filter((entry) => entry.status !== 'running').length : 0)
     this.ctx.emit('notifications/changed', state)
   }
 
