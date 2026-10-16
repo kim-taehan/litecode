@@ -64,7 +64,8 @@
   display: none;
 }
 
-/* 칩 — 28px, 80~170 폭, 이름은 끝이 흐려진다. × 는 흐름 밖(이름 끝 위)에 있어 보이든 말든 폭이 같다 */
+/* 칩 — 28px, 80~170 폭. 닫을 수 있는 칩은 × 자리(오른쪽 24px)를 항상 비워 두고 × 는 이름 위를 지나지 않는다 (이슈 #456) —
+   이름에 자리가 남으면 전체가 보이고, 실제로 안 들어갈 때만 … 으로 줄인다. 고정 칩(파일·Git)은 × 가 없어 오른쪽 여백 10px */
 .file-preview__tab {
   position: relative;
   flex: 0 1 auto;
@@ -74,7 +75,7 @@
   min-width: 80px;
   max-width: 170px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 24px 0 10px;
   border-radius: 8px;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -86,6 +87,7 @@
 .file-preview__tab--files {
   min-width: 0;
   flex: none;
+  padding-right: 10px;
 }
 
 .file-preview__tab:hover {
@@ -109,22 +111,14 @@
   color: var(--warn);
 }
 
+/* 이름 — 자리가 남으면 전체가 보이고, 칩 최대 폭(170px)에서 실제로 안 들어갈 때만 … 으로 (이슈 #456 — 예전 끝 흐림 마스킹은 × 겹침 때문에 생겼으나 × 자리는 이제 패딩으로 비워 둔다) */
 .file-preview__tab-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   line-height: 1.4;
-  mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
-}
-
-.file-preview__tab--files .file-preview__tab-title {
-  mask-image: none;
-}
-
-.file-preview__tab:hover .file-preview__tab-title,
-.file-preview__tab:focus-within .file-preview__tab-title,
-.file-preview__tab[aria-selected='true']:not(.file-preview__tab--files) .file-preview__tab-title {
-  mask-image: linear-gradient(to right, black calc(100% - 30px), transparent calc(100% - 14px));
 }
 
 .file-preview__tab-close {

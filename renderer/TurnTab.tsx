@@ -7,7 +7,7 @@ import { formatDuration, turnHeadText } from './turnView.ts'
 import { useNow } from './useNow.ts'
 import './turnTab.css'
 
-// 오른쪽 패널 "이 턴의 작업" 탭 (이슈 #416) — 도는 턴의 전체 진행(생각·도구·글 줄)을 실시간으로, 턴이 끝나도 닫힌 채 남는다.
+// 오른쪽 패널 "턴 작업" 탭 (이슈 #416) — 도는 턴의 전체 진행(생각·도구·글 줄)을 실시간으로, 턴이 끝나도 닫힌 채 남는다.
 // 데이터는 채팅의 진행 줄과 같은 출처(turnDetailStore — 채팅 이벤트로 이어 붙는다, 다시 뜨면 스냅샷). 줄은 채팅의 작업 줄과
 // 같은 컴포넌트(WorkRow)로 그리므로 안에 들어 있는 모습과 같다. 맨 아래를 보고 있으면 따라 내려간다 (TaskTab 과 같은 길)
 

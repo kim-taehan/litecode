@@ -986,7 +986,7 @@ function TaskIcon({ className = 'file-preview__icon' }: { className?: string }) 
   )
 }
 
-/** "이 턴의 작업" 탭 — 번개 (이슈 #416, 대화 진행 중 줄의 아이콘과 같은 번개) */
+/** "턴 작업" 탭 — 번개 (이슈 #416, 대화 진행 중 줄의 아이콘과 같은 번개) */
 function TurnTabIcon({ className = 'file-preview__icon' }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
