@@ -345,6 +345,8 @@ export const en = {
   'taskTab.showAll': 'Show all',
   'taskTab.showAllLines': 'Show all ({count} lines)',
   'turnTab.tab': 'Turn work',
+  'turnTab.conversation': 'Conversation',
+  'turnTab.jumpTo': 'Go to that conversation',
   'turnTab.gone': 'No record of this turn — the app was restarted or the turn was too old to keep.',
   'turnTab.showAll': 'Show all steps of this turn',
   'trajectory.loading': 'Loading…',

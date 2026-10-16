@@ -69,14 +69,24 @@ function readWidth(): number {
   return Math.round(window.innerWidth * DEFAULT_RATIO)
 }
 
+export interface FilePreviewPanelProps {
+  directory?: string
+  /** “턴 작업” 탭(이슈 #462) — 그 턴의 대화 제목을 알려 주는 것. 없으면 대화 줄을 안 그린다 */
+  titleFor?: (conversationId: string) => string
+  /** 지금 보고 있는 대화 — “턴 작업” 탭의 대화 줄이 화살표를 안 띄울 판정 */
+  activeConversationId?: string
+  /** 그 대화로 이동(알림 열기와 같은 길) */
+  onOpenConversation?: (conversationId: string) => void
+}
+
 /** 지금 보는 대화의 프로젝트 패널일 때만 그린다 — 프로젝트를 옮기면 숨긴다 */
-export function FilePreviewPanel({ directory }: { directory?: string }) {
+export function FilePreviewPanel({ directory, titleFor, activeConversationId, onOpenConversation }: FilePreviewPanelProps) {
   const state = usePanelState()
   const stale = !!state?.open && state.directory !== directory
   useEffect(() => {
     if (stale) closeFilePreview()
   }, [stale])
-  return state?.open && !stale ? <Panel state={state} /> : null
+  return state?.open && !stale ? <Panel state={state} titleFor={titleFor} activeConversationId={activeConversationId} onOpenConversation={onOpenConversation} /> : null
 }
 
 /** 대화 머리 오른쪽 끝 — 오른쪽 패널을 열고 숨기는 버튼 (왼쪽 사이드바 접기 그림을 뒤집은 것). 늘 보인다 — 숨겨도 탭은 남는다 (사용자 요청 2026-10-04) */
@@ -112,7 +122,7 @@ function CompareIcon() {
   )
 }
 
-function Panel({ state }: { state: PanelState }) {
+function Panel({ state, titleFor, activeConversationId, onOpenConversation }: { state: PanelState } & Omit<FilePreviewPanelProps, 'directory'>) {
   const t = useT()
   const [width, setWidth] = useState(readWidth)
   const root = useRef<HTMLElement>(null)
@@ -126,6 +136,8 @@ function Panel({ state }: { state: PanelState }) {
   // 기능이 꺼지면(셸도 다 끝났다) 터미널 탭은 보이지 않는다
   const tabs = terminalOn ? allTabs : allTabs.filter((key) => !isTerminalTab(key))
   const active = state.active === GIT_TAB && !gitOn ? undefined : isTerminalTab(state.active) && !terminalOn ? undefined : state.active
+  // 고른 “턴 작업” 탭의 열쇠 (이슈 #462) — 대화 줄(제목·이동)에 쓴다
+  const turnRef = isTurnTab(active) ? turnRefOf(active) : undefined
   // 비교 보기 (이슈 #424) — 비교하는 파일 탭 둘 다 남아 있을 때만 (닫거나 프로젝트를 옮기면 저장소가 먼저 지운다 — 여기서는 안전망)
   const compare =
     state.compare && isFileTab(state.compare.a) && isFileTab(state.compare.b) && allTabs.includes(state.compare.a) && allTabs.includes(state.compare.b)
@@ -419,9 +431,17 @@ function Panel({ state }: { state: PanelState }) {
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
       )}
       {active !== undefined && isTaskTab(active) && <TaskTab key={active} taskId={taskIdOf(active)!} directory={directory} />}
-      {active !== undefined &&
-        isTurnTab(active) &&
-        <TurnTab key={active} conversationId={turnRefOf(active)!.conversationId} startedAt={turnRefOf(active)!.startedAt} directory={directory} />}
+      {turnRef !== undefined && active !== undefined && (
+        <TurnTab
+          key={active}
+          conversationId={turnRef.conversationId}
+          startedAt={turnRef.startedAt}
+          directory={directory}
+          title={titleFor?.(turnRef.conversationId)}
+          here={activeConversationId === turnRef.conversationId}
+          onJump={onOpenConversation ? () => onOpenConversation(turnRef.conversationId) : undefined}
+        />
+      )}
       {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && active !== GIT_TAB && (
         <CompareSplit compare={compare} directory={directory} active={active} jump={jump} tabs={tabs} />
       )}

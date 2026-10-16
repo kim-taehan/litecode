@@ -363,6 +363,8 @@ export const ko = {
   'taskTab.showAllLines': '전체 보기 ({count}줄)',
   // 턴 작업 탭 (이슈 #416)
   'turnTab.tab': '턴 작업',
+  'turnTab.conversation': '대화',
+  'turnTab.jumpTo': '그 대화로 이동',
   'turnTab.gone': '이 턴의 기록이 없습니다 — 앱을 다시 켰거나 오래된 턴이라 지워졌습니다.',
   'turnTab.showAll': '이 턴의 진행 전체 보기',
   // 추론 과정(Trajectory) 탭
