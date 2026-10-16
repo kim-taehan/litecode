@@ -30,10 +30,16 @@ jobs:
           # git tag 도 REST /releases 도 안 된다 — 기존 v0.1.x 릴리스는 태그 ref 없이 만든 것이라
           # matching-refs 에 없고 /releases(REST)·/releases/latest 는 404.
           # gh release list(JSON) 에서 데스크톱 태그("v" 로 시작, 모바일 mobile-vX.Y.Z 는 빠짐)만 뽑아
-          # 버전 숫자순으로 정렬해 최대를 한다 — 목록 순서에 무관하게 결정적.
-          RAW="$(gh release list --limit 30 --json tagName 2>&1 || true)"
+          # 0 패드한 "000.001.013" 형태로 바꿔 보통 알파벳 정렬로 최대를 찾는다 — sort -n 옵션은 GNU/BSD 차이로 러너에서 어긋났기 때문에(런 38854793348: 0.1.13 무시→0.1.10).
+          RAW="$(gh release list --limit 30 --exclude-drafts --json tagName 2>&1 || true)"
           echo "gh release list (처음 200): $(printf '%s' "$RAW" | head -c 200)"
-          LATEST="$(printf '%s\n' "$RAW" | grep -oE '"tagName":"v[0-9][^"]*"' | cut -d'"' -f4 | sort -t. -k1.2n -k2n -k3n | tail -1 || true)"
+          candidates="$(printf '%s\n' "$RAW" | grep -oE '"tagName":"v[0-9][^"]*"' | cut -d'"' -f4)"
+          echo "후보: $(printf '%s' "$candidates" | tr '\n' ' ')"
+          LATEST="$(printf '%s\n' "$candidates" | while read -r t; do
+            [ -n "$t" ] || continue
+            IFS=. read -r a b cc <<< "${t#v}"
+            printf '%03d.%03d.%03d %s\n' "$((10#$a))" "$((10#$b))" "$((10#$cc))" "$t"
+          done | sort | tail -1 | cut -d' ' -f2- || true)"
           if [ -n "$LATEST" ]; then
             N="${LATEST#v}"
             C="${N##*.}"
