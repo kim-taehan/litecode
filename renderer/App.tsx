@@ -259,6 +259,18 @@ export function App() {
   const projectName = project?.name
   const openConversation = useRef(openNotice)
   openConversation.current = openNotice
+  // “턴 작업” 탭의 대화 줄 (이슈 #462) — 그 턴의 대화 제목과 그 대화로 이동(알림 열기와 같은 길). ref 로 정체성을 고정해
+  // 채팅 이벤트마다 오른쪽 패널이 다시 그려지지 않게
+  const titleOfRef = useRef(titleOf)
+  titleOfRef.current = titleOf
+  const panelTitleFor = useRef((conversationId: string): string => {
+    const session = sessionsRef.current.find((candidate) => candidate.id === conversationId)
+    return session ? titleOfRef.current(session) : ''
+  }).current
+  const panelOpenConversation = useRef((conversationId: string): void => {
+    const target = sessionsRef.current.find((session) => session.id === conversationId)
+    if (target) void openConversation.current({ project: target.project, conversationId })
+  }).current
   const delegation = useMemo(() => {
     const peers = sessions
       .filter((session) => !isBlank(session))
@@ -825,7 +837,7 @@ export function App() {
       </main>
       {/* 답의 파일 칩을 누르면 채팅 오른쪽에 붙는 파일 미리보기 (이슈 #17) */}
       <ErrorBoundary scope="section" className="crash--side" resetKey={active?.project}>
-        <FilePreviewPanel directory={active?.project} />
+        <FilePreviewPanel directory={active?.project} activeConversationId={active?.id} titleFor={panelTitleFor} onOpenConversation={panelOpenConversation} />
       </ErrorBoundary>
       {settingsOpen && <SettingsModal providers={providers} onProvidersChange={setProviders} onClose={closeSettings} />}
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
