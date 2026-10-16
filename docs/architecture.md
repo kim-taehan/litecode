@@ -178,7 +178,7 @@ llm.chat({onSession}) ─▶ sessions.attach (engineSessionId 조기 연결 — 
 - 입력: `+` 메뉴 트리거(`@`/`/`/`!`)는 `useTriggers`→메인 `queryTrigger` — 렌더러는 어떤 문자인지 모름. 첨부·음성(16kHz PCM)·대기열(QueueDock).
 - 사이드바: 접힘/리사이즈, 진행중만 보기, 찾기, 고정/변경/삭제, **대화 이동 ⌘↑/⌘↓** (목록 순서·끝에서 감, `useSessionNav` #330) + 현재 대화 행 강조·"현재" 뱃지, **새 대화 ⌘N/Ctrl+N** (#344 — 버튼과 같은 동작·입력창 포커스 #343, 판·빠른 열기 열려 있으면 무시). **프로젝트 전환 = 빠른 열기**(#305): `ProjectQuickOpen` 전환 카드 옆(사이드바 우측) 패널, ⌘K/Ctrl+K(또는 전환 버튼)로 열고 타이핑 즉시 필터, ↑↓·Enter·Esc·Home/End, 즐겨찾기 ★ 먼저 — 옛 앵커형 popover 제거. **⌘K 반복 = 다음 프로젝트로 강조 이동** (#375·#379): 열려 있으면 ⌘K 가 열렸을 때 순서(즐겨찾기 먼저) 스냅샷의 다음 프로젝트로 **강조(선택 행)만** 움직이고, **Enter(=행 선택) 로 열고 닫아 확정**. 순환은 `renderer/projectCycle.ts`(열면 최근 목록 맨 앞이라 live 순서가 아니라 스냅샷·커서) + `ProjectQuickOpen` effect. **열려 있으면 목록 순서는 열렸을 때 순서 그대로** (#377, `pinnedProjects` — 이동하는 것은 강조 ✓·선택 행뿐, ★·이름·삭제만 live).
 - 설정 모달: 기본/모델/기능(4그룹: screen·ai·automation·devices)/모바일. **⌘, / Ctrl+, 로 열기** (#384 — macOS 의 설정 표준 키. 판·빠른 열기 열려 있으면 다른 전역 키처럼 무시, 닫기는 ×/Esc).
-- 오른쪽 패널: Files/파일/Git/**터미널** 탭(filePreviewStore) — 터미널은 다중(번호=탭 이름)·닫아도 셸 유지·탭 닫으면 셸 종료. 단축키는 `useTerminalKeys`(⌘T 새 터미널·⌘[·⌘] 이전/다음, #303). PDF는 OS 앱으로.
+- 오른쪽 패널: Files/파일/Git/**터미널** 탭(filePreviewStore) — 터미널은 다중(번호=탭 이름)·닫아도 셸 유지·탭 닫으면 셸 종료. 단축키는 `useTerminalKeys`(⌘T 새 터미널·⌘[·⌘] 이전/다음, #303), **패널 토글 ⌘B/Ctrl+B** (#444 — `App.tsx` 전역 키: 열면 숨김(탭 유지)·닫으면 재개, 닫으면 포커스 입력창으로, 판·빠른 열기 열려 있으면 무시). PDF는 OS 앱으로.
 
 ## 8. 모바일 (mobile/, Android-Expo)
 
