@@ -26,9 +26,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # git tag 도 REST /releases 도 안 된다 — 기존 v0.1.x 릴리스는 태그 ref 없이 만든 것이라
-          # matching-refs 에 없고 /releases(REST)·/releases/latest 는 404. GraphQL 기반 gh release list 로
-          # 최신 non-prerelease 를 잡는다 (모바일 mobile-vX.Y.Z 는 pre-release 라 제외).
-          LATEST="$(gh release list --limit 20 --json tagName,isPrerelease --jq '[.[] | select(.isPrerelease|not)][0].tagName // empty' 2>/dev/null || true)"
+          # matching-refs 에 없고 /releases(REST)·/releases/latest 는 404.
+          # gh release list(JSON) 에서 데스크톱 태그("v" 로 시작, 모바일 mobile-vX.Y.Z 는 빠짐)만 뽑아
+          # 버전 숫자순으로 정렬해 최대를 한다 — 목록 순서에 무관하게 결정적.
+          RAW="$(gh release list --limit 30 --json tagName 2>&1 || true)"
+          echo "gh release list (처음 200): $(printf '%s' "$RAW" | head -c 200)"
+          LATEST="$(printf '%s\n' "$RAW" | grep -oE '"tagName":"v[0-9][^"]*"' | cut -d'"' -f4 | sort -t. -k1.2n -k2n -k3n | tail -1 || true)"
           if [ -n "$LATEST" ]; then
             N="${LATEST#v}"
             C="${N##*.}"
