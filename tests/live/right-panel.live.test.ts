@@ -167,7 +167,9 @@ describe('오른쪽 패널 — 탭', () => {
   })
 
   it('"+" 는 파일 탭으로 — 탭 줄 빈 곳은 창 끌기, 탭·버튼은 아님', async () => {
-    await panel().getByRole('button', { name: '파일 목록' }).click()
+    // 터미널 기능은 필수(#430)라 `+` 는 메뉴(파일 목록/새 터미널, #316) — 파일 목록을 고른다
+    await panel().getByRole('button', { name: '새 탭' }).click()
+    await page.getByRole('menuitem', { name: '파일 목록' }).click()
     expect(await tab('파일').getAttribute('aria-selected')).toBe('true')
     const region = (selector: string) => panel().locator(selector).first().evaluate((el) => getComputedStyle(el).getPropertyValue('-webkit-app-region'))
     expect(await region('.file-preview__head')).toBe('drag')
@@ -292,5 +294,16 @@ describe('오른쪽 패널 — 전체 화면·닫기·다시 열기', () => {
     await panel().waitFor()
     expect(await fileTabs().evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-file')))).toEqual(opened)
     expect(await page.locator('.main__header').getByRole('button', { name: '오른쪽 패널 열기' }).count()).toBe(0)
+  })
+
+  it('⌘B — 닫혀 있으면 머리 버튼처럼 열고, 열려 있으면 숨긴다(탭 유지). 닫으면 포커스는 입력창으로 (이슈 #444)', async () => {
+    const opened = await fileTabs().evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-file')))
+    await page.keyboard.press('Meta+B')
+    await panel().waitFor({ state: 'detached' })
+    await expect.poll(() => page.locator('.composer__input').evaluate((el) => el === document.activeElement), { timeout: 5_000 }).toBe(true)
+    // 닫았던 패널의 탭은 그대로 — ⌘B 로 다시 열면 연 탭으로 돌아온다
+    await page.keyboard.press('Meta+B')
+    await panel().waitFor()
+    expect(await fileTabs().evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-file')))).toEqual(opened)
   })
 })

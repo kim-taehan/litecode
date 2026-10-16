@@ -21,13 +21,14 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          # 태그를 안 받으면 git tag 가 비어 fall back 버전(0.0.2)이 박힌다 — fetch-depth: 0 만으론 태그가 안 온다
-          fetch-tags: true
       - id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          LATEST="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1 || true)"
+          # git tag 도 REST /releases 도 안 된다 — 기존 v0.1.x 릴리스는 태그 ref 없이 만든 것이라
+          # matching-refs 에 없고 /releases(REST)·/releases/latest 는 404. GraphQL 기반 gh release list 로
+          # 최신 non-prerelease 를 잡는다 (모바일 mobile-vX.Y.Z 는 pre-release 라 제외).
+          LATEST="$(gh release list --limit 20 --json tagName,isPrerelease --jq '[.[] | select(.isPrerelease|not)][0].tagName // empty' 2>/dev/null || true)"
           if [ -n "$LATEST" ]; then
             N="${LATEST#v}"
             C="${N##*.}"
@@ -36,7 +37,7 @@ jobs:
             NEXT="0.0.2"
           fi
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
-          echo "릴리스 버전: $NEXT"
+          echo "릴리스 버전: $NEXT (이전: ${LATEST:-없음})"
 
   mac:
     needs: next-version
