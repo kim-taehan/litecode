@@ -420,6 +420,10 @@ export const en = {
   'feature.notifications.channel.system.hint': 'The desktop notification (when the window is behind) and the dock badge. Off means no desktop notification and no badge — the dots on the chat row and project stay.',
   'feature.notifications.channel.app': 'In-app notifications',
   'feature.notifications.channel.app.hint': 'The toast shown when the window is in front. Off means no toast — only the dots on the chat row and project stay.',
+  'feature.web': 'Web access',
+  'feature.web.description': 'Web tools for the AI (page fetch · search) — off means the AI never reaches the web',
+  'feature.web.detail': 'Web tools for the AI — fetching web pages and web search — on and off together.\nOff (the default): the AI has no way to reach the web, so it makes no outside calls — on a closed network this default state is the safe one.\nOn: the AI reads the web page at an address you give it — only addresses this PC can reach; on a closed network that means things like internal docs.\nNot used in Plan mode.\nThis switch covers the web tools only — if this PC can reach the internet, the AI can still get out with commands (curl and the like), and in Default mode commands run without asking. To stop that too, set the input mode to "Ask every time".\nChanging it restarts the engine — an answer in progress stops.',
+
   'feature.web.where': 'A tool the AI calls during a chat',
   'settings.openFile': 'Open configuration file',
   'settings.openFileError': 'Could not open configuration file',
