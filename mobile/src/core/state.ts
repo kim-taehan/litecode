@@ -24,6 +24,8 @@ export interface ConversationView {
   attention: Attention[]
   /** 대기열 (보낸 순서) */
   queue: string[]
+  /** history 가 앞에서 잘린 메시지 수 — 스냅샷은 전체가 아니라 마지막 질문부터 온다 (이슈 #365). 화면이 맨 위에 "N개 생략" 을 그린다 */
+  omitted?: number
   missingFolder?: boolean
   error?: string
   /** 데스크탑 `!명령` 결과 카드 (#265) — 스냅샷에서만 온다(읽기 전용). 새로 돈 카드는 다시 받을 때 보인다 */
@@ -117,6 +119,7 @@ export function reduce(state: RemoteState, action: RemoteAction): RemoteState {
 function viewOf(snapshot: ConversationSnapshot): ConversationView {
   return {
     messages: snapshot.history.messages,
+    omitted: snapshot.omitted,
     running: snapshot.live !== undefined,
     progress: snapshot.live?.progress ?? [],
     attention: snapshot.live?.attention ?? [],

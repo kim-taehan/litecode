@@ -119,6 +119,8 @@ export function ChatScreen({ session, cid, onBack, onCarrier }: { session: AppSe
       </View>
 
       <ScrollView ref={scroll} style={styles.body} contentContainerStyle={styles.bodyContent} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
+        {/* 스냅샷은 전체가 아니라 마지막 질문부터 온다 — 앞의 것이 생략됐으면 한 줄으로 (#365) */}
+        {view && view.omitted !== undefined && view.omitted > 0 ? <Text style={styles.omitted}>{S.omittedMessages(view.omitted)}</Text> : null}
         {view &&
           chatRows(view.messages, view.shells).map((row) =>
             row.kind === 'shell' ? <ShellCardBox key={row.key} card={row.card} /> : row.message.role === 'user' ? <UserMessage key={row.key} message={row.message} /> : <Answer key={row.key} message={row.message} />,
@@ -400,6 +402,7 @@ const styles = StyleSheet.create({
   status: { paddingTop: 8 },
   body: { flex: 1 },
   bodyContent: { padding: 16, gap: 14 },
+  omitted: { textAlign: 'center', fontSize: 12, color: C.sub },
   userTurn: { alignItems: 'flex-end', gap: 4 },
   userMeta: { fontSize: 12, color: C.sub },
   hook: { gap: 2, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: 'rgba(0,0,0,0.08)' },

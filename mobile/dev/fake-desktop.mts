@@ -26,6 +26,8 @@ import type { Attention, AttentionAnswer, HistoryMessage, NoticeState, TurnItem 
 import {
   REMOTE_API_VERSION,
   REMOTE_PING_INTERVAL_MS,
+  snapshotMessage,
+  snapshotTailAt,
   type AttentionReplyResponse,
   type ConversationSnapshot,
   type CreateConversationRequest,
@@ -309,7 +311,17 @@ export async function startFakeDesktop(options: FakeDesktopOptions = {}): Promis
       const chat = chats.get(params[0]!)
       if (!chat) return [404, { error: '없는 대화' }]
       const live = chat.turn ? { progress: [...chat.turn.items.values()], attention: chat.turn.attention, queue: chat.queue } : undefined
-      return [200, { history: { messages: [...chat.messages] }, live, seq } satisfies ConversationSnapshot]
+      // 진짜 데스크탑과 같은 내용 (#365) — 전체가 아니라 꼬리 (도는 중이면 그 질문은 이미 messages 에 있고 쓰다 만 답은 live)
+      const from = snapshotTailAt(chat.messages)
+      return [
+        200,
+        {
+          history: { messages: chat.messages.slice(from).map(snapshotMessage) },
+          ...(live && { live }),
+          ...(from > 0 && { omitted: from }),
+          seq,
+        } satisfies ConversationSnapshot,
+      ]
     },
     'POST /v1/conversations/*/messages': ({ params, body, deviceId }) => {
       const chat = chats.get(params[0]!)

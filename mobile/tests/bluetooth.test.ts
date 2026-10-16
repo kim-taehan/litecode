@@ -527,12 +527,13 @@ describe('진짜 ctx.remote 에 블루투스로 — hello · 목록 · 긴 대�
     await until(() => (session.getState().conversations[harness.box.project] ?? []).length === 2 && session.models.length > 0, '대화 목록·모델', 10_000)
     expect(wifi.calls).toBe(0) // Wi-Fi 에는 한 번도 가지 않았다
 
-    // 긴 대화 — 알림 수백 조각이 다시 붙어 스냅샷 하나로
+    // 긴 대화 — 폰은 전체(80개·수십 KB)가 아니라 꼬리만 (#365) — 조각 대신 아주 작은 스냅샷
     const before = session.receivedBytes()
     session.openConversation('c_big')
-    await until(() => session.getState().views['c_big']?.messages.length === 80, '긴 대화', 10_000)
-    expect(session.getState().views['c_big']!.messages[79]!.text).toBe(history[79]!.text)
-    expect(session.receivedBytes() - before).toBeGreaterThan(30_000)
+    await until(() => (session.getState().views['c_big']?.messages.length ?? 0) >= 2, '긴 대화', 10_000)
+    expect(session.getState().views['c_big']!.messages[3]!.text).toBe(history[79]!.text)
+    expect(session.getState().views['c_big']!.omitted).toBe(76)
+    expect(session.receivedBytes() - before).toBeLessThan(10_000)
     session.openConversation('c_small')
     await until(() => session.getState().views['c_small'] !== undefined, '작은 대화')
     expect(Math.max(...ble.writes)).toBeLessThanOrEqual(182)
