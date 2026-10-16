@@ -22,22 +22,13 @@
 .hook-badge[data-event='SessionStart'] { --hook-tone: #8b5cf6; }
 .hook-badge[data-event='Notification'] { --hook-tone: var(--warn); }
 
-/* ── 팝업: 설명 + [훅 추가] */
-.hooks-intro {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-}
+/* ── 팝업: 설명 */
 .hooks-intro__text {
-  margin: 0;
+  margin: 0 0 12px;
   max-width: 470px;
   font-size: 13px;
   line-height: 20px;
   color: var(--text-secondary);
-}
-.hooks-intro .settings-button {
-  flex: none;
 }
 
 /* 가져오기 띠 — 시안: 옅은 파랑 바탕·12 모서리 */
@@ -141,19 +132,11 @@
 .hook-editor__warn {
   padding: 0;
 }
-.hook-row__new {
-  padding: 12px 14px 0;
-  font-weight: 600;
-}
-
 /* ── 편집 판 — 줄 아래 폼 (MCP 편집 카드와 같은 부품) */
 .hook-editor {
   margin: 0;
   padding: 12px 14px 14px;
   border-top: 0.5px solid var(--border);
-}
-.hook-row__new + .hook-editor {
-  border-top: none;
 }
 .hook-editor__choices {
   display: flex;
