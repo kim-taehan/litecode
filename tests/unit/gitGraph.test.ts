@@ -34,8 +34,8 @@ describe('layoutGraph — 고정 입력', () => {
   it('다이아몬드 머지 — 머지에서 갈라지고(곡선 나감) root 에서 합쳐진다(곡선 들어옴)', () => {
     const { rows, state } = rowsOf([c('M', ['A', 'B']), c('A', ['C']), c('B', ['C']), c('C')])
     expect(shape(rows)).toEqual([
-      { lane: 0, up: [], down: [0, 1], diagonal: [{ from: 0, to: 1 }], folded: false }, // M: 갈라짐
-      { lane: 0, up: [0, 1], down: [0, 1], diagonal: [], folded: false }, // A: 옆 레인은 세로로 지나감
+      { lane: 0, up: [], down: [0], diagonal: [{ from: 0, to: 1 }], folded: false }, // M: 갈라짐 — B(2줄 아래) 선은 접는다(#466)
+      { lane: 0, up: [0, 1], down: [1], diagonal: [], folded: false }, // A: A 의 C 선도 접고, B 레인(1줄 아래)은 그림
       { lane: 1, up: [0, 1], down: [0, 1], diagonal: [], folded: false }, // B
       { lane: 0, up: [0, 1], down: [], diagonal: [{ from: 1, to: 0 }], folded: false }, // C: 합쳐짐
     ])
@@ -46,9 +46,9 @@ describe('layoutGraph — 고정 입력', () => {
     // M2 가 main 의 A 를 이미 머지해 둔 뒤, M 이 M2 를 머지 — A 를 기다리던 레인 0 에 M2 에서 곡선이 잇는다
     const { rows, state } = rowsOf([c('M', ['A', 'M2']), c('M2', ['B', 'A']), c('A', ['C']), c('B', ['C']), c('C')])
     expect(shape(rows)).toEqual([
-      { lane: 0, up: [], down: [0, 1], diagonal: [{ from: 0, to: 1 }], folded: false },
-      { lane: 1, up: [0, 1], down: [0, 1], diagonal: [{ from: 1, to: 0 }], folded: false },
-      { lane: 0, up: [0, 1], down: [0, 1], diagonal: [], folded: false },
+      { lane: 0, up: [], down: [1], diagonal: [{ from: 0, to: 1 }], folded: false }, // A(2줄 아래)는 접고 M2(1줄)는 그림
+      { lane: 1, up: [0, 1], down: [0], diagonal: [{ from: 1, to: 0 }], folded: false },
+      { lane: 0, up: [0, 1], down: [1], diagonal: [], folded: false }, // A 의 C 선(3줄)은 접고 B(1줄)는 그림
       { lane: 1, up: [0, 1], down: [0, 1], diagonal: [], folded: false },
       { lane: 0, up: [0, 1], down: [], diagonal: [{ from: 1, to: 0 }], folded: false },
     ])
@@ -82,7 +82,7 @@ describe('layoutGraph — 고정 입력', () => {
       lane: 0,
       color: laneColor(0),
       up: [],
-      down: [0, 1, 2],
+      down: [0], // #466 — A(1줄 아래)만 선 그리고, B·C(2·3줄)는 접음
       diagonal: [{ from: 0, to: 1 }, { from: 0, to: 2 }],
       folded: false,
     })
@@ -149,6 +149,50 @@ describe('layoutGraph — 고정 입력', () => {
   it('빈 입력', () => {
     expect(rowsOf([])).toEqual({ rows: [], state: { lanes: [] } })
     expect(rowsOf([], { lanes: ['h1', null] })).toMatchObject({ rows: [], state: { lanes: ['h1', null] } })
+  })
+})
+
+describe('layoutGraph — 튀어나온 구간 자르기 (#466)', () => {
+  it('머지에서 내린 선이 3줄 아래에서 해소 — 그 사이는 공백, 해소 직전 1줄부터 이어진다', () => {
+    // F 가 M 에서 3줄 아래 — lane1 선이 점 없이 뻗는 구간(2줄)은 안 그린다
+    const { rows, state } = rowsOf([c('M', ['A', 'F']), c('A', ['B']), c('B', ['F']), c('F')])
+    expect(shape(rows)).toEqual([
+      { lane: 0, up: [], down: [0], diagonal: [{ from: 0, to: 1 }], folded: false }, // M: A(1줄) 선은, F(3줄) 곡선만(선 없음)
+      { lane: 0, up: [0], down: [0], diagonal: [], folded: false }, // A: F 레인(2줄) 아직 안 그림
+      { lane: 0, up: [0, 1], down: [0, 1], diagonal: [], folded: false }, // B: F(1줄) — 여기서부터 그림
+      { lane: 0, up: [0, 1], down: [], diagonal: [{ from: 1, to: 0 }], folded: false }, // F: 합류
+    ])
+    expect(state.lanes).toEqual([])
+  })
+
+  it('바로 아래 줄에서 해소(1줄) — 선은 그대로(자기 브랜치 직선은 변함없음)', () => {
+    const { rows } = rowsOf([c('c', ['b']), c('b', ['a']), c('a')])
+    expect(shape(rows)).toEqual([
+      { lane: 0, up: [], down: [0], diagonal: [], folded: false },
+      { lane: 0, up: [0], down: [0], diagonal: [], folded: false },
+      { lane: 0, up: [0], down: [], diagonal: [], folded: false },
+    ])
+  })
+
+  it('해소 커밋이 다음 페이지(목록에 없음) — 줄은 이어 그린다(페이지 연속 유지)', () => {
+    const { rows } = rowsOf([c('a', ['x']), c('b', ['y']), c('c')])
+    // x·y 는 페이지에 없음 → Infinity — 다음 페이지와 이어지도록 계속 그려야 한다
+    expect(shape(rows)).toEqual([
+      { lane: 0, up: [], down: [0], diagonal: [], folded: false },
+      { lane: 1, up: [0], down: [0, 1], diagonal: [], folded: false },
+      { lane: 2, up: [0, 1], down: [0, 1], diagonal: [], folded: false },
+    ])
+  })
+
+  it('2줄 갭 — 해소 직전 1줄(꼬리)만 남는다', () => {
+    // b 의 도트(R2)까지 2줄 — a 줄(R0)엔 선이 없고, R1(해소 1줄)부터 꼬리만 남는다
+    const { rows } = rowsOf([c('a', ['b']), c('x'), c('b', ['c']), c('c')])
+    expect(shape(rows)).toEqual([
+      { lane: 0, up: [], down: [], diagonal: [], folded: false }, // a: b(2줄) 아님 — 접음
+      { lane: 1, up: [0], down: [0], diagonal: [], folded: false }, // x: b 레인(1줄) — 꼬리
+      { lane: 0, up: [0], down: [0], diagonal: [], folded: false }, // b: c(1줄)
+      { lane: 0, up: [0], down: [], diagonal: [], folded: false }, // c
+    ])
   })
 })
 

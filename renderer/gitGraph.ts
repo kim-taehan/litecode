@@ -8,6 +8,8 @@
 // - 아직 안 읽힌 부모(다음 페이지에 올 커밋)는 그 레인을 기다리며 남긴다 — 그래서 state 를 이어줘야 한다.
 //   (P3 의 필터로 부모가 아예 목록에서 빠지면 그 레인은 기다림이 남는다 — P3 에서 다룬다)
 // 상태(state.lanes)를 넘겨주면 페이지 단위로 이어 계산된다.
+// #466: 레인의 세로선(기다림 포함)은 해소 줄(기다리던 커밋 줄)이 이 줄이거나 바로 아래 줄일 때만 그려
+// 점 없이 2줄 이상 뻗던 구간을 잘라낸다. 부모가 페이지에 없으면(다음 페이지·필터)은 줄을 이어그린다.
 
 import type { GitLogCommit } from '../shared/git.ts'
 
@@ -40,9 +42,9 @@ export interface GraphRow {
   lane: number
   /** 점 색 (레인 색) */
   color: string
-  /** 위에서(이전 줄) 들어오는 선이 있는 레인 — 도트의 레인 포함 */
+  /** 위에서(이전 줄) 들어오는 선이 있는 레인 — 도트의 레인 포함. #466: 기다림 선은 해소 줄 1줄 안에만 든다 */
   up: number[]
-  /** 아래(다음 줄)로 나가는 선이 있는 레인 — 도트의 레인·머지 곡선이 내린 레인 포함, 지나가는 세로선도 둘 다에 든다 */
+  /** 아래(다음 줄)로 나가는 선이 있는 레인 — 도트의 레인·머지 곡선이 내린 레인 포함, 지나가는 세로선도 둘 다에 든다. #466 동일 */
   down: number[]
   /** 곡선 (머지·분기) */
   diagonal: GraphDiagonal[]
@@ -70,8 +72,14 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
   const maxLanes = options.maxLanes ?? Infinity
   const lanes: Array<string | null> = state.lanes ? state.lanes.slice() : []
   const rows: GraphRow[] = []
-  // 직선 브랜치 판정(#413)은 부모 커밋 객체가 필요 — 이미 읽힌(페이지에 든) 커밋만 보인다
+  // 직선 브랜치 판정(#413)은 부모 커밋 객체가 필요 — 이미 읽힌(페이지에 든) 커밋만 본다
   const byHash = new Map(commits.map((commit): [string, GitLogCommit] => [commit.hash, commit]))
+  // #466 — 해시가 이 페이지의 몇 번째 줄에 오는가(최근→옛순). 기다림 선을 "접는" 자리 판단에 쓴다.
+  const rowIndex = new Map(commits.map((commit, i): [string, number] => [commit.hash, i]))
+
+  /** 레인이 기다리는 해시가 해소되는 첫 줄 번호 — 이 페이지에 없으면(다음 페이지·필터로 빠진) Infinity */
+  const resolveAt = (hash: string | null | undefined): number =>
+    hash === null || hash === undefined ? Infinity : (rowIndex.get(hash) ?? Infinity)
 
   /** second 가 first 라는 1커밋 브랜치의 끝이면 true — first 의 바로 위(분기점 = first)에서 갈라진 1커밋 */
   const isStraightChild = (first: string, second: string): boolean => {
@@ -89,7 +97,8 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
 
   const sortLanes = (lanes: Set<number>): number[] => [...lanes].sort((a, b) => a - b)
 
-  for (const commit of commits) {
+  for (let r = 0; r < commits.length; r++) {
+    const commit = commits[r]!
     const up = new Set<number>()
     const down = new Set<number>()
     const diagonal: GraphDiagonal[] = []
@@ -159,8 +168,22 @@ export function layoutGraph(commits: readonly GitLogCommit[], state: GraphState 
       diagonal.push({ from: lane, to: other })
     }
 
-    // 맨 오른쪽이 빈 레인이면 낸다 (그래프가 좁도록)
+    // 맨 오른쪽이 빈 레인이면 낸다 (그래프이 좁도록)
     while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop()
+
+    // #466 — 튀어나온 구간 자른다: 레인의 세로선은 해소 줄(자기 도트가 내려앉는 줄)이 이 줄이거나 바로 아래 줄일 때만 그린다.
+    // 점 없이 2줄 이상 뻗은 기다림 선은 그리지 않고, 해소 직전 1줄에서 다시 이어진다.
+    // - down(아래로 나가는 선): 이 줄 처리 뒤 레인의 기다림(lanes[L])으로 판단 — 도트의 첫 부모·새로 내린 머지 선 다 해당
+    // - up(위에서 들어오는 선): 지나가는 레인은 기다림으로 판단, 도트 레인의 up(기다리던 선이 도트에 잇는 follower 줄)은 그대로
+    for (const L of [...down]) {
+      const res = resolveAt(lanes[L])
+      if (res !== Infinity && res > r + 1) down.delete(L)
+    }
+    for (const L of [...up]) {
+      if (L === lane) continue
+      const res = resolveAt(lanes[L])
+      if (res !== Infinity && res > r + 1) up.delete(L)
+    }
 
     const farthest = Math.max(lane, ...up, ...down, ...diagonal.map((line) => Math.max(line.from, line.to)))
     rows.push({
