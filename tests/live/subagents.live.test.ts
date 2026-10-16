@@ -97,7 +97,7 @@ describe('하위 작업 (이슈 #31)', () => {
       `parallel ${tasks(['general', 'alpha job', '[bash:sleep 4; echo A > sub-a.txt] child A'], ['general', 'beta job', '[bash:sleep 4; echo B > sub-b.txt] child B'])}`,
     )
     await runningTurn().waitFor({ timeout: 10_000 })
-    // 두 하위 작업이 함께 진행 중 — 도는 턴은 채팅에 한 줄(이슈 #416), 하위 작업 줄은 우측 "이 턴의 작업" 탭에
+    // 두 하위 작업이 함께 진행 중 — 도는 턴은 채팅에 한 줄(이슈 #416), 하위 작업 줄은 우측 "턴 작업" 탭에
     const runningLine = runningTurn().locator('.turn-running__line')
     await runningLine.waitFor({ timeout: 20_000 })
     await runningLine.click()

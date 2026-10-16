@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { TurnItem } from '../shared/ipc.ts'
 import { upsertItem } from '../shared/chatReducer.ts'
 
-// 오른쪽 패널 "이 턴의 작업" 탭 (이슈 #416) 의 데이터 — 도는 턴의 진행 줄을 채팅 이벤트(useChatEvents)에서 실시간으로 받아 넣고,
+// 오른쪽 패널 "턴 작업" 탭 (이슈 #416) 의 데이터 — 도는 턴의 진행 줄을 채팅 이벤트(useChatEvents)에서 실시간으로 받아 넣고,
 // 턴이 끝나면 끝난 답의 items(turn.ended 의 message.items)로 통째 바꾼다. 새 데이터는 없다 — 채팅의 진행 줄과 같은 출처다.
 // 열쇠는 (대화 id, 보낸 시각) — 턴마다 하나. 화면이 (재)뜰 때 메인이 쥔 도는 턴은 App 이 스냅샷으로 한 번에 넣어 준다(feedTurnSnapshot).
 // 오래된 기록은 상한만 거른다(메모리 저장소 — 탭은 남을 수 있지만 데이터는 상한까지)

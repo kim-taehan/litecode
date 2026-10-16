@@ -124,7 +124,7 @@ export function App() {
     void (async () => {
       const stored = (await window.litecode.listConversations()).map(fromConversation)
       // 메인이 쥔 도는 턴·대기열을 입힌다 — 창을 닫았다 열어도 진행 줄·대기열이 이어져 보인다 (그 뒤는 이벤트로).
-      // "이 턴의 작업" 탭(이슈 #416) 도 같은 스냅샷으로 이어 붙인다
+      // "턴 작업" 탭(이슈 #416) 도 같은 스냅샷으로 이어 붙인다
       const live = await window.litecode.chatSnapshot()
       for (const session of stored) {
         const turn = live[session.id]?.turn
