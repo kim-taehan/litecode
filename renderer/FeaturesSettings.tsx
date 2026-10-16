@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { speechLanguage, type SpeechLanguage } from '../shared/speech.ts'
 import { LANGUAGES } from '../shared/i18n/index.ts'
 import { OptionSelect } from './GeneralSettings.tsx'
+import { NOTIFY_CHANNELS, channelsOn, type NotifyChannel, type NotifyChannels } from '../shared/notifyChannels.ts'
 import { FEATURE_REQUIRES, featureDefault, featureOn, type ChoosableFeatureId, type FeatureReason } from '../shared/features.ts'
 import type { MessageKey } from '../shared/i18n/index.ts'
 import { useFeatureStatuses } from './featuresStore.ts'
@@ -64,6 +65,17 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
     )
   }
 
+  /** 알림 채널 자 스위치 (이슈 #372) — 기본(켜짐)으로 돌아오면 키를 빼고, 전부 기본이면 빈 객체로 저장한다 */
+  function toggleChannel(channel: NotifyChannel): void {
+    const next: NotifyChannels = { ...settings.notifyChannels }
+    if (channelsOn(settings.notifyChannels)[channel]) delete next[channel]
+    else next[channel] = false
+    void updateSettings({ notifyChannels: next }).then(
+      () => setError(undefined),
+      () => setError(t('settings.saveError')),
+    )
+  }
+
   function reasonText(reason: FeatureReason): string {
     return typeof reason === 'string' ? reason : t(reason.key, reason.vars)
   }
@@ -97,6 +109,29 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
             ))}
           </ul>
         )}
+        {/* 알림 채널 자 스위치 (이슈 #372) — 외부(PC 알림·dock 배지)·내부(토스트) 를 따로 켜고 끈다. 점 은 채널과 무관해 여기서 안 꺼진다 */}
+        {feature === 'notifications' &&
+          NOTIFY_CHANNELS.map((channel) => {
+            const on = channelsOn(settings.notifyChannels)[channel]
+            return (
+              <div className="settings-row" key={channel} data-setting={`notifyChannels.${channel}`}>
+                <div className="settings-row__text">
+                  <div className="settings-row__title">{t(`feature.notifications.channel.${channel}` as MessageKey)}</div>
+                  <div className="settings-row__description">{t(`feature.notifications.channel.${channel}.hint` as MessageKey)}</div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  className="settings-switch"
+                  aria-checked={on}
+                  aria-label={t(`feature.notifications.channel.${channel}` as MessageKey)}
+                  onClick={() => toggleChannel(channel)}
+                >
+                  <span className="settings-switch__thumb" />
+                </button>
+              </div>
+            )
+          })}
         {feature === 'voice' && (
           <div className="settings-row" data-setting="speechLanguage">
             <div className="settings-row__text">
