@@ -36,6 +36,13 @@ export function toolPicking(server: McpRow & { source: string; tools?: readonly 
   return server.tools && mcpState(server) === 'connected' ? 'pick' : 'waiting'
 }
 
+/** MCP 팝업 내장 서버 줄의 표시 이름 — "… in litecode" (#337). 실제 이름은 도구 접두어라 건드리지 않는다
+ *  (`litecode` = src/services/mcp.ts 의 APP_MCP_NAME, `chrome` = shared/browser.ts 의 BROWSER_MCP_NAME) —
+ *  앱 자신의 서버는 "app" 이라 부른다 ("litecode in litecode" 가 되었으니까) */
+export function builtinServerName(name: string): string {
+  return `${name === 'litecode' ? 'app' : name} in litecode`
+}
+
 /** 도구 고르기의 줄 — 검색(이름·설명)으로 거르고 켜짐을 붙인다 */
 export function toolRows<T extends { name: string; description?: string }>(tools: readonly T[], selection: McpToolSelection | undefined, query: string): (T & { on: boolean })[] {
   return filterTools(tools, query).map((tool) => ({ ...tool, on: toolOn(selection, tool.name) }))

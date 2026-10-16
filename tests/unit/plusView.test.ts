@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { byScope, mcpCounts, mcpState, toolPicking, toolRows } from '../../renderer/plusView.ts'
+import { builtinServerName, byScope, mcpCounts, mcpState, toolPicking, toolRows } from '../../renderer/plusView.ts'
 
 // 입력창 `+` 메뉴와 스킬·MCP 팝업(이슈 #43)의 화면용 순수 함수 — 묶음 가르기, 메뉴의 "연결 N · 실패 M", 서버 줄의 상태
 
@@ -39,6 +39,13 @@ describe('mcpCounts — 메뉴의 요약', () => {
         { enabled: true },
       ]),
     ).toEqual({ connected: 2, failed: 2 })
+  })
+})
+
+describe('builtinServerName — 내장 서버 줄의 표시 이름 (#337)', () => {
+  it('앱 자신의 서버는 "app in litecode", 브라우저는 "chrome in litecode" — 실제 이름(도구 접두어)은 바뀌지 않는다', () => {
+    expect(builtinServerName('litecode')).toBe('app in litecode')
+    expect(builtinServerName('chrome')).toBe('chrome in litecode')
   })
 })
 
