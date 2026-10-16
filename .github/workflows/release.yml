@@ -1,6 +1,6 @@
 # main 머지(또는 수동) 시 설치 파일 자동 빌드 + 릴리스 생성 (#441)
 # 산출물은 로컬 `npm run dist:mac` / `npm run dist:win` 과 동일: litecode-mac-arm64.zip · litecode-mac-x64.zip · litecode-win-x64.exe.
-# 버전은 최신 릴리스 태그(v0.1.13) 다음 패치(v0.1.14) — 태그가 버전의 단일 출처다. mac 은 ci 에 서명 인증서가 없어 afterPack.cjs 가 ad-hoc 으로 서명한다.
+# 버전은 최신 릴리스 태그 다음 패치 — v* 태그가 버전의 단일 출처다. 태그가 없으면 첫 릴리스 v0.0.2 (레거시 v0.1.x 태그 제거, #447). mac 은 ci 에 서명 인증서가 없어 afterPack.cjs 가 ad-hoc 으로 서명한다.
 name: Release
 
 on:
@@ -32,7 +32,7 @@ jobs:
             C="${N##*.}"
             NEXT="${N%.*}.$((C + 1))"
           else
-            NEXT="0.1.0"
+            NEXT="0.0.2"
           fi
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "릴리스 버전: $NEXT"
