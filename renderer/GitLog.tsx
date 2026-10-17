@@ -143,10 +143,15 @@ function LogRow({ commit, row, now }: { commit: GitLogCommit; row: GraphRow; now
 function GraphSvg({ row }: { row: GraphRow }) {
   const x = (lane: number) => PAD + Math.min(lane, LANE_CAP - 1) * LANE_W + LANE_W / 2
   const lines: ReactNode[] = []
+  // 곡선이 이미 잇는 레인(머지로 합류해 들어오는 위쪽 / 머지로 갈라져 나가는 아래쪽)은 세로선을 또 그리지 않는다 — 곡선 바깥으로 튀어나온다
+  const joinsDot = (lane: number) => row.diagonal.some((line) => line.from === lane && line.to === row.lane)
+  const leavesDot = (lane: number) => row.diagonal.some((line) => line.from === row.lane && line.to === lane)
   for (const lane of row.up) {
+    if (lane !== row.lane && joinsDot(lane)) continue
     lines.push(<line key={`u${lane}`} x1={x(lane)} y1={0} x2={x(lane)} y2={lane === row.lane ? MID : LOG_ROW_H} stroke={laneColor(lane)} strokeWidth={1.5} />)
   }
   for (const lane of row.down) {
+    if (lane !== row.lane && leavesDot(lane)) continue
     lines.push(<line key={`d${lane}`} x1={x(lane)} y1={lane === row.lane ? MID : 0} x2={x(lane)} y2={LOG_ROW_H} stroke={laneColor(lane)} strokeWidth={1.5} />)
   }
   row.diagonal.forEach((line, index) => {
