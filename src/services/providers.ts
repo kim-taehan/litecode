@@ -24,6 +24,9 @@ export interface ModelCatalogEntry {
   /** 이미지 입력(선택, 이슈 #44) — 켠 모델만 엔진이 opencode.json 모델 정의에 modalities.input 의 image 를 싣는다. 그게 없으면 opencode 가
    *  붙인 이미지를 "ERROR: Cannot read …(this model does not support image input)" 글로 바꿔 보낸다 (01y). 기본 꺼짐 */
   imageInput?: boolean
+  /** 사고 끄기(선택, 이슈 #477) — 켠 모델의 chat/completions 본문에 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다
+   *  (사내망 실측: vLLM 게이트웨이의 Qwen 이 reasoning 을 끈다). 요청마다 저장된 값을 보므로 엔진 재시작 없이 다음 요청부터. 기본 없음 */
+  thinkingOff?: boolean
 }
 
 export interface ProviderConfig {
@@ -150,7 +153,9 @@ export class ProviderRegistry extends Service {
       ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
       ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
       ...(model.imageInput === true && { imageInput: true }),
+      ...(model.thinkingOff === true && { thinkingOff: true }),
     }))
+    if (input.models.some((model) => model.thinkingOff !== undefined && typeof model.thinkingOff !== 'boolean')) throw new Error(tr('error.thinkingOff'))
     if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
       throw new Error(tr('error.contextLength'))
     }

@@ -523,7 +523,7 @@ const dialog = () => page.getByRole('dialog', { name: '설정' })
 const card = (name: string) => dialog().locator('.provider-card', { has: page.locator('.provider-card__name', { hasText: name }) })
 const cardNames = () => dialog().locator('.provider-card__name').allTextContents()
 const field = (label: string) => dialog().getByLabel(label, { exact: true })
-const modelIds = () => dialog().locator('.model-row input[aria-label^="모델 id"]').evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))
+const modelIds = () => dialog().locator('.model-card input[aria-label^="모델 id"]').evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))
 const fakeLlm = async () => (await (await fetch(`${inject('fakeLlmUrl')}/requests`)).json()) as { count: number; modelsAuth?: string; chatAuth?: string; chatModels: string[] }
 
 /** 설정 > 모델 을 연다 — 설정은 일반 페이지로 열린다(dsh) */

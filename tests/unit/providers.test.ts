@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ProviderRegistry, type KeyCipher, type ProviderRegistryOptions } from '../../src/services/providers.ts'
+import { ProviderRegistry, type KeyCipher, type ModelCatalogEntry, type ProviderRegistryOptions } from '../../src/services/providers.ts'
 import { canSealKeys } from '../../electron/keyStorage.ts'
 import { tr } from '../../src/i18n.ts'
 
@@ -196,6 +196,16 @@ describe('ProviderRegistry', () => {
     const providers = await registry(files)
     providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', imageInput: true }, { id: 'm2', displayName: 'N', imageInput: false }] })
     expect((await registry(files)).get('gw')!.models).toEqual([{ id: 'm1', displayName: 'M', imageInput: true }, { id: 'm2', displayName: 'N' }])
+  })
+
+  // 사고 끄기(이슈 #477) — 켠 모델만 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다. 기본 없음, 불(boolean)이 아니면 거절
+  it('모델의 사고 끄기는 켰을 때만 남고, 불이 아닌 값은 저장을 거절한다', async () => {
+    const providers = await registry(files)
+    providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', thinkingOff: true }, { id: 'm2', displayName: 'N', thinkingOff: false }] })
+    expect((await registry(files)).get('gw')!.models).toEqual([{ id: 'm1', displayName: 'M', thinkingOff: true }, { id: 'm2', displayName: 'N' }])
+    const bad = { id: 'm1', displayName: 'M', thinkingOff: 'yes' } as unknown as ModelCatalogEntry
+    expect(() => providers.save({ ...config, models: [bad] })).toThrow(tr('error.thinkingOff'))
+    expect(providers.get('gw')!.models[0]).toEqual({ id: 'm1', displayName: 'M', thinkingOff: true })
   })
 
   // 03_qa 1차 재확인 · 리더 결정: 주소를 바꿔 저장하려면 키를 다시 넣어야 한다 — 안 그러면 save → fetch 로 저장 키가 새 주소로 간다
