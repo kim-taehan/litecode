@@ -1192,6 +1192,12 @@
   background: var(--border);
 }
 
+/* ⋯ 메뉴(.settings-menu, absolute)가 카드 밖으로 나와야 한다 — .feature-row 의 overflow: hidden 이 자르던 것(이슈 #515).
+   모델 카드(.provider-card)처럼 overflow 를 두지 않는다. 카드 안에 모서리 밖으로 칠할 바탕이 없어 둥근 모서리는 그대로다 */
+.extension-row {
+  overflow: visible;
+}
+
 .extension-row__body {
   cursor: default;
 }

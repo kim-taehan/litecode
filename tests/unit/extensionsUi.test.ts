@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
@@ -205,5 +206,25 @@ describe('FeaturesPage 에 끼운 것', () => {
     const out = html(createElement(FeaturesPage, { initialQuery: 'zzzz-없는-말' }))
     expect(out).toContain(ko('settings.features.noMatch'))
     expect(out).not.toContain('data-extension=')
+  })
+})
+
+describe('⋯ 메뉴가 카드에 잘리지 않는다 (이슈 #515)', () => {
+  const css = readFileSync(new URL('../../renderer/settings.css', import.meta.url), 'utf8')
+  const rule = (selector: string): string => {
+    const at = css.indexOf(`\n${selector} {`)
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
+  }
+
+  it('확장 카드는 overflow 를 풀어 메뉴가 카드 밖으로 나온다 — 모델 카드(.provider-card)처럼', () => {
+    expect(rule('.feature-row')).toMatch(/overflow: hidden/) // 기능 카드는 그대로
+    expect(rule('.extension-row')).toMatch(/overflow: visible/)
+  })
+
+  it('메뉴는 ⋯ 버튼 바로 아래에 붙는다 — fixed 좌표가 아니라 버튼 틀 기준 absolute (#513)', () => {
+    expect(rule('.settings-select')).toMatch(/position: relative/)
+    expect(rule('.settings-menu')).toMatch(/position: absolute/)
+    expect(rule('.settings-menu')).toMatch(/top: calc\(100% \+ 4px\)/)
+    expect(html(createElement(ExtensionCard, { extension: ON }))).toMatch(/<div class="settings-select"><button[^>]*class="extension-row__more"/)
   })
 })
