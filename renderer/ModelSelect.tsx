@@ -95,27 +95,35 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
             .map((provider) => (
               <div key={provider.id} role="group" aria-label={provider.displayName}>
                 <div className="model-menu__label">{provider.displayName}</div>
-                {provider.models.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    role="menuitemradio"
-                    className="model-menu__item"
-                    aria-checked={provider.id === value?.providerId && model.id === value.modelId}
-                    title={model.id}
-                    onClick={() => {
-                      const changed = provider.id !== value?.providerId || model.id !== value.modelId
-                      onChange({ providerId: provider.id, modelId: model.id })
-                      close()
-                      if (!changed) return
-                      setToast(t('model.changed', { name: model.displayName }))
-                      clearTimeout(toastTimer.current)
-                      toastTimer.current = setTimeout(() => setToast(undefined), 2_000)
-                    }}
-                  >
-                    {model.displayName}
-                  </button>
-                ))}
+                {provider.models.map((model) => {
+                  // 라벨(findModel)과 같은 항목에 체크 — findModel 은 thinkingOff 없이 id 로 첫 매칭하므로,
+                  // thinkingOff 로만 비교하면 라벨과 체크가 어긋난다 (모델이 사고 켬·끔 둘로 나뉘어 있을 때)
+                  const selected = current?.provider.id === provider.id && current?.model === model
+                  return (
+                    <button
+                      key={`${model.id}:${model.thinkingOff ? 1 : 0}`}
+                      type="button"
+                      role="menuitemradio"
+                      className="model-menu__item"
+                      aria-checked={selected}
+                      title={model.thinkingOff ? t('models.thinkingOffTitle') : model.id}
+                      onClick={() => {
+                        const changed = provider.id !== value?.providerId || model.id !== value.modelId || (model.thinkingOff ?? false) !== (value?.thinkingOff ?? false)
+                        // 사고 켜진 모델은 thinkingOff: false 를 명시 — 안 그러면 저장값에 thinkingOff 가 없어
+                        // findModel 이 thinkingOff:undefined 로 id 첫 매칭(=사고 끄기)을 고른다 (이슈: thinking 선택이 사고 끄기로 되돌림)
+                        onChange({ providerId: provider.id, modelId: model.id, thinkingOff: model.thinkingOff === true })
+                        close()
+                        if (!changed) return
+                        setToast(t('model.changed', { name: model.displayName }))
+                        clearTimeout(toastTimer.current)
+                        toastTimer.current = setTimeout(() => setToast(undefined), 2_000)
+                      }}
+                    >
+                      {model.displayName}
+                      {model.thinkingOff && <span className="model-menu__item-hint">{t('models.thinkingOffLabel')}</span>}
+                    </button>
+                  )
+                })}
               </div>
             ))}
         </div>

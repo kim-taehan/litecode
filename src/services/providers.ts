@@ -1,5 +1,6 @@
 import { Context, Service } from 'cordis'
 import { providerIdFor } from '../../shared/providerId.ts'
+import { thinkingOffTwinId } from '../../shared/thinkingOffTwin.ts'
 import { tr } from '../i18n.ts'
 import { readJsonFileSync, unreadableFileError, writeJsonFileSync } from './jsonFile.ts'
 import { describeHttpError, errorDetail } from '../../shared/httpError.ts'
@@ -24,7 +25,17 @@ export interface ModelCatalogEntry {
   /** 이미지 입력(선택, 이슈 #44) — 켠 모델만 엔진이 opencode.json 모델 정의에 modalities.input 의 image 를 싣는다. 그게 없으면 opencode 가
    *  붙인 이미지를 "ERROR: Cannot read …(this model does not support image input)" 글로 바꿔 보낸다 (01y). 기본 꺼짐 */
   imageInput?: boolean
+  /** 사고 끄기(선택, 이슈 #477) — 켠 모델의 chat/completions 본문에 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다
+   *  (사내망 실측: vLLM 게이트웨이의 Qwen 이 reasoning 을 끈다). 요청마다 저장된 값을 보므로 엔진 재시작 없이 다음 요청부터. 기본 없음.
+   *  같은 게이트웨이 모델을 사고 켬·끔 둘로 두려면 id 를 달리하고 upstreamId 로 같은 이름을 보낸다 (이슈 #491 — 설정 화면이 `<id>-off` 항목을 만든다) */
+  thinkingOff?: boolean
+  /** 실제 모델 이름(선택, 이슈 #485·#491) — 키 프록시가 게이트웨이에 보낼 때 본문 model 을 id 대신 이 이름으로 바꾼다. 사고 끄기와 무관한
+   *  일반 별칭이다. id 는 provider 안에서 유일하지만 이 값은 겹쳐도 된다. 비우면 id 그대로. opencode.json 에는 id 만 간다 */
+  upstreamId?: string
 }
+
+/** 실제 모델 이름 상한 — 게이트웨이 모델 이름으로 충분히 길다 */
+const UPSTREAM_ID_MAX = 200
 
 export interface ProviderConfig {
   id: string
@@ -110,7 +121,11 @@ export class ProviderRegistry extends Service {
       }
     }
     const stored = opts.file ? (read(opts.file, 'array') as ProviderConfig[] | undefined) : undefined
-    for (const config of stored?.filter((config) => typeof config?.id === 'string') ?? opts.defaults ?? []) this.entries.set(config.id, config)
+    for (const config of stored?.filter((config) => typeof config?.id === 'string') ?? opts.defaults ?? []) {
+      // 구버전(같은 id 의 사고 켬·끔 두 항목) 이주 — 다음 저장 때 파일에 쓰인다. 모양이 이상한 목록은 건드리지 않는다
+      const models = Array.isArray(config.models) && config.models.every((model) => typeof model?.id === 'string') ? splitThinkingOffTwins(config.models) : config.models
+      this.entries.set(config.id, models === config.models ? config : { ...config, models })
+    }
     this.keys = (opts.keysFile && (read(opts.keysFile, 'object') as Record<string, string> | undefined)) || {}
   }
 
@@ -144,13 +159,26 @@ export class ProviderRegistry extends Service {
     const baseURL = input.baseURL.trim()
     if (!displayName) throw new Error(tr('error.displayNameRequired'))
     if (!isHttpUrl(baseURL)) throw new Error(tr('error.baseUrlInvalid'))
-    const models = input.models.map((model) => ({
-      id: model.id.trim(),
-      displayName: model.displayName.trim() || model.id.trim(),
-      ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
-      ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
-      ...(model.imageInput === true && { imageInput: true }),
-    }))
+    // 실제 모델 이름 — 헤더가 아니라 JSON 본문에 실리지만 줄바꿈·제어 문자는 붙여넣기 실수다
+    const badUpstream = (value: unknown) => value !== undefined && (typeof value !== 'string' || value.trim().length > UPSTREAM_ID_MAX || /\p{Cc}/u.test(value.trim()))
+    if (input.models.some((model) => badUpstream(model.upstreamId))) throw new Error(tr('error.upstreamId'))
+    const models = splitThinkingOffTwins(
+      input.models.map((model) => {
+        const id = model.id.trim()
+        // id 와 같으면 바꿀 것이 없다 — 남기지 않는다
+        const upstreamId = model.upstreamId?.trim()
+        return {
+          id,
+          displayName: model.displayName.trim() || id,
+          ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
+          ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
+          ...(model.imageInput === true && { imageInput: true }),
+          ...(model.thinkingOff === true && { thinkingOff: true }),
+          ...(upstreamId && upstreamId !== id && { upstreamId }),
+        }
+      }),
+    )
+    if (input.models.some((model) => model.thinkingOff !== undefined && typeof model.thinkingOff !== 'boolean')) throw new Error(tr('error.thinkingOff'))
     if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
       throw new Error(tr('error.contextLength'))
     }
@@ -258,5 +286,21 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false
   }
+}
+
+/** 구버전 이주 (이슈 #491) — 80b58cd 는 같은 id 의 사고 켬·끔 두 항목을 허용했지만 프록시는 body.model(id) 만 보므로 둘을 못 가린다.
+ *  같은 id 가 둘 이상이고 그중 사고 끔 항목이 있으면 그 항목만 `<id>-off`(유일하게) + upstreamId=원래 id 로 분리한다(이미 별칭이 있으면 그대로).
+ *  그 밖의 중복은 그대로 둔다 — 읽을 때는 던지지 않고(CLAUDE.md 함정 4) 저장 검증이 거절한다. 바꿀 것이 없으면 받은 배열 그대로 */
+function splitThinkingOffTwins(models: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  const count = new Map<string, number>()
+  for (const model of models) count.set(model.id, (count.get(model.id) ?? 0) + 1)
+  if (!models.some((model) => model.thinkingOff === true && count.get(model.id)! > 1)) return models
+  const taken = new Set(models.map((model) => model.id))
+  return models.map((model) => {
+    if (model.thinkingOff !== true || count.get(model.id)! < 2) return model
+    const id = thinkingOffTwinId(model.id, (candidate) => taken.has(candidate))
+    taken.add(id)
+    return { ...model, id, upstreamId: model.upstreamId ?? model.id }
+  })
 }
 

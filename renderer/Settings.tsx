@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../shared/ipc.ts'
 import { providerIdFor } from '../shared/providerId.ts'
+import { toggleThinkingOff } from '../shared/thinkingOffTwin.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
 import { MobilePage } from './MobileSettings.tsx'
@@ -287,6 +288,20 @@ export function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalP
   )
 }
 
+/** 모델 카드 아랫줄의 알약 토글 — 켜면 어두운 채움 + 체크, 끄면 테두리만 (이슈 #477 시안 A) */
+function ModelToggle({ on, label, ariaLabel, title, disabled, onToggle }: { on: boolean; label: string; ariaLabel: string; title: string; disabled: boolean; onToggle(on: boolean): void }) {
+  return (
+    <button type="button" className="model-card__toggle" aria-pressed={on} aria-label={ariaLabel} title={title} disabled={disabled} onClick={() => onToggle(!on)}>
+      {on && (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M5 12l5 5L20 7" />
+        </svg>
+      )}
+      {label}
+    </button>
+  )
+}
+
 interface ProviderEditorProps {
   /** 없으면 새 provider */
   provider?: ProviderSummary
@@ -375,73 +390,92 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
       </label>
 
       <div className="settings-field__label">{t('models.models')}</div>
+      {/* 모델마다 카드 하나 — 윗줄 id·표시 이름·삭제, 아랫줄 컨텍스트 길이·최대 출력·알약 토글 (이슈 #477 시안 A "카드형 두 줄":
+          체크 둘이 한 줄에 늘어 id·이름 칸이 잘려 보였다). 아랫줄은 좁으면 줄바꿈한다 */}
       {models.map((model, index) => (
-        <div key={index} className="model-row">
-          <input
-            className="settings-input"
-            aria-label={t('models.modelId', { n: index + 1 })}
-            placeholder={t('models.modelIdPlaceholder')}
-            value={model.id}
-            disabled={busy}
-            onChange={(event) => setModel(index, { id: event.target.value })}
-          />
-          <input
-            className="settings-input"
-            aria-label={t('models.modelName', { n: index + 1 })}
-            placeholder={t('models.modelNamePlaceholder')}
-            value={model.displayName}
-            disabled={busy}
-            onChange={(event) => setModel(index, { displayName: event.target.value })}
-          />
-          {/* opencode 는 custom 모델의 한도를 모른다 — 적으면 엔진에 넘기고 입력창 통계 줄의 컨텍스트 % 가 보인다 (비우면 "—") */}
-          <input
-            className="settings-input"
-            aria-label={t('models.contextLength', { n: index + 1 })}
-            placeholder={t('models.contextLengthPlaceholder')}
-            title={t('models.contextLengthTitle')}
-            type="number"
-            min={1}
-            step={1}
-            value={model.contextLength ?? ''}
-            disabled={busy}
-            onChange={(event) => setModel(index, { contextLength: event.target.value === '' ? undefined : Number(event.target.value) })}
-          />
-          {/* 최대 출력 — 요청 max_tokens 이자 요약 문턱(컨텍스트 − 출력)의 몫. 비우면 엔진이 정하는 값을 흐리게 보인다 (이슈 #27) */}
-          <input
-            className="settings-input"
-            aria-label={t('models.maxOutput', { n: index + 1 })}
-            placeholder={model.contextLength ? t('models.maxOutputAuto', { n: defaultOutputLimit(model.contextLength) }) : t('models.maxOutputPlaceholder')}
-            title={t('models.maxOutputTitle')}
-            type="number"
-            min={1}
-            step={1}
-            value={model.maxOutput ?? ''}
-            disabled={busy}
-            onChange={(event) => setModel(index, { maxOutput: event.target.value === '' ? undefined : Number(event.target.value) })}
-          />
-          {/* 이미지 입력 — 켠 모델만 엔진이 이미지를 받는 모델로 알린다 (이슈 #44, 01y: 이 표시 없이는 붙인 이미지가 오류 글로 바뀐다). 기본 꺼짐 */}
-          <label className="model-row__check" title={t('models.imageInputTitle')}>
+        <div key={index} className="model-card">
+          <div className="model-card__row">
             <input
-              type="checkbox"
-              aria-label={t('models.imageInput', { n: index + 1 })}
-              checked={model.imageInput === true}
+              className="settings-input model-card__id"
+              aria-label={t('models.modelId', { n: index + 1 })}
+              placeholder={t('models.modelIdPlaceholder')}
+              value={model.id}
               disabled={busy}
-              onChange={(event) => setModel(index, { imageInput: event.target.checked || undefined })}
+              onChange={(event) => setModel(index, { id: event.target.value })}
             />
-            {t('models.imageInputLabel')}
-          </label>
-          <button
-            type="button"
-            className="settings-icon-button"
-            aria-label={t('models.removeModel', { n: index + 1 })}
-            title={t('models.removeModelTitle')}
-            disabled={busy}
-            onClick={() => setModels((current) => current.filter((_, at) => at !== index))}
-          >
-            ×
-          </button>
+            <input
+              className="settings-input"
+              aria-label={t('models.modelName', { n: index + 1 })}
+              placeholder={t('models.modelNamePlaceholder')}
+              value={model.displayName}
+              disabled={busy}
+              onChange={(event) => setModel(index, { displayName: event.target.value })}
+            />
+            <button
+              type="button"
+              className="settings-icon-button"
+              aria-label={t('models.removeModel', { n: index + 1 })}
+              title={t('models.removeModelTitle')}
+              disabled={busy}
+              onClick={() => setModels((current) => current.filter((_, at) => at !== index))}
+            >
+              ×
+            </button>
+          </div>
+          <div className="model-card__row">
+            {/* opencode 는 custom 모델의 한도를 모른다 — 적으면 엔진에 넘기고 입력창 통계 줄의 컨텍스트 % 가 보인다 (비우면 "—") */}
+            <input
+              className="settings-input model-card__number"
+              aria-label={t('models.contextLength', { n: index + 1 })}
+              placeholder={t('models.contextLengthPlaceholder')}
+              title={t('models.contextLengthTitle')}
+              type="number"
+              min={1}
+              step={1}
+              value={model.contextLength ?? ''}
+              disabled={busy}
+              onChange={(event) => setModel(index, { contextLength: event.target.value === '' ? undefined : Number(event.target.value) })}
+            />
+            {/* 최대 출력 — 요청 max_tokens 이자 요약 문턱(컨텍스트 − 출력)의 몫. 비우면 엔진이 정하는 값을 흐리게 보인다 (이슈 #27) */}
+            <input
+              className="settings-input model-card__number"
+              aria-label={t('models.maxOutput', { n: index + 1 })}
+              placeholder={model.contextLength ? t('models.maxOutputAuto', { n: defaultOutputLimit(model.contextLength) }) : t('models.maxOutputPlaceholder')}
+              title={t('models.maxOutputTitle')}
+              type="number"
+              min={1}
+              step={1}
+              value={model.maxOutput ?? ''}
+              disabled={busy}
+              onChange={(event) => setModel(index, { maxOutput: event.target.value === '' ? undefined : Number(event.target.value) })}
+            />
+            <div className="model-card__toggles">
+              {/* 이미지 입력 — 켠 모델만 엔진이 이미지를 받는 모델로 알린다 (이슈 #44, 01y: 이 표시 없이는 붙인 이미지가 오류 글로 바뀐다). 기본 꺼짐 */}
+              <ModelToggle
+                on={model.imageInput === true}
+                label={t('models.imageInputLabel')}
+                ariaLabel={t('models.imageInput', { n: index + 1 })}
+                title={t('models.imageInputTitle')}
+                disabled={busy}
+                onToggle={(on) => setModel(index, { imageInput: on || undefined })}
+              />
+              {/* 사고 끄기 — 켠 모델의 요청에 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다 (이슈 #477). 기본 꺼짐 */}
+              <ModelToggle
+                on={model.thinkingOff === true}
+                label={t('models.thinkingOffLabel')}
+                ariaLabel={t('models.thinkingOff', { n: index + 1 })}
+                title={t('models.thinkingOffTitle')}
+                disabled={busy}
+                // 켜면 이 항목은 그대로 두고 바로 뒤에 "(사고 끔)" 항목을 만든다 — id 를 바꾸면 그 id 를 가리키던 대화·마지막 선택이 끊긴다 (이슈 #491)
+                onToggle={(on) => setModels((current) => toggleThinkingOff(current, index, on, t('models.thinkingOffSuffix')))}
+              />
+            </div>
+          </div>
         </div>
       ))}
+      <p className="context-length-hint">
+        <strong className="context-length-hint__term">{t('models.thinkingOffLabel')}</strong> — {t('models.thinkingOffHint')}
+      </p>
       <ContextLengthNotes models={models} />
       <div className="provider-editor__model-actions">
         <button type="button" className="settings-button settings-button--compact" disabled={busy} onClick={() => setModels((current) => [...current, { id: '', displayName: '' }])}>

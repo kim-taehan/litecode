@@ -46,6 +46,11 @@
 
 .context-length-hint--warn { color: var(--warn); }
 
+.context-length-hint__term {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .compaction-running__text { animation: none; }
 }

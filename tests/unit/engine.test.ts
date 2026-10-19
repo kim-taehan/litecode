@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isGated, isOurServer, MODE_AGENT, plantInstallMarkers, SUBAGENT_ASK, toolGate, withheldEngineEnv } from '../../src/services/engine.ts'
+import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isGated, isOurServer, MODE_AGENT, plantInstallMarkers, proxyTarget, SUBAGENT_ASK, toolGate, withheldEngineEnv } from '../../src/services/engine.ts'
 import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
@@ -593,6 +593,82 @@ describe('engineConfig — 이미지 입력 (이슈 #44)', () => {
       vision: { name: 'Vision', modalities: { input: ['text', 'image'], output: ['text'] } },
       off: { name: 'Off', limit: { context: 32_768, output: 8_192 } },
     })
+  })
+})
+
+describe('engineConfig — id 중복', () => {
+  it('같은 id 의 항목이 여러 개이면 첫 항목으로 하나의 모델 정의만 싣는다', () => {
+    const config = engineConfig(
+      [
+        {
+          ...provider('a'),
+          models: [
+            { id: 'qwen', displayName: 'Q', thinkingOff: false, contextLength: 32_768 },
+            { id: 'qwen', displayName: 'QT', thinkingOff: true },
+          ],
+        },
+      ],
+      { token: 't', baseURLFor: (id: string) => `http://127.0.0.1:9/${id}` },
+    )
+    expect((config.provider as Record<string, { models: unknown }>)['a']!.models).toEqual({
+      qwen: { name: 'Q', limit: { context: 32_768, output: 8_192 } },
+    })
+  })
+})
+
+// 이슈 #477: 사고 끄기는 opencode.json 이 아니라 키 프록시 본문에서 — 켠 모델만, 켠 모델이 없으면 본문을 모으지 않는다
+describe('proxyTarget — 사고 끄기 (이슈 #477)', () => {
+  it('켠 모델에만 chat_template_kwargs.enable_thinking=false 를 돌려주고, 켠 모델이 없으면 addToBody 가 없다', () => {
+    const target = proxyTarget({ ...provider('a'), models: [{ id: 'qwen', displayName: 'Q', thinkingOff: true }, { id: 'llama', displayName: 'L' }] }, 'sk')
+    expect(target).toMatchObject({ baseURL: provider('a').baseURL, apiKey: 'sk' })
+    expect(target.addToBody!('qwen')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+    expect(target.addToBody!('llama')).toBeUndefined()
+    expect(proxyTarget({ ...provider('a'), models: [{ id: 'llama', displayName: 'L', thinkingOff: false }] }, undefined)).not.toHaveProperty('addToBody')
+  })
+})
+
+// 같은 id 는 사고 켬·끔 두 항목으로 중복될 수 있다 — 프록시 목표는 id 한 개로 사고 끄기 여부를 모은다
+describe('proxyTarget — id 중복', () => {
+  it('같은 id 에 사고 끄기 한 항목이라도 그 id 요청에는 사고 끄기를 싣는다', () => {
+    const models = [
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen', displayName: 'QT', thinkingOff: true },
+      { id: 'llama', displayName: 'L' },
+    ]
+    const target = proxyTarget({ ...provider('a'), models }, 'sk')
+    expect(target.addToBody!('qwen')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+    expect(target.addToBody!('llama')).toBeUndefined()
+  })
+})
+
+// 이슈 #491: 사고 끔 항목은 유일한 id(예: qwen-off) + upstreamId(게이트웨이의 실제 이름). upstreamId 는 사고 끄기와 무관한 일반 별칭이다
+describe('proxyTarget — 별칭 (upstreamId)', () => {
+  it('사고 끔 + 별칭: 그 id 만 실제 이름으로 바꾸고 사고 끄기를 싣는다, 사고 켬 id 는 그대로', () => {
+    const models = [
+      { id: 'qwen', displayName: 'Q on' },
+      { id: 'qwen-off', displayName: 'Q off', thinkingOff: true, upstreamId: 'qwen' },
+    ]
+    const target = proxyTarget({ ...provider('a'), models }, 'sk')
+    expect(target.renameModel!('qwen-off')).toBe('qwen')
+    expect(target.renameModel!('qwen')).toBe('qwen')
+    expect(target.addToBody!('qwen-off')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+    expect(target.addToBody!('qwen')).toBeUndefined()
+  })
+
+  it('별칭만 있으면(사고 끄기 없음) renameModel 만, 둘 다 없으면 둘 다 없다', () => {
+    const only = proxyTarget({ ...provider('a'), models: [{ id: 'fast', displayName: 'F', upstreamId: 'qwen3.8-27b' }, { id: 'llama', displayName: 'L' }] }, undefined)
+    expect(only).not.toHaveProperty('addToBody')
+    expect(only.renameModel!('fast')).toBe('qwen3.8-27b')
+    expect(only.renameModel!('llama')).toBe('llama')
+    const none = proxyTarget({ ...provider('a'), models: [{ id: 'llama', displayName: 'L' }] }, undefined)
+    expect(none).not.toHaveProperty('addToBody')
+    expect(none).not.toHaveProperty('renameModel')
+  })
+
+  it('별칭 없는 사고 끔 항목은 renameModel 없이 addToBody 만 (`-off` 접미사로 추측하지 않는다)', () => {
+    const target = proxyTarget({ ...provider('a'), models: [{ id: 'qwen-off', displayName: 'Q off', thinkingOff: true }] }, 'sk')
+    expect(target).not.toHaveProperty('renameModel')
+    expect(target.addToBody!('qwen-off')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
   })
 })
 

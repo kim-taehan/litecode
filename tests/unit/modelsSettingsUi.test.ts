@@ -65,6 +65,90 @@ describe('ProviderEditor — 편집 안 버튼', () => {
   })
 })
 
+// 이슈 #477: 모델마다 카드 하나 — 윗줄 id·표시 이름·삭제, 아랫줄 컨텍스트 길이·최대 출력·알약 토글(이미지 입력·사고 끄기).
+// 체크 둘이 한 줄에 늘어 id·이름 칸이 잘려 보였다 (시안 A "카드형 두 줄", _workspace/mock-model-row/OptionA.dc.html).
+// 토글은 <button aria-pressed> — 저장된 값이 눌림 상태로 보이고, 두 토글은 서로 독립이다
+describe('ProviderEditor — 모델 카드 두 줄', () => {
+  const ko = (key: MessageKey, n: number) => translate('ko', key, { n })
+  const render = (models: ProviderSummary['models']) =>
+    renderToStaticMarkup(createElement(ProviderEditor, { provider: { ...provider, models }, taken: [provider], onDone: () => {} }))
+  /** aria-label 이 `label` 인 요소의 여는 태그 */
+  const tag = (html: string, label: string) => html.match(new RegExp(`<[a-z]+ [^>]*aria-label="${label}"[^>]*>`))?.[0]
+  /** n 번째 카드의 줄들 (줄마다 HTML 조각) */
+  const rows = (html: string, n: number) => {
+    const card = html.split('<div class="model-card">')[n]!
+    return card.split('<div class="model-card__row">').slice(1)
+  }
+
+  it('모델마다 카드 하나에 줄 둘', () => {
+    const html = render([{ id: 'm1', displayName: 'M1' }, { id: 'm2', displayName: 'M2' }])
+    expect(html.split('<div class="model-card">').length - 1).toBe(2)
+    expect(rows(html, 1)).toHaveLength(2)
+  })
+
+  it('윗줄은 id → 표시 이름 → 삭제, 아랫줄은 컨텍스트 길이 → 최대 출력 → 이미지 입력 → 사고 끄기', () => {
+    const [top, bottom] = rows(render([{ id: 'm1', displayName: 'M1' }]), 1)
+    const order = (part: string, keys: MessageKey[]) => keys.map((key) => part.indexOf(`aria-label="${ko(key, 1)}"`))
+    const topAt = order(top!, ['models.modelId', 'models.modelName', 'models.removeModel'])
+    const bottomAt = order(bottom!, ['models.contextLength', 'models.maxOutput', 'models.imageInput', 'models.thinkingOff'])
+    for (const at of [...topAt, ...bottomAt]) expect(at).toBeGreaterThan(-1)
+    expect(topAt).toEqual([...topAt].sort((a, b) => a - b))
+    expect(bottomAt).toEqual([...bottomAt].sort((a, b) => a - b))
+  })
+
+  it('이미지 입력·사고 끄기는 알약 버튼(aria-pressed) — 켠 모델만 눌려 있고, 둘은 독립', () => {
+    const html = render([
+      { id: 'm1', displayName: 'M1', thinkingOff: true },
+      { id: 'm2', displayName: 'M2', imageInput: true },
+      { id: 'm3', displayName: 'M3' },
+    ])
+    const pressed = (key: MessageKey, n: number) => {
+      const found = tag(html, ko(key, n))
+      expect(found).toMatch(/^<button /)
+      expect(found).toContain('class="model-card__toggle"')
+      return found!.match(/aria-pressed="(true|false)"/)?.[1]
+    }
+    expect([pressed('models.imageInput', 1), pressed('models.thinkingOff', 1)]).toEqual(['false', 'true'])
+    expect([pressed('models.imageInput', 2), pressed('models.thinkingOff', 2)]).toEqual(['true', 'false'])
+    expect([pressed('models.imageInput', 3), pressed('models.thinkingOff', 3)]).toEqual(['false', 'false'])
+  })
+
+  // 이슈 #491: 알약은 thinkingOff 만 따른다 — 별칭(upstreamId)이 있거나 id 가 `-off` 로 끝나도 thinkingOff 가 없으면 꺼져 보인다
+  it('사고 끄기 알약은 upstreamId·id 모양과 무관하게 thinkingOff 를 따른다', () => {
+    const html = render([
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen-off', displayName: 'Q (사고 끔)', upstreamId: 'qwen', thinkingOff: true },
+      { id: 'fast', displayName: 'F', upstreamId: 'qwen' },
+      { id: 'x-off', displayName: 'X' },
+    ])
+    const pressed = (n: number) => tag(html, ko('models.thinkingOff', n))!.match(/aria-pressed="(true|false)"/)?.[1]
+    expect([1, 2, 3, 4].map(pressed)).toEqual(['false', 'true', 'false', 'false'])
+  })
+
+  it('알약 글자는 기존 라벨 키, 체크박스는 더 없다', () => {
+    const html = render([{ id: 'm1', displayName: 'M1' }])
+    expect(html).not.toContain('type="checkbox"')
+    expect(html).toContain(`>${translate('ko', 'models.imageInputLabel')}</button>`)
+    expect(html).toContain(`>${translate('ko', 'models.thinkingOffLabel')}</button>`)
+  })
+
+  it('켠 알약에만 체크 아이콘', () => {
+    const [bottom] = rows(render([{ id: 'm1', displayName: 'M1', imageInput: true }]), 1).slice(1)
+    const buttons = [...bottom!.matchAll(/<button [^>]*class="model-card__toggle"[^>]*>.*?<\/button>/g)].map((match) => match[0])
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0]).toContain('<svg')
+    expect(buttons[1]).not.toContain('<svg')
+  })
+
+  it('안내문에 사고 끄기 한 줄이 컨텍스트 길이·최대 출력 안내 앞에 있다', () => {
+    const html = render([{ id: 'm1', displayName: 'M1' }])
+    const hint = html.indexOf(translate('ko', 'models.thinkingOffHint'))
+    expect(hint).toBeGreaterThan(-1)
+    expect(hint).toBeLessThan(html.indexOf(translate('ko', 'models.contextLengthHint')))
+    expect(html).toContain(translate('ko', 'models.maxOutputHint'))
+  })
+})
+
 // 이슈 #231: 키체인이 키를 안 풀어 주면 채팅만 실패하고 설정에는 아무 표시가 없었다 — 모델 페이지 위쪽에 노란 안내 한 줄
 describe('ModelsPage — 키 저장소 안내', () => {
   const escaped = (text: string) => text.replace(/'/g, '&#x27;').replace(/"/g, '&quot;')

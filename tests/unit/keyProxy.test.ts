@@ -75,3 +75,208 @@ describe('startKeyProxy', () => {
     }
   })
 })
+
+// 모델별 "사고 끄기" (이슈 #477) — 사내망 실측: vLLM 게이트웨이에 chat_template_kwargs:{enable_thinking:false} 를 실으면 reasoning 이 꺼진다.
+// 프록시가 켠 모델의 chat/completions 본문에만 병합한다. 깨진 본문은 그대로 넘기고(요청을 실패시키지 않는다), 응답은 스트림 그대로
+describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', () => {
+  type Seen = { body: string; contentLength?: string }
+  const thinkingOff = (model: string) => (model === 'qwen' ? { chat_template_kwargs: { enable_thinking: false } } : undefined)
+
+  async function echoUpstream(seen: Seen[]): Promise<string> {
+    upstream = http.createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', (chunk: Buffer) => chunks.push(chunk))
+      req.on('end', () => {
+        seen.push({ body: Buffer.concat(chunks).toString('utf8'), contentLength: req.headers['content-length'] })
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}')
+      })
+    })
+    await new Promise<void>((resolve) => upstream!.listen(0, '127.0.0.1', resolve))
+    return `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`
+  }
+
+  async function send(path: string, body: string, contentType = 'application/json'): Promise<Response> {
+    return fetch(`${proxy!.baseURLFor('gw')}${path}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${proxy!.token}`, 'content-type': contentType },
+      body,
+      signal: AbortSignal.timeout(5_000),
+    })
+  }
+
+  it('켠 모델의 chat/completions 본문에만 enable_thinking=false 를 싣고 content-length 를 다시 센다', async () => {
+    const seen: Seen[] = []
+    const baseURL = await echoUpstream(seen)
+    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+
+    expect((await send('/chat/completions', JSON.stringify({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }] }))).status).toBe(200)
+    const sent = JSON.parse(seen[0]!.body)
+    expect(sent).toEqual({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }], chat_template_kwargs: { enable_thinking: false } })
+    expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
+  })
+
+  it('다른 모델·다른 경로에는 싣지 않는다 (본문 바이트 그대로)', async () => {
+    const seen: Seen[] = []
+    const baseURL = await echoUpstream(seen)
+    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    const other = JSON.stringify({ model: 'llama', messages: [] })
+    const elsewhere = JSON.stringify({ model: 'qwen', input: 'x' })
+
+    await send('/chat/completions', other)
+    await send('/embeddings', elsewhere)
+    expect(seen.map((entry) => entry.body)).toEqual([other, elsewhere])
+  })
+
+  it('이미 있는 chat_template_kwargs 의 다른 키는 남긴다', async () => {
+    const seen: Seen[] = []
+    const baseURL = await echoUpstream(seen)
+    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+
+    await send('/chat/completions', JSON.stringify({ model: 'qwen', chat_template_kwargs: { foo: 1, enable_thinking: true } }))
+    expect(JSON.parse(seen[0]!.body).chat_template_kwargs).toEqual({ foo: 1, enable_thinking: false })
+  })
+
+  it('깨진 JSON·JSON 아닌 본문은 손대지 않고 넘긴다 (content-length 도 맞다)', async () => {
+    const seen: Seen[] = []
+    const baseURL = await echoUpstream(seen)
+    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    const broken = '{"model":"qwen",'
+    const text = 'model=qwen'
+
+    expect((await send('/chat/completions', broken)).status).toBe(200)
+    expect((await send('/chat/completions', text, 'text/plain')).status).toBe(200)
+    expect(seen.map((entry) => entry.body)).toEqual([broken, text])
+    for (const entry of seen) expect(Number(entry.contentLength)).toBe(Buffer.byteLength(entry.body))
+  })
+
+  it('켠 모델이어도 응답 SSE 는 모으지 않고 흘린다 — 첫 조각이 끝나기 전에 도착한다', async () => {
+    let finish!: () => void
+    upstream = http.createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.write('data: first\n\n')
+        finish = () => res.end('data: [DONE]\n\n')
+      })
+    })
+    await new Promise<void>((resolve) => upstream!.listen(0, '127.0.0.1', resolve))
+    const baseURL = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`
+    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+
+    const res = await send('/chat/completions', JSON.stringify({ model: 'qwen', stream: true }))
+    const reader = res.body!.getReader()
+    const first = await reader.read()
+    expect(new TextDecoder().decode(first.value)).toBe('data: first\n\n')
+    finish()
+    let rest = ''
+    for (let part = await reader.read(); !part.done; part = await reader.read()) rest += new TextDecoder().decode(part.value)
+    expect(rest).toBe('data: [DONE]\n\n')
+  })
+
+  it('Expect: 100-continue 요청도 던지지 않고 값을 싣는다 (모으는 요청은 expect 를 넘기지 않는다 — 03_qa 경고)', async () => {
+    const seen: Seen[] = []
+    const baseURL = await echoUpstream(seen)
+    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    const body = JSON.stringify({ model: 'qwen', messages: [] })
+    const proxyURL = new URL(`${proxy.baseURLFor('gw')}/chat/completions`)
+
+    const status = await new Promise<number>((resolve, reject) => {
+      const request = http.request(
+        proxyURL,
+        { method: 'POST', headers: { authorization: `Bearer ${proxy!.token}`, 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), expect: '100-continue' }, timeout: 5_000 },
+        (res) => {
+          res.resume()
+          resolve(res.statusCode ?? 0)
+        },
+      )
+      request.on('error', reject)
+      request.on('timeout', () => request.destroy(new Error('timeout')))
+      request.on('continue', () => request.end(body))
+      request.flushHeaders()
+    })
+
+    expect(status).toBe(200)
+    expect(JSON.parse(seen[0]!.body).chat_template_kwargs).toEqual({ enable_thinking: false })
+    expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
+  })
+
+  // 같은 id 는 사고 켬·끔 두 항목으로 중복될 수 있다 — 프록시는 id 기준으로 사고 끄기만 적용한다
+  describe('id 중복', () => {
+    const addToBody = (model: string) => (model === 'qwen' ? { chat_template_kwargs: { enable_thinking: false } } : undefined)
+
+    it('같은 id 의 사고 끄기 값만 싣고 model id 는 그대로, content-length 를 다시 센다', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, addToBody }))
+
+      await send('/chat/completions', JSON.stringify({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }] }))
+      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }], chat_template_kwargs: { enable_thinking: false } })
+      expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
+    })
+
+    it('다른 model id·다른 경로·비 JSON·깨진 본문은 바이트 그대로', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, addToBody }))
+      const other = JSON.stringify({ model: 'llama', messages: [] })
+      const elsewhere = JSON.stringify({ model: 'qwen', input: 'x' })
+      const broken = '{"model":"qwen",'
+      const text = 'model=qwen'
+
+      await send('/chat/completions', other)
+      await send('/embeddings', elsewhere)
+      await send('/chat/completions', broken)
+      await send('/chat/completions', text, 'text/plain')
+      expect(seen.map((entry) => entry.body)).toEqual([other, elsewhere, broken, text])
+      for (const entry of seen) expect(Number(entry.contentLength)).toBe(Buffer.byteLength(entry.body))
+    })
+  })
+
+  // 사고 끔 항목은 유일한 id(예: qwen-off) — 프록시가 upstreamId(실제 이름)로 바꾸고 사고 끄기도 싣는다 (이슈 #491)
+  describe('별칭 변환 (upstreamId)', () => {
+    const rename = (model: string) => (model === 'qwen-off' ? 'qwen' : model)
+    const addToBody = (model: string) => (model === 'qwen-off' ? { chat_template_kwargs: { enable_thinking: false } } : undefined)
+
+    it('별칭만 있어도(addToBody 없음) 본문을 모아 model 을 바꾸고 content-length 를 다시 센다', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, renameModel: rename }))
+
+      await send('/chat/completions', JSON.stringify({ model: 'qwen-off', messages: [{ role: 'user', content: '안녕' }] }))
+      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }] })
+      expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
+    })
+
+    it('별칭만 있을 때 다른 경로·비 JSON·깨진 본문은 바이트 그대로', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, renameModel: rename }))
+      const elsewhere = JSON.stringify({ model: 'qwen-off', input: 'x' })
+      const broken = '{"model":"qwen-off",'
+      const text = 'model=qwen-off'
+
+      await send('/embeddings', elsewhere)
+      await send('/chat/completions', broken)
+      await send('/chat/completions', text, 'text/plain')
+      expect(seen.map((entry) => entry.body)).toEqual([elsewhere, broken, text])
+    })
+
+    it('가상 id 요청은 실제 id 로 변환되고 enable_thinking=false 도 함께 싣는다 (변환 전 id 로 사고 끄기 판정)', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, addToBody, renameModel: rename }))
+
+      await send('/chat/completions', JSON.stringify({ model: 'qwen-off', messages: [] }))
+      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [], chat_template_kwargs: { enable_thinking: false } })
+    })
+
+    it('실제 id 로 오는 사고 켜진 요청은 그대로 (변환도 추가도 없음)', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, addToBody, renameModel: rename }))
+      const on = JSON.stringify({ model: 'qwen', messages: [] })
+      await send('/chat/completions', on)
+      expect(seen[0]!.body).toBe(on)
+    })
+  })
+})

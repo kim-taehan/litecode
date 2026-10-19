@@ -575,18 +575,94 @@
   gap: 6px;
 }
 
-/* 모델별 "이미지 입력" 체크 (이슈 #44) — 컨텍스트 길이·최대 출력 옆 */
-.model-row__check {
+.model-row .settings-input:first-child {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* 설정 > 모델 — 모델마다 카드 하나, 두 줄 (이슈 #477 시안 A "카드형 두 줄"). 윗줄 id·표시 이름(반씩)·삭제,
+   아랫줄 컨텍스트 길이·최대 출력(고정폭)·오른쪽 알약 토글 — 좁으면 아랫줄이 줄바꿈해 칸이 잘리지 않는다 */
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 14px;
+}
+
+.model-card__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-card__row:first-child {
+  flex-wrap: nowrap;
+}
+
+.model-card__row:first-child .settings-input {
+  flex: 1;
+}
+
+.model-card__id {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+}
+
+.model-card__number {
+  flex: none;
+  width: 120px;
+}
+
+.model-card .settings-icon-button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.model-card__toggles {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 알약 토글 — 끄면 테두리만, 켜면 어두운 채움 + 체크 (켠 모양은 settings-button--primary 와 같은 색) */
+.model-card__toggle {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 999px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
   color: var(--text-secondary);
   white-space: nowrap;
 }
 
-.model-row .settings-input:first-child {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+.model-card__toggle:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.model-card__toggle[aria-pressed='true'] {
+  padding-left: 10px;
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--on-text);
+  font-weight: 600;
+}
+
+.model-card__toggle[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--text-strong-hover);
+}
+
+.model-card__toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .settings-icon-button {
@@ -1042,4 +1118,246 @@
   font-size: 13px;
   line-height: 20px;
   color: var(--text-caption);
+}
+
+/* 설치한 확장 (이슈 #489, 시안 _workspace/mock-extension) — 카드는 기능 줄(.feature-row) 모양 그대로, 확장 표시는 보라(타일·뱃지).
+   보라는 공용 토큰에 없어 여기에 둔다 (기록 레인 보라 git.css --log-lane-3 과 같은 값) */
+:root {
+  --extension: #8a5ce0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --extension: #b08cf5;
+  }
+}
+
+.features-page__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.features-page__search .session-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.extensions-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.extensions-notice {
+  margin: 0;
+}
+
+.extensions-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.extensions-section__divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.extensions-section__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.extension-row__body {
+  cursor: default;
+}
+
+.extension-row .extension-row__tile,
+.extension-confirm__card .extension-row__tile {
+  background: color-mix(in srgb, var(--extension) 14%, transparent);
+  color: var(--extension);
+}
+
+.extension-row__badge {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--extension) 12%, transparent);
+  color: var(--extension);
+}
+
+.extension-row__version,
+.extension-row__mounting {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.extension-row__mounting {
+  color: var(--accent);
+}
+
+.extension-row__reason {
+  color: var(--danger);
+}
+
+.extension-row[data-kind='failed'] {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.extension-row[data-kind='pending-install'] {
+  border-style: dashed;
+  background: var(--fill-hover);
+}
+
+.extension-row[data-kind='pending-install'] .extension-row__tile {
+  opacity: 0.6;
+}
+
+.extension-row[data-kind='pending-remove'] .feature-row__toggle {
+  opacity: 0.5;
+}
+
+.extension-row__more {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-secondary);
+}
+
+.extension-row__more:hover {
+  background: var(--fill-hover);
+}
+
+.extension-row__danger {
+  color: var(--danger);
+}
+
+.extension-row__error {
+  padding: 0 16px 12px 64px;
+}
+
+/* 설치 확인·거절 — 전체 권한 확인 틀(.confirm-dialog)을 시안 폭 520 으로 */
+.extension-confirm {
+  width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.extension-confirm .confirm-dialog__title,
+.extension-confirm .confirm-dialog__description,
+.extension-confirm .settings-notice {
+  margin: 0;
+}
+
+.extension-confirm .confirm-dialog__actions {
+  margin-top: 4px;
+}
+
+.extension-confirm__card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 14px;
+}
+
+.extension-confirm__rows {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.extension-confirm__rows dt,
+.extension-confirm__rows dd {
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.extension-confirm__rows dt {
+  color: var(--text-tertiary);
+}
+
+.extension-confirm__rows dd {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.extension-confirm__rows dt:last-of-type,
+.extension-confirm__rows dd:last-of-type {
+  border-bottom: none;
+}
+
+.extension-confirm__met {
+  color: var(--ok);
+}
+
+.extension-reject__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.extension-reject__icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.extension-reject__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extension-reject__line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: 10px;
+  background: var(--danger-bg);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.extension-reject__note {
+  color: var(--text-secondary);
+}
+
+.extension-reject__note code,
+.extension-confirm__rows code,
+.extension-row__info code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
 }
