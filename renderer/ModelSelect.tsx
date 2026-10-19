@@ -108,8 +108,10 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
                       aria-checked={selected}
                       title={model.thinkingOff ? t('models.thinkingOffTitle') : model.id}
                       onClick={() => {
-                        const changed = provider.id !== value?.providerId || model.id !== value.modelId || model.thinkingOff === true && value?.thinkingOff !== true
-                        onChange({ providerId: provider.id, modelId: model.id, ...(model.thinkingOff ? { thinkingOff: true } : {}) })
+                        const changed = provider.id !== value?.providerId || model.id !== value.modelId || (model.thinkingOff ?? false) !== (value?.thinkingOff ?? false)
+                        // 사고 켜진 모델은 thinkingOff: false 를 명시 — 안 그러면 저장값에 thinkingOff 가 없어
+                        // findModel 이 thinkingOff:undefined 로 id 첫 매칭(=사고 끄기)을 고른다 (이슈: thinking 선택이 사고 끄기로 되돌림)
+                        onChange({ providerId: provider.id, modelId: model.id, thinkingOff: model.thinkingOff === true })
                         close()
                         if (!changed) return
                         setToast(t('model.changed', { name: model.displayName }))

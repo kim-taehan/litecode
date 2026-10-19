@@ -15,7 +15,13 @@ type ProviderLike = { id: string; displayName: string; models: ModelCatalogEntry
  *  thinkingOff 를 주면 그 값과 같은 항목만, 안 주면(이전 저장값) 기존처럼 id 로만 맞춘다. 설정에서 지워졌으면 undefined */
 export function findModel<P extends ProviderLike>(providers: P[], ref: ModelRef | undefined): { provider: P; model: ModelCatalogEntry } | undefined {
   const provider = providers.find((candidate) => candidate.id === ref?.providerId)
-  const model = provider?.models.find((candidate) => candidate.id === ref?.modelId && (ref === undefined || ref.thinkingOff === undefined || candidate.thinkingOff === ref.thinkingOff))
+  // thinkingOff 로 항목을 가린다 — 사고 끄기(true)는 정확히 true 항목, 사고 켬(false)은 true가 아닌 항목
+  // (사고 켜진 모델은 thinkingOff 키가 없어 undefined 이므로 false 와 같다고 봐야 사고 켬/끔이 안 뒤뀜)
+  const model = provider?.models.find((candidate) => {
+    if (candidate.id !== ref?.modelId) return false
+    if (ref === undefined || ref.thinkingOff === undefined) return true // 이전 저장값 — id 로 첫 매칭
+    return ref.thinkingOff ? candidate.thinkingOff === true : candidate.thinkingOff !== true
+  })
   return provider && model ? { provider, model } : undefined
 }
 

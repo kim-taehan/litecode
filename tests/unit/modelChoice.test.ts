@@ -56,4 +56,15 @@ describe('modelChoice', () => {
     // 지워진 사고 끄기 선택은 첫 모델로, 사고 켜진 선택은 그대로
     expect(initialModel(onlyOff, { providerId: 'gw', modelId: 'echo', thinkingOff: true })).toEqual({ providerId: 'gw', modelId: 'echo', thinkingOff: true })
   })
+
+  it('사고 끄기 모델이 id 첫 항목이어도 thinkingOff:false 로는 사고 켜진 항목을 고른다 (# thinking 선택이 사고 끄기로 되돌리는 버그)', () => {
+    // providers.json 의 실제 형태 — 사고 끄기(thinkingOff:true) 가 먼저, 사고 켜진 항목이 뒤에
+    const real = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'q', displayName: 'Q', thinkingOff: true }, { id: 'q2', displayName: 'Other' }, { id: 'q', displayName: 'thinking Q' }] }]
+    // 사고 켜진 모델(id=q, thinkingOff 없음) 을 명시적 thinkingOff:false 로 선택하면 사고 끄기[0]이 아니라 뒤에 있는 사고 켜진 항목
+    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: false })?.model.displayName).toBe('thinking Q')
+    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: false })?.model.thinkingOff).toBeUndefined()
+    // 사고 끄기(thinkingOff:true) 는 그대로 사고 끄기 항목
+    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: true })?.model.displayName).toBe('Q')
+    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: true })?.model.thinkingOff).toBe(true)
+  })
 })
