@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isGated, isOurServer, MODE_AGENT, plantInstallMarkers, SUBAGENT_ASK, toolGate, withheldEngineEnv } from '../../src/services/engine.ts'
+import { ENGINE_AGENTS, engineConfig, engineEnv, installMarkerDirs, isGated, isOurServer, MODE_AGENT, plantInstallMarkers, proxyTarget, SUBAGENT_ASK, toolGate, withheldEngineEnv } from '../../src/services/engine.ts'
 import { MODES } from '../../shared/modes.ts'
 import { bundledPaths, findOpencodeBinary } from '../../src/services/opencodeBinary.ts'
 import type { ProviderConfig } from '../../src/services/providers.ts'
@@ -593,6 +593,17 @@ describe('engineConfig — 이미지 입력 (이슈 #44)', () => {
       vision: { name: 'Vision', modalities: { input: ['text', 'image'], output: ['text'] } },
       off: { name: 'Off', limit: { context: 32_768, output: 8_192 } },
     })
+  })
+})
+
+// 이슈 #477: 사고 끄기는 opencode.json 이 아니라 키 프록시 본문에서 — 켠 모델만, 켠 모델이 없으면 본문을 모으지 않는다
+describe('proxyTarget — 사고 끄기 (이슈 #477)', () => {
+  it('켠 모델에만 chat_template_kwargs.enable_thinking=false 를 돌려주고, 켠 모델이 없으면 addToBody 가 없다', () => {
+    const target = proxyTarget({ ...provider('a'), models: [{ id: 'qwen', displayName: 'Q', thinkingOff: true }, { id: 'llama', displayName: 'L' }] }, 'sk')
+    expect(target).toMatchObject({ baseURL: provider('a').baseURL, apiKey: 'sk' })
+    expect(target.addToBody!('qwen')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+    expect(target.addToBody!('llama')).toBeUndefined()
+    expect(proxyTarget({ ...provider('a'), models: [{ id: 'llama', displayName: 'L', thinkingOff: false }] }, undefined)).not.toHaveProperty('addToBody')
   })
 })
 

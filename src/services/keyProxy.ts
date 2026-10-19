@@ -16,11 +16,14 @@ import { sameSecret } from './httpUtil.ts'
 // 받아들인 이유: opencode 는 원래 그 폴더에서 AI 가 코드를 실행하는 도구이고, 키 값은 빼 갈 수 없으며, 프록시는 저장된 주소로만 보낸다.
 //
 // 경로: `/<providerId>/<나머지>` → `<저장된 baseURL>/<나머지>` (쿼리 그대로). 본문·응답은 스트림 그대로 흘린다 — SSE 를 버퍼링하면
-// 답이 한 번에 몰려 온다. 진짜 키는 나가는 Authorization 헤더에만 있고 로그·예외·응답에는 싣지 않는다.
+// 답이 한 번에 몰려 온다(요청 본문은 예외 하나 — 사고 끄기를 켠 모델의 chat/completions JSON 본문만 모아 고친다, 이슈 #477). 진짜 키는 나가는 Authorization 헤더에만 있고 로그·예외·응답에는 싣지 않는다.
 
 export interface ProxyTarget {
   baseURL: string
   apiKey?: string
+  /** 본문의 model id → `POST …/chat/completions` JSON 본문에 병합할 값 (이슈 #477 사고 끄기). 객체 값은 본문에 이미 있는 같은 키의 객체와 합친다.
+   *  없으면 본문을 읽지 않고 흘린다. undefined 를 돌려주면 모은 바이트를 그대로 보낸다 */
+  addToBody?(model: string): Record<string, unknown> | undefined
 }
 
 export interface KeyProxy {
@@ -48,6 +51,25 @@ function fail(res: http.ServerResponse, status: number, message: string): void {
   res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: tr('error.proxy', { message }) } }))
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** 본문 model 에 더할 값을 병합한 본문. JSON 이 아니거나 깨졌거나 더할 것이 없으면 받은 바이트 그대로 — 요청을 실패시키지 않는다 */
+function withAdded(raw: Buffer, addToBody: (model: string) => Record<string, unknown> | undefined): Buffer {
+  let body: unknown
+  try {
+    body = JSON.parse(raw.toString('utf8'))
+  } catch {
+    return raw
+  }
+  if (!isObject(body) || typeof body.model !== 'string') return raw
+  const added = addToBody(body.model)
+  if (!added) return raw
+  for (const [key, value] of Object.entries(added)) body[key] = isObject(value) && isObject(body[key]) ? { ...body[key], ...value } : value
+  return Buffer.from(JSON.stringify(body))
+}
+
 /** targetOf 는 요청마다 부른다 — 저장된 설정이 정본이다 */
 export async function startKeyProxy(targetOf: (providerId: string) => ProxyTarget | undefined): Promise<KeyProxy> {
   const token = randomBytes(24).toString('base64url')
@@ -73,7 +95,11 @@ export async function startKeyProxy(targetOf: (providerId: string) => ProxyTarge
     if (!target) return fail(res, 404, tr('error.proxyUnknown', { id: first }))
 
     const upstreamURL = new URL(`${normalizeBaseURL(target.baseURL)}${rest.length ? `/${rest.join('/')}` : ''}${incoming.search}`)
-    const headers = forwardable(req.headers, ['host', 'authorization'])
+    // 사고 끄기(이슈 #477) — chat/completions JSON 본문만 모아 병합한다. 모으는 요청은 expect 를 넘기지 않는다: Node 가 expect 가 있으면 요청을
+    // 만들 때 헤더를 확정해 버려서, 본문을 다 받은 뒤 content-length 를 고치는 setHeader 가 던진다 (03_qa 경고)
+    const addToBody = target.addToBody
+    const collects = !!addToBody && req.method === 'POST' && rest.join('/') === 'chat/completions' && /json/i.test(req.headers['content-type'] ?? '')
+    const headers = forwardable(req.headers, collects ? ['host', 'authorization', 'expect'] : ['host', 'authorization'])
     if (target.apiKey) headers['authorization'] = `Bearer ${target.apiKey}`
     const upstream = (upstreamURL.protocol === 'https:' ? https : http).request(upstreamURL, { method: req.method, headers }, (answer) => {
       res.writeHead(answer.statusCode ?? 502, forwardable(answer.headers))
@@ -87,6 +113,17 @@ export async function startKeyProxy(targetOf: (providerId: string) => ProxyTarge
     res.on('close', () => {
       if (!res.writableFinished) upstream.destroy()
     })
+    // 헤더는 첫 write/end 전까지 안 나가므로 content-length 를 여기서 고친다
+    if (addToBody && collects) {
+      const chunks: Buffer[] = []
+      req.on('data', (chunk: Buffer) => chunks.push(chunk))
+      req.on('end', () => {
+        const body = withAdded(Buffer.concat(chunks), addToBody)
+        upstream.setHeader('content-length', body.length)
+        upstream.end(body)
+      })
+      return
+    }
     req.pipe(upstream)
   }
 
