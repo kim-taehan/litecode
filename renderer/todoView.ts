@@ -40,6 +40,8 @@ export interface TodoDockView {
   total: number
   /** 지금 하는 일 — 첫 active 항목 (없으면 없다) */
   current?: { text: string; stalled: boolean }
+  /** 다음 할 일 — 첫 pending 항목 (없으면 없다) */
+  next?: { text: string }
   rows: { text: string; mark: TodoMark }[]
 }
 
@@ -48,9 +50,11 @@ export interface TodoDockView {
 export function todoDock(todos: readonly TodoItem[] | undefined, running: boolean): TodoDockView | undefined {
   if (!todos || !todos.some((item) => item.status === 'pending' || item.status === 'active')) return undefined
   const active = todos.find((item) => item.status === 'active')
+  const next = todos.find((item) => item.status === 'pending')
   return {
     ...todoCounts(todos),
     ...(active && { current: { text: active.text, stalled: !running } }),
+    ...(next && { next: { text: next.text } }),
     rows: todos.map((item) => ({ text: item.text, mark: item.status === 'active' && !running ? 'stalled' : item.status })),
   }
 }

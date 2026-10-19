@@ -131,6 +131,7 @@ export const ko = {
   'todo.progress': '완료 {done}/{total}',
   'todo.empty': '목록 비움',
   'todo.now': '지금: {text}',
+  'todo.next': '다음: {text}',
   'todo.stalled': '멈춤: {text}',
   'todo.dismiss': '할 일 줄 닫기',
   'todo.status.pending': '대기',

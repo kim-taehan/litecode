@@ -124,6 +124,7 @@ export const en = {
   'todo.progress': '{done}/{total} done',
   'todo.empty': 'List cleared',
   'todo.now': 'Now: {text}',
+  'todo.next': 'Next: {text}',
   'todo.stalled': 'Paused: {text}',
   'todo.dismiss': 'Dismiss to-do bar',
   'todo.status.pending': 'Pending',
