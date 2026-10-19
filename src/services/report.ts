@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis'
-import { engineModelId } from '../../shared/engineModelId.ts'
+import { engineModelKeys } from '../../shared/engineModelId.ts'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -156,7 +156,7 @@ export class ReportService extends Service {
       name: provider.displayName,
       baseURL: provider.baseURL,
       protocol: provider.protocol,
-      models: provider.models.map(engineModelId), // 엔진·대화에 쓰이는 내부 키 (#497) — 사고 끔 항목은 접미 키
+      models: provider.models.flatMap(engineModelKeys), // 엔진·대화에 쓰이는 키 (#500) — Thinking 모델은 id·id--think·id--nothink
       hasKey: this.ctx.providers.apiKey(provider.id) !== undefined,
     })), null, 2)}\n`)
     write('engine.log', engine.outputTail())

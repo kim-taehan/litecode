@@ -104,7 +104,7 @@ class FakeProviders extends Service {
     super(ctx, 'providers')
   }
   list() {
-    return [{ id: 'gw', displayName: 'Gateway', baseURL: 'http://secret.example/v1', protocol: 'openai-chat-completions', hasKey: true, custom: true, models: [{ id: 'm1', displayName: 'Model One' }, { id: 'm2', displayName: '' }, { id: 'm1', displayName: 'Model One off', thinkingOff: true }] }]
+    return [{ id: 'gw', displayName: 'Gateway', baseURL: 'http://secret.example/v1', protocol: 'openai-chat-completions', hasKey: true, custom: true, models: [{ id: 'm1', displayName: 'Model One', thinking: true }, { id: 'm2', displayName: '' }] }]
   }
   get(id: string) {
     return this.list().find((provider) => provider.id === id)

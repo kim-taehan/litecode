@@ -1,6 +1,6 @@
 import { Context, Service } from 'cordis'
 import { providerIdFor } from '../../shared/providerId.ts'
-import { engineModelId } from '../../shared/engineModelId.ts'
+import { engineModelKeys } from '../../shared/engineModelId.ts'
 import { tr } from '../i18n.ts'
 import { readJsonFileSync, unreadableFileError, writeJsonFileSync } from './jsonFile.ts'
 import { describeHttpError, errorDetail } from '../../shared/httpError.ts'
@@ -25,10 +25,11 @@ export interface ModelCatalogEntry {
   /** 이미지 입력(선택, 이슈 #44) — 켠 모델만 엔진이 opencode.json 모델 정의에 modalities.input 의 image 를 싣는다. 그게 없으면 opencode 가
    *  붙인 이미지를 "ERROR: Cannot read …(this model does not support image input)" 글로 바꿔 보낸다 (01y). 기본 꺼짐 */
   imageInput?: boolean
-  /** 사고 끄기(선택, 이슈 #477) — 켠 모델의 chat/completions 본문에 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다
-   *  (사내망 실측: vLLM 게이트웨이의 Qwen 이 reasoning 을 끈다). 요청마다 저장된 값을 보므로 엔진 재시작 없이 다음 요청부터. 기본 없음.
-   *  같은 게이트웨이 모델을 사고 켬·끔 둘로 두려면 같은 id 의 두 항목에 이 값만 달리한다 (이슈 #497 — 엔진 쪽은 engineModelId 키로 가린다) */
-  thinkingOff?: boolean
+  /** "Thinking 모델" 선언(선택, 이슈 #500) — 이 모델은 서버에서 사고를 켜고 끌 수 있다. 켠 모델은 입력창에서 대화마다 Thinking 을
+   *  디폴트·켬·끔으로 고르고, 그 값은 대화의 모델 키(shared/engineModelId.ts)에 실린다. 켬·끔이면 키 프록시가 chat/completions 본문에
+   *  chat_template_kwargs.enable_thinking 을 싣는다 (사내망 실측 #477: vLLM 게이트웨이의 Qwen 이 false 면 reasoning 을 끈다). 디폴트는 아무것도 안 싣는다.
+   *  켠 것만 저장, 기본 없음. 옛 thinkingOff(#477·#497)·upstreamId(#491)는 저장하지 않고 이주 입력으로만 읽는다 (migrateModels) */
+  thinking?: boolean
 }
 
 export interface ProviderConfig {
@@ -116,11 +117,8 @@ export class ProviderRegistry extends Service {
     }
     const stored = opts.file ? (read(opts.file, 'array') as ProviderConfig[] | undefined) : undefined
     for (const config of stored?.filter((config) => typeof config?.id === 'string') ?? opts.defaults ?? []) {
-      // #491 형태(upstreamId) 이주 — 다음 저장 때 파일에 쓰인다. 모양이 이상한 목록은 건드리지 않는다. 이주 뒤 겹침은 그대로(저장 때 거절)
-      const models =
-        Array.isArray(config.models) && config.models.some((model) => typeof model === 'object' && model !== null && 'upstreamId' in model)
-          ? config.models.map(withoutUpstreamId)
-          : config.models
+      // #491(upstreamId)·#497(thinkingOff) 형태 이주 — 다음 저장 때 파일에 쓰인다. 모양이 이상한 목록은 건드리지 않는다. 이주 뒤 겹침은 그대로(저장 때 거절)
+      const models = Array.isArray(config.models) ? migrateModels(config.models) : config.models
       this.entries.set(config.id, models === config.models ? config : { ...config, models })
     }
     this.keys = (opts.keysFile && (read(opts.keysFile, 'object') as Record<string, string> | undefined)) || {}
@@ -156,18 +154,16 @@ export class ProviderRegistry extends Service {
     const baseURL = input.baseURL.trim()
     if (!displayName) throw new Error(tr('error.displayNameRequired'))
     if (!isHttpUrl(baseURL)) throw new Error(tr('error.baseUrlInvalid'))
-    const models = input.models.map(withoutUpstreamId).map((model) => {
-      const id = model.id.trim()
-      return {
-        id,
-        displayName: model.displayName.trim() || id,
-        ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
-        ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
-        ...(model.imageInput === true && { imageInput: true }),
-        ...(model.thinkingOff === true && { thinkingOff: true }),
-      }
-    })
-    if (input.models.some((model) => model.thinkingOff !== undefined && typeof model.thinkingOff !== 'boolean')) throw new Error(tr('error.thinkingOff'))
+    const trimmed = input.models.map(withoutUpstreamId).map((model) => ({ ...model, id: model.id.trim() }))
+    if (trimmed.some((model) => model.thinking !== undefined && typeof model.thinking !== 'boolean')) throw new Error(tr('error.thinking'))
+    const models = migrateModels(trimmed).map((model) => ({
+      id: model.id,
+      displayName: model.displayName.trim() || model.id,
+      ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
+      ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
+      ...(model.imageInput === true && { imageInput: true }),
+      ...(model.thinking === true && { thinking: true }),
+    }))
     if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
       throw new Error(tr('error.contextLength'))
     }
@@ -177,8 +173,9 @@ export class ProviderRegistry extends Service {
       !(Number.isSafeInteger(model.maxOutput) && model.maxOutput > 0 && (model.contextLength === undefined || model.maxOutput < model.contextLength))
     if (models.some(badOutput)) throw new Error(tr('error.maxOutput'))
     if (models.length === 0 || models.some((model) => !model.id)) throw new Error(tr('error.modelsRequired'))
-    // 같은 id 는 사고 끄기가 달라야 한다 (이슈 #497) — 엔진·대화가 모델을 가리키는 내부 키 기준. `x--nothink` 같은 진짜 id 와 x 의 사고 끔 항목도 겹침
-    if (new Set(models.map(engineModelId)).size !== models.length) throw new Error(tr('error.modelIdDuplicate'))
+    // 엔진·대화가 모델을 가리키는 키 기준 (이슈 #500) — 같은 id 두 항목, 그리고 Thinking 모델 x 의 파생 키(x--think·x--nothink)와 같은 진짜 id 도 겹침
+    const keys = models.flatMap(engineModelKeys)
+    if (new Set(keys).size !== keys.length) throw new Error(tr('error.modelIdDuplicate'))
     const apiKey = input.apiKey?.trim()
     // 키는 키 프록시가 Authorization 헤더로 싣는다 — 헤더에 못 쓰는 문자(줄바꿈·제어 문자·U+200B 같은 보이지 않는 문자·비ASCII)는
     // 붙여넣기 실수이고, 저장되면 요청마다 실패한다 (03_qa 2차). 메시지에 키 값은 넣지 않는다
@@ -278,9 +275,41 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+type LegacyEntry = ModelCatalogEntry & { thinkingOff?: unknown; upstreamId?: unknown }
+
+const isEntry = (model: unknown): model is LegacyEntry => typeof model === 'object' && model !== null
+
+/** 옛 사고 끄기 모양의 이주 (이슈 #500, 던지지 않는다 — CLAUDE.md 함정 4). 순서:
+ *  (a) #491 형태(upstreamId)는 id=upstreamId 로 (withoutUpstreamId).
+ *  (b) 같은 id 에 thinkingOff 항목과 아닌 항목이 섞이면(#497 의 켬·끔 두 항목) 아닌 항목 중 **첫 것** 하나에 thinking:true 를 달고(이름·한도·자리는 그것의 것)
+ *      그 id 의 thinkingOff 항목은 버린다. (c) 짝 없이 thinkingOff 인 항목은 thinking:true 로 — 저장된 대화의 `id--nothink` 키가 그대로 끔이 된다.
+ *  thinkingOff 필드는 어느 쪽이든 지운다. 이주 뒤 id 가 겹쳐도 여기서는 두고 저장 검증이 거절한다. 바꿀 것이 없으면 받은 배열 그대로 */
+function migrateModels(models: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  if (!models.some((model) => isEntry(model) && ('thinkingOff' in model || 'upstreamId' in model))) return models
+  const moved = models.map(withoutUpstreamId) as LegacyEntry[]
+  const offIds = new Set(moved.filter((model) => isEntry(model) && model.thinkingOff === true).map((model) => model.id))
+  const declared = new Set<string>()
+  const result: ModelCatalogEntry[] = []
+  for (const model of moved) {
+    if (!isEntry(model)) {
+      result.push(model)
+      continue
+    }
+    const { thinkingOff, ...rest } = model
+    if (thinkingOff === true) {
+      // (b) 짝(같은 id 의 끔 아닌 항목)이 있는 끔 항목은 버린다, (c) 없으면 Thinking 모델로
+      if (!moved.some((other) => isEntry(other) && other.id === model.id && other.thinkingOff !== true)) result.push({ ...rest, thinking: true })
+    } else if (offIds.has(model.id) && !declared.has(model.id)) {
+      declared.add(model.id) // (b) 켬 항목 — 첫 것만 Thinking 모델로
+      result.push({ ...rest, thinking: true })
+    } else result.push(rest)
+  }
+  return result
+}
+
 /** #491 형태 이주 (이슈 #497) — #491 은 사고 끄기를 켜면 `X-off` + upstreamId `X` 항목을 만들었다. 이제 id 가 게이트웨이의 실제 이름이므로
  *  id=upstreamId 로 바꾸고 upstreamId 를 지운다(비었거나 문자열이 아니면 id 는 그대로). 겹침이 생겨도 여기서는 두고 저장 검증이 거절한다.
- *  구버전 단일 사고 끔 항목(upstreamId 없음)은 그대로다. 바꿀 것이 없으면 받은 항목 그대로 */
+ *  바꿀 것이 없으면 받은 항목 그대로 */
 function withoutUpstreamId(model: ModelCatalogEntry): ModelCatalogEntry {
   if (typeof model !== 'object' || model === null || !('upstreamId' in model)) return model
   const { upstreamId, ...rest } = model as ModelCatalogEntry & { upstreamId?: unknown }

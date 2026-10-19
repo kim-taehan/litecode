@@ -610,7 +610,7 @@
   font-size: 13px;
 }
 
-/* (id, 사고 끄기) 가 겹치는 항목의 id 칸 (이슈 #497 시안 F) */
+/* 키가 겹치는 항목의 id 칸 (이슈 #497 시안 F, #500 부터 같은 id·Thinking 모델의 파생 키 기준) */
 .model-card__id--clash,
 .model-card__id--clash:focus {
   border-color: var(--danger);

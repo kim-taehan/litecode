@@ -116,7 +116,7 @@ class FakeProviders extends Service {
     super(ctx, 'providers')
   }
   get(id: string) {
-    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }, { id: 'm1', thinkingOff: true, imageInput: true }] } : undefined
+    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3', thinking: true, imageInput: true }] } : undefined
   }
 }
 
@@ -183,12 +183,15 @@ async function until(done: () => boolean): Promise<void> {
 
 const input = (text: string, patch: Partial<QueuedSend> = {}): QueuedSend => ({ project: '/work/a', text, model: MODEL, mode: 'build', ...patch })
 
-// 이슈 #497: 대화의 모델은 내부 키 — 같은 id 의 사고 켬·끔 두 항목은 키로 가린다 (이미지 입력은 사고 끔 항목만 켬)
-describe('ChatService — acceptsImages 는 내부 키로 항목을 찾는다', () => {
-  it('사고 끔 키는 사고 끔 항목, id 는 사고 켬 항목', async () => {
+// 이슈 #500: 대화의 모델은 키 — Thinking 모델(m3, 이미지 입력 켬)은 디폴트·켬·끔 세 키 모두 그 항목이다
+describe('ChatService — acceptsImages 는 키를 항목으로 풀어 본다', () => {
+  it('Thinking 모델의 세 키는 같은 항목, 미선언 항목의 접미 키는 없는 모델', async () => {
     const { chat } = await start()
-    expect(chat.acceptsImages({ providerId: 'gw', modelId: engineModelId({ id: 'm1', thinkingOff: true }) })).toBe(true)
+    for (const thinking of ['default', 'on', 'off'] as const) {
+      expect(chat.acceptsImages({ providerId: 'gw', modelId: engineModelId({ id: 'm3' }, thinking) })).toBe(true)
+    }
     expect(chat.acceptsImages({ providerId: 'gw', modelId: 'm1' })).toBe(false)
+    expect(chat.acceptsImages({ providerId: 'gw', modelId: engineModelId({ id: 'm1' }, 'off') })).toBe(false)
   })
 })
 

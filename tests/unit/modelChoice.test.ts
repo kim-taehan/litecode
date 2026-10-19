@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findModel, initialModel, parseModelRef } from '../../renderer/modelChoice.ts'
+import { findModel, initialModel, parseModelRef, withThinking } from '../../renderer/modelChoice.ts'
 import { engineModelId } from '../../shared/engineModelId.ts'
 
 // 입력창 아래 모델 드롭다운의 선택 규칙 (00_request 모델 선택, 2026-10-01)
@@ -35,34 +35,42 @@ describe('modelChoice', () => {
     expect(parseModelRef('null')).toBeUndefined()
   })
 
-  // 이슈 #497 (시안 E): 같은 id 의 사고 켬·끔 두 항목은 내부 키(engineModelId)가 다르다 — 선택은 키 하나로 쥔다
-  describe('내부 키', () => {
-    const off = engineModelId({ id: 'q', thinkingOff: true })
-    // providers.json 의 실제 형태 — 사고 끄기 항목이 먼저, 같은 id 의 사고 켬 항목이 뒤에
-    const both = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'q', displayName: 'Q', thinkingOff: true }, { id: 'q2', displayName: 'Other' }, { id: 'q', displayName: 'thinking Q' }] }]
+  // 이슈 #500: Thinking 모델(thinking:true)은 대화마다 디폴트·켬·끔 — 그 값은 선택의 키(modelId)에 실린다. 선택기는 키를 (항목, 값)으로 푼다
+  describe('Thinking 키', () => {
+    const on = engineModelId({ id: 'q' }, 'on')
+    const off = engineModelId({ id: 'q' }, 'off')
+    const gw = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'llama', displayName: 'L' }, { id: 'q', displayName: 'Q', thinking: true }] }]
 
-    it('findModel 은 키로 찾는다 — 사고 켬 키(=id)는 사고 켬 항목, 접미 키는 사고 끔 항목', () => {
-      expect(findModel(both, { providerId: 'gw', modelId: 'q' })?.model.displayName).toBe('thinking Q')
-      expect(findModel(both, { providerId: 'gw', modelId: off })?.model.displayName).toBe('Q')
+    it('findModel 은 키를 항목과 Thinking 값으로 푼다 — 세 키 모두 같은 항목', () => {
+      expect(findModel(gw, { providerId: 'gw', modelId: 'q' })).toMatchObject({ model: { id: 'q' }, thinking: 'default' })
+      expect(findModel(gw, { providerId: 'gw', modelId: on })).toMatchObject({ model: { id: 'q' }, thinking: 'on' })
+      expect(findModel(gw, { providerId: 'gw', modelId: off })).toMatchObject({ model: { id: 'q' }, thinking: 'off' })
+      expect(findModel(gw, { providerId: 'gw', modelId: on })?.model).toBe(gw[0]!.models[1])
     })
 
-    it('사고 끔 항목만 있으면 id 로는 못 찾는다 (키가 다르다)', () => {
-      const onlyOff = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'q', displayName: 'Q', thinkingOff: true }] }]
-      expect(findModel(onlyOff, { providerId: 'gw', modelId: 'q' })).toBeUndefined()
-      expect(initialModel(onlyOff, { providerId: 'gw', modelId: off })).toEqual({ providerId: 'gw', modelId: off })
+    it('Thinking 모델로 선언되지 않은 항목의 접미 키는 못 찾는다', () => {
+      expect(findModel(gw, { providerId: 'gw', modelId: engineModelId({ id: 'llama' }, 'off') })).toBeUndefined()
     })
 
-    it('새 대화의 첫 모델도 키 — 첫 항목이 사고 끔이면 접미 키', () => {
-      expect(initialModel(both, undefined)).toEqual({ providerId: 'gw', modelId: off })
+    it('마지막 선택이 켬·끔 키여도 새 대화가 그대로 이어받는다', () => {
+      expect(initialModel(gw, { providerId: 'gw', modelId: off })).toEqual({ providerId: 'gw', modelId: off })
     })
 
-    it('이전 저장값 {modelId, thinkingOff} 는 키로 읽는다 — 첫 모델로 돌아가지 않는다', () => {
+    it('withThinking 은 그 선택의 항목은 그대로 두고 키만 바꾼다', () => {
+      const current = { providerId: 'gw', modelId: on }
+      expect(withThinking(gw, current, 'off')).toEqual({ providerId: 'gw', modelId: off })
+      expect(withThinking(gw, current, 'default')).toEqual({ providerId: 'gw', modelId: 'q' })
+      expect(withThinking(gw, { providerId: 'gw', modelId: 'q' }, 'on')).toEqual({ providerId: 'gw', modelId: on })
+      // 못 찾는 선택·미선언 항목은 바꾸지 않는다
+      expect(withThinking(gw, { providerId: 'gw', modelId: 'gone' }, 'on')).toBeUndefined()
+      expect(withThinking(gw, { providerId: 'gw', modelId: 'llama' }, 'on')).toBeUndefined()
+    })
+
+    it('이전 저장값 {modelId, thinkingOff} 는 끔 키로 읽는다 — 이주로 Thinking 모델이 된 항목의 끔', () => {
       const offRef = parseModelRef('{"providerId":"gw","modelId":"q","thinkingOff":true}')
       expect(offRef).toEqual({ providerId: 'gw', modelId: off })
-      expect(initialModel(both, offRef)).toEqual({ providerId: 'gw', modelId: off })
-      const onRef = parseModelRef('{"providerId":"gw","modelId":"q","thinkingOff":false}')
-      expect(onRef).toEqual({ providerId: 'gw', modelId: 'q' })
-      expect(findModel(both, onRef)?.model.displayName).toBe('thinking Q')
+      expect(findModel(gw, offRef)).toMatchObject({ model: { id: 'q' }, thinking: 'off' })
+      expect(parseModelRef('{"providerId":"gw","modelId":"q","thinkingOff":false}')).toEqual({ providerId: 'gw', modelId: 'q' })
     })
   })
 })

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
 import type { ModelCatalogEntry, ProviderSummary } from '../../shared/ipc.ts'
 
-// 이슈 #497 (시안 E): 사고 끄기 알약은 그 항목의 thinkingOff 만 켜고 끈다 — #491 처럼 항목을 만들거나 id 를 바꾸지 않는다.
+// 이슈 #500 (시안 H): Thinking 모델 알약은 그 항목의 thinking 만 켜고 끈다 — #491 처럼 항목을 만들거나 id 를 바꾸지 않는다.
 // DOM 없이 클릭을 보려고 useState 의 setter 만 가로채고 ProviderEditor 를 함수로 불러 나온 요소의 onToggle 을 직접 부른다
 const setters: ((next: unknown) => void)[] = []
 vi.mock('react', async (original) => {
@@ -40,10 +40,10 @@ function find(node: ReactNode, match: (props: Record<string, unknown>) => boolea
   return find(node.props.children as ReactNode, match)
 }
 
-describe('ProviderEditor — 사고 끄기 알약 (이슈 #497)', () => {
+describe('ProviderEditor — Thinking 모델 알약 (이슈 #500)', () => {
   const models: ModelCatalogEntry[] = [
     { id: 'qwen', displayName: 'Q', contextLength: 32_768 },
-    { id: 'llama', displayName: 'L', thinkingOff: true },
+    { id: 'llama', displayName: 'L', thinking: true },
   ]
   const provider: ProviderSummary = { id: 'gw', displayName: 'GW', baseURL: 'http://gw/v1', protocol: 'openai-chat-completions', models, custom: true, hasKey: false }
 
@@ -51,7 +51,7 @@ describe('ProviderEditor — 사고 끄기 알약 (이슈 #497)', () => {
   function toggle(n: number, on: boolean): ModelCatalogEntry[] {
     setters.length = 0
     const tree = (ProviderEditor as (props: unknown) => ReactNode)({ provider, taken: [provider], onDone: () => {} })
-    const label = translate('ko', 'models.thinkingOff', { n })
+    const label = translate('ko', 'models.thinking', { n })
     const pill = find(tree, (props) => props.ariaLabel === label)
     expect(pill).toBeDefined()
     ;(pill!.props.onToggle as (on: boolean) => void)(on)
@@ -61,18 +61,18 @@ describe('ProviderEditor — 사고 끄기 알약 (이슈 #497)', () => {
     return typeof next === 'function' ? (next as (current: ModelCatalogEntry[]) => ModelCatalogEntry[])(models) : (next as ModelCatalogEntry[])
   }
 
-  it('켜면 그 항목에 thinkingOff 만 붙는다 — 항목 수·id·다른 필드 그대로', () => {
+  it('켜면 그 항목에 thinking 만 붙는다 — 항목 수·id·다른 필드 그대로', () => {
     expect(toggle(1, true)).toEqual([
-      { id: 'qwen', displayName: 'Q', contextLength: 32_768, thinkingOff: true },
-      { id: 'llama', displayName: 'L', thinkingOff: true },
+      { id: 'qwen', displayName: 'Q', contextLength: 32_768, thinking: true },
+      { id: 'llama', displayName: 'L', thinking: true },
     ])
   })
 
-  it('끄면 그 항목의 thinkingOff 만 빠진다', () => {
+  it('끄면 그 항목의 thinking 만 빠진다', () => {
     const next = toggle(2, false)
     expect(next).toHaveLength(2)
     expect(next[0]).toEqual(models[0])
     expect(next[1]!.id).toBe('llama')
-    expect(next[1]!.thinkingOff).not.toBe(true)
+    expect(next[1]!.thinking).not.toBe(true)
   })
 })

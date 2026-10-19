@@ -1,5 +1,5 @@
 import type { Context } from 'cordis'
-import { engineModelId } from '../../../shared/engineModelId.ts'
+import { engineModelId, resolveModelKey } from '../../../shared/engineModelId.ts'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import { tr } from '../../i18n.ts'
@@ -229,11 +229,12 @@ function models(host: RouteHost): RemoteModel[] {
     .flatMap((provider) => provider.models.map((model) => ({ providerId: provider.id, providerName: provider.displayName, modelId: engineModelId(model), displayName: model.displayName || model.id })))
 }
 
-/** 폰이 고른 모델 — 데스크탑에 설정된 것만 */
+/** 폰이 고른 모델 — 데스크탑에 설정된 것만. 목록(models)은 항목당 디폴트 키 하나지만, Thinking 모델의 켬·끔 키(데스크탑 대화의 키를 폰이 그대로 돌려줄 때)도 받는다 (이슈 #500) */
 function modelOf(host: RouteHost, value: unknown): ModelChoice | undefined {
   const choice = value as Partial<ModelChoice> | null
-  const found = models(host).find((model) => model.providerId === choice?.providerId && model.modelId === choice?.modelId)
-  return found && { providerId: found.providerId, modelId: found.modelId }
+  if (typeof choice?.providerId !== 'string' || typeof choice.modelId !== 'string') return undefined
+  const provider = host.ctx.providers.list().find((entry) => entry.id === choice.providerId)
+  return provider && resolveModelKey(provider.models, choice.modelId) ? { providerId: provider.id, modelId: choice.modelId } : undefined
 }
 
 async function registered(host: RouteHost, project: string): Promise<boolean> {
