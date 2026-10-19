@@ -9,7 +9,9 @@ import type {
   ExtensionStoreFailure,
 } from '../../../shared/extensions.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../jsonFile.ts'
+import { EXTENSION_LIMITS } from './limits.ts'
 import { checkManifest, isExtensionId, MANIFEST_FILE } from './manifest.ts'
+import { isEntryPath } from './paths.ts'
 import { unpackZip } from './unpack.ts'
 import { inspectZip } from './zipInspect.ts'
 
@@ -21,8 +23,10 @@ import { inspectZip } from './zipInspect.ts'
 //   staging/<token>.zip      고른 zip 의 앱 안 복사본 — stage 는 이 복사본을 검사한다(확인 카드에 보인 것 = 설치되는 것)
 //   staging/<token>.json     stage 때 본 { id, version } — install 이 다시 검사한 결과와 다르면 거절한다
 //
-// 실행 중인 확장 파일은 건드리지 않는다 — 교체는 applyPending(부팅 때, 확장이 올라오기 전) 한 곳에서만. 교체는 모두 루트 안의 rename 이다
-// (같은 볼륨 — 복사·이동이 아니라 원자적이고, Windows 에서도 폴더 rename 은 안의 파일이 열려 있지 않으면 된다. 부팅 전이라 열려 있지 않다).
+// 실행 중인 확장 파일은 건드리지 않는다 — 교체는 applyPending 한 곳에서만. 교체는 모두 루트 안의 rename 이다
+// (같은 볼륨 — 복사·이동이 아니라 원자적이고, Windows 에서도 폴더 rename 은 안의 파일이 열려 있지 않으면 된다).
+// applyPending 은 부팅 때(확장이 올라오기 전) 부르고, 이슈 #511 부터는 서비스가 설치·삭제 직후에도 곧바로 부른다 — 패널 확장은 HTML 을
+// 읽어 화면의 iframe 에서 돌릴 뿐 메인에서 실행되지 않아 열려 있는 확장 파일이 없다. 부팅 때 적용은 비정상 종료 복구용으로 남는다.
 //
 // 업그레이드 순서와 비정상 종료 복구:
 //   1) installed/<id> → installed/.old-<id>-<시각>   2) pending/install/<id> → installed/<id>   3) .old 삭제
@@ -52,6 +56,7 @@ export interface StageResult {
 
 export type InstallResult = { ok: true; id: string; version: string } | { ok: false; failure: ExtensionStoreFailure }
 export type RemoveResult = { ok: true } | { ok: false; failure: ExtensionStoreFailure }
+export type ReadEntryResult = { ok: true; html: string } | { ok: false; failure: ExtensionStoreFailure }
 
 export interface ApplyResult {
   applied: ExtensionPendingOp[]
@@ -278,6 +283,29 @@ export class ExtensionStore {
       return []
     }
     return Promise.all(names.map((name) => readInstalled(path.join(this.installedDir, name), name, appVersion)))
+  }
+
+  /** 설치된 확장의 진입 HTML (이슈 #511) — 화면이 격리된 iframe 에 싣는다(메인은 실행하지 않는다). 설치 때 검증했어도 그 뒤 디스크가 바뀔 수 있어
+   *  읽을 때마다 다시 본다: id 형식 · entry 경로 규칙(isEntryPath) · .html/.htm · 실제 경로(realpath)가 설치 폴더 안 · 일반 파일(lstat) · 크기 상한.
+   *  읽기 전용이라 줄에 서지 않는다(부르는 서비스가 자기 줄에서 부른다). 던지지 않는다 */
+  async readEntry(id: string, entry: string): Promise<ReadEntryResult> {
+    if (!isExtensionId(id)) return failure('id-invalid', { value: id })
+    if (!isEntryPath(entry)) return failure('entry-unsafe', { entry })
+    if (!/\.html?$/i.test(entry)) return failure('entry-not-html', { entry })
+    const dir = path.join(this.installedDir, id)
+    const file = path.join(dir, entry)
+    try {
+      const [realDir, realFile, stat] = await Promise.all([fs.realpath(dir), fs.realpath(file), fs.lstat(file)])
+      if (!realFile.startsWith(realDir + path.sep) || !stat.isFile()) return failure('entry-unsafe', { entry })
+      const limit = EXTENSION_LIMITS.entryBytes
+      if (stat.size > limit) return failure('entry-too-large', { bytes: stat.size, limit })
+      const bytes = await fs.readFile(realFile)
+      // 확인과 읽기 사이에 커졌을 수 있다
+      if (bytes.length > limit) return failure('entry-too-large', { bytes: bytes.length, limit })
+      return { ok: true, html: bytes.toString('utf8') }
+    } catch (error) {
+      return failure('entry-unreadable', { message: messageOf(error) })
+    }
   }
 
   /** 다음 부팅에 적용될 보류 작업 — id 별 마지막 op. 던지지 않는다 */

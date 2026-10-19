@@ -71,13 +71,24 @@ export type ExtensionStoreFailure =
   | { code: 'id-invalid'; params: { value: string } }
   | { code: 'not-installed'; params: { id: string } }
   | { code: 'io-failed'; params: { message: string } }
+  /** 설치·삭제를 곧바로 적용하지 못했다 (이슈 #511) — 이전 상태(버전)가 그대로 남는다. message 는 저장소가 남긴 사유 */
+  | { code: 'apply-failed'; params: { message: string } }
+  // 진입 HTML 읽기 (readEntry, 이슈 #511)
+  /** 켜져 있지 않거나 상태가 정상(on)이 아니다 */
+  | { code: 'not-on'; params: { id: string } }
+  /** 진입 파일이 .html·.htm 이 아니다 — 패널 확장은 한 파일짜리 HTML */
+  | { code: 'entry-not-html'; params: { entry: string } }
+  /** 진입 경로가 설치 폴더 밖을 가리키거나(심볼릭 링크) 일반 파일이 아니다 */
+  | { code: 'entry-unsafe'; params: { entry: string } }
+  | { code: 'entry-too-large'; params: { bytes: number; limit: number } }
+  | { code: 'entry-unreadable'; params: { message: string } }
 
 // --- ctx.extensions 와 화면 사이 (이슈 #482) ---
 
 /** settings.extensions — 확장 id → 켜짐. 기본(켜짐)과 다른 값(false)만 남긴다 (features 와 같은 규칙) */
 export type ExtensionSwitches = Record<string, boolean>
 
-/** off: 꺼졌거나 아직 설치 전(보류 설치만 있음) · mounting: 올리는 중 · on: 켜짐 · failed: 설치 폴더가 깨졌거나 올리지 못함 (reason) */
+/** off: 꺼짐 · mounting: 올리는 중 · on: 켜짐 · failed: 설치 폴더가 깨졌거나 올리지 못함 (reason) */
 export type ExtensionState = 'on' | 'off' | 'mounting' | 'failed'
 
 /** failed 의 사유 — 코드 + 변수 (문구는 화면이 i18n 키로 입힌다) */
@@ -97,8 +108,6 @@ export interface ExtensionSummary {
   enabled: boolean
   state: ExtensionState
   reason?: ExtensionFailedReason
-  /** 다음 부팅에 적용될 보류 작업 — install: 새로 설치·업그레이드 대기, remove: 삭제 예정 */
-  pending?: 'install' | 'remove'
 }
 
 /** 설치 확인 카드의 미리보기 — problems 가 비면 통과(token 이 있다), 아니면 거절 카드 */
@@ -113,3 +122,5 @@ export type ExtensionResult<T extends object = object> = ({ ok: true } & T) | { 
 /** pick — preview 가 없으면 대화상자를 취소했다 */
 export type ExtensionPickResult = ExtensionResult<{ preview?: ExtensionPreview }>
 export type ExtensionInstallResult = ExtensionResult<{ id: string; version: string }>
+/** readEntry (이슈 #511) — 켜진 정상 확장의 진입 HTML(UTF-8)과 그 버전 */
+export type ExtensionEntryResult = ExtensionResult<{ html: string; version: string }>

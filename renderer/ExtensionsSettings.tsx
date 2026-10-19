@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { ExtensionPreview, ExtensionResult, ExtensionStoreFailure, ExtensionSummary } from '../shared/extensions.ts'
+import { openExtensionTab, workspaceDirectory } from './filePreviewStore.ts'
 import { useFocusTrap } from './focusTrap.ts'
+import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT, type Translate } from './settingsStore.ts'
 import { cardKind, failedReasonText, failureLines, formatBytes, installKind, lineSummary, problemLine, type ProblemLine } from './extensionsView.ts'
 
 // 설정 > 기능의 확장 (이슈 #489, 시안 _workspace/mock-extension Main·Confirm·Reject). 기능 페이지(FeaturesSettings.tsx)에 끼우는 조각들:
-// 검색창 옆 [확장 추가 (zip)] · 보류 안내 배너 · 기능 카드 아래 "설치한 확장" 구분선 + 카드 · 설치 확인/거절 대화상자.
-// 카드는 기능 줄(.feature-row)의 모양을 그대로 쓰고 퍼즐 타일 · 보라 "확장" 뱃지 · 버전 · ⋯ 메뉴를 더한다.
-// 시안과 다른 점: 배너의 [지금 다시 시작] 은 없다 — 앱 재시작 기능이 없다(종료 확인·자식 프로세스 정리까지 번진다). 배너는 문구만.
+// 검색창 옆 [확장 추가 (zip)] · 설치 직후 안내 · 기능 카드 아래 "설치한 확장" 구분선 + 카드 · 설치 확인/거절 대화상자.
+// 카드는 기능 줄(.feature-row)의 모양을 그대로 쓰고 퍼즐 타일 · 보라 "확장" 뱃지 · 버전 · [열기] · ⋯ 메뉴를 더한다.
+// 패널 확장 (이슈 #511, 시안 _workspace/mock-extension-panel Installed): 설치·삭제는 곧바로 적용된다(보류·재시작 안내가 없어졌다).
+// 설치가 끝나면 대화상자를 닫고 초록 안내 한 줄 + 그 확장 탭을 오른쪽 패널에 연다(설치 직후 한 번). 정상(on) 카드에 [열기] — 탭을 열고 패널을 연다.
+// 탭을 여는 자리는 지금 보는 대화의 프로젝트(filePreviewStore.workspaceDirectory) — 대화가 없으면 열지 못하고 안내는 앞 문장만.
 // 삭제 확인은 모델 카드(Settings.tsx ModelsPage)처럼 카드 안 [삭제 확인][취소] 두 버튼. 대화상자 틀은 전체 권한 확인(ModeChip ConfirmFullAccess)과 같다.
 // 요청 결과는 던지지 않고 { ok, failure } 로 온다 — 그래도 IPC 자체가 실패할 수 있어 거부도 받는다.
 
@@ -20,14 +24,6 @@ async function request<T extends object>(call: () => Promise<ExtensionResult<T>>
   } catch {
     return { ok: false, failure: UNKNOWN_FAILURE }
   }
-}
-
-function PuzzleIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M10 4h4v3a2 2 0 1 0 4 0v3h-3a2 2 0 1 0 0 4h3v4h-4v-3a2 2 0 1 0-4 0v3H6v-4h3a2 2 0 1 0 0-4H6V7h4z" />
-    </svg>
-  )
 }
 
 /** 사유 한 줄의 보조 글 — 고정폭 값 · 번역한 보조 글 · 원문을 " — " 로 잇는다 */
@@ -70,8 +66,9 @@ function useEscape(onEscape: () => void): void {
   }, [onEscape])
 }
 
-/** 설치 확인 (시안 Confirm) — 취소·Esc·바깥 누르기는 모두 cancelExtension(token). 설치가 실패하면 사유를 보이고 열어 둔다 */
-export function ExtensionConfirmDialog({ preview, onClose }: { preview: ExtensionPreview; onClose(): void }) {
+/** 설치 확인 (시안 Confirm) — 취소·Esc·바깥 누르기는 모두 cancelExtension(token). 설치가 실패하면 사유를 보이고 열어 둔다.
+ *  성공하면 onInstalled(설치된 id) 뒤에 닫는다 */
+export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { preview: ExtensionPreview; onClose(): void; onInstalled?(id: string): void }) {
   const t = useT()
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<ProblemLine[]>()
@@ -91,8 +88,11 @@ export function ExtensionConfirmDialog({ preview, onClose }: { preview: Extensio
     setBusy(true)
     const result = await request(() => window.litecode.installExtension(preview.token!))
     setBusy(false)
-    if (result.ok) onClose() // 목록은 extensions:changed 로 갱신된다
-    else setFailure(failureLines(result.failure))
+    if (result.ok) {
+      // 목록은 extensions:changed 로 갱신된다
+      onInstalled?.(result.id)
+      onClose()
+    } else setFailure(failureLines(result.failure))
   }
 
   const existing = preview.existing && manifest && {
@@ -208,8 +208,15 @@ export function ExtensionRejectDialog({ lines, onClose }: { lines: readonly Prob
 
 type Dialog = { kind: 'confirm'; preview: ExtensionPreview } | { kind: 'reject'; lines: ProblemLine[] }
 
-/** [확장 추가 (zip)] — zip 고르기 → 통과면 설치 확인, 사유가 있으면 거절. 대화상자를 취소하면 아무것도 안 한다 */
-export function ExtensionAddButton() {
+/** 설치가 끝났다 — 안내에 쓸 이름과 탭을 열었는지 */
+export interface InstalledNote {
+  name: string
+  opened: boolean
+}
+
+/** [확장 추가 (zip)] — zip 고르기 → 통과면 설치 확인, 사유가 있으면 거절. 대화상자를 취소하면 아무것도 안 한다.
+ *  설치가 끝나면 그 확장 탭을 오른쪽 패널에 열고(설치 직후 한 번) onInstalled 로 알린다 — 안내 줄은 기능 페이지가 그린다 */
+export function ExtensionAddButton({ onInstalled }: { onInstalled?(note: InstalledNote): void }) {
   const t = useT()
   const [busy, setBusy] = useState(false)
   const [dialog, setDialog] = useState<Dialog>()
@@ -234,19 +241,27 @@ export function ExtensionAddButton() {
         </svg>
         {t('extensions.add')}
       </button>
-      {dialog?.kind === 'confirm' && <ExtensionConfirmDialog preview={dialog.preview} onClose={close} />}
+      {dialog?.kind === 'confirm' && (
+        <ExtensionConfirmDialog
+          preview={dialog.preview}
+          onClose={close}
+          onInstalled={(id) => {
+            const name = dialog.preview.manifest?.name ?? id
+            onInstalled?.({ name, opened: openExtensionTab(workspaceDirectory(), id) })
+          }}
+        />
+      )}
       {dialog?.kind === 'reject' && <ExtensionRejectDialog lines={dialog.lines} onClose={close} />}
     </>
   )
 }
 
-/** 보류가 하나라도 있으면 노란 안내 (버튼 없음 — 앱 재시작 기능이 없다) */
-export function ExtensionsNotice({ extensions }: { extensions: readonly ExtensionSummary[] }) {
+/** 설치 직후 초록 안내 한 줄 (시안 Installed) — 탭을 열지 못했으면(대화 없음) 앞 문장만 */
+export function ExtensionInstalledNotice({ name, opened }: InstalledNote) {
   const t = useT()
-  if (!extensions.some((extension) => extension.pending)) return null
   return (
-    <p className="settings-notice extensions-notice" role="status">
-      {t('extensions.notice')}
+    <p className="extensions-installed" role="status">
+      {t(opened ? 'extensions.installed' : 'extensions.installedOnly', { name })}
     </p>
   )
 }
@@ -327,7 +342,6 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
   const [error, setError] = useState<string>()
   const kind = cardKind(extension)
   const name = extension.name ?? extension.id
-  const locked = kind === 'pending-install' || kind === 'pending-remove'
 
   async function run(call: () => Promise<ExtensionResult>): Promise<void> {
     const result = await request(call)
@@ -335,8 +349,6 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
   }
 
   function summary(): ReactNode {
-    if (kind === 'pending-install') return <span className="feature-row__summary">{t('extensions.pending.install')}</span>
-    if (kind === 'pending-remove') return <span className="feature-row__summary">{t('extensions.pending.remove')}</span>
     if (kind === 'failed' && extension.reason) return <span className="feature-row__summary extension-row__reason">{failedReasonText(extension.reason, t)}</span>
     return <span className="feature-row__summary">{extension.description}</span>
   }
@@ -377,13 +389,20 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
             </button>
           </span>
         ) : (
-          <MoreMenu
-            label={t('extensions.more', { name })}
-            items={[
-              { label: t('extensions.menu.info'), onSelect: () => setInfo((now) => !now) },
-              ...(kind === 'pending-remove' ? [] : [{ label: t('extensions.menu.remove'), danger: true, onSelect: () => setConfirmingRemove(true) }]),
-            ]}
-          />
+          <>
+            {kind === 'on' && (
+              <button type="button" className="settings-button settings-button--compact extension-row__open" onClick={() => openExtensionTab(workspaceDirectory(), extension.id)}>
+                {t('extensions.open')}
+              </button>
+            )}
+            <MoreMenu
+              label={t('extensions.more', { name })}
+              items={[
+                { label: t('extensions.menu.info'), onSelect: () => setInfo((now) => !now) },
+                { label: t('extensions.menu.remove'), danger: true, onSelect: () => setConfirmingRemove(true) },
+              ]}
+            />
+          </>
         )}
         <button
           type="button"
@@ -391,8 +410,6 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
           className="settings-switch"
           aria-checked={extension.enabled}
           aria-label={name}
-          disabled={locked}
-          title={locked ? t('extensions.locked') : undefined}
           onClick={() => void run(() => window.litecode.setExtensionEnabled(extension.id, !extension.enabled))}
         >
           <span className="settings-switch__thumb" />

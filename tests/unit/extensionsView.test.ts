@@ -53,6 +53,12 @@ const FAILURES: { [C in ExtensionStoreFailure['code']]: Extract<ExtensionStoreFa
   'id-invalid': { code: 'id-invalid', params: { value: 'X' } },
   'not-installed': { code: 'not-installed', params: { id: 'gone' } },
   'io-failed': { code: 'io-failed', params: { message: 'disk full' } },
+  'apply-failed': { code: 'apply-failed', params: { message: 'EACCES' } },
+  'not-on': { code: 'not-on', params: { id: 'off-ext' } },
+  'entry-not-html': { code: 'entry-not-html', params: { entry: 'index.js' } },
+  'entry-unsafe': { code: 'entry-unsafe', params: { entry: 'index.html' } },
+  'entry-too-large': { code: 'entry-too-large', params: { bytes: 3 * 1024 * 1024, limit: 2 * 1024 * 1024 } },
+  'entry-unreadable': { code: 'entry-unreadable', params: { message: 'ENOENT' } },
 }
 
 const UNSAFE: Record<UnsafePathReason, true> = { empty: true, nul: true, absolute: true, drive: true, backslash: true, parent: true }
@@ -215,7 +221,7 @@ describe('installKind — 신규·업그레이드·같은 버전·이전 버전'
 
 const ext = (patch: Partial<ExtensionSummary> & { id: string }): ExtensionSummary => ({ enabled: true, state: 'on', ...patch })
 
-describe('cardKind — 카드 상태 표현 (보류 > 실패 > 올리는 중 > 켜짐/꺼짐)', () => {
+describe('cardKind — 카드 상태 표현 (실패 > 올리는 중 > 켜짐/꺼짐, 보류 상태는 없다 — 이슈 #511)', () => {
   it('on / off', () => {
     expect(cardKind(ext({ id: 'a' }))).toBe('on')
     expect(cardKind(ext({ id: 'a', enabled: false, state: 'off' }))).toBe('off')
@@ -223,13 +229,6 @@ describe('cardKind — 카드 상태 표현 (보류 > 실패 > 올리는 중 > �
   it('mounting · failed', () => {
     expect(cardKind(ext({ id: 'a', state: 'mounting' }))).toBe('mounting')
     expect(cardKind(ext({ id: 'a', state: 'failed', reason: { code: 'mount-failed', params: { message: 'x' } } }))).toBe('failed')
-  })
-  it('보류 설치는 상태(off·on)와 무관하게 pending-install', () => {
-    expect(cardKind(ext({ id: 'a', state: 'off', pending: 'install' }))).toBe('pending-install')
-    expect(cardKind(ext({ id: 'a', state: 'on', pending: 'install' }))).toBe('pending-install')
-  })
-  it('삭제 예정이 무엇보다 앞선다 (실패한 확장도)', () => {
-    expect(cardKind(ext({ id: 'a', state: 'failed', pending: 'remove' }))).toBe('pending-remove')
   })
 })
 

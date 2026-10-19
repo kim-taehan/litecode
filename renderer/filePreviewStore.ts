@@ -42,9 +42,9 @@ function base(directory: string): PanelState {
   return current?.directory === directory ? current : { directory, open: false, tabs: [], fullscreen: false, focus: 0 }
 }
 
-/** 파일 탭인가 — 터미널·작업·턴 탭과 Git 은 아님 (비교 보기는 파일 탭만) */
+/** 파일 탭인가 — 터미널·작업·턴·확장 탭과 Git 은 아님 (비교 보기는 파일 탭만) */
 export function isFileTab(key: string): boolean {
-  return key !== GIT_TAB && !isTerminalTab(key) && !isTaskTab(key) && !isTurnTab(key)
+  return key !== GIT_TAB && !isTerminalTab(key) && !isTaskTab(key) && !isTurnTab(key) && !isExtensionTab(key)
 }
 
 /** 비교 보기 후보 — 같은 패널의 다른 연 파일 탭 (현재 탭 제외) */
@@ -172,6 +172,50 @@ export function openTurnTab(directory: string, conversationId: string, startedAt
   const tabs = state.tabs.filter((tab) => turnRefOf(tab) === undefined && tab !== key)
   tabs.splice(index < 0 ? tabs.length : index, 0, key)
   set({ ...state, open: true, tabs, active: key, focus: state.focus + 1, quiet: false })
+}
+
+/** 확장 탭의 열쇠 (이슈 #511) — `\0ext/<확장 id>`. 본문은 그 확장의 진입 HTML 을 격리된 iframe 에서 (FilePreview.tsx ExtensionTab) */
+export const EXT_PREFIX = '\0ext/'
+export function extensionTabKey(id: string): string {
+  return EXT_PREFIX + id
+}
+export function extensionIdOf(key: string | undefined): string | undefined {
+  return key?.startsWith(EXT_PREFIX) && key.length > EXT_PREFIX.length ? key.slice(EXT_PREFIX.length) : undefined
+}
+export function isExtensionTab(key: string | undefined): key is string {
+  return extensionIdOf(key) !== undefined
+}
+
+/** 확장 탭 본문의 재마운트 열쇠 — 버전이 바뀌면(업그레이드) 새 HTML 을 읽어 iframe 을 새로 그린다 */
+export function extensionFrameKey(id: string, version: string | undefined): string {
+  return `${id}@${version ?? ''}`
+}
+
+/** 확장 탭을 연다 — 이미 있으면 그 탭을 고른다. 패널이 닫혀 있으면 연다(파일 칩과 같은 길). 프로젝트가 없으면(대화 없음) 열지 못한다 → false */
+export function openExtensionTab(directory: string | undefined, id: string): boolean {
+  if (directory === undefined) return false
+  const state = base(directory)
+  const key = extensionTabKey(id)
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus: state.focus + 1, quiet: false })
+  return true
+}
+
+/** 확장 목록이 바뀌었다(extensions:changed) — 꺼졌거나·삭제됐거나·상태가 정상(on)이 아닌 확장의 탭을 닫는다. 고른 탭이면 closeTab 처럼 이웃으로 */
+export function closeExtensionTabs(extensions: readonly { id: string; state: string }[]): void {
+  const on = new Set(extensions.filter((extension) => extension.state === 'on').map((extension) => extension.id))
+  for (const key of current?.tabs ?? []) {
+    const id = extensionIdOf(key)
+    if (id !== undefined && !on.has(id)) closeTab(key)
+  }
+}
+
+/** 지금 보는 대화의 프로젝트 — 패널(FilePreviewPanel)이 알린다. 패널 밖(설정 화면의 확장 [열기])이 확장 탭을 열 자리 */
+let workspace: string | undefined
+export function setWorkspaceDirectory(directory: string | undefined): void {
+  workspace = directory
+}
+export function workspaceDirectory(): string | undefined {
+  return workspace
 }
 
 /** ⌘[·⌘] — 터미널 탭을 넘나든다 (이전·다음). 고른 것이 없으면 마지막 연 것으로. 하나 없으면 false */
