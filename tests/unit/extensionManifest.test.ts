@@ -1,0 +1,121 @@
+import { describe, expect, it } from 'vitest'
+import { checkManifest, compareVersions } from '../../src/services/extensions/manifest.ts'
+
+// 확장 manifest(extension.json) 검증 (이슈 #478, 설계 docs/superpowers/specs/2026-10-19-extension-install-design.md 3절).
+// 거절 사유는 코드 + 변수로 모아 돌려준다 — 첫 사유에서 멈추지 않는다. 모르는 필드는 무시하지 않고 거절(오타 난 permissions 가 조용히 빠지지 않게)
+
+const APP = '1.4.0'
+const valid = { id: 'my-ext', name: '내 확장', description: '한 줄 설명', version: '1.0.0', entry: 'index.js' }
+
+describe('checkManifest', () => {
+  it('정상 manifest 는 사유 없이 manifest 를 돌려준다 (선택 필드 포함)', () => {
+    const full = { ...valid, litecode: '1.2.0', permissions: ['fs.read'] }
+    expect(checkManifest(full, APP)).toEqual({ manifest: full, problems: [] })
+    expect(checkManifest(valid, APP)).toEqual({ manifest: valid, problems: [] })
+  })
+
+  it('객체가 아니면 manifest-invalid', () => {
+    for (const value of [null, [], 'x', 3]) {
+      expect(checkManifest(value, APP).problems.map((p) => p.code)).toEqual(['manifest-invalid'])
+    }
+  })
+
+  it('필수 필드가 없으면 각각 field-missing', () => {
+    const result = checkManifest({}, APP)
+    expect(result.manifest).toBeUndefined()
+    expect(result.problems).toEqual(
+      ['id', 'name', 'description', 'version', 'entry'].map((field) => ({ code: 'field-missing', params: { field } })),
+    )
+  })
+
+  it.each(['ab', 'My-Ext', 'my_ext', 'a'.repeat(41), 'my ext', 'ünï'])('id 형식 위반: %s', (id) => {
+    expect(checkManifest({ ...valid, id }, APP).problems).toEqual([{ code: 'id-invalid', params: { value: id } }])
+  })
+
+  it('id 3자·40자 경계는 통과', () => {
+    expect(checkManifest({ ...valid, id: 'a-1' }, APP).problems).toEqual([])
+    expect(checkManifest({ ...valid, id: 'a'.repeat(40) }, APP).problems).toEqual([])
+  })
+
+  it('기존 기능 id(FEATURES)와 같으면 id-reserved', () => {
+    expect(checkManifest({ ...valid, id: 'git' }, APP).problems).toEqual([{ code: 'id-reserved', params: { value: 'git' } }])
+  })
+
+  it('name·description 은 비지 않은 문자열이고 길이 상한이 있다', () => {
+    expect(checkManifest({ ...valid, name: '  ' }, APP).problems).toEqual([{ code: 'text-invalid', params: { field: 'name', max: 80 } }])
+    expect(checkManifest({ ...valid, description: 'x'.repeat(301) }, APP).problems).toEqual([
+      { code: 'text-invalid', params: { field: 'description', max: 300 } },
+    ])
+    expect(checkManifest({ ...valid, name: 3 }, APP).problems.map((p) => p.code)).toEqual(['text-invalid'])
+  })
+
+  it.each(['1.0', 'v1.0.0', '01.0.0', '1.0.0-', '1.0.0.0', 'latest'])('잘못된 semver: %s', (version) => {
+    expect(checkManifest({ ...valid, version }, APP).problems).toEqual([{ code: 'version-invalid', params: { field: 'version', value: version } }])
+  })
+
+  it('prerelease·build 가 붙은 semver 는 통과', () => {
+    expect(checkManifest({ ...valid, version: '1.0.0-beta.2+build.7' }, APP).problems).toEqual([])
+  })
+
+  it('litecode(최소 앱 버전)가 semver 가 아니면 version-invalid, 앱보다 높으면 app-too-old', () => {
+    expect(checkManifest({ ...valid, litecode: '>=1.0' }, APP).problems).toEqual([
+      { code: 'version-invalid', params: { field: 'litecode', value: '>=1.0' } },
+    ])
+    expect(checkManifest({ ...valid, litecode: '1.5.0' }, APP).problems).toEqual([
+      { code: 'app-too-old', params: { required: '1.5.0', current: APP } },
+    ])
+    expect(checkManifest({ ...valid, litecode: APP }, APP).problems).toEqual([])
+  })
+
+  it.each(['../index.js', '/abs/index.js', 'C:/index.js', 'C:\\index.js', 'lib\\..\\..\\x.js', 'a/../../x.js', '', './index.js', 'lib/', 'a\0b.js'])(
+    'entry 경로 위반: %j',
+    (entry) => {
+      expect(checkManifest({ ...valid, entry }, APP).problems).toEqual([{ code: 'entry-invalid', params: { value: entry } }])
+    },
+  )
+
+  it('하위 폴더의 entry 는 통과', () => {
+    expect(checkManifest({ ...valid, entry: 'dist/main.js' }, APP).problems).toEqual([])
+  })
+
+  it('permissions 는 문자열 배열이어야 한다', () => {
+    for (const permissions of ['fs', [1], [''], { a: 1 }]) {
+      expect(checkManifest({ ...valid, permissions }, APP).problems).toEqual([{ code: 'permissions-invalid', params: {} }])
+    }
+    expect(checkManifest({ ...valid, permissions: [] }, APP).problems).toEqual([])
+  })
+
+  it('모르는 필드는 거절하고, 비슷한 이름이 있으면 suggestion 을 싣는다', () => {
+    expect(checkManifest({ ...valid, permisions: ['x'] }, APP).problems).toEqual([
+      { code: 'field-unknown', params: { field: 'permisions', suggestion: 'permissions' } },
+    ])
+    expect(checkManifest({ ...valid, Version: '1.0.0' }, APP).problems).toEqual([
+      { code: 'field-unknown', params: { field: 'Version', suggestion: 'version' } },
+    ])
+    expect(checkManifest({ ...valid, homepage: 'x' }, APP).problems).toEqual([{ code: 'field-unknown', params: { field: 'homepage' } }])
+  })
+
+  it('여러 사유를 한 번에 모은다', () => {
+    const result = checkManifest({ id: 'Bad', name: '', version: '1', entry: '../x', permisions: [] }, APP)
+    expect(result.manifest).toBeUndefined()
+    expect(result.problems.map((p) => p.code)).toEqual(['field-unknown', 'id-invalid', 'text-invalid', 'field-missing', 'version-invalid', 'entry-invalid'])
+  })
+})
+
+describe('compareVersions', () => {
+  it.each([
+    ['1.0.0', '1.0.0', 0],
+    ['1.0.1', '1.0.0', 1],
+    ['1.2.0', '1.10.0', -1],
+    ['2.0.0', '1.99.99', 1],
+    ['1.0.0-alpha', '1.0.0', -1],
+    ['1.0.0-alpha', '1.0.0-alpha.1', -1],
+    ['1.0.0-alpha.1', '1.0.0-alpha.beta', -1],
+    ['1.0.0-beta.2', '1.0.0-beta.11', -1],
+    ['1.0.0-rc.1', '1.0.0-beta.11', 1],
+    ['1.0.0+build.1', '1.0.0+build.2', 0],
+  ] as const)('%s vs %s → %i', (a, b, expected) => {
+    expect(Math.sign(compareVersions(a, b))).toBe(expected)
+    expect(Math.sign(compareVersions(b, a))).toBe(expected === 0 ? 0 : -expected)
+  })
+})
