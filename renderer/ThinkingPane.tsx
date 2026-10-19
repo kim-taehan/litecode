@@ -11,21 +11,15 @@ export function thinkingLabel(t: Translate, value: Thinking): string {
   return t(`model.thinking.${value}` as const)
 }
 
-/** 닫힌 칩 전구의 모양 (이슈 #503 시안) — 색에만 기대지 않게 모양으로 나눈다 */
-export function bulbShape(value: Thinking): 'outline' | 'filled' | 'slashed' {
-  return value === 'on' ? 'filled' : value === 'off' ? 'slashed' : 'outline'
-}
-
-/** 닫힌 칩의 Thinking 전구 (16px, aria-hidden — 값은 트리거의 aria-label·title 이 읽힌다). 색은 styles.css 의 --{value} 변형 */
-export function ThinkingBulb({ value }: { value: Thinking }) {
-  const shape = bulbShape(value)
+/** 닫힌 칩의 Thinking 켬 표시 — 채운 전구 하나(13px, aria-hidden — 값은 트리거의 aria-label·title 이 읽힌다). 디폴트·끔일 때는 그리지 않는다 (이슈 #505) */
+export function ThinkingBulb() {
   return (
     <svg
-      className={`model-select__bulb model-select__bulb--${value}`}
-      width="16"
-      height="16"
+      className="model-select__bulb"
+      width="13"
+      height="13"
       viewBox="0 0 24 24"
-      fill={shape === 'filled' ? 'currentColor' : 'none'}
+      fill="currentColor"
       stroke="currentColor"
       strokeWidth="1.8"
       strokeLinecap="round"
@@ -33,7 +27,6 @@ export function ThinkingBulb({ value }: { value: Thinking }) {
       aria-hidden="true"
     >
       <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z" />
-      {shape === 'slashed' && <path className="model-select__bulb-slash" d="M3.5 3.5l17 17" />}
     </svg>
   )
 }
