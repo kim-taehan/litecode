@@ -14,6 +14,7 @@ import type { ToolCaller } from '../../src/services/toolCalls.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { MESSAGE_MAX, MAX_SENDS_PER_TURN, NEW_CONVERSATION_TOOL } from '../../shared/delegation.ts'
 import { TITLE_MAX } from '../../shared/chat.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 import type { Attention, Conversation } from '../../shared/contract.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
 
@@ -79,7 +80,7 @@ class FakeProviders extends Service {
     super(ctx, 'providers')
   }
   get(id: string) {
-    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }] } : undefined
+    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3', thinkingOff: true }] } : undefined
   }
 }
 
@@ -264,6 +265,22 @@ describe('new_conversation', () => {
     calledBy(turn)
     await expect(call({ title: 'x', message: 'y' })).rejects.toThrow('no conversation in this project with a usable model')
     expect((await ctx.sessions.list())).toHaveLength(1)
+  })
+
+  // 이슈 #497: 대화는 모델을 내부 키로 가리킨다 — 사고 끔 항목은 접미 키로만 쓸 수 있고 id 로는 못 쓴다
+  it('사고 끔 항목은 내부 키면 쓸 수 있고, id 만으로는 못 쓴다', async () => {
+    const { call, sessions, say, calledBy } = await start()
+    const key = engineModelId({ id: 'm3', thinkingOff: true })
+    const turn = await say(A, '주문 화면', { model: { providerId: 'gw', modelId: key } })
+    calledBy(turn)
+    expect(await createdOf(await call({ title: '키', message: 'y' }), sessions)).toMatchObject({ model: { providerId: 'gw', modelId: key } })
+  })
+
+  it('사고 끔 항목의 id 만 가리키는 대화는 쓸 수 있는 모델이 아니다', async () => {
+    const { call, say, calledBy } = await start()
+    const turn = await say(A, '주문 화면', { model: { providerId: 'gw', modelId: 'm3' } })
+    calledBy(turn)
+    await expect(call({ title: 'x', message: 'y' })).rejects.toThrow('no conversation in this project with a usable model')
   })
 
   it('한 턴에 만들 수 있는 새 대화 수는 보내기와 함께 5', async () => {

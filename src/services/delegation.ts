@@ -1,4 +1,5 @@
 import { Context, Service } from 'cordis'
+import { engineModelId } from '../../shared/engineModelId.ts'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { realDirectory } from './projectPath.ts'
@@ -118,7 +119,7 @@ export class DelegationService extends Service {
       if ((await realDirectory(picked.project)) !== (await realDirectory(target.project.path))) throw new Error('The conversation the user chose belongs to a different project.')
       to = picked
     }
-    if (!to.model || !this.ctx.providers.get(to.model.providerId)?.models.some((model) => model.id === to.model!.modelId)) {
+    if (!to.model || !this.ctx.providers.get(to.model.providerId)?.models.some((model) => engineModelId(model) === to.model!.modelId)) {
       throw new Error('Target conversation has no usable model.')
     }
     const waiting = this.ctx.chat.queued(to.id)
@@ -152,7 +153,7 @@ export class DelegationService extends Service {
       throw new Error(`Too many instructions sent in this turn (the limit is ${MAX_SENDS_PER_TURN}).`)
     }
     const usable = (entry: Conversation): entry is Conversation & { model: { providerId: string; modelId: string } } =>
-      !!entry.model && !!this.ctx.providers.get(entry.model.providerId)?.models.some((model) => model.id === entry.model!.modelId)
+      !!entry.model && !!this.ctx.providers.get(entry.model.providerId)?.models.some((model) => engineModelId(model) === entry.model!.modelId)
     const real = await realDirectory(target.project.path)
     const all = await this.ctx.sessions.list()
     const reals = new Map<string, string>()

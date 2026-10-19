@@ -11,6 +11,7 @@ import { tr } from '../../src/i18n.ts'
 import type { Attention, AttentionAnswer, HistoryMessage, ShellCard, TurnItem } from '../../shared/contract.ts'
 import { SNAPSHOT_DETAIL_MAX, SNAPSHOT_TEXT_MAX, type ConversationSnapshot, type Hello, type PairRejected, type RemoteConversation, type RemoteModel } from '../../shared/remote.ts'
 import { MODEL, box, parseFrames, setUp, start, tearDown, until } from './support/remoteHarness.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 
 // ctx.remote — 모바일이 붙는 문 (이슈 #56, 설계 01t 2·3절). 서버는 진짜 HTTP(127.0.0.1 빈 포트)로 띄운다 (support/remoteHarness.ts).
 // 모바일 클라이언트 코어(폰 앱이 쓰는 그 코드)를 이 서버에 붙이는 테스트는 mobile/tests/desktop.test.ts 에 있다 — 루트 vitest 는
@@ -481,8 +482,19 @@ describe('REST', () => {
     expect(answer.body).toEqual([
       { providerId: 'gw', providerName: 'Gateway', modelId: 'm1', displayName: 'Model One' },
       { providerId: 'gw', providerName: 'Gateway', modelId: 'm2', displayName: 'm2' },
+      // 같은 id 의 사고 끔 항목은 내부 키로 (#497) — 폰은 키를 그대로 돌려준다
+      { providerId: 'gw', providerName: 'Gateway', modelId: engineModelId({ id: 'm1', thinkingOff: true }), displayName: 'Model One off' },
     ])
     expect(JSON.stringify(answer.body)).not.toContain('secret.example')
+  })
+
+  it('새 대화 — 사고 끔 항목은 내부 키로 고른다 (#497)', async () => {
+    const { api, pair } = await start()
+    const { token } = await pair()
+    const model = { providerId: 'gw', modelId: engineModelId({ id: 'm1', thinkingOff: true }) }
+    const created = await api<RemoteConversation>('POST', '/v1/conversations', { token, body: { project, model } })
+    expect(created.status).toBe(200)
+    expect(created.body).toMatchObject({ model })
   })
 
   it('새 대화 — 등록된 프로젝트에만, full 모드는 거절. 첫 메시지를 보내기 전에는 저장하지 않는다', async () => {

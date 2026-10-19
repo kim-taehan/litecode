@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import type { ProviderSummary } from '../shared/ipc.ts'
 import { focusComposerInput } from './composerFocus.ts'
 import { findModel, type ModelRef } from './modelChoice.ts'
+import { engineModelId } from '../shared/engineModelId.ts'
 import { useT } from './settingsStore.ts'
 
 interface ModelSelectProps {
@@ -96,22 +97,20 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
               <div key={provider.id} role="group" aria-label={provider.displayName}>
                 <div className="model-menu__label">{provider.displayName}</div>
                 {provider.models.map((model) => {
-                  // 라벨(findModel)과 같은 항목에 체크 — findModel 은 thinkingOff 없이 id 로 첫 매칭하므로,
-                  // thinkingOff 로만 비교하면 라벨과 체크가 어긋난다 (모델이 사고 켬·끔 둘로 나뉘어 있을 때)
+                  // 선택은 내부 키 하나 — 같은 id 의 사고 켬·끔 두 항목도 키가 달라 라벨(findModel)과 체크가 같은 항목을 가리킨다 (이슈 #497)
+                  const key = engineModelId(model)
                   const selected = current?.provider.id === provider.id && current?.model === model
                   return (
                     <button
-                      key={`${model.id}:${model.thinkingOff ? 1 : 0}`}
+                      key={key}
                       type="button"
                       role="menuitemradio"
                       className="model-menu__item"
                       aria-checked={selected}
                       title={model.thinkingOff ? t('models.thinkingOffTitle') : model.id}
                       onClick={() => {
-                        const changed = provider.id !== value?.providerId || model.id !== value.modelId || (model.thinkingOff ?? false) !== (value?.thinkingOff ?? false)
-                        // 사고 켜진 모델은 thinkingOff: false 를 명시 — 안 그러면 저장값에 thinkingOff 가 없어
-                        // findModel 이 thinkingOff:undefined 로 id 첫 매칭(=사고 끄기)을 고른다 (이슈: thinking 선택이 사고 끄기로 되돌림)
-                        onChange({ providerId: provider.id, modelId: model.id, thinkingOff: model.thinkingOff === true })
+                        const changed = provider.id !== value?.providerId || key !== value.modelId
+                        onChange({ providerId: provider.id, modelId: key })
                         close()
                         if (!changed) return
                         setToast(t('model.changed', { name: model.displayName }))

@@ -3,6 +3,9 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { tr } from '../../src/i18n.ts'
 import { startKeyProxy, type KeyProxy, type ProxyTarget } from '../../src/services/keyProxy.ts'
+import { proxyTarget } from '../../src/services/engine.ts'
+import type { ProviderConfig } from '../../src/services/providers.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 
 // 키 프록시 단위 테스트 — 외부 프로세스 없이 이 프로세스 안의 127.0.0.1 서버끼리만 돈다.
 // 스트리밍·401·키 전달의 실물 확인은 tests/live/engine.live.test.ts.
@@ -200,83 +203,54 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
     expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
   })
 
-  // 같은 id 는 사고 켬·끔 두 항목으로 중복될 수 있다 — 프록시는 id 기준으로 사고 끄기만 적용한다
-  describe('id 중복', () => {
-    const addToBody = (model: string) => (model === 'qwen' ? { chat_template_kwargs: { enable_thinking: false } } : undefined)
+  // 이슈 #497 (시안 E): 같은 게이트웨이 id 의 사고 켬·끔 두 항목 — 엔진은 내부 키(engineModelId)를 보내고, 프록시가 설정(proxyTarget)으로
+  // 그 키의 항목을 찾아 게이트웨이 이름(id)으로 바꾸고 사고 끔이면 enable_thinking=false 를 싣는다 (값 찾기는 바꾸기 전 키로)
+  describe('내부 키 → 게이트웨이 id (이슈 #497)', () => {
+    const gateway = (baseURL: string): ProviderConfig => ({
+      id: 'gw',
+      displayName: 'GW',
+      baseURL,
+      protocol: 'openai-chat-completions',
+      models: [
+        { id: 'qwen', displayName: 'Q' },
+        { id: 'qwen', displayName: 'Q off', thinkingOff: true },
+      ],
+    })
+    const off = engineModelId({ id: 'qwen', thinkingOff: true })
 
-    it('같은 id 의 사고 끄기 값만 싣고 model id 는 그대로, content-length 를 다시 센다', async () => {
+    it('사고 끔 키는 실제 id 로 바꾸고 enable_thinking=false 를 싣는다 (content-length 다시 셈)', async () => {
       const seen: Seen[] = []
       const baseURL = await echoUpstream(seen)
-      proxy = await startKeyProxy(() => ({ baseURL, addToBody }))
+      proxy = await startKeyProxy(() => proxyTarget(gateway(baseURL), undefined))
 
-      await send('/chat/completions', JSON.stringify({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }] }))
+      await send('/chat/completions', JSON.stringify({ model: off, messages: [{ role: 'user', content: '안녕' }] }))
       expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }], chat_template_kwargs: { enable_thinking: false } })
       expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
     })
 
-    it('다른 model id·다른 경로·비 JSON·깨진 본문은 바이트 그대로', async () => {
+    it('사고 켬 키(=id)는 바이트 그대로', async () => {
       const seen: Seen[] = []
       const baseURL = await echoUpstream(seen)
-      proxy = await startKeyProxy(() => ({ baseURL, addToBody }))
-      const other = JSON.stringify({ model: 'llama', messages: [] })
-      const elsewhere = JSON.stringify({ model: 'qwen', input: 'x' })
-      const broken = '{"model":"qwen",'
-      const text = 'model=qwen'
+      proxy = await startKeyProxy(() => proxyTarget(gateway(baseURL), undefined))
+      const on = JSON.stringify({ model: 'qwen', messages: [] })
 
-      await send('/chat/completions', other)
-      await send('/embeddings', elsewhere)
-      await send('/chat/completions', broken)
-      await send('/chat/completions', text, 'text/plain')
-      expect(seen.map((entry) => entry.body)).toEqual([other, elsewhere, broken, text])
-      for (const entry of seen) expect(Number(entry.contentLength)).toBe(Buffer.byteLength(entry.body))
-    })
-  })
-
-  // 사고 끔 항목은 유일한 id(예: qwen-off) — 프록시가 upstreamId(실제 이름)로 바꾸고 사고 끄기도 싣는다 (이슈 #491)
-  describe('별칭 변환 (upstreamId)', () => {
-    const rename = (model: string) => (model === 'qwen-off' ? 'qwen' : model)
-    const addToBody = (model: string) => (model === 'qwen-off' ? { chat_template_kwargs: { enable_thinking: false } } : undefined)
-
-    it('별칭만 있어도(addToBody 없음) 본문을 모아 model 을 바꾸고 content-length 를 다시 센다', async () => {
-      const seen: Seen[] = []
-      const baseURL = await echoUpstream(seen)
-      proxy = await startKeyProxy(() => ({ baseURL, renameModel: rename }))
-
-      await send('/chat/completions', JSON.stringify({ model: 'qwen-off', messages: [{ role: 'user', content: '안녕' }] }))
-      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }] })
-      expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
+      await send('/chat/completions', on)
+      expect(seen[0]!.body).toBe(on)
     })
 
-    it('별칭만 있을 때 다른 경로·비 JSON·깨진 본문은 바이트 그대로', async () => {
+    it('다른 경로·비 JSON·깨진 본문은 바이트 그대로 (content-length 도 맞다)', async () => {
       const seen: Seen[] = []
       const baseURL = await echoUpstream(seen)
-      proxy = await startKeyProxy(() => ({ baseURL, renameModel: rename }))
-      const elsewhere = JSON.stringify({ model: 'qwen-off', input: 'x' })
-      const broken = '{"model":"qwen-off",'
-      const text = 'model=qwen-off'
+      proxy = await startKeyProxy(() => proxyTarget(gateway(baseURL), undefined))
+      const elsewhere = JSON.stringify({ model: off, input: 'x' })
+      const broken = `{"model":"${off}",`
+      const text = `model=${off}`
 
       await send('/embeddings', elsewhere)
       await send('/chat/completions', broken)
       await send('/chat/completions', text, 'text/plain')
       expect(seen.map((entry) => entry.body)).toEqual([elsewhere, broken, text])
-    })
-
-    it('가상 id 요청은 실제 id 로 변환되고 enable_thinking=false 도 함께 싣는다 (변환 전 id 로 사고 끄기 판정)', async () => {
-      const seen: Seen[] = []
-      const baseURL = await echoUpstream(seen)
-      proxy = await startKeyProxy(() => ({ baseURL, addToBody, renameModel: rename }))
-
-      await send('/chat/completions', JSON.stringify({ model: 'qwen-off', messages: [] }))
-      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [], chat_template_kwargs: { enable_thinking: false } })
-    })
-
-    it('실제 id 로 오는 사고 켜진 요청은 그대로 (변환도 추가도 없음)', async () => {
-      const seen: Seen[] = []
-      const baseURL = await echoUpstream(seen)
-      proxy = await startKeyProxy(() => ({ baseURL, addToBody, renameModel: rename }))
-      const on = JSON.stringify({ model: 'qwen', messages: [] })
-      await send('/chat/completions', on)
-      expect(seen[0]!.body).toBe(on)
+      for (const entry of seen) expect(Number(entry.contentLength)).toBe(Buffer.byteLength(entry.body))
     })
   })
 })

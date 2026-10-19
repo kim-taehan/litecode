@@ -11,6 +11,7 @@ import { setMainLanguage, tr } from '../../src/i18n.ts'
 import type { Attention, AttentionAnswer, Subtask, TurnItem, TurnUsage } from '../../shared/contract.ts'
 import { MAX_RUNNING_TASKS, MAX_TASKS, TASK_STALL_TIMEOUT_MS, TASK_START_TOOL, TASK_STATUS_TOOL } from '../../shared/tasks.ts'
 import type { ChatEventMap, QueuedSend } from '../../shared/chat.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 
 // ctx.chat — 대화별 턴 소유 (이슈 #52). 원래 화면(App.tsx send·useSendQueue)이 하던 규칙을 그대로 지킨다: 턴 중 보내기는 대기열,
 // 턴 끝(실패·중단 포함)에 합쳐 한 턴, 멈춘 턴은 대기열을 붙잡음, 첫 메시지로 제목, 보낸 모델·모드에 묶기, 통계 합산, `/` 명령의 보일 글.
@@ -115,7 +116,7 @@ class FakeProviders extends Service {
     super(ctx, 'providers')
   }
   get(id: string) {
-    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }] } : undefined
+    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }, { id: 'm1', thinkingOff: true, imageInput: true }] } : undefined
   }
 }
 
@@ -181,6 +182,15 @@ async function until(done: () => boolean): Promise<void> {
 }
 
 const input = (text: string, patch: Partial<QueuedSend> = {}): QueuedSend => ({ project: '/work/a', text, model: MODEL, mode: 'build', ...patch })
+
+// 이슈 #497: 대화의 모델은 내부 키 — 같은 id 의 사고 켬·끔 두 항목은 키로 가린다 (이미지 입력은 사고 끔 항목만 켬)
+describe('ChatService — acceptsImages 는 내부 키로 항목을 찾는다', () => {
+  it('사고 끔 키는 사고 끔 항목, id 는 사고 켬 항목', async () => {
+    const { chat } = await start()
+    expect(chat.acceptsImages({ providerId: 'gw', modelId: engineModelId({ id: 'm1', thinkingOff: true }) })).toBe(true)
+    expect(chat.acceptsImages({ providerId: 'gw', modelId: 'm1' })).toBe(false)
+  })
+})
 
 describe('ChatService — 보내기와 턴 끝 처리', () => {
   it('첫 메시지: 대화를 저장하고(제목 = 첫 줄, 모델·모드에 묶음) 내 말과 함께 턴 시작을 알린 뒤 바로 돌아온다 — 답은 턴 끝 이벤트로', async () => {
