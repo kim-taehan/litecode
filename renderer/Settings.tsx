@@ -421,6 +421,29 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
               ×
             </button>
           </div>
+          {/* 실제 모델 이름(이슈 #485 시안 D) — 값이 있거나 펼쳤으면(빈 문자열) 윗줄 아래 한 줄. × 는 값을 지우고 접는다 */}
+          {model.upstreamId !== undefined && (
+            <div className="model-card__alias">
+              <span className="model-card__alias-label">{t('models.upstreamIdLabel')}</span>
+              <input
+                className="settings-input model-card__id"
+                aria-label={t('models.upstreamId', { n: index + 1 })}
+                placeholder={t('models.upstreamIdPlaceholder')}
+                value={model.upstreamId}
+                disabled={busy}
+                onChange={(event) => setModel(index, { upstreamId: event.target.value })}
+              />
+              <button
+                type="button"
+                className="settings-icon-button"
+                aria-label={t('models.upstreamIdClear', { n: index + 1 })}
+                disabled={busy}
+                onClick={() => setModel(index, { upstreamId: undefined })}
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div className="model-card__row">
             {/* opencode 는 custom 모델의 한도를 모른다 — 적으면 엔진에 넘기고 입력창 통계 줄의 컨텍스트 % 가 보인다 (비우면 "—") */}
             <input
@@ -448,6 +471,17 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
               disabled={busy}
               onChange={(event) => setModel(index, { maxOutput: event.target.value === '' ? undefined : Number(event.target.value) })}
             />
+            {model.upstreamId === undefined && (
+              <button
+                type="button"
+                className="model-card__alias-add"
+                aria-label={t('models.upstreamIdAdd', { n: index + 1 })}
+                disabled={busy}
+                onClick={() => setModel(index, { upstreamId: '' })}
+              >
+                {t('models.upstreamIdAddLabel')}
+              </button>
+            )}
             <div className="model-card__toggles">
               {/* 이미지 입력 — 켠 모델만 엔진이 이미지를 받는 모델로 알린다 (이슈 #44, 01y: 이 표시 없이는 붙인 이미지가 오류 글로 바뀐다). 기본 꺼짐 */}
               <ModelToggle
@@ -471,6 +505,9 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
           </div>
         </div>
       ))}
+      <p className="context-length-hint">
+        <strong className="context-length-hint__term">{t('models.upstreamIdLabel')}</strong> — {t('models.upstreamIdHint')}
+      </p>
       <p className="context-length-hint">
         <strong className="context-length-hint__term">{t('models.thinkingOffLabel')}</strong> — {t('models.thinkingOffHint')}
       </p>
