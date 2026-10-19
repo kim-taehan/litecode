@@ -83,6 +83,43 @@ describe('inspectZip — 경로 (zip-slip)', () => {
   })
 })
 
+describe('inspectZip — Finder 로 만든 zip (이슈 #480)', () => {
+  const wrapped: ZipItem[] = [{ name: 'my-ext/' }, ...base.map((item) => ({ ...item, name: `my-ext/${item.name}` }))]
+  const finderJunk: ZipItem[] = [
+    { name: 'my-ext/.DS_Store', data: 'ds' },
+    { name: '__MACOSX/' },
+    { name: '__MACOSX/my-ext/' },
+    { name: '__MACOSX/my-ext/._extension.json', data: 'rsrc' },
+    { name: '__MACOSX/my-ext/._index.js', data: 'rsrc' },
+  ]
+
+  it('__MACOSX/ 와 .DS_Store 가 딸린 래퍼 폴더 zip 이 통과 — 항목 수·크기에서도 빠진다', async () => {
+    const result = await inspect([...wrapped, ...finderJunk])
+    expect(result.problems).toEqual([])
+    expect(result.manifest?.id).toBe('my-ext')
+    expect(result.files).toEqual({ count: 2, totalBytes: MANIFEST_BYTES + 'export default {}'.length })
+  })
+
+  it('최상위 모양 zip 의 .DS_Store·__MACOSX 도 무시 (중복 판정에서도 빠진다)', async () => {
+    const result = await inspect([...base, { name: '.DS_Store' }, { name: 'sub/.DS_Store' }, { name: '__MACOSX/._extension.json' }, { name: '__MACOSX/._index.js' }])
+    expect(result.problems).toEqual([])
+  })
+
+  it('__MACOSX 아래의 위험한 이름은 여전히 거절', async () => {
+    const result = await inspect([...base, { name: '__MACOSX/../x', data: 'x' }])
+    expect(result.problems).toEqual([{ code: 'unsafe-path', params: { path: '__MACOSX/../x', reason: 'parent' } }])
+  })
+
+  it('__MACOSX 아래의 심볼릭 링크도 여전히 거절', async () => {
+    expect(codes(await inspect([...base, { name: '__MACOSX/l', data: '/etc', mode: 0o120777 }]))).toEqual(['symlink'])
+  })
+
+  it('entry 가 무시되는 .DS_Store 를 가리키면 entry-missing (풀지 않는 파일이다)', async () => {
+    const manifest = JSON.stringify({ id: 'my-ext', name: 'n', description: 'd', version: '1.0.0', entry: '.DS_Store' })
+    expect(codes(await inspect([{ name: 'extension.json', data: manifest }, { name: '.DS_Store' }]))).toEqual(['entry-missing'])
+  })
+})
+
 describe('inspectZip — 상한', () => {
   const small = (over: Partial<ExtensionLimits>): ExtensionLimits => ({ ...EXTENSION_LIMITS, ...over })
 

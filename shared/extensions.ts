@@ -46,6 +46,8 @@ export type ExtensionProblem =
   | { code: 'entry-invalid'; params: { value: string } }
   | { code: 'permissions-invalid'; params: Record<string, never> }
   | { code: 'entry-missing'; params: { entry: string } }
+  // 설치된 폴더 (이슈 #480) — 폴더 이름과 extension.json 의 id 가 다르다
+  | { code: 'id-mismatch'; params: { folder: string; id: string } }
 
 /** zip 검사 결과 — problems 가 비면 통과. manifest 는 extension.json 자체가 맞을 때만 (zip 에 다른 사유가 있어도 미리보기로 보인다) */
 export interface ExtensionInspection {
@@ -54,3 +56,16 @@ export interface ExtensionInspection {
   files: { count: number; totalBytes: number }
   problems: ExtensionProblem[]
 }
+
+/** 보류 작업 (이슈 #480) — 다음 부팅 때 확장이 올라오기 전에 적용한다 */
+export type ExtensionPendingOp = { op: 'install'; id: string; version: string } | { op: 'remove'; id: string }
+
+/** 설치·삭제 요청이 실패한 사유. rejected 는 staging 복사본을 다시 검사해 걸린 것 */
+export type ExtensionStoreFailure =
+  | { code: 'token-unknown'; params: Record<string, never> }
+  | { code: 'rejected'; params: { problems: ExtensionProblem[] } }
+  | { code: 'unpack-failed'; params: { message: string } }
+  | { code: 'verify-failed'; params: { message: string } }
+  | { code: 'id-invalid'; params: { value: string } }
+  | { code: 'not-installed'; params: { id: string } }
+  | { code: 'io-failed'; params: { message: string } }
