@@ -71,3 +71,45 @@ export type ExtensionStoreFailure =
   | { code: 'id-invalid'; params: { value: string } }
   | { code: 'not-installed'; params: { id: string } }
   | { code: 'io-failed'; params: { message: string } }
+
+// --- ctx.extensions 와 화면 사이 (이슈 #482) ---
+
+/** settings.extensions — 확장 id → 켜짐. 기본(켜짐)과 다른 값(false)만 남긴다 (features 와 같은 규칙) */
+export type ExtensionSwitches = Record<string, boolean>
+
+/** off: 꺼졌거나 아직 설치 전(보류 설치만 있음) · mounting: 올리는 중 · on: 켜짐 · failed: 설치 폴더가 깨졌거나 올리지 못함 (reason) */
+export type ExtensionState = 'on' | 'off' | 'mounting' | 'failed'
+
+/** failed 의 사유 — 코드 + 변수 (문구는 화면이 i18n 키로 입힌다) */
+export type ExtensionFailedReason =
+  /** 설치 폴더의 extension.json·진입 파일이 맞지 않다 (부팅 때 다시 검증) */
+  | { code: 'invalid'; params: { problems: ExtensionProblem[] } }
+  /** mount 가 던졌다 — message 는 한 줄로 정리한 오류 (홈 경로 ~, 비밀 가림) */
+  | { code: 'mount-failed'; params: { message: string } }
+
+/** 확장 목록의 한 줄. name·description·version 은 extension.json 을 읽었을 때만 (깨진 폴더면 id 만) */
+export interface ExtensionSummary {
+  id: string
+  name?: string
+  description?: string
+  version?: string
+  /** settings.extensions 의 값 (없으면 켜짐) */
+  enabled: boolean
+  state: ExtensionState
+  reason?: ExtensionFailedReason
+  /** 다음 부팅에 적용될 보류 작업 — install: 새로 설치·업그레이드 대기, remove: 삭제 예정 */
+  pending?: 'install' | 'remove'
+}
+
+/** 설치 확인 카드의 미리보기 — problems 가 비면 통과(token 이 있다), 아니면 거절 카드 */
+export interface ExtensionPreview extends ExtensionInspection {
+  token?: string
+  /** 같은 id 가 이미 있으면 그 버전 (보류 설치가 있으면 그쪽) */
+  existing?: { version: string }
+}
+
+/** ctx.extensions 의 요청 결과 — 던지지 않는다. 실패 코드는 저장소의 것과 같다 (io-failed: 예상 못 한 파일·설정·대화상자 오류) */
+export type ExtensionResult<T extends object = object> = ({ ok: true } & T) | { ok: false; failure: ExtensionStoreFailure }
+/** pick — preview 가 없으면 대화상자를 취소했다 */
+export type ExtensionPickResult = ExtensionResult<{ preview?: ExtensionPreview }>
+export type ExtensionInstallResult = ExtensionResult<{ id: string; version: string }>

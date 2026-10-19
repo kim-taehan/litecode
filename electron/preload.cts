@@ -140,6 +140,13 @@ const Channel = {
   GIT_RUN: 'git:run',
   GIT_OPEN_REMOTE: 'git:open-remote',
   GIT_CHANGED: 'git:changed',
+  EXTENSIONS_LIST: 'extensions:list',
+  EXTENSIONS_PICK: 'extensions:pick',
+  EXTENSIONS_INSTALL: 'extensions:install',
+  EXTENSIONS_CANCEL: 'extensions:cancel',
+  EXTENSIONS_REMOVE: 'extensions:remove',
+  EXTENSIONS_SET_ENABLED: 'extensions:set-enabled',
+  EXTENSIONS_CHANGED: 'extensions:changed',
 } as const
 
 /** 경로 없는 이미지(붙여넣은 스크린숏)를 읽어 메인에 넘길 상한 — shared/attachments.ts 의 imageBytes 와 같아야 한다 (메인이 다시 본다) */
@@ -321,6 +328,13 @@ const bridge: LitecodeBridge = {
   gitRun: (directory, action) => ipcRenderer.invoke(Channel.GIT_RUN, directory, action),
   openGitRemote: (directory) => ipcRenderer.invoke(Channel.GIT_OPEN_REMOTE, directory),
   onGitChanged: (listener) => listen(Channel.GIT_CHANGED, listener),
+  listExtensions: () => ipcRenderer.invoke(Channel.EXTENSIONS_LIST),
+  pickExtension: () => ipcRenderer.invoke(Channel.EXTENSIONS_PICK),
+  installExtension: (token) => ipcRenderer.invoke(Channel.EXTENSIONS_INSTALL, token),
+  cancelExtension: (token) => ipcRenderer.invoke(Channel.EXTENSIONS_CANCEL, token),
+  removeExtension: (id) => ipcRenderer.invoke(Channel.EXTENSIONS_REMOVE, id),
+  setExtensionEnabled: (id, on) => ipcRenderer.invoke(Channel.EXTENSIONS_SET_ENABLED, id, on),
+  onExtensionsChanged: (listener) => listen(Channel.EXTENSIONS_CHANGED, listener),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)

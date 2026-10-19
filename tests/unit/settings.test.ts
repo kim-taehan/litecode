@@ -158,6 +158,36 @@ describe('알림 채널 자 스위치 (settings.notifyChannels, 이슈 #372)', (
   })
 })
 
+describe('확장 켜기 (settings.extensions, 이슈 #482)', () => {
+  it('없으면 undefined(모두 켜짐). 확장 id 형식의 키 → boolean 만 저장된다', async () => {
+    const { settings } = await service({ file })
+    expect(settings.get().extensions).toBeUndefined()
+    settings.set({ extensions: { 'my-ext': false } })
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).extensions).toEqual({ 'my-ext': false })
+    settings.set({ extensions: {} })
+    expect(settings.get().extensions).toEqual({})
+    expect(() => settings.set({ extensions: { 'my-ext': 'off' } as never })).toThrow()
+    expect(() => settings.set({ extensions: [false] as never })).toThrow()
+    expect(() => settings.set({ extensions: { 'My_Ext': false } })).toThrow()
+    expect(() => settings.set({ extensions: { '../x': false } })).toThrow()
+    expect(() => settings.set({ extensions: { ab: false } })).toThrow() // 3자 미만
+  })
+
+  it('파일을 손으로 고쳐 잘못된 값이면 그 값만 기본값으로 — 나머지 설정은 그대로', async () => {
+    await fs.writeFile(file, JSON.stringify({ language: 'ko', extensions: { 'my-ext': false, 'Bad Id': false } }))
+    const { settings } = await service({ file })
+    expect(settings.get()).toEqual({ language: 'ko', appearance: 'light', fontSize: 14, defaultMode: 'build' })
+  })
+
+  it('extensions 가 없는 옛 설정 파일은 그대로 읽히고, 저장해도 extensions 를 만들지 않는다', async () => {
+    await fs.writeFile(file, JSON.stringify({ language: 'ko', fontSize: 16, features: { git: true } }))
+    const { settings } = await service({ file })
+    expect(settings.get()).toEqual({ language: 'ko', appearance: 'light', fontSize: 16, defaultMode: 'build', features: { git: true } })
+    settings.set({ fontSize: 15 })
+    expect(JSON.parse(await fs.readFile(file, 'utf8'))).not.toHaveProperty('extensions')
+  })
+})
+
 describe('다른 앱에서 열기 기본 앱 (settings.openInApp)', () => {
   it('처음엔 없다(목록 첫 앱), 고르면 settings.json 에 남고 다시 읽힌다. 문자열이 아니면 거절', async () => {
     const { settings } = await service({ file })
