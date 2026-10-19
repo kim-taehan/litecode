@@ -132,10 +132,12 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   const liveRows = running
     ? items.filter((item): item is Extract<TurnItem, { kind: 'text' }> | Extract<TurnItem, { kind: 'compaction' }> => item.kind === 'compaction' || (item.kind === 'text' && item.text.trim() !== ''))
     : []
-  const foldable = !running && !failed && work.length > 0
+  // 진짜 실패만 작업 줄을 펼쳐 둔다. 중단(사용자 stop·엔진 재시작)은 failed 의 한 갈래지만 완료처럼 접힌다 (이슈 #516)
+  const unfolded = failed && !interrupted
+  const foldable = !running && !unfolded && work.length > 0
   const [open, setOpen] = useState(false)
   const t = useT()
-  const showWork = running || failed || open
+  const showWork = running || unfolded || open
   // 접힌 작업 줄도 대화 안 찾기(이슈 #79)에 걸리게 — 찾는 동안에는 숨긴 채 그려 두고, 일치가 그 안이면 펼친다 (ChatFind.tsx)
   const workFold = useFindFold(showWork, () => setOpen(true))
   /** 답의 마크다운 원문 — 그리는 글이자 "답 복사" 가 복사하는 글 */
