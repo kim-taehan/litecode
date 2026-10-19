@@ -1,6 +1,6 @@
 import zlib from 'node:zlib'
 
-// 테스트용 최소 zip 작성기 (확장 zip 검사, 이슈 #478) — 압축 없이(STORE) 쓴다. yazl 을 쓰지 않는 이유: yazl 은 `../x`·`/abs`·백슬래시 이름을
+// 테스트용 최소 zip 작성기 (확장 zip 검사, 이슈 #478) — 기본은 압축 없이(STORE) 쓴다(deflate·선언 크기 거짓은 항목 옵션, 이슈 #480). yazl 을 쓰지 않는 이유: yazl 은 `../x`·`/abs`·백슬래시 이름을
 // 쓰기 전에 거절해서 zip-slip 항목을 만들 수 없다. 여기서는 이름(바이트 그대로)·external attributes(심볼릭 링크)·Info-ZIP 유니코드 경로 필드를 직접 준다
 
 export interface ZipItem {
@@ -11,6 +11,10 @@ export interface ZipItem {
   mode?: number
   /** Info-ZIP Unicode Path Extra Field(0x7075)에 싣는 이름 — 풀 때 헤더 이름 대신 이것이 쓰인다 */
   unicodeName?: string
+  /** deflate(방식 8)로 압축해 싣는다 — 기본은 STORE (이슈 #480) */
+  deflate?: boolean
+  /** 헤더에 적을 해제 크기 — 실제 데이터와 다르게 적어 크기 거짓 zip 을 만든다. deflate 항목에만 (STORE 는 yauzl 이 목록 단계에서 거절한다) */
+  declaredSize?: number
 }
 
 export function makeZip(items: readonly ZipItem[]): Buffer {
@@ -21,6 +25,9 @@ export function makeZip(items: readonly ZipItem[]): Buffer {
     const name = Buffer.from(item.name, 'utf8')
     const data = Buffer.from(item.data ?? '', 'utf8')
     const crc = zlib.crc32(data)
+    const stored = item.deflate ? zlib.deflateRawSync(data) : data
+    const method = item.deflate ? 8 : 0
+    const size = item.declaredSize ?? data.length
     const mode = item.mode ?? (item.name.endsWith('/') ? 0o40755 : 0o100644)
     const extra = item.unicodeName === undefined ? Buffer.alloc(0) : unicodePathField(name, item.unicodeName)
 
@@ -28,30 +35,30 @@ export function makeZip(items: readonly ZipItem[]): Buffer {
     local.writeUInt32LE(0x04034b50, 0)
     local.writeUInt16LE(20, 4) // version needed
     local.writeUInt16LE(0x800, 6) // UTF-8 이름
-    local.writeUInt16LE(0, 8) // STORE
+    local.writeUInt16LE(method, 8)
     local.writeUInt32LE(crc, 14)
-    local.writeUInt32LE(data.length, 18)
-    local.writeUInt32LE(data.length, 22)
+    local.writeUInt32LE(stored.length, 18)
+    local.writeUInt32LE(size, 22)
     local.writeUInt16LE(name.length, 26)
     local.writeUInt16LE(extra.length, 28)
-    locals.push(local, name, extra, data)
+    locals.push(local, name, extra, stored)
 
     const central = Buffer.alloc(46)
     central.writeUInt32LE(0x02014b50, 0)
     central.writeUInt16LE((3 << 8) | 20, 4) // made by: unix
     central.writeUInt16LE(20, 6)
     central.writeUInt16LE(0x800, 8)
-    central.writeUInt16LE(0, 10)
+    central.writeUInt16LE(method, 10)
     central.writeUInt32LE(crc, 16)
-    central.writeUInt32LE(data.length, 20)
-    central.writeUInt32LE(data.length, 24)
+    central.writeUInt32LE(stored.length, 20)
+    central.writeUInt32LE(size, 24)
     central.writeUInt16LE(name.length, 28)
     central.writeUInt16LE(extra.length, 30)
     central.writeUInt32LE((mode << 16) >>> 0, 38)
     central.writeUInt32LE(offset, 42)
     centrals.push(central, name, extra)
 
-    offset += local.length + name.length + extra.length + data.length
+    offset += local.length + name.length + extra.length + stored.length
   }
   const directory = Buffer.concat(centrals)
   const end = Buffer.alloc(22)

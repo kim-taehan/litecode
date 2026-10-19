@@ -18,7 +18,8 @@ import { inspectZip } from './zipInspect.ts'
 //   installed/<id>/          풀린 확장
 //   pending/ops.json         보류 작업 목록 (id 마다 하나 — 뒤 작업이 앞 작업을 바꾼다)
 //   pending/install/<id>/    풀어 둔 새 버전
-//   staging/<token>.zip      고른 zip 의 앱 안 복사본
+//   staging/<token>.zip      고른 zip 의 앱 안 복사본 — stage 는 이 복사본을 검사한다(확인 카드에 보인 것 = 설치되는 것)
+//   staging/<token>.json     stage 때 본 { id, version } — install 이 다시 검사한 결과와 다르면 거절한다
 //
 // 실행 중인 확장 파일은 건드리지 않는다 — 교체는 applyPending(부팅 때, 확장이 올라오기 전) 한 곳에서만. 교체는 모두 루트 안의 rename 이다
 // (같은 볼륨 — 복사·이동이 아니라 원자적이고, Windows 에서도 폴더 rename 은 안의 파일이 열려 있지 않으면 된다. 부팅 전이라 열려 있지 않다).
@@ -28,11 +29,17 @@ import { inspectZip } from './zipInspect.ts'
 //   2) 가 실패하면 1) 을 되돌린다. 어느 지점에서 죽어도 다음 부팅의 복구가 맞춘다 — `.old-<id>-*` 가 있는데 installed/<id> 가 없으면
 //   1)~2) 사이에서 죽은 것(가장 최근 .old 를 되돌린다), 있으면 2)~3) 사이(.old 를 지운다). ops.json 은 모든 작업이 끝난 뒤에 비우므로
 //   죽은 부팅의 작업은 다음 부팅에 다시 적용된다. pending/install/<id> 가 이미 옮겨져 없는데 installed/<id> 가 그 op 의 버전이면 끝난 작업으로 본다.
+// 삭제는 installed/<id> → installed/.del-<id>-<시각> 후 지운다. 이름이 .old 와 달라 복구가 되돌리지 않고 마저 지운다 — 지우다 실패한 반쪽 폴더가
+// 다음 부팅에 "설치된 확장" 으로 되살아나지 않게 (이슈 #480 QA).
+//
+// 한 저장소의 stage·cancel·install·remove·applyPending 은 한 줄(직렬 큐)로 선다 — ops.json 읽기~쓰기 사이의 await 에 다른 호출이 끼어
+// 서로의 op 를 덮거나, 부팅 청소가 막 풀어 둔 보류를 지우지 않게. 읽기 전용(listInstalled·pendingState)은 줄에 서지 않는다.
 //
 // 부팅 경로(applyPending·listInstalled·pendingState)는 던지지 않는다 (CLAUDE.md 함정 4). install·remove 는 실패를 구조화된 사유로 돌려준다
 
 const TOKEN = /^[0-9a-f]{32}$/
 const OLD = /^\.old-([a-z0-9-]{3,40})-(\d+)$/
+const DELETING = /^\.del-[a-z0-9-]{3,40}-\d+$/
 const TEMP_MARK = '.tmp-'
 
 export interface StageResult {
@@ -62,6 +69,7 @@ export interface InstalledExtension {
 
 export class ExtensionStore {
   private readonly root: string
+  private queue: Promise<unknown> = Promise.resolve()
 
   constructor(root: string) {
     this.root = path.resolve(root)
@@ -82,30 +90,99 @@ export class ExtensionStore {
   private stagedZip(token: string) {
     return path.join(this.stagingDir, `${token}.zip`)
   }
+  private stagedMeta(token: string) {
+    return path.join(this.stagingDir, `${token}.json`)
+  }
 
-  /** 검사하고, 통과하면 zip 을 staging 에 복사해 token 을 준다. 사유가 있으면 아무것도 만들지 않는다 */
-  async stage(zipPath: string, appVersion: string): Promise<StageResult> {
-    const result = await inspectZip(zipPath, appVersion)
-    if (result.problems.length > 0 || !result.manifest) return { result }
+  /** 앞선 호출이 끝난 뒤에 돈다 (앞 호출의 실패와 상관없이) */
+  private serial<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task, task)
+    this.queue = run.catch(() => {})
+    return run
+  }
+
+  /** zip 을 staging 에 복사하고 그 복사본을 검사한다. 통과하면 token 을 주고, 사유가 있으면 복사본을 지운다 */
+  stage(zipPath: string, appVersion: string): Promise<StageResult> {
+    return this.serial(() => this.stageNow(zipPath, appVersion))
+  }
+
+  /** 복사본과 기록을 지운다 */
+  cancel(token: string): Promise<void> {
+    return this.serial(async () => {
+      if (TOKEN.test(token)) await this.removeStaged(token)
+    })
+  }
+
+  /** staging 복사본을 다시 검사하고 pending/install/<id> 에 풀어 op 를 기록한다. 성공·실패와 상관없이 staging 복사본은 지운다(token 은 한 번 쓴다) */
+  install(token: string, appVersion: string): Promise<InstallResult> {
+    return this.serial(async () => {
+      if (!TOKEN.test(token)) return failure('token-unknown', {})
+      try {
+        return await this.installStaged(token, appVersion)
+      } finally {
+        await this.removeStaged(token)
+      }
+    })
+  }
+
+  /** 설치된 것은 remove op 를 기록하고(같은 id 의 보류 설치는 버린다), 보류 설치만 있으면 그 보류를 취소한다 */
+  remove(id: string): Promise<RemoveResult> {
+    return this.serial(() => this.removeNow(id))
+  }
+
+  /** 부팅 때 확장이 올라오기 전에 한 번 — 비정상 종료 복구 → id 별 마지막 op 적용 → ops 비우기 → 남은 임시물 청소. 던지지 않는다 */
+  applyPending(): Promise<ApplyResult> {
+    return this.serial(() => this.applyPendingNow())
+  }
+
+  private async stageNow(zipPath: string, appVersion: string): Promise<StageResult> {
     const token = randomBytes(16).toString('hex')
-    await fs.mkdir(this.stagingDir, { recursive: true })
-    await fs.copyFile(zipPath, this.stagedZip(token))
+    const copy = this.stagedZip(token)
+    let result: ExtensionInspection
+    try {
+      await fs.mkdir(this.stagingDir, { recursive: true })
+      await fs.copyFile(zipPath, copy)
+      result = await inspectZip(copy, appVersion)
+      if (result.problems.length > 0 || !result.manifest) {
+        await fs.rm(copy, { force: true })
+        return { result }
+      }
+      writeJsonFileSync(this.stagedMeta(token), { id: result.manifest.id, version: result.manifest.version })
+    } catch (error) {
+      await this.removeStaged(token)
+      throw error
+    }
     const version = this.pendingInstallVersion(result.manifest.id) ?? (await installedVersion(path.join(this.installedDir, result.manifest.id)))
     return version === undefined ? { token, result } : { token, result, existing: { version } }
   }
 
-  async cancel(token: string): Promise<void> {
-    if (TOKEN.test(token)) await fs.rm(this.stagedZip(token), { force: true })
+  private async removeStaged(token: string): Promise<void> {
+    for (const file of [this.stagedZip(token), this.stagedMeta(token)]) {
+      await fs.rm(file, { force: true }).catch((error: unknown) => console.warn(`[extensions] staging 을 지우지 못했다: ${messageOf(error)}`))
+    }
   }
 
-  /** staging 복사본을 다시 검사하고 pending/install/<id> 에 풀어 op 를 기록한다. 실패해도 staging 은 남긴다(cancel·다음 부팅이 지운다) */
-  async install(token: string, appVersion: string): Promise<InstallResult> {
+  /** stage 때 본 { id, version } — 없거나 모양이 틀리면 undefined */
+  private readStagedMeta(token: string): { id: string; version: string } | undefined {
+    try {
+      const value = readJsonFileSync(this.stagedMeta(token), 'object') as Record<string, unknown> | undefined
+      return value && isExtensionId(value.id) && typeof value.version === 'string' ? { id: value.id, version: value.version } : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private async installStaged(token: string, appVersion: string): Promise<InstallResult> {
     const staged = this.stagedZip(token)
-    if (!TOKEN.test(token) || !(await exists(staged))) return failure('token-unknown', {})
+    const expected = this.readStagedMeta(token)
+    if (!expected || !(await exists(staged))) return failure('token-unknown', {})
     const inspection = await inspectZip(staged, appVersion).catch((error: unknown) => error as Error)
     if (inspection instanceof Error) return failure('unpack-failed', { message: inspection.message })
     if (inspection.problems.length > 0 || !inspection.manifest) return failure('rejected', { problems: inspection.problems })
     const { id, version } = inspection.manifest
+    if (id !== expected.id || version !== expected.version) {
+      return failure('staged-mismatch', { expected: `${expected.id}@${expected.version}`, actual: `${id}@${version}` })
+    }
 
     const temp = path.join(this.pendingInstallDir, `${id}${TEMP_MARK}${token}`)
     try {
@@ -137,12 +214,10 @@ export class ExtensionStore {
       await fs.rm(target, { recursive: true, force: true })
       return failure('io-failed', { message: messageOf(error) })
     }
-    await fs.rm(staged, { force: true })
     return { ok: true, id, version }
   }
 
-  /** 설치된 것은 remove op 를 기록하고(같은 id 의 보류 설치는 버린다), 보류 설치만 있으면 그 보류를 취소한다 */
-  async remove(id: string): Promise<RemoveResult> {
+  private async removeNow(id: string): Promise<RemoveResult> {
     if (!isExtensionId(id)) return failure('id-invalid', { value: id })
     try {
       const ops = this.readOps()
@@ -158,8 +233,7 @@ export class ExtensionStore {
     }
   }
 
-  /** 부팅 때 확장이 올라오기 전에 한 번 — 비정상 종료 복구 → id 별 마지막 op 적용 → ops 비우기 → 남은 임시물 청소. 던지지 않는다 */
-  async applyPending(): Promise<ApplyResult> {
+  private async applyPendingNow(): Promise<ApplyResult> {
     const result: ApplyResult = { applied: [], failed: [] }
     await this.recoverOld()
 
@@ -217,18 +291,24 @@ export class ExtensionStore {
 
   // --- 부팅 적용 ---
 
-  /** `.old-<id>-<시각>` — installed/<id> 가 없으면 가장 최근 것을 되돌리고, 나머지는 지운다 */
+  /** `.del-*` 는 마저 지운다. `.old-<id>-<시각>` — installed/<id> 가 없으면 가장 최근 것을 되돌리고, 나머지는 지운다 */
   private async recoverOld(): Promise<void> {
-    let olds: { name: string; id: string; time: number }[]
+    let names: string[]
     try {
-      olds = (await fs.readdir(this.installedDir))
-        .map((name) => ({ name, match: OLD.exec(name) }))
-        .filter((item) => item.match !== null)
-        .map(({ name, match }) => ({ name, id: match![1]!, time: Number(match![2]) }))
-        .sort((a, b) => b.time - a.time)
+      names = await fs.readdir(this.installedDir)
     } catch {
       return
     }
+    for (const name of names.filter((name) => DELETING.test(name))) {
+      await fs.rm(path.join(this.installedDir, name), { recursive: true, force: true }).catch((error: unknown) => {
+        console.warn(`[extensions] ${name} 을 지우지 못했다: ${messageOf(error)}`)
+      })
+    }
+    const olds = names
+      .map((name) => ({ name, match: OLD.exec(name) }))
+      .filter((item) => item.match !== null)
+      .map(({ name, match }) => ({ name, id: match![1]!, time: Number(match![2]) }))
+      .sort((a, b) => b.time - a.time)
     for (const old of olds) {
       const from = path.join(this.installedDir, old.name)
       const current = path.join(this.installedDir, old.id)
@@ -273,14 +353,17 @@ export class ExtensionStore {
   private async applyRemove(id: string): Promise<string | undefined> {
     const current = path.join(this.installedDir, id)
     if (!(await exists(current))) return undefined
-    const old = path.join(this.installedDir, `.old-${id}-${Date.now()}`)
+    const deleting = path.join(this.installedDir, `.del-${id}-${Date.now()}`)
     try {
-      await fs.rename(current, old)
+      await fs.rename(current, deleting)
     } catch (error) {
       return messageOf(error)
     }
-    // 지우다 실패하면 .old 가 남고 installed/<id> 는 없다 — 다음 부팅의 recoverOld 가 되돌리므로 실패로 보고한다
-    return fs.rm(old, { recursive: true, force: true }).then(() => undefined, (error: unknown) => messageOf(error))
+    // installed/<id> 는 이미 없다(목록·올리기에서 빠진다) — 지우다 남은 것은 다음 부팅의 recoverOld 가 마저 지운다
+    await fs.rm(deleting, { recursive: true, force: true }).catch((error: unknown) => {
+      console.warn(`[extensions] ${id} 폴더를 다 지우지 못했다 (다음 부팅에 다시 지운다): ${messageOf(error)}`)
+    })
+    return undefined
   }
 
   // --- ops.json ---

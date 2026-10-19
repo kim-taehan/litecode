@@ -2,7 +2,9 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EXTENSION_LIMITS } from '../../src/services/extensions/limits.ts'
 import { ExtensionStore } from '../../src/services/extensions/store.ts'
+import { unpackZip } from '../../src/services/extensions/unpack.ts'
 import { makeZip, type ZipItem } from './support/zipWriter.ts'
 
 // 확장 저장소 (이슈 #480, 설계 docs/superpowers/specs/2026-10-19-extension-install-design.md 4절 "풀기·교체는 보류로 쌓고 다음 부팅 때") —
@@ -58,6 +60,11 @@ async function installItems(items: readonly ZipItem[]) {
 async function exists(file: string): Promise<boolean> {
   return fs.lstat(file).then(() => true, () => false)
 }
+/** 폴더 아래 모든 파일(폴더 제외)의 상대 경로 */
+async function filesUnder(folder: string): Promise<string[]> {
+  const entries = await fs.readdir(folder, { recursive: true, withFileTypes: true }).catch(() => [])
+  return entries.filter((entry) => !entry.isDirectory()).map((entry) => path.relative(folder, path.join(entry.parentPath, entry.name)))
+}
 async function list(folder: string): Promise<string[]> {
   return (await fs.readdir(folder).catch(() => [] as string[])).sort()
 }
@@ -70,11 +77,39 @@ async function readOps(): Promise<unknown> {
 }
 
 describe('stage', () => {
-  it('나쁜 zip 은 사유만 돌려주고 아무 파일도 만들지 않는다', async () => {
+  it('나쁜 zip 은 사유만 돌려주고 아무 파일도 남기지 않는다 (검사한 복사본도 지운다)', async () => {
     const staged = await stageItems([...flat('my-ext', '1.0.0'), { name: '../evil', data: 'x' }])
     expect(staged.token).toBeUndefined()
     expect(staged.result.problems.map((p) => p.code)).toEqual(['unsafe-path'])
-    expect(await exists(root)).toBe(false)
+    expect(await filesUnder(root)).toEqual([])
+  })
+
+  it('복사본을 검사한다 — 검사와 복사 사이에 원본이 바뀌어도 카드에 보이는 것이 설치되는 것이다', async () => {
+    const original = await zipFile(flat('harmless', '1.0.0'))
+    const swapped = makeZip(flat('other-ext', '9.9.9'))
+    const copyFile = fs.copyFile
+    vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
+      await fs.writeFile(original, swapped)
+      return copyFile(from, to, mode)
+    })
+    const staged = await store.stage(original, APP)
+    vi.restoreAllMocks()
+    expect(staged.result.manifest).toMatchObject({ id: 'other-ext', version: '9.9.9' })
+    expect(await store.install(staged.token!, APP)).toEqual({ ok: true, id: 'other-ext', version: '9.9.9' })
+  })
+
+  it('stage 때 본 id·version 과 staging 복사본의 것이 다르면 install 이 거절한다', async () => {
+    const staged = await stageItems(flat('harmless', '1.0.0'))
+    await fs.writeFile(path.join(root, 'staging', `${staged.token}.zip`), makeZip(flat('other-ext', '9.9.9')))
+    expect(await store.install(staged.token!, APP)).toEqual({
+      ok: false,
+      failure: { code: 'staged-mismatch', params: { expected: 'harmless@1.0.0', actual: 'other-ext@9.9.9' } },
+    })
+    expect(await list(path.join(root, 'pending', 'install'))).toEqual([])
+
+    const again = await stageItems(flat('harmless', '1.0.0'))
+    await fs.writeFile(path.join(root, 'staging', `${again.token}.zip`), makeZip(flat('harmless', '1.0.1')))
+    expect(await store.install(again.token!, APP)).toMatchObject({ ok: false, failure: { code: 'staged-mismatch' } })
   })
 
   it('정상 zip — token 을 주고 staging 에 복사본을 둔다. 원본은 이후 읽지 않는다', async () => {
@@ -83,7 +118,7 @@ describe('stage', () => {
     expect(staged.token).toMatch(/^[0-9a-f]{32}$/)
     expect(staged.existing).toBeUndefined()
     expect(staged.result.manifest?.id).toBe('my-ext')
-    expect(await list(path.join(root, 'staging'))).toEqual([`${staged.token}.zip`])
+    expect(await list(path.join(root, 'staging'))).toEqual([`${staged.token}.json`, `${staged.token}.zip`])
 
     await fs.rm(original)
     expect(await store.install(staged.token!, APP)).toEqual({ ok: true, id: 'my-ext', version: '1.0.0' })
@@ -98,7 +133,7 @@ describe('stage', () => {
     expect((await stageItems(flat('my-ext', '2.0.0'))).existing).toEqual({ version: '1.5.0' })
   })
 
-  it('cancel 은 복사본을 지운다 — 그 token 으로는 설치할 수 없다', async () => {
+  it('cancel 은 복사본과 기록을 지운다 — 그 token 으로는 설치할 수 없다', async () => {
     const staged = await stageItems(flat('my-ext', '1.0.0'))
     await store.cancel(staged.token!)
     expect(await list(path.join(root, 'staging'))).toEqual([])
@@ -149,14 +184,42 @@ describe('install — 보류 설치', () => {
     expect(await exists(opsFile())).toBe(false)
   })
 
-  it('풀다 실패하면 만들던 임시 폴더를 지우고 사유를 돌려준다 (던지지 않는다)', async () => {
+  it('풀다 실패하면 만들던 임시 폴더와 staging 복사본을 지우고 사유를 돌려준다 (던지지 않는다)', async () => {
     // `a` 파일과 `a/b` — 검사는 통과하지만(서로 다른 이름) 풀 때 a 가 파일이라 a/ 폴더를 못 만든다
     const staged = await stageItems([...flat('my-ext', '1.0.0'), { name: 'a', data: 'file' }, { name: 'a/b', data: 'x' }])
     expect(staged.result.problems).toEqual([])
     const result = await store.install(staged.token!, APP)
     expect(result).toMatchObject({ ok: false, failure: { code: 'unpack-failed' } })
     expect(await list(path.join(root, 'pending', 'install'))).toEqual([])
+    expect(await list(path.join(root, 'staging'))).toEqual([])
     expect(await exists(opsFile())).toBe(false)
+  })
+
+  it('deflate 항목도 푼다', async () => {
+    await installItems(flat('my-ext', '1.0.0').map((item) => (item.name.endsWith('/') ? item : { ...item, deflate: true })))
+    expect(await read(path.join(pendingDir('my-ext'), 'index.js'))).toBe('// my-ext 1.0.0')
+    expect(await read(path.join(pendingDir('my-ext'), 'skills', 'a.md'))).toBe('# a')
+  })
+
+  // 회귀: yauzl 의 크기 검증 스트림은 어긋나도 오류·닫힘을 내지 않아 install 이 영영 안 끝났다 — 끝나지 않으면 테스트 타임아웃(5초)으로 실패한다
+  it.each([
+    ['선언보다 크다 (압축 폭탄 모양)', 'x'.repeat(100), 10],
+    ['선언보다 작다', 'x'.repeat(10), 100],
+  ])('deflate 항목의 실제 크기가 %s → unpack-failed 로 끝나고 임시물을 지운다', async (_label, data, declaredSize) => {
+    const staged = await stageItems([...flat('size-lie', '1.0.0'), { name: 'blob.bin', data, deflate: true, declaredSize }])
+    expect(staged.result.problems).toEqual([])
+    const result = await store.install(staged.token!, APP)
+    expect(result).toMatchObject({ ok: false, failure: { code: 'unpack-failed' } })
+    expect(await list(path.join(root, 'pending', 'install'))).toEqual([])
+    expect(await list(path.join(root, 'staging'))).toEqual([])
+    expect(await exists(opsFile())).toBe(false)
+  })
+
+  it('실제로 흘러나온 바이트로 상한을 건다 (파일 하나·전체)', async () => {
+    const file = path.join(dir, 'honest.zip')
+    await fs.writeFile(file, makeZip([...flat('my-ext', '1.0.0'), { name: 'big.bin', data: 'x'.repeat(500), deflate: true }]))
+    await expect(unpackZip(file, path.join(dir, 'out1'), { ...EXTENSION_LIMITS, fileBytes: 400 })).rejects.toThrow(/big\.bin exceeds 400 bytes/)
+    await expect(unpackZip(file, path.join(dir, 'out2'), { ...EXTENSION_LIMITS, totalBytes: 300 })).rejects.toThrow(/total exceeds 300 bytes/)
   })
 
   it('보류 설치가 있는 id 를 다시 설치하면 새 것으로 바꾸고 op 는 하나만 남는다', async () => {
@@ -164,6 +227,43 @@ describe('install — 보류 설치', () => {
     await installItems(flat('my-ext', '1.1.0'))
     expect(await readOps()).toEqual([{ op: 'install', id: 'my-ext', version: '1.1.0' }])
     expect(await read(path.join(pendingDir('my-ext'), 'index.js'))).toBe('// my-ext 1.1.0')
+  })
+})
+
+describe('직렬화 — 같은 저장소의 install·remove·applyPending 은 한 줄로 선다', () => {
+  it('동시 remove 둘 — 둘 다 op 가 남는다', async () => {
+    await installItems(flat('aaa', '1.0.0'))
+    await installItems(flat('bbb', '1.0.0'))
+    await store.applyPending()
+    expect(await Promise.all([store.remove('aaa'), store.remove('bbb')])).toEqual([{ ok: true }, { ok: true }])
+    expect(store.pendingState()).toEqual({ aaa: 'remove', bbb: 'remove' })
+  })
+
+  it('같은 id 의 동시 install 둘 — 둘 다 성공하고 보류 폴더는 뒤 것으로 온전하다', async () => {
+    const first = await stageItems(flat('same', '1.0.0'))
+    const second = await stageItems(flat('same', '2.0.0'))
+    expect(await Promise.all([store.install(first.token!, APP), store.install(second.token!, APP)])).toEqual([
+      { ok: true, id: 'same', version: '1.0.0' },
+      { ok: true, id: 'same', version: '2.0.0' },
+    ])
+    expect(await readOps()).toEqual([{ op: 'install', id: 'same', version: '2.0.0' }])
+    expect(await list(pendingDir('same'))).toEqual(['extension.json', 'index.js', 'skills'])
+    expect(await read(path.join(pendingDir('same'), 'index.js'))).toBe('// same 2.0.0')
+    expect(await store.applyPending()).toMatchObject({ applied: [{ id: 'same', version: '2.0.0' }], failed: [] })
+  })
+
+  it('applyPending 이 끝나기 전에 온 stage·install 은 기다린다 — 부팅 청소가 그 결과를 지우지 않는다', async () => {
+    // (applyPending 전에 stage 한 token 은 부팅 청소가 지운다 — 부팅 뒤에 고른 zip 만 설치된다)
+    await fs.mkdir(path.join(root, 'pending', 'install', 'old.tmp-x'), { recursive: true })
+    const file = await zipFile(flat('my-ext', '1.0.0'))
+    const [applied, installed] = await Promise.all([
+      store.applyPending(),
+      store.stage(file, APP).then((staged) => store.install(staged.token!, APP)),
+    ])
+    expect(applied).toEqual({ applied: [], failed: [] })
+    expect(installed).toEqual({ ok: true, id: 'my-ext', version: '1.0.0' })
+    expect(await list(pendingDir('my-ext'))).toEqual(['extension.json', 'index.js', 'skills'])
+    expect(store.pendingState()).toEqual({ 'my-ext': 'install' })
   })
 })
 
@@ -330,10 +430,39 @@ describe('applyPending — 부팅 때 적용', () => {
     expect(await read(path.join(installedDir('my-ext'), 'index.js'))).toBe('// my-ext 1.0.0')
   })
 
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('삭제가 중간에 실패해도 다음 부팅에 반쪽 폴더가 되살아나지 않고 마저 지운다', async () => {
+    await installItems([...flat('half', '1.0.0'), { name: 'z/' }, { name: 'z/locked.txt', data: 'x' }])
+    await store.applyPending()
+    await store.remove('half')
+    // z/ 에 쓰기 권한이 없으면 그 안의 파일을 못 지운다 — extension.json 등은 이미 지워진 반쪽이 남는다
+    await fs.chmod(path.join(installedDir('half'), 'z'), 0o555)
+    const deleting = path.join(root, 'installed')
+    try {
+      await store.applyPending()
+      expect(await exists(installedDir('half'))).toBe(false)
+      expect(await store.listInstalled(APP)).toEqual([])
+    } finally {
+      for (const name of await list(deleting)) await fs.chmod(path.join(deleting, name, 'z'), 0o755).catch(() => {})
+    }
+    await store.applyPending()
+    expect(await list(path.join(root, 'installed'))).toEqual([])
+    expect(await store.listInstalled(APP)).toEqual([])
+  })
+
+  it('비정상 종료 복구 — 삭제 도중 죽은 폴더(.del-*)는 되돌리지 않고 지운다', async () => {
+    await installItems(flat('my-ext', '1.0.0'))
+    await store.applyPending()
+    await fs.rename(installedDir('my-ext'), path.join(root, 'installed', '.del-my-ext-1700000000000'))
+    await fs.rm(path.join(root, 'installed', '.del-my-ext-1700000000000', 'extension.json'))
+    expect(await store.applyPending()).toEqual({ applied: [], failed: [] })
+    expect(await list(path.join(root, 'installed'))).toEqual([])
+  })
+
   it('남은 임시물(pending/install 의 .tmp-*·staging/*)을 지운다', async () => {
     await fs.mkdir(path.join(root, 'pending', 'install', 'my-ext.tmp-abc'), { recursive: true })
     await fs.mkdir(path.join(root, 'staging'), { recursive: true })
     await fs.writeFile(path.join(root, 'staging', 'deadbeef.zip'), 'x')
+    await fs.writeFile(path.join(root, 'staging', 'deadbeef.json'), '{}')
     expect(await store.applyPending()).toEqual({ applied: [], failed: [] })
     expect(await list(path.join(root, 'pending', 'install'))).toEqual([])
     expect(await list(path.join(root, 'staging'))).toEqual([])
