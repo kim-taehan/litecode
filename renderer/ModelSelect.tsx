@@ -95,27 +95,31 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
             .map((provider) => (
               <div key={provider.id} role="group" aria-label={provider.displayName}>
                 <div className="model-menu__label">{provider.displayName}</div>
-                {provider.models.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    role="menuitemradio"
-                    className="model-menu__item"
-                    aria-checked={provider.id === value?.providerId && model.id === value.modelId}
-                    title={model.id}
-                    onClick={() => {
-                      const changed = provider.id !== value?.providerId || model.id !== value.modelId
-                      onChange({ providerId: provider.id, modelId: model.id })
-                      close()
-                      if (!changed) return
-                      setToast(t('model.changed', { name: model.displayName }))
-                      clearTimeout(toastTimer.current)
-                      toastTimer.current = setTimeout(() => setToast(undefined), 2_000)
-                    }}
-                  >
-                    {model.displayName}
-                  </button>
-                ))}
+                {provider.models.map((model) => {
+                  const selected = provider.id === value?.providerId && model.id === value.modelId && model.thinkingOff === value?.thinkingOff
+                  return (
+                    <button
+                      key={`${model.id}:${model.thinkingOff ? 1 : 0}`}
+                      type="button"
+                      role="menuitemradio"
+                      className="model-menu__item"
+                      aria-checked={selected}
+                      title={model.thinkingOff ? t('models.thinkingOffTitle') : model.id}
+                      onClick={() => {
+                        const changed = provider.id !== value?.providerId || model.id !== value.modelId || model.thinkingOff === true && value?.thinkingOff !== true
+                        onChange({ providerId: provider.id, modelId: model.id, ...(model.thinkingOff ? { thinkingOff: true } : {}) })
+                        close()
+                        if (!changed) return
+                        setToast(t('model.changed', { name: model.displayName }))
+                        clearTimeout(toastTimer.current)
+                        toastTimer.current = setTimeout(() => setToast(undefined), 2_000)
+                      }}
+                    >
+                      {model.displayName}
+                      {model.thinkingOff && <span className="model-menu__item-hint">{t('models.thinkingOffLabel')}</span>}
+                    </button>
+                  )
+                })}
               </div>
             ))}
         </div>

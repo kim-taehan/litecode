@@ -32,5 +32,28 @@ describe('modelChoice', () => {
     expect(parseModelRef('not json')).toBeUndefined()
     expect(parseModelRef('{"providerId":"gw"}')).toBeUndefined()
     expect(parseModelRef('null')).toBeUndefined()
+    expect(parseModelRef('{"providerId":"gw","modelId":"echo","thinkingOff":true}')).toEqual({ providerId: 'gw', modelId: 'echo', thinkingOff: true })
+  })
+
+  it('같은 id 의 사고 켬·끔 두 항목을 thinkingOff 로 가려 고르고, 사고 끄기만 지워도 사고 켬은 남는다', () => {
+    const both = [
+      {
+        id: 'gw',
+        displayName: 'Gateway',
+        models: [
+          { id: 'echo', displayName: 'Echo' },
+          { id: 'echo', displayName: 'Echo', thinkingOff: true },
+        ],
+      },
+    ]
+    expect(findModel(both, { providerId: 'gw', modelId: 'echo', thinkingOff: true })?.model.thinkingOff).toBe(true)
+    expect(findModel(both, { providerId: 'gw', modelId: 'echo', thinkingOff: false })?.model.thinkingOff).toBeUndefined()
+    // thinkingOff 를 안 준(이전 저장값) 것은 id 로만 맞춰 사고 켜진 항목이 된다
+    expect(findModel(both, { providerId: 'gw', modelId: 'echo' })?.model.thinkingOff).toBeUndefined()
+    const onlyOff = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'echo', displayName: 'Echo', thinkingOff: true }] }]
+    expect(findModel(onlyOff, { providerId: 'gw', modelId: 'echo', thinkingOff: true })?.model.thinkingOff).toBe(true)
+    expect(findModel(onlyOff, { providerId: 'gw', modelId: 'echo', thinkingOff: false })).toBeUndefined()
+    // 지워진 사고 끄기 선택은 첫 모델로, 사고 켜진 선택은 그대로
+    expect(initialModel(onlyOff, { providerId: 'gw', modelId: 'echo', thinkingOff: true })).toEqual({ providerId: 'gw', modelId: 'echo', thinkingOff: true })
   })
 })
