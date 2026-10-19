@@ -27,7 +27,13 @@ export interface ModelCatalogEntry {
   /** 사고 끄기(선택, 이슈 #477) — 켠 모델의 chat/completions 본문에 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다
    *  (사내망 실측: vLLM 게이트웨이의 Qwen 이 reasoning 을 끈다). 요청마다 저장된 값을 보므로 엔진 재시작 없이 다음 요청부터. 기본 없음 */
   thinkingOff?: boolean
+  /** 실제 모델 이름(선택, 이슈 #485) — 키 프록시가 게이트웨이에 보낼 때 본문 model 을 id 대신 이 이름으로 바꾼다. 같은 모델을 id 만 다르게
+   *  두 항목(사고 켬·끔)으로 둘 때 쓴다 — id 는 provider 안에서 유일하지만 이 값은 겹쳐도 된다. 비우면 id 그대로. opencode.json 에는 id 만 간다 */
+  upstreamId?: string
 }
+
+/** 실제 모델 이름 상한 — 게이트웨이 모델 이름으로 충분히 길다 */
+const UPSTREAM_ID_MAX = 200
 
 export interface ProviderConfig {
   id: string
@@ -147,14 +153,23 @@ export class ProviderRegistry extends Service {
     const baseURL = input.baseURL.trim()
     if (!displayName) throw new Error(tr('error.displayNameRequired'))
     if (!isHttpUrl(baseURL)) throw new Error(tr('error.baseUrlInvalid'))
-    const models = input.models.map((model) => ({
-      id: model.id.trim(),
-      displayName: model.displayName.trim() || model.id.trim(),
-      ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
-      ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
-      ...(model.imageInput === true && { imageInput: true }),
-      ...(model.thinkingOff === true && { thinkingOff: true }),
-    }))
+    // 실제 모델 이름 — 헤더가 아니라 JSON 본문에 실리지만 줄바꿈·제어 문자는 붙여넣기 실수다
+    const badUpstream = (value: unknown) => value !== undefined && (typeof value !== 'string' || value.trim().length > UPSTREAM_ID_MAX || /\p{Cc}/u.test(value.trim()))
+    if (input.models.some((model) => badUpstream(model.upstreamId))) throw new Error(tr('error.upstreamId'))
+    const models = input.models.map((model) => {
+      const id = model.id.trim()
+      // id 와 같으면 바꿀 것이 없다 — 남기지 않는다
+      const upstreamId = model.upstreamId?.trim()
+      return {
+        id,
+        displayName: model.displayName.trim() || id,
+        ...(upstreamId && upstreamId !== id && { upstreamId }),
+        ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
+        ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
+        ...(model.imageInput === true && { imageInput: true }),
+        ...(model.thinkingOff === true && { thinkingOff: true }),
+      }
+    })
     if (input.models.some((model) => model.thinkingOff !== undefined && typeof model.thinkingOff !== 'boolean')) throw new Error(tr('error.thinkingOff'))
     if (models.some((model) => model.contextLength !== undefined && !(Number.isSafeInteger(model.contextLength) && model.contextLength > 0))) {
       throw new Error(tr('error.contextLength'))

@@ -137,6 +137,59 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
   })
 })
 
+// 이슈 #485: 실제 모델 이름 (시안 D, _workspace/mock-model-row/OptionD_alias.dc.html) — 비었으면 아랫줄 입력 오른쪽(알약 앞)에 링크형 버튼,
+// 값이 있거나 펼쳤으면(빈 문자열) 윗줄 아래에 "실제 모델 이름 [입력] [×]" 한 줄. 그때 링크 버튼은 없다
+describe('ProviderEditor — 실제 모델 이름 (이슈 #485)', () => {
+  const ko = (key: MessageKey, n: number) => translate('ko', key, { n })
+  const render = (models: ProviderSummary['models']) =>
+    renderToStaticMarkup(createElement(ProviderEditor, { provider: { ...provider, models }, taken: [provider], onDone: () => {} }))
+  const card = (html: string, n: number) => html.split('<div class="model-card">')[n]!
+  const tag = (html: string, label: string) => html.match(new RegExp(`<[a-z]+ [^>]*aria-label="${label}"[^>]*>`))?.[0]
+
+  it('비었으면 실제 이름 줄은 없고, 아랫줄의 최대 출력 뒤·알약 앞에 링크형 버튼', () => {
+    const html = card(render([{ id: 'm1', displayName: 'M1' }]), 1)
+    expect(html).not.toContain('model-card__alias"')
+    expect(tag(html, ko('models.upstreamId', 1))).toBeUndefined()
+    const bottom = html.split('<div class="model-card__row">')[2]!
+    const add = tag(bottom, ko('models.upstreamIdAdd', 1))
+    expect(add).toMatch(/^<button [^>]*class="model-card__alias-add"/)
+    expect(bottom).toContain(`>${translate('ko', 'models.upstreamIdAddLabel')}</button>`)
+    const at = (key: MessageKey) => bottom.indexOf(`aria-label="${ko(key, 1)}"`)
+    expect(at('models.maxOutput')).toBeLessThan(at('models.upstreamIdAdd'))
+    expect(at('models.upstreamIdAdd')).toBeLessThan(at('models.imageInput'))
+  })
+
+  it('값이 있으면 윗줄과 아랫줄 사이에 라벨·입력·지우기 한 줄, 링크 버튼은 없다', () => {
+    const html = card(render([{ id: 'qwen-thinking', displayName: 'QT', upstreamId: 'qwen3.8-27b' }]), 1)
+    const alias = html.indexOf('<div class="model-card__alias">')
+    const rows = [...html.matchAll(/<div class="model-card__row">/g)].map((match) => match.index!)
+    expect(rows).toHaveLength(2)
+    expect(alias).toBeGreaterThan(rows[0]!)
+    expect(alias).toBeLessThan(rows[1]!)
+    const part = html.slice(alias, rows[1])
+    expect(part).toContain(`>${translate('ko', 'models.upstreamIdLabel')}</span>`)
+    const input = tag(part, ko('models.upstreamId', 1))
+    expect(input).toMatch(/^<input /)
+    expect(input).toContain('value="qwen3.8-27b"')
+    expect(input).toContain(`placeholder="${translate('ko', 'models.upstreamIdPlaceholder')}"`)
+    expect(tag(part, ko('models.upstreamIdClear', 1))).toMatch(/^<button /)
+    expect(tag(html, ko('models.upstreamIdAdd', 1))).toBeUndefined()
+  })
+
+  it('펼친 빈 값(빈 문자열)도 입력 줄이 보인다', () => {
+    const html = card(render([{ id: 'm1', displayName: 'M1', upstreamId: '' }]), 1)
+    expect(tag(html, ko('models.upstreamId', 1))).toContain('value=""')
+    expect(tag(html, ko('models.upstreamIdAdd', 1))).toBeUndefined()
+  })
+
+  it('안내문에 실제 모델 이름 한 줄이 사고 끄기 안내 앞에 있다', () => {
+    const html = render([{ id: 'm1', displayName: 'M1' }])
+    const hint = html.indexOf(translate('ko', 'models.upstreamIdHint'))
+    expect(hint).toBeGreaterThan(-1)
+    expect(hint).toBeLessThan(html.indexOf(translate('ko', 'models.thinkingOffHint')))
+  })
+})
+
 // 이슈 #231: 키체인이 키를 안 풀어 주면 채팅만 실패하고 설정에는 아무 표시가 없었다 — 모델 페이지 위쪽에 노란 안내 한 줄
 describe('ModelsPage — 키 저장소 안내', () => {
   const escaped = (text: string) => text.replace(/'/g, '&#x27;').replace(/"/g, '&quot;')

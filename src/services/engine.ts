@@ -567,13 +567,16 @@ function forgetRecord(file: string, pid: number | undefined): void {
 }
 
 /** 키 프록시가 요청마다 쓰는 provider 의 행선지. 사고 끄기(이슈 #477, 사내망 실측: vLLM 게이트웨이의 Qwen 은 chat_template_kwargs.enable_thinking=false 면
- *  reasoning 이 비고 reasoning_tokens 0) — 켠 모델이 있는 provider 만 chat/completions 본문을 모으고, 켠 모델의 요청에만 싣는다 */
+ *  reasoning 이 비고 reasoning_tokens 0) — 켠 모델이 있는 provider 만 chat/completions 본문을 모으고, 켠 모델의 요청에만 싣는다.
+ *  실제 모델 이름(이슈 #485) — 적은 모델의 요청만 model 을 바꾼다. 둘 다 id 로 찾으므로 실제 이름이 같은 두 항목이 서로 다른 사고 설정을 가진다 */
 export function proxyTarget(provider: ProviderConfig, apiKey: string | undefined): ProxyTarget {
   const off = new Set(provider.models.filter((model) => model.thinkingOff).map((model) => model.id))
+  const upstream = new Map(provider.models.flatMap((model) => (model.upstreamId ? [[model.id, model.upstreamId] as const] : [])))
   return {
     baseURL: provider.baseURL,
     apiKey,
     ...(off.size > 0 && { addToBody: (model: string) => (off.has(model) ? { chat_template_kwargs: { enable_thinking: false } } : undefined) }),
+    ...(upstream.size > 0 && { upstreamModel: (model: string) => upstream.get(model) }),
   }
 }
 

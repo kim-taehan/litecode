@@ -607,6 +607,29 @@ describe('proxyTarget — 사고 끄기 (이슈 #477)', () => {
   })
 })
 
+// 이슈 #485: 실제 모델 이름 — 적은 모델만 프록시가 본문 model 을 바꾼다. 사고 끄기는 id 기준이라 같은 실제 이름의 두 항목이 갈린다
+describe('proxyTarget — 실제 모델 이름 (이슈 #485)', () => {
+  const models = [
+    { id: 'qwen', displayName: 'Q', upstreamId: 'qwen3.8-27b', thinkingOff: true },
+    { id: 'qwen-thinking', displayName: 'QT', upstreamId: 'qwen3.8-27b' },
+    { id: 'llama', displayName: 'L' },
+  ]
+
+  it('적은 모델의 id 를 실제 이름으로, 안 적은 모델은 undefined. 사고 끄기는 id 로 찾는다', () => {
+    const target = proxyTarget({ ...provider('a'), models }, 'sk')
+    expect(['qwen', 'qwen-thinking', 'llama', 'qwen3.8-27b'].map((id) => target.upstreamModel!(id))).toEqual(['qwen3.8-27b', 'qwen3.8-27b', undefined, undefined])
+    expect(target.addToBody!('qwen')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+    expect(target.addToBody!('qwen-thinking')).toBeUndefined()
+  })
+
+  it('실제 이름만 있고 사고 끄기가 없으면 upstreamModel 만, 둘 다 없으면 둘 다 없다', () => {
+    const only = proxyTarget({ ...provider('a'), models: [models[1]!, models[2]!] }, undefined)
+    expect(only).toHaveProperty('upstreamModel')
+    expect(only).not.toHaveProperty('addToBody')
+    expect(proxyTarget({ ...provider('a'), models: [models[2]!] }, undefined)).not.toHaveProperty('upstreamModel')
+  })
+})
+
 describe('engineEnv — opencode 자식 프로세스 env', () => {
   it('설정 폴더·DB·비밀번호를 싣고, 카탈로그 받기를 끄며(폐쇄망), 사용자명 재정의는 뺀다', () => {
     const env = engineEnv({ PATH: '/bin', OPENCODE_SERVER_USERNAME: 'x' }, { configDir: '/c', db: '/d.db', password: 'pw' })
