@@ -71,7 +71,7 @@ beforeEach(() => {
 describe('thinkingLabel', () => {
   it('세 값의 글자 (ko·en)', () => {
     const t = (key: MessageKey) => ko(key)
-    expect((['default', 'on', 'off'] as const).map((value) => thinkingLabel(t, value))).toEqual(['디폴트', '켬', '끔'])
+    expect((['default', 'on', 'off'] as const).map((value) => thinkingLabel(t, value))).toEqual(['Default', 'On', 'Off'])
     expect((['default', 'on', 'off'] as const).map((value) => thinkingLabel((key) => translate('en', key), value))).toEqual(['Default', 'On', 'Off'])
   })
 })
@@ -108,37 +108,44 @@ describe('thinkingOf — 파생 키 겹침이면 Thinking 없음', () => {
 })
 
 describe('ModelSelect — 닫힌 칩', () => {
-  it('Thinking 이 켬일 때만 이름 뒤에 채운 전구 하나(13px, aria-hidden) — 디폴트·끔은 아이콘 없이 접근성 이름·툴팁에 값', () => {
+  it('켬은 채운 전구, 끔은 윤곽선 전구 + 사선(13px, aria-hidden), 디폴트는 아이콘 없음 — 값은 접근성 이름·툴팁에', () => {
     const BULB = 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z'
-    for (const [thinking, word] of [['default', '디폴트'], ['on', '켬'], ['off', '끔']] as const) {
+    const SLASH = 'M3.5 3.5l17 17'
+    for (const [thinking, word] of [['default', 'Default'], ['on', 'On'], ['off', 'Off']] as const) {
       const html = markup(qwen(thinking))
       expect(html).not.toContain(`· ${word}`)
       expect(html).not.toContain('model-select__thinking')
       expect(html).toContain(`aria-label="${ko('model.labelThinking', { name: 'Qwen3.8 27B', value: word })}"`)
       expect(html).toContain(`title="Thinking: ${word}\nGateway · qwen"`)
       expect(html).not.toContain('role="menu"')
-      if (thinking === 'on') {
-        expect(html).toContain('<span class="composer__model">Qwen3.8 27B</span><svg class="model-select__bulb"')
-        expect(html).toMatch(/<svg class="model-select__bulb" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"[^>]*aria-hidden="true"/)
-        expect(html).toContain(`d="${BULB}"`)
-      } else {
+      if (thinking === 'default') {
         expect(html).not.toContain('model-select__bulb')
         expect(html).toContain('<span class="composer__model">Qwen3.8 27B</span><svg class="model-select__caret"')
+        continue
+      }
+      expect(html).toContain(`<span class="composer__model">Qwen3.8 27B</span><svg class="model-select__bulb model-select__bulb--${thinking}"`)
+      expect(html).toMatch(/<svg class="model-select__bulb[^"]*" width="13" height="13" viewBox="0 0 24 24"[^>]*aria-hidden="true"/)
+      expect(html).toContain(`d="${BULB}"`)
+      if (thinking === 'on') {
+        expect(html).toContain('fill="currentColor"')
+        expect(html).not.toContain(SLASH)
+      } else {
+        expect(html).toMatch(/<svg class="model-select__bulb model-select__bulb--off"[^>]*fill="none"/)
+        expect(html).toContain(`<path class="model-select__bulb-slash" d="${SLASH}"`)
       }
     }
   })
 
-  it('사선 전구·윤곽선 전구는 더 이상 그리지 않는다', () => {
-    for (const thinking of ['default', 'on', 'off'] as const) {
-      const html = markup(qwen(thinking))
-      expect(html).not.toContain('model-select__bulb-slash')
-      expect(html).not.toContain('M3.5 3.5l17 17')
-      expect(html).not.toContain('model-select__bulb--')
-    }
+  it('켬과 끔의 아이콘은 서로 다르고 디폴트와도 다르다 (칩에서 구분)', () => {
+    const bulb = (thinking: Thinking) => markup(qwen(thinking)).match(/<svg class="model-select__bulb.*?<\/svg>/)?.[0]
+    expect(bulb('default')).toBeUndefined()
+    expect(bulb('on')).toBeTruthy()
+    expect(bulb('off')).toBeTruthy()
+    expect(bulb('on')).not.toBe(bulb('off'))
   })
 
   it('툴팁 문구 (ko·en) — 값 글자는 thinking.* 를 다시 쓴다', () => {
-    expect(ko('model.thinkingTitle', { value: ko('model.thinking.off') })).toBe('Thinking: 끔')
+    expect(ko('model.thinkingTitle', { value: ko('model.thinking.off') })).toBe('Thinking: Off')
     expect(translate('en', 'model.thinkingTitle', { value: translate('en', 'model.thinking.off') })).toBe('Thinking: Off')
   })
 
@@ -157,7 +164,7 @@ describe('ModelSelect — 열린 메뉴', () => {
     const cells = [...html.matchAll(/<button [^>]*role="menuitem"[^>]*>(.*?)<\/button>/g)].map((match) => match[1])
     expect(cells).toEqual([
       '<span class="model-menu__cell-label">Model</span><span class="model-menu__cell-value">Qwen3.8 27B</span><span class="model-menu__cell-chevron" aria-hidden="true">›</span>',
-      '<span class="model-menu__cell-label">Thinking</span><span class="model-menu__cell-value">끔</span><span class="model-menu__cell-chevron" aria-hidden="true">›</span>',
+      '<span class="model-menu__cell-label">Thinking</span><span class="model-menu__cell-value">Off</span><span class="model-menu__cell-chevron" aria-hidden="true">›</span>',
     ])
     expect(html).not.toContain('menuitemradio')
   })
@@ -187,9 +194,9 @@ describe('ModelSelect — 열린 메뉴', () => {
       (match) => [match[2], match[3], match[1]],
     )
     expect(options).toEqual([
-      ['디폴트', '아무 값도 보내지 않습니다. 서버 설정을 따릅니다.', 'false'],
-      ['켬', '답하기 전에 충분히 생각하도록 켜서 보냅니다.', 'true'],
-      ['끔', '생각을 건너뛰도록 꺼서 보냅니다. 더 빠르지만 어려운 작업은 정확도가 내려갈 수 있습니다.', 'false'],
+      ['Default', '아무 값도 보내지 않습니다. 서버 설정을 따릅니다.', 'false'],
+      ['On', '답하기 전에 충분히 생각하도록 켜서 보냅니다.', 'true'],
+      ['Off', '생각을 건너뛰도록 꺼서 보냅니다. 더 빠르지만 어려운 작업은 정확도가 내려갈 수 있습니다.', 'false'],
     ])
   })
 })

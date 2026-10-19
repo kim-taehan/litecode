@@ -159,10 +159,10 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
     expect(translate('ko', 'models.thinkingLabel')).toBe('Thinking 모델')
     expect(translate('en', 'models.thinkingLabel')).toBe('Thinking model')
     expect(translate('ko', 'models.thinkingHint')).toBe(
-      '답하기 전에 생각하는 과정이 있는 모델이면 켜 두세요. 켜면 입력창에서 대화마다 Thinking 을 디폴트·켬·끔 중에서 고를 수 있습니다. 서버가 이 설정을 따르지 않는 모델에는 켜지 마세요.',
+      '답하기 전에 생각하는 과정이 있는 모델이면 켜 두세요. 켜면 입력창에서 대화마다 Thinking 을 Default·On·Off 중에서 고를 수 있습니다. 서버가 이 설정을 따르지 않는 모델에는 켜지 마세요.',
     )
     // #503 (#502-2): 선언을 끄면 켬·끔으로 쓰던 대화의 키가 풀리지 않는다 — 다시 고르라는 안내 한 줄이 힌트 바로 뒤에
-    expect(translate('ko', 'models.thinkingOffHint')).toBe('끄면 이 모델을 Thinking 켬·끔으로 쓰던 대화는 입력창에서 모델을 다시 골라야 합니다.')
+    expect(translate('ko', 'models.thinkingOffHint')).toBe('끄면 이 모델을 Thinking On·Off 로 쓰던 대화는 입력창에서 모델을 다시 골라야 합니다.')
     expect(translate('en', 'models.thinkingOffHint')).toBe('If you turn it off, chats that used this model with Thinking On or Off need the model picked again in the input box.')
     expect(render([{ id: 'm1', displayName: 'M1' }])).toContain(`${translate('ko', 'models.thinkingHint')} ${translate('ko', 'models.thinkingOffHint')}`)
     expect(translate('ko', 'error.modelIdDuplicate')).toBe('모델 id 가 겹칩니다')
