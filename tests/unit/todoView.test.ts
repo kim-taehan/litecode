@@ -59,11 +59,12 @@ describe('todoCounts — 완료 n/m', () => {
 describe('todoDock — 입력 카드 위 줄', () => {
   const list = [todo('a', 'done'), todo('b', 'active'), todo('c'), todo('d', 'cancelled')]
 
-  it('도는 턴이면 active 는 진행 중 — 지금 하는 일은 첫 active', () => {
+  it('도는 턴이면 active 는 진행 중 — 지금 하는 일은 첫 active, 다음은 첫 pending', () => {
     expect(todoDock(list, true)).toEqual({
       done: 1,
       total: 3,
       current: { text: 'b', stalled: false },
+      next: { text: 'c' },
       rows: [{ text: 'a', mark: 'done' }, { text: 'b', mark: 'active' }, { text: 'c', mark: 'pending' }, { text: 'd', mark: 'cancelled' }],
     })
   })
@@ -78,6 +79,12 @@ describe('todoDock — 입력 카드 위 줄', () => {
     const dock = todoDock([todo('a', 'done'), todo('c')], true)!
     expect(dock).toMatchObject({ done: 1, total: 2 })
     expect(dock.current).toBeUndefined()
+    expect(dock.next).toEqual({ text: 'c' })
+  })
+
+  it('pending 이 없으면 다음이 없다', () => {
+    const dock = todoDock([todo('a', 'active')], true)!
+    expect(dock.next).toBeUndefined()
   })
 
   it('목록이 없거나 비었거나 전부 완료·취소면 숨긴다', () => {
@@ -113,13 +120,15 @@ describe('화면', () => {
     expect(failed).not.toContain('Todowrite')
   })
 
-  it('입력 카드 위: "할 일 1/3 · 지금: …", 끝난 턴이면 "멈춤: …"', () => {
+  it('입력 카드 위: "할 일 1/3 · 지금: …", 끝난 턴이면 "멈춤: …", 다음: …', () => {
     const stalled = renderToStaticMarkup(createElement(TodoDock, { messages: [user, answer(write('m:p1', list))], progress: undefined, running: false }))
     expect(stalled).toContain('todo-dock')
     expect(stalled).toContain('1/3')
     expect(stalled).toContain('멈춤: edit b.txt')
+    expect(stalled).toContain('다음: run tests')
     const live = renderToStaticMarkup(createElement(TodoDock, { messages: [user], progress: [write('m:p1', list)], running: true }))
     expect(live).toContain('지금: edit b.txt')
+    expect(live).toContain('다음: run tests')
   })
 
   it('입력 카드 위: 닫기 버튼은 턴이 안 돌 때만 — 도는 동안엔 없다', () => {

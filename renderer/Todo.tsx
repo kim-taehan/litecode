@@ -108,6 +108,11 @@ export const TodoDock = memo(function TodoDock({ messages, progress, running }: 
               {t(view.current.stalled ? 'todo.stalled' : 'todo.now', { text: view.current.text })}
             </span>
           )}
+          {view.next && (
+            <span className="todo-dock__next">
+              {t('todo.next', { text: view.next.text })}
+            </span>
+          )}
           <svg className="todo-dock__chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M4 10L8 6L12 10" />
           </svg>

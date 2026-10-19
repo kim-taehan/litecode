@@ -19,7 +19,10 @@ import { tr } from '../i18n.ts'
 // - 그래서 앱이 매 턴 system 에(프로젝트 지시문 뒤에 — 뒤가 이긴다) 이 한 줄을 싣는다. 그 뒤 스텝은 이 턴 user 의
 //   system 을 쓰고(01ar E) 끼워 넣는 말이 같은 system 을 싣는다
 export const TODO_SYNC_RULE =
-  'Keep your todo list in sync with your progress. As soon as you finish a todo item, call todowrite again with the full list, marking that item completed and the item you start next in_progress. Update it as you go — not only when you create the list or when the work is done.'
+  'TODO SYNC RULE (MANDATORY): You MUST call todowrite immediately after completing any todo item OR starting a new one. ' +
+  'Do NOT batch updates. The sequence is: (1) finish item X → call todowrite marking X as "done" (or "in_progress" for the next item) RIGHT NOW, ' +
+  'then (2) start the next item. This is not optional — the UI depends on it to show progress. ' +
+  'Every time you change what you are doing, update the list first.'
 
 const NAMES = ['AGENTS.md', 'CLAUDE.md']
 const LOCAL_NAMES = ['AGENTS.local.md', 'CLAUDE.local.md']
