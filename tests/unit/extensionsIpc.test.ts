@@ -1,0 +1,48 @@
+import fs from 'node:fs'
+import { describe, expect, it } from 'vitest'
+import { Channel } from '../../shared/ipc.ts'
+
+// 확장 IPC (이슈 #482) — 채널은 shared/ipc.ts · electron/preload.cts(CJS 라 손으로 옮긴 복사본) · electron/main.ts(브리지) 세 곳에 있다.
+// 이름 대조는 preloadChannels.test.ts 가 한다. 여기는 채널마다 반대쪽이 실제로 있는지 — preload 가 부르고 main 이 받는지(또는 main 이 보내고
+// preload 가 듣는지) — 를 글자로 본다. 빠지면 typecheck 는 초록인데 런타임에 "No handler registered" 로 그 채널만 죽는다
+
+const read = (file: string) => fs.readFileSync(new URL(file, import.meta.url), 'utf8')
+const preload = read('../../electron/preload.cts')
+const main = read('../../electron/main.ts')
+
+const keys = (Object.keys(Channel) as (keyof typeof Channel)[]).filter((key) => key.startsWith('EXTENSIONS_'))
+const requests = keys.filter((key) => key !== 'EXTENSIONS_CHANGED')
+
+/** main.ts 의 extensionsBridge 본문 */
+function bridgeBody(): string {
+  const body = /^function extensionsBridge\(ctx: Context\): void \{\n([\s\S]*?)^\}/m.exec(main)
+  if (!body) throw new Error('main.ts 에서 extensionsBridge 를 찾지 못했다')
+  return body[1]!
+}
+
+describe('확장 IPC 채널', () => {
+  it('설계의 채널이 다 있다', () => {
+    expect(keys.map((key) => Channel[key]).sort()).toEqual(
+      ['extensions:cancel', 'extensions:changed', 'extensions:install', 'extensions:list', 'extensions:pick', 'extensions:remove', 'extensions:set-enabled'],
+    )
+  })
+
+  it('요청 채널마다 preload 가 invoke 하고 main 의 브리지가 handle 한다', () => {
+    const body = bridgeBody()
+    for (const key of requests) {
+      expect(preload, key).toMatch(new RegExp(`ipcRenderer\\.invoke\\(Channel\\.${key}\\b`))
+      expect(body, key).toMatch(new RegExp(`handle\\(ctx, Channel\\.${key},`))
+    }
+  })
+
+  it('바뀜 이벤트는 main 이 broadcast 하고 preload 가 듣는다', () => {
+    expect(bridgeBody()).toMatch(/ctx\.on\('extensions\/changed', \(extensions\) => broadcast\(Channel\.EXTENSIONS_CHANGED, extensions\)\)/)
+    expect(preload).toMatch(/listen\(Channel\.EXTENSIONS_CHANGED, listener\)/)
+  })
+
+  it('브리지는 inject 로 extensions 를 기다리고, 기능 묶음이 아니라 바탕으로 올라간다 (부팅 진단 목록에도)', () => {
+    expect(main).toMatch(/^extensionsBridge\.inject = \['extensions'\]$/m)
+    expect(main).toMatch(/^mounted\.push\(ctx\.plugin\(extensionsBridge\)\)$/m)
+    expect(main).toMatch(/\.\.\.extensionsBridge\.inject/)
+  })
+})

@@ -12,6 +12,8 @@ import { AttachmentsService } from '../src/services/attachmentsService.ts'
 import { systemAttachmentsHost } from './attachmentsHost.ts'
 import { ReportService } from '../src/services/report.ts'
 import { systemReportHost } from './reportHost.ts'
+import { ExtensionsService } from '../src/services/extensions.ts'
+import { systemExtensionsHost } from './extensionsHost.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
 import { EngineService, killEngineProcesses } from '../src/services/engine.ts'
@@ -360,6 +362,21 @@ function reportBridge(ctx: Context): void {
 reportBridge.inject = ['report']
 mounted.push(ctx.plugin(ReportService, { host: systemReportHost, logFile: mainLog.path, appVersion: app.getVersion() }))
 mounted.push(ctx.plugin(reportBridge))
+
+// 설치한 확장 (ctx.extensions, 이슈 #482) — 바탕이다(기능 레지스트리에 넣지 않는다, 끌 수 없다). 부팅 때 보류 설치·삭제를 적용하고 목록을 읽는다.
+// zip 고르기 대화상자는 host 가 요청을 보낸 창에 붙인다 (event.sender). 확장 코드 실행(mount, B 층)은 아직 주입하지 않는다
+function extensionsBridge(ctx: Context): void {
+  handle(ctx, Channel.EXTENSIONS_LIST, async () => ctx.extensions.list())
+  handle(ctx, Channel.EXTENSIONS_PICK, async (event) => ctx.extensions.pick(event.sender))
+  handle(ctx, Channel.EXTENSIONS_INSTALL, async (_event, token: unknown) => ctx.extensions.install(String(token)))
+  handle(ctx, Channel.EXTENSIONS_CANCEL, async (_event, token: unknown) => ctx.extensions.cancel(String(token)))
+  handle(ctx, Channel.EXTENSIONS_REMOVE, async (_event, id: unknown) => ctx.extensions.remove(String(id)))
+  handle(ctx, Channel.EXTENSIONS_SET_ENABLED, async (_event, id: unknown, on: unknown) => ctx.extensions.setEnabled(String(id), on === true))
+  ctx.on('extensions/changed', (extensions) => broadcast(Channel.EXTENSIONS_CHANGED, extensions))
+}
+extensionsBridge.inject = ['extensions']
+mounted.push(ctx.plugin(ExtensionsService, systemExtensionsHost(userData)))
+mounted.push(ctx.plugin(extensionsBridge))
 
 /** 모든 앱 창에 보낸다 */
 function broadcast(channel: string, ...args: unknown[]): void {
@@ -961,7 +978,7 @@ function createWindow(): BrowserWindow {
 // 켜진 기능 묶음의 서비스도 같이 본다 — 못 뜨면 화면은 켜진 줄 알고 그 채널을 부른다 ("No handler registered")
 const BOOT_DEADLINE_MS = 15_000
 function checkBoot(): void {
-  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject, ...reportBridge.inject, ...(ctx.get('features')?.services() ?? [])], (name) => ctx.get(name))
+  const missing = missingServices([...bootstrap.inject, ...chatBridge.inject, ...attachmentsBridge.inject, ...reportBridge.inject, ...extensionsBridge.inject, ...(ctx.get('features')?.services() ?? [])], (name) => ctx.get(name))
   if (!missing.length) return
   console.error(`[boot] ${BOOT_DEADLINE_MS / 1000}초 안에 안 뜬 서비스: ${missing.join(', ')}`)
   if (hiddenForTests) return // 실물 테스트는 대화상자를 띄우지 않는다 — 기록만

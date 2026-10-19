@@ -1,0 +1,355 @@
+import { Context } from 'cordis'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SettingsService } from '../../src/services/settings.ts'
+import { ExtensionsService, type ExtensionsOptions } from '../../src/services/extensions.ts'
+import { ExtensionStore } from '../../src/services/extensions/store.ts'
+import type { ExtensionSummary } from '../../shared/extensions.ts'
+import { makeZip, type ZipItem } from './support/zipWriter.ts'
+
+// ctx.extensions (이슈 #482, 설계 docs/superpowers/specs/2026-10-19-extension-install-design.md 5절) — 부팅 때 보류 적용 → 목록,
+// 켜짐 값(settings.extensions), 설치 흐름 위임(pick·install·cancel·remove), mount 주입 자리의 올리고 내리기. 재시작은 같은 root·설정 파일로
+// 새 Context 를 띄워 흉내 낸다. 루트·설정 파일은 임시 폴더
+
+const APP = '1.0.0'
+
+function zipItems(id: string, version: string): ZipItem[] {
+  return [
+    { name: 'extension.json', data: JSON.stringify({ id, name: `${id} 이름`, description: `${id} 설명`, version, entry: 'index.js' }) },
+    { name: 'index.js', data: `// ${id} ${version}` },
+  ]
+}
+
+let dir: string
+let root: string
+let settingsFile: string
+let zipCount = 0
+
+beforeEach(async () => {
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'litecode-ext-service-'))
+  root = path.join(dir, 'extensions')
+  settingsFile = path.join(dir, 'settings.json')
+})
+afterEach(async () => {
+  await fs.rm(dir, { recursive: true, force: true })
+  vi.restoreAllMocks()
+})
+
+async function zipFile(items: readonly ZipItem[]): Promise<string> {
+  const file = path.join(dir, `pick-${zipCount++}.zip`)
+  await fs.writeFile(file, makeZip(items))
+  return file
+}
+
+/** 앱 한 번 실행 — 설정 + 확장 서비스. events 는 extensions/changed 로 받은 목록들 */
+async function boot(options: Partial<ExtensionsOptions> = {}) {
+  const ctx = new Context()
+  const events: ExtensionSummary[][] = []
+  ctx.on('extensions/changed', (list) => void events.push(list))
+  ctx.plugin(SettingsService, { file: settingsFile })
+  ctx.plugin(ExtensionsService, { root, appVersion: APP, ...options })
+  const ready = await new Promise<Context>((resolve) => ctx.inject(['extensions', 'settings'], (injected) => resolve(injected)))
+  return { ctx, ext: ready.extensions, settings: ready.settings, events }
+}
+
+/** 보류 설치를 저장소로 직접 만든다 (지난 실행의 설치 흉내) */
+async function pendInstall(id: string, version: string): Promise<void> {
+  const store = new ExtensionStore(root)
+  const staged = await store.stage(await zipFile(zipItems(id, version)), APP)
+  expect(await store.install(staged.token!, APP)).toMatchObject({ ok: true })
+}
+
+/** 한 실행에 보류 설치 → 다음 실행에 설치됨 */
+async function installed(...ids: string[]): Promise<void> {
+  for (const id of ids) await pendInstall(id, '1.0.0')
+  await new ExtensionStore(root).applyPending()
+}
+
+const pick = (file: string | undefined) => async () => file
+
+describe('부팅', () => {
+  it('root 가 없으면 빈 목록 — 폴더를 만들지 않는다', async () => {
+    const { ext } = await boot()
+    expect(await ext.list()).toEqual([])
+    expect(await fs.stat(root).catch(() => undefined)).toBeUndefined()
+  })
+
+  it('보류 설치·업그레이드·삭제를 확장이 올라오기 전에 적용하고 목록을 읽는다', async () => {
+    await installed('old-ext', 'up-ext')
+    await pendInstall('up-ext', '2.0.0')
+    await pendInstall('new-ext', '1.0.0')
+    expect(await new ExtensionStore(root).remove('old-ext')).toEqual({ ok: true })
+
+    const { ext } = await boot()
+    expect(await ext.list()).toEqual([
+      { id: 'new-ext', name: 'new-ext 이름', description: 'new-ext 설명', version: '1.0.0', enabled: true, state: 'on' },
+      { id: 'up-ext', name: 'up-ext 이름', description: 'up-ext 설명', version: '2.0.0', enabled: true, state: 'on' },
+    ])
+  })
+
+  it('깨진 설치 폴더가 있어도 뜬다 — 그 확장만 폴더 이름 id 로 failed(invalid), 나머지는 정상', async () => {
+    await installed('good-ext')
+    await fs.mkdir(path.join(root, 'installed', 'broken-ext'), { recursive: true })
+    await fs.writeFile(path.join(root, 'installed', 'broken-ext', 'extension.json'), '{ not json')
+
+    const { ext } = await boot()
+    const list = await ext.list()
+    expect(list.map((item) => [item.id, item.state])).toEqual([
+      ['broken-ext', 'failed'],
+      ['good-ext', 'on'],
+    ])
+    expect(list[0]).toMatchObject({ enabled: true, reason: { code: 'invalid', params: { problems: [{ code: 'manifest-invalid' }] } } })
+    expect(list[0]!.name).toBeUndefined()
+  })
+
+  it('root 가 파일이어도 생성자가 던지지 않는다 — 빈 목록, pick 은 io-failed 로 돌려준다', async () => {
+    await fs.writeFile(root, 'not a folder')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { ext } = await boot({ pick: pick(await zipFile(zipItems('my-ext', '1.0.0'))) })
+    expect(await ext.list()).toEqual([])
+    expect(await ext.pick()).toMatchObject({ ok: false, failure: { code: 'io-failed' } })
+    warn.mockRestore()
+  })
+
+  it('installed 폴더를 읽을 권한이 없어도 뜬다 — 빈 목록', async () => {
+    await installed('my-ext')
+    await fs.chmod(path.join(root, 'installed'), 0o000)
+    try {
+      const { ext } = await boot()
+      expect(await ext.list()).toEqual([])
+    } finally {
+      await fs.chmod(path.join(root, 'installed'), 0o755)
+    }
+  })
+})
+
+describe('설치 흐름', () => {
+  it('pick → install → 목록에 보류 설치(off·pending install, 이름은 보류 폴더에서) → 재시작 → 켜져서 뜬다', async () => {
+    const first = await boot({ pick: pick(await zipFile(zipItems('my-ext', '1.0.0'))) })
+    const picked = await first.ext.pick()
+    expect(picked).toMatchObject({ ok: true, preview: { manifest: { id: 'my-ext', version: '1.0.0' }, files: { count: 2 }, problems: [] } })
+    if (!picked.ok || !picked.preview?.token) throw new Error('token 없음')
+    expect(picked.preview.existing).toBeUndefined()
+
+    expect(await first.ext.install(picked.preview.token)).toEqual({ ok: true, id: 'my-ext', version: '1.0.0' })
+    const pendingRow = { id: 'my-ext', name: 'my-ext 이름', description: 'my-ext 설명', version: '1.0.0', enabled: true, state: 'off', pending: 'install' }
+    expect(await first.ext.list()).toEqual([pendingRow])
+    expect(first.events.at(-1)).toEqual([pendingRow])
+
+    const second = await boot()
+    expect(await second.ext.list()).toEqual([{ id: 'my-ext', name: 'my-ext 이름', description: 'my-ext 설명', version: '1.0.0', enabled: true, state: 'on' }])
+  })
+
+  it('이미 있는 id 를 고르면 미리보기에 그 버전 (업그레이드 확인 카드)', async () => {
+    await installed('my-ext')
+    const { ext } = await boot({ pick: pick(await zipFile(zipItems('my-ext', '2.0.0'))) })
+    expect(await ext.pick()).toMatchObject({ ok: true, preview: { existing: { version: '1.0.0' } } })
+  })
+
+  it('나쁜 zip — 미리보기에 사유, token 없음', async () => {
+    const { ext } = await boot({ pick: pick(await zipFile([...zipItems('my-ext', '1.0.0'), { name: '../evil', data: 'x' }])) })
+    const picked = await ext.pick()
+    expect(picked).toMatchObject({ ok: true, preview: { problems: [{ code: 'unsafe-path' }] } })
+    expect(picked.ok && picked.preview?.token).toBeFalsy()
+  })
+
+  it('대화상자 취소(undefined) — preview 없이 ok, 아무 파일도 만들지 않는다', async () => {
+    const { ext } = await boot({ pick: pick(undefined) })
+    expect(await ext.pick()).toEqual({ ok: true })
+    expect(await fs.stat(root).catch(() => undefined)).toBeUndefined()
+  })
+
+  it('pick 이 주입되지 않았으면 취소와 같다', async () => {
+    const { ext } = await boot()
+    expect(await ext.pick()).toEqual({ ok: true })
+  })
+
+  it('대화상자가 던져도 던지지 않고 io-failed', async () => {
+    const { ext } = await boot({ pick: async () => { throw new Error('dialog broke') } })
+    expect(await ext.pick()).toEqual({ ok: false, failure: { code: 'io-failed', params: { message: 'dialog broke' } } })
+  })
+
+  it('pick 의 owner(요청한 창)를 대화상자에 넘긴다', async () => {
+    const seen: unknown[] = []
+    const { ext } = await boot({ pick: async (owner) => void seen.push(owner) })
+    await ext.pick('window-1')
+    expect(seen).toEqual(['window-1'])
+  })
+
+  it('cancel 하면 그 token 으로는 설치할 수 없다 — 구조화된 실패', async () => {
+    const { ext } = await boot({ pick: pick(await zipFile(zipItems('my-ext', '1.0.0'))) })
+    const picked = await ext.pick()
+    const token = picked.ok ? picked.preview!.token! : ''
+    expect(await ext.cancel(token)).toEqual({ ok: true })
+    expect(await ext.install(token)).toEqual({ ok: false, failure: { code: 'token-unknown', params: {} } })
+    expect(await ext.list()).toEqual([])
+  })
+
+  it('remove 예약 → 목록에 pending remove → 재시작 → 사라지고 settings 값도 지운다', async () => {
+    await installed('my-ext', 'other-ext')
+    const first = await boot()
+    expect(await first.ext.setEnabled('my-ext', false)).toEqual({ ok: true })
+    expect(await first.ext.setEnabled('other-ext', false)).toEqual({ ok: true })
+    expect(await first.ext.remove('my-ext')).toEqual({ ok: true })
+    expect((await first.ext.list()).find((item) => item.id === 'my-ext')).toMatchObject({ pending: 'remove', state: 'off' })
+    expect(first.events.at(-1)?.find((item) => item.id === 'my-ext')?.pending).toBe('remove')
+
+    const second = await boot()
+    expect((await second.ext.list()).map((item) => item.id)).toEqual(['other-ext'])
+    expect(second.settings.get().extensions).toEqual({ 'other-ext': false })
+    expect(JSON.parse(await fs.readFile(settingsFile, 'utf8')).extensions).toEqual({ 'other-ext': false })
+  })
+
+  it('보류 설치만 있는 확장을 remove 하면 보류가 취소되고 목록에서 곧바로 빠진다', async () => {
+    await installed('my-ext')
+    const { ext } = await boot({ pick: pick(await zipFile(zipItems('new-ext', '1.0.0'))) })
+    const picked = await ext.pick()
+    expect(await ext.install(picked.ok ? picked.preview!.token! : '')).toMatchObject({ ok: true })
+    expect((await ext.list()).map((item) => item.id)).toEqual(['my-ext', 'new-ext'])
+    expect(await ext.remove('new-ext')).toEqual({ ok: true })
+    expect((await ext.list()).map((item) => item.id)).toEqual(['my-ext'])
+  })
+
+  it('remove 실패도 던지지 않는다 — 없는 id·잘못된 id', async () => {
+    const { ext } = await boot()
+    expect(await ext.remove('no-such')).toEqual({ ok: false, failure: { code: 'not-installed', params: { id: 'no-such' } } })
+    expect(await ext.remove('../x')).toEqual({ ok: false, failure: { code: 'id-invalid', params: { value: '../x' } } })
+  })
+})
+
+describe('켜짐 값 (settings.extensions)', () => {
+  it('끄면 false 만 저장, 다시 켜면 키를 지운다(기본 켜짐). 바뀔 때만 이벤트', async () => {
+    await installed('my-ext')
+    const { ext, settings, events } = await boot()
+    await ext.idle()
+    const before = events.length
+
+    expect(await ext.setEnabled('my-ext', false)).toEqual({ ok: true })
+    expect(settings.get().extensions).toEqual({ 'my-ext': false })
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', enabled: false, state: 'off' }])
+    expect(events.length).toBe(before + 1)
+
+    expect(await ext.setEnabled('my-ext', false)).toEqual({ ok: true })
+    expect(events.length).toBe(before + 1) // 같은 값 — 다시 내지 않는다
+
+    expect(await ext.setEnabled('my-ext', true)).toEqual({ ok: true })
+    expect(settings.get().extensions).toEqual({})
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', enabled: true, state: 'on' }])
+    expect(events.length).toBe(before + 2)
+  })
+
+  it('목록에 없는 id 는 not-installed — 설정을 건드리지 않는다', async () => {
+    const { ext, settings } = await boot()
+    expect(await ext.setEnabled('no-such', false)).toEqual({ ok: false, failure: { code: 'not-installed', params: { id: 'no-such' } } })
+    expect(settings.get().extensions).toBeUndefined()
+  })
+
+  it('다른 설정만 바뀌면 이벤트를 내지 않는다', async () => {
+    await installed('my-ext')
+    const { ext, settings, events } = await boot()
+    await ext.idle()
+    const before = events.length
+    settings.set({ fontSize: 15 })
+    await ext.idle()
+    expect(events.length).toBe(before)
+  })
+})
+
+describe('mount 주입 자리', () => {
+  function recorder() {
+    const log: string[] = []
+    const mount: ExtensionsOptions['mount'] = ({ manifest, dir: folder }) => (ctx: Context) => {
+      log.push(`mount ${manifest.id} ${path.basename(folder)}`)
+      ctx.effect(() => () => void log.push(`dispose ${manifest.id}`))
+    }
+    return { log, mount }
+  }
+
+  it('켜진 확장은 부팅 때 올리고, 끄면 내리고, 켜면 다시 올린다. 꺼진 확장은 올리지 않는다', async () => {
+    await installed('a-ext', 'b-ext')
+    await fs.writeFile(settingsFile, JSON.stringify({ extensions: { 'b-ext': false } }))
+    const { log, mount } = recorder()
+    const { ext } = await boot({ mount })
+    await ext.idle()
+    expect(log).toEqual(['mount a-ext a-ext'])
+    expect(await ext.list()).toMatchObject([{ id: 'a-ext', state: 'on' }, { id: 'b-ext', state: 'off' }])
+
+    await ext.setEnabled('a-ext', false)
+    expect(log).toEqual(['mount a-ext a-ext', 'dispose a-ext'])
+    await ext.setEnabled('b-ext', true)
+    await ext.setEnabled('a-ext', true)
+    expect(log).toEqual(['mount a-ext a-ext', 'dispose a-ext', 'mount b-ext b-ext', 'mount a-ext a-ext'])
+  })
+
+  it('mount 가 던지면 그 확장만 failed(mount-failed) — 나머지는 on. 끄면 사유가 지워지고 다시 켜면 다시 시도한다', async () => {
+    await installed('bad-ext', 'good-ext')
+    let fail = true
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const mount: ExtensionsOptions['mount'] = ({ manifest }) => () => {
+      if (manifest.id === 'bad-ext' && fail) throw new Error(`boom ${os.homedir()}/x`)
+    }
+    const { ext } = await boot({ mount })
+    await ext.idle()
+    expect(await ext.list()).toMatchObject([
+      { id: 'bad-ext', state: 'failed', reason: { code: 'mount-failed', params: { message: 'boom ~/x' } } },
+      { id: 'good-ext', state: 'on' },
+    ])
+
+    await ext.setEnabled('bad-ext', false)
+    expect((await ext.list())[0]).toEqual(expect.objectContaining({ state: 'off' }))
+    expect((await ext.list())[0]!.reason).toBeUndefined()
+    fail = false
+    await ext.setEnabled('bad-ext', true)
+    expect((await ext.list())[0]).toMatchObject({ state: 'on' })
+    error.mockRestore()
+  })
+
+  it('올리는 동안은 mounting — 이벤트로 보이고, 목록은 올리기가 끝나길 기다리지 않는다', async () => {
+    await installed('my-ext')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const { ext, events } = await boot({ mount: () => async () => gate })
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject([{ id: 'my-ext', state: 'mounting' }]))
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', state: 'mounting' }])
+    release()
+    await ext.idle()
+    expect(events.at(-1)).toMatchObject([{ id: 'my-ext', state: 'on' }])
+  })
+
+  it('동시 호출은 한 줄로 선다 — 올리는 중에 끄면 다 올린 뒤에 내린다', async () => {
+    await installed('my-ext')
+    await fs.writeFile(settingsFile, JSON.stringify({ extensions: { 'my-ext': false } }))
+    const log: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const mount: ExtensionsOptions['mount'] = () => async (ctx: Context) => {
+      log.push('mount start')
+      ctx.effect(() => () => void log.push('dispose'))
+      await gate
+      log.push('mount done')
+    }
+    const { ext } = await boot({ mount })
+    await ext.idle()
+
+    const on = ext.setEnabled('my-ext', true)
+    const off = ext.setEnabled('my-ext', false)
+    await vi.waitFor(() => expect(log).toEqual(['mount start']))
+    let offDone = false
+    void off.then(() => (offDone = true))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(offDone).toBe(false)
+    release()
+    expect(await on).toEqual({ ok: true })
+    expect(await off).toEqual({ ok: true })
+    expect(log).toEqual(['mount start', 'mount done', 'dispose'])
+    expect(await ext.list()).toMatchObject([{ state: 'off', enabled: false }])
+  })
+
+  it('mount 가 없으면 상태만 on (A 층 단독 — 확장 코드는 실행되지 않는다)', async () => {
+    await installed('my-ext')
+    const { ext } = await boot()
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', state: 'on' }])
+  })
+})
