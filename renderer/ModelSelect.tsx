@@ -96,7 +96,9 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
               <div key={provider.id} role="group" aria-label={provider.displayName}>
                 <div className="model-menu__label">{provider.displayName}</div>
                 {provider.models.map((model) => {
-                  const selected = provider.id === value?.providerId && model.id === value.modelId && model.thinkingOff === value?.thinkingOff
+                  // 라벨(findModel)과 같은 항목에 체크 — findModel 은 thinkingOff 없이 id 로 첫 매칭하므로,
+                  // thinkingOff 로만 비교하면 라벨과 체크가 어긋난다 (모델이 사고 켬·끔 둘로 나뉘어 있을 때)
+                  const selected = current?.provider.id === provider.id && current?.model === model
                   return (
                     <button
                       key={`${model.id}:${model.thinkingOff ? 1 : 0}`}
