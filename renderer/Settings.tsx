@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../shared/ipc.ts'
 import { providerIdFor } from '../shared/providerId.ts'
+import { toggleThinkingOff } from '../shared/thinkingOffTwin.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
 import { MobilePage } from './MobileSettings.tsx'
@@ -465,7 +466,8 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
                 ariaLabel={t('models.thinkingOff', { n: index + 1 })}
                 title={t('models.thinkingOffTitle')}
                 disabled={busy}
-                onToggle={(on) => setModel(index, { thinkingOff: on || undefined })}
+                // 켜면 이 항목은 그대로 두고 바로 뒤에 "(사고 끔)" 항목을 만든다 — id 를 바꾸면 그 id 를 가리키던 대화·마지막 선택이 끊긴다 (이슈 #491)
+                onToggle={(on) => setModels((current) => toggleThinkingOff(current, index, on, t('models.thinkingOffSuffix')))}
               />
             </div>
           </div>

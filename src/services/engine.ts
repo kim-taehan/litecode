@@ -568,14 +568,16 @@ function forgetRecord(file: string, pid: number | undefined): void {
 
 /** 키 프록시가 요청마다 쓰는 provider 의 행선지. 사고 끄기(이슈 #477, 사내망 실측: vLLM 게이트웨이의 Qwen 은 chat_template_kwargs.enable_thinking=false 면
  *  reasoning 이 비고 reasoning_tokens 0) — 켠 모델이 있는 provider 만 chat/completions 본문을 모으고, 켠 모델의 요청에만 싣는다.
- *  같은 id 의 사고 켬·끔 두 항목은 프록시가 body.model(id) 만으로 구분하지 못한다 — 항목을 id+thinkingOff 로 구분하되, 프록시에는
- *  사고 끄기 id 목록만 넘긴다(동일 id 중 하나라도 꺼져 있으면 그 id 요청에는 사고 끄기를 싣는다) */
+ *  실제 모델 이름(이슈 #485·#491) — upstreamId 가 있는 모델(사고 끄기와 무관)의 요청만 model 을 바꾼다. 둘 다 유일한 id 로 찾는다 —
+ *  사고 끔 항목은 `<id>-off` 같은 별도 id + upstreamId 라, 같은 게이트웨이 모델의 사고 켬·끔이 서로 다른 설정으로 나간다 */
 export function proxyTarget(provider: ProviderConfig, apiKey: string | undefined): ProxyTarget {
   const off = new Set(provider.models.filter((model) => model.thinkingOff).map((model) => model.id))
+  const upstream = new Map(provider.models.flatMap((model) => (model.upstreamId ? [[model.id, model.upstreamId] as const] : [])))
   return {
     baseURL: provider.baseURL,
     apiKey,
     ...(off.size > 0 && { addToBody: (model) => (off.has(model) ? { chat_template_kwargs: { enable_thinking: false } } : undefined) }),
+    ...(upstream.size > 0 && { renameModel: (model) => upstream.get(model) ?? model }),
   }
 }
 

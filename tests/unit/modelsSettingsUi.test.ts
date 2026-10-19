@@ -113,6 +113,18 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
     expect([pressed('models.imageInput', 3), pressed('models.thinkingOff', 3)]).toEqual(['false', 'false'])
   })
 
+  // 이슈 #491: 알약은 thinkingOff 만 따른다 — 별칭(upstreamId)이 있거나 id 가 `-off` 로 끝나도 thinkingOff 가 없으면 꺼져 보인다
+  it('사고 끄기 알약은 upstreamId·id 모양과 무관하게 thinkingOff 를 따른다', () => {
+    const html = render([
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen-off', displayName: 'Q (사고 끔)', upstreamId: 'qwen', thinkingOff: true },
+      { id: 'fast', displayName: 'F', upstreamId: 'qwen' },
+      { id: 'x-off', displayName: 'X' },
+    ])
+    const pressed = (n: number) => tag(html, ko('models.thinkingOff', n))!.match(/aria-pressed="(true|false)"/)?.[1]
+    expect([1, 2, 3, 4].map(pressed)).toEqual(['false', 'true', 'false', 'false'])
+  })
+
   it('알약 글자는 기존 라벨 키, 체크박스는 더 없다', () => {
     const html = render([{ id: 'm1', displayName: 'M1' }])
     expect(html).not.toContain('type="checkbox"')
