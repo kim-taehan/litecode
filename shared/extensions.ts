@@ -64,6 +64,8 @@ export type ExtensionPendingOp = { op: 'install'; id: string; version: string } 
 export type ExtensionStoreFailure =
   | { code: 'token-unknown'; params: Record<string, never> }
   | { code: 'rejected'; params: { problems: ExtensionProblem[] } }
+  /** staging 복사본의 id·version 이 stage 때 본 것과 다르다 (`<id>@<version>`) */
+  | { code: 'staged-mismatch'; params: { expected: string; actual: string } }
   | { code: 'unpack-failed'; params: { message: string } }
   | { code: 'verify-failed'; params: { message: string } }
   | { code: 'id-invalid'; params: { value: string } }
