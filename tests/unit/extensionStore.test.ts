@@ -252,6 +252,18 @@ describe('직렬화 — 같은 저장소의 install·remove·applyPending 은 �
     expect(await store.applyPending()).toMatchObject({ applied: [{ id: 'same', version: '2.0.0' }], failed: [] })
   })
 
+  // 회귀(이슈 #484): extension.json 의 선언 크기 거짓으로 stage 가 멈추면 큐 뒤의 모든 작업이 멈췄다 — 끝나지 않으면 테스트 타임아웃(5초)
+  it('extension.json 의 선언 크기가 거짓인 stage 는 사유로 끝나고 뒤의 stage·remove 가 이어진다', async () => {
+    await installItems(flat('old-ext', '1.0.0'))
+    await store.applyPending()
+    const [lie, ...rest] = flat('size-lie', '1.0.0')
+    const staged = await stageItems([{ ...lie!, deflate: true, declaredSize: 10 }, ...rest])
+    expect(staged.token).toBeUndefined()
+    expect(staged.result.problems.map((p) => p.code)).toEqual(['zip-unreadable'])
+    expect((await stageItems(flat('next-ext', '1.0.0'))).token).toBeDefined()
+    expect(await store.remove('old-ext')).toEqual({ ok: true })
+  })
+
   it('applyPending 이 끝나기 전에 온 stage·install 은 기다린다 — 부팅 청소가 그 결과를 지우지 않는다', async () => {
     // (applyPending 전에 stage 한 token 은 부팅 청소가 지운다 — 부팅 뒤에 고른 zip 만 설치된다)
     await fs.mkdir(path.join(root, 'pending', 'install', 'old.tmp-x'), { recursive: true })

@@ -1,5 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { PassThrough, Transform, Writable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import zlib from 'node:zlib'
 import yauzl from 'yauzl'
 import type { ExtensionInspection, ExtensionProblem } from '../../../shared/extensions.ts'
 import { EXTENSION_LIMITS, type ExtensionLimits } from './limits.ts'
@@ -73,7 +76,7 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
 
     let value: unknown
     try {
-      value = JSON.parse(await readEntry(zip, manifestItem.entry))
+      value = JSON.parse(await readEntry(zip, manifestItem))
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error
       problems.push({ code: 'manifest-invalid', params: { message: error.message } })
@@ -132,15 +135,50 @@ export function listItems(zip: yauzl.ZipFile): Promise<Item[]> {
   })
 }
 
-function readEntry(zip: yauzl.ZipFile, entry: yauzl.Entry): Promise<string> {
+async function readEntry(zip: yauzl.ZipFile, item: Item): Promise<string> {
+  const chunks: Buffer[] = []
+  const collect = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      chunks.push(chunk)
+      done()
+    },
+  })
+  await pipeEntry(zip, item, collect)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+/**
+ * 항목 내용을 sinks 로 흘린다 — 실제로 흘러나온 바이트를 선언 해제 크기와 대조해 어긋나면(크든 작든) 던진다. inspect(extension.json)와 unpack 이 같이 쓴다.
+ * 압축은 yauzl 에 맡기지 않고(decompress:false 로 원본 바이트만 받는다) 직접 푼다: yauzl 2.10 이 압축 항목에 돌려주는 스트림은 destroy 를
+ * 자기 함수로 덮어써 오류·close 를 내지 않아, 크기 검증(AssertByteCountStream)이 어긋나면 pipeline 이 영영 끝나지 않았다(이슈 #480 QA 차단, #484)
+ */
+export async function pipeEntry(zip: yauzl.ZipFile, item: Item, ...sinks: [...NodeJS.ReadWriteStream[], NodeJS.WritableStream]): Promise<void> {
+  const declared = item.entry.uncompressedSize
+  let bytes = 0
+  await pipeline([
+    await openRawStream(zip, item.entry),
+    // STORE 는 원본 바이트가 곧 내용이다 (yauzl 이 목록 단계에서 압축·해제 크기가 같은지 본다)
+    item.entry.isCompressed() ? zlib.createInflateRaw() : new PassThrough(),
+    new Transform({
+      transform(chunk: Buffer, _encoding, done) {
+        bytes += chunk.length
+        done(bytes > declared ? new Error(`${item.name} is larger than declared ${declared} bytes`) : null, chunk)
+      },
+      flush(done) {
+        done(bytes === declared ? null : new Error(`${item.name} is ${bytes} bytes, declared ${declared}`))
+      },
+    }),
+    ...sinks,
+  ])
+}
+
+/** 항목의 원본(압축된) 바이트 — decompress 옵션은 압축 항목에만 줄 수 있다(yauzl 이 던진다) */
+function openRawStream(zip: yauzl.ZipFile, entry: yauzl.Entry): Promise<NodeJS.ReadableStream> {
   return new Promise((resolve, reject) => {
-    zip.openReadStream(entry, (error, stream) => {
-      if (error) return reject(error)
-      const chunks: Buffer[] = []
-      stream.on('data', (chunk: Buffer) => chunks.push(chunk))
-      stream.once('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-      stream.once('error', reject)
-    })
+    const done = (error: Error | null, stream: NodeJS.ReadableStream) => (error ? reject(error) : resolve(stream))
+    // @types/yauzl 은 옵션을 모두 필수로 적는다 — yauzl 은 `!= null` 로 보므로 null 은 안 준 것과 같다
+    if (entry.isCompressed()) zip.openReadStream(entry, { decompress: false, decrypt: null, start: null, end: null }, done)
+    else zip.openReadStream(entry, done)
   })
 }
 

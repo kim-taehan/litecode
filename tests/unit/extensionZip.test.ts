@@ -202,6 +202,22 @@ describe('inspectZip — extension.json·entry', () => {
     expect(codes(await inspect([{ name: 'extension.json', data: '{ id: ' }, { name: 'index.js' }]))).toEqual(['manifest-invalid'])
   })
 
+  it('deflate 로 압축된 extension.json 도 읽는다', async () => {
+    const result = await inspect(base.map((item) => ({ ...item, deflate: true })))
+    expect(result.problems).toEqual([])
+    expect(result.manifest?.id).toBe('my-ext')
+  })
+
+  // 회귀(이슈 #484): yauzl 의 크기 검증 스트림은 어긋나도 오류·닫힘을 내지 않아 검사가 영영 안 끝났다 — 끝나지 않으면 테스트 타임아웃(5초)으로 실패한다
+  it.each([
+    ['선언보다 크다', 10],
+    ['선언보다 작다', MANIFEST_BYTES + 100],
+  ])('deflate 로 압축된 extension.json 의 실제 크기가 %s → zip-unreadable', async (_label, declaredSize) => {
+    const result = await inspect([{ name: 'extension.json', data: MANIFEST, deflate: true, declaredSize }, base[1]!])
+    expect(codes(result)).toEqual(['zip-unreadable'])
+    expect(result.manifest).toBeUndefined()
+  })
+
   it('zip 이 아니면 zip-unreadable', async () => {
     const file = path.join(dir, 'not.zip')
     await fs.writeFile(file, 'hello')
