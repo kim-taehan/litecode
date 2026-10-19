@@ -575,18 +575,94 @@
   gap: 6px;
 }
 
-/* 모델별 "이미지 입력" 체크 (이슈 #44) — 컨텍스트 길이·최대 출력 옆 */
-.model-row__check {
+.model-row .settings-input:first-child {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* 설정 > 모델 — 모델마다 카드 하나, 두 줄 (이슈 #477 시안 A "카드형 두 줄"). 윗줄 id·표시 이름(반씩)·삭제,
+   아랫줄 컨텍스트 길이·최대 출력(고정폭)·오른쪽 알약 토글 — 좁으면 아랫줄이 줄바꿈해 칸이 잘리지 않는다 */
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 14px;
+}
+
+.model-card__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-card__row:first-child {
+  flex-wrap: nowrap;
+}
+
+.model-card__row:first-child .settings-input {
+  flex: 1;
+}
+
+.model-card__id {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+}
+
+.model-card__number {
+  flex: none;
+  width: 120px;
+}
+
+.model-card .settings-icon-button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.model-card__toggles {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 알약 토글 — 끄면 테두리만, 켜면 어두운 채움 + 체크 (켠 모양은 settings-button--primary 와 같은 색) */
+.model-card__toggle {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 999px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
   color: var(--text-secondary);
   white-space: nowrap;
 }
 
-.model-row .settings-input:first-child {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+.model-card__toggle:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.model-card__toggle[aria-pressed='true'] {
+  padding-left: 10px;
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--on-text);
+  font-weight: 600;
+}
+
+.model-card__toggle[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--text-strong-hover);
+}
+
+.model-card__toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .settings-icon-button {

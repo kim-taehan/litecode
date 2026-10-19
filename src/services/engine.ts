@@ -7,11 +7,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { mergePath } from './loginPath.ts'
 import { findOpencodeBinary, notFoundMessage } from './opencodeBinary.ts'
-import { startKeyProxy, type KeyProxy } from './keyProxy.ts'
+import { startKeyProxy, type KeyProxy, type ProxyTarget } from './keyProxy.ts'
 import { keepTail, streamText } from './outputBuffer.ts'
 import { engineConfig, engineMcpConfig, hiddenEnvNames, isGated, toolGate, withBrowserRules, type EngineGate, type EngineMcp, type EngineSkills } from './engineConfig.ts'
 import { tr } from '../i18n.ts'
 import { removeAppPluginDirs } from './enginePlugins.ts'
+import type { ProviderConfig } from './providers.ts'
 import './providers.ts'
 import type {} from './features.ts' // ctx.features·'features/changed' 타입
 import type {} from './settings.ts' // ctx.settings·'settings/changed' 타입
@@ -429,7 +430,7 @@ export class EngineService extends Service {
     // 저장된 설정을 요청마다 본다 — 키는 이 메인 프로세스에서만 풀린다
     this.proxy ??= startKeyProxy((id) => {
       const provider = this.ctx.providers.get(id)
-      return provider && { baseURL: provider.baseURL, apiKey: this.ctx.providers.apiKey(id) }
+      return provider && proxyTarget(provider, this.ctx.providers.apiKey(id))
     })
     const proxy = await this.proxy
     await this.purgeDeleted() // 다른 연결이 없을 때 — 지난 실행이 정리 전에 끝났어도 여기서 걷힌다
@@ -562,6 +563,17 @@ function forgetRecord(file: string, pid: number | undefined): void {
     if ((JSON.parse(fs.readFileSync(file, 'utf8')) as ServerRecord).pid === pid) fs.rmSync(file)
   } catch {
     // 없거나 망가졌다
+  }
+}
+
+/** 키 프록시가 요청마다 쓰는 provider 의 행선지. 사고 끄기(이슈 #477, 사내망 실측: vLLM 게이트웨이의 Qwen 은 chat_template_kwargs.enable_thinking=false 면
+ *  reasoning 이 비고 reasoning_tokens 0) — 켠 모델이 있는 provider 만 chat/completions 본문을 모으고, 켠 모델의 요청에만 싣는다 */
+export function proxyTarget(provider: ProviderConfig, apiKey: string | undefined): ProxyTarget {
+  const off = new Set(provider.models.filter((model) => model.thinkingOff).map((model) => model.id))
+  return {
+    baseURL: provider.baseURL,
+    apiKey,
+    ...(off.size > 0 && { addToBody: (model: string) => (off.has(model) ? { chat_template_kwargs: { enable_thinking: false } } : undefined) }),
   }
 }
 
