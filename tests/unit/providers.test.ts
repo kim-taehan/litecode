@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ProviderRegistry, type KeyCipher, type ModelCatalogEntry, type ProviderRegistryOptions } from '../../src/services/providers.ts'
 import { canSealKeys } from '../../electron/keyStorage.ts'
 import { tr } from '../../src/i18n.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 
 const config = {
   id: 'gw',
@@ -208,44 +209,45 @@ describe('ProviderRegistry', () => {
     expect(providers.get('gw')!.models[0]).toEqual({ id: 'm1', displayName: 'M', thinkingOff: true })
   })
 
-  // 이슈 #491: id 는 provider 안에서 유일하다 — 같은 게이트웨이 모델의 사고 켬·끔은 id 를 달리하고 upstreamId(일반 별칭)로 같은 이름을 보낸다
-  it('id 가 겹치면 사고 끄기가 같은 항목끼리는 거절한다', async () => {
+  // 이슈 #497 (시안 E): id 는 게이트웨이의 실제 모델 이름 — 같은 id 를 두 항목에 쓸 수 있되 사고 끄기가 달라야 한다.
+  // 겹침은 내부 키(engineModelId) 기준이다 — 엔진·대화가 모델을 그 키로 가리키므로
+  it('같은 id 라도 사고 끄기가 다르면 저장한다 (#491 처럼 항목을 만들거나 id 를 바꾸지 않는다)', async () => {
     const providers = await registry(files)
-    expect(() => providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen', displayName: 'Q2' }] })).toThrow(tr('error.modelIdDuplicate'))
-    expect(() =>
-      providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen', displayName: 'Q2', upstreamId: 'other' }] }),
-    ).toThrow(tr('error.modelIdDuplicate'))
-  })
-
-  // 구버전(80b58cd) 데이터 이주 — 같은 id 의 사고 켬·끔 두 항목이면 사고 끔 쪽만 `<id>-off`(유일하게) + upstreamId=원래 id 로 분리한다
-  it('저장 입력의 같은 id 둘(사고 켬·끔)은 사고 끔 쪽만 분리하고 다른 필드는 그대로', async () => {
-    const providers = await registry(files)
-    providers.save({
-      ...config,
-      models: [
-        { id: 'qwen', displayName: 'Q', contextLength: 32_768 },
-        { id: 'qwen', displayName: 'QT', thinkingOff: true, contextLength: 32_768, maxOutput: 4_096, imageInput: true },
-        { id: 'qwen-off', displayName: '진짜 qwen-off' },
-        { id: 'm3', displayName: 'N' },
-      ],
-    })
+    providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: ' qwen ', displayName: 'QT', thinkingOff: true }] })
     expect((await registry(files)).get('gw')!.models).toEqual([
-      { id: 'qwen', displayName: 'Q', contextLength: 32_768 },
-      { id: 'qwen-off-2', displayName: 'QT', contextLength: 32_768, maxOutput: 4_096, imageInput: true, thinkingOff: true, upstreamId: 'qwen' },
-      { id: 'qwen-off', displayName: '진짜 qwen-off' },
-      { id: 'm3', displayName: 'N' },
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen', displayName: 'QT', thinkingOff: true },
     ])
   })
 
-  it('파일의 구버전 같은 id 둘은 읽을 때 분리하고, 이주 뒤에도 남는 중복은 던지지 않고 그대로 둔다 (저장 때만 거절)', async () => {
+  it('같은 id·같은 사고 끄기는 거절한다 — 문구는 사고 끄기 설정을 달리하라고 알린다', async () => {
+    const providers = await registry(files)
+    expect(tr('error.modelIdDuplicate')).toContain('사고 끄기')
+    expect(() => providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen', displayName: 'Q2', thinkingOff: false }] })).toThrow(
+      tr('error.modelIdDuplicate'),
+    )
+    expect(() =>
+      providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q', thinkingOff: true }, { id: 'qwen', displayName: 'Q2', thinkingOff: true }] }),
+    ).toThrow(tr('error.modelIdDuplicate'))
+  })
+
+  it('내부 키끼리 겹치면 거절한다 — 접미 키 모양의 진짜 id 와 그 id 의 사고 끔 항목', async () => {
+    const providers = await registry(files)
+    const key = engineModelId({ id: 'x', thinkingOff: true })
+    expect(() => providers.save({ ...config, models: [{ id: key, displayName: 'Real' }, { id: 'x', displayName: 'X', thinkingOff: true }] })).toThrow(
+      tr('error.modelIdDuplicate'),
+    )
+  })
+
+  // #491 이주 — #491 은 사고 끄기를 켜면 `X-off` + upstreamId `X` 항목을 만들었다. 이제 id 가 실제 이름이므로 id=upstreamId, upstreamId 는 지운다
+  it('파일의 #491 형태는 읽을 때 id=upstreamId 로 바꾸고 upstreamId 를 지운다 (다른 필드는 그대로)', async () => {
     const stored = [
       {
         ...config,
         models: [
           { id: 'qwen', displayName: 'Q' },
-          { id: 'qwen', displayName: 'QT', thinkingOff: true },
-          { id: 'dup', displayName: 'D1' },
-          { id: 'dup', displayName: 'D2' },
+          { id: 'qwen-off', displayName: 'Q (사고 끔)', upstreamId: 'qwen', thinkingOff: true, contextLength: 32_768 },
+          { id: 'old', displayName: 'Old', thinkingOff: true },
         ],
       },
     ]
@@ -253,49 +255,32 @@ describe('ProviderRegistry', () => {
     const providers = await registry(files)
     expect(providers.get('gw')!.models).toEqual([
       { id: 'qwen', displayName: 'Q' },
-      { id: 'qwen-off', displayName: 'QT', thinkingOff: true, upstreamId: 'qwen' },
-      { id: 'dup', displayName: 'D1' },
-      { id: 'dup', displayName: 'D2' },
+      { id: 'qwen', displayName: 'Q (사고 끔)', thinkingOff: true, contextLength: 32_768 },
+      // 구버전 단일 사고 끔 항목(upstreamId 없음)은 그대로 — 키만 접미 키가 된다
+      { id: 'old', displayName: 'Old', thinkingOff: true },
     ])
-    expect(() => providers.save({ ...config, models: providers.get('gw')!.models })).toThrow(tr('error.modelIdDuplicate'))
   })
 
-  it('`-off` 접미사로 추측하지 않는다 — 별칭 없는 qwen-off 사고 끔 항목은 upstreamId 없이 그대로 저장된다', async () => {
+  it('저장 입력의 #491 형태도 같은 이주를 거친다', async () => {
     const providers = await registry(files)
-    providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen-off', displayName: 'QT', thinkingOff: true }] })
+    const legacy = { id: 'qwen-off', displayName: 'QT', upstreamId: ' qwen ', thinkingOff: true } as ModelCatalogEntry
+    providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, legacy] })
     expect((await registry(files)).get('gw')!.models).toEqual([
       { id: 'qwen', displayName: 'Q' },
-      { id: 'qwen-off', displayName: 'QT', thinkingOff: true },
+      { id: 'qwen', displayName: 'QT', thinkingOff: true },
     ])
   })
 
-  // upstreamId(실제 모델 이름) — 사고 끄기와 무관한 일반 별칭. 트림 후 비거나 id 와 같으면 남기지 않는다
-  it('upstreamId 는 트림해 비어 있지 않고 id 와 다를 때만 남고, 여러 항목이 같은 값이어도 된다', async () => {
+  it('이주 뒤 키가 겹치면 읽을 때는 던지지 않고 그대로 두고(CLAUDE.md 함정 4), 저장 때만 거절한다', async () => {
+    // #491 에서 사고 끄기를 다시 끈 항목은 upstreamId 만 남았다 — 이주하면 원래 항목과 같은 id·같은 사고 끄기
+    const stored = [{ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen-off', displayName: 'Q2', upstreamId: 'qwen' }] }]
+    await fs.writeFile(files.file!, JSON.stringify(stored))
     const providers = await registry(files)
-    providers.save({
-      ...config,
-      models: [
-        { id: 'qwen', displayName: 'Q', upstreamId: ' qwen3.8-27b ' },
-        { id: 'qwen-off', displayName: 'QT', upstreamId: 'qwen3.8-27b', thinkingOff: true },
-        { id: 'm3', displayName: 'N', upstreamId: '   ' },
-        { id: 'm4', displayName: 'O', upstreamId: '' },
-        { id: 'm5', displayName: 'P', upstreamId: ' m5 ' },
-      ],
-    })
-    expect((await registry(files)).get('gw')!.models).toEqual([
-      { id: 'qwen', displayName: 'Q', upstreamId: 'qwen3.8-27b' },
-      { id: 'qwen-off', displayName: 'QT', upstreamId: 'qwen3.8-27b', thinkingOff: true },
-      { id: 'm3', displayName: 'N' },
-      { id: 'm4', displayName: 'O' },
-      { id: 'm5', displayName: 'P' },
+    expect(providers.get('gw')!.models).toEqual([
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen', displayName: 'Q2' },
     ])
-  })
-
-  it('upstreamId 가 문자열이 아니거나 200자를 넘거나 제어 문자·개행이 있으면 거절한다', async () => {
-    const providers = await registry(files)
-    const save = (upstreamId: unknown) => providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', upstreamId } as unknown as ModelCatalogEntry] })
-    for (const bad of [42, 'a'.repeat(201), 'qwen\nx', 'qwen\tx', 'q\u0000']) expect(() => save(bad)).toThrow(tr('error.upstreamId'))
-    expect(save('a'.repeat(200))[0]!.models[0]!.upstreamId).toBe('a'.repeat(200))
+    expect(() => providers.save({ ...config, models: providers.get('gw')!.models })).toThrow(tr('error.modelIdDuplicate'))
   })
 
   // 03_qa 1차 재확인 · 리더 결정: 주소를 바꿔 저장하려면 키를 다시 넣어야 한다 — 안 그러면 save → fetch 로 저장 키가 새 주소로 간다

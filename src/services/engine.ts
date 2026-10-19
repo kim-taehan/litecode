@@ -13,6 +13,7 @@ import { engineConfig, engineMcpConfig, hiddenEnvNames, isGated, toolGate, withB
 import { tr } from '../i18n.ts'
 import { removeAppPluginDirs } from './enginePlugins.ts'
 import type { ProviderConfig } from './providers.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 import './providers.ts'
 import type {} from './features.ts' // ctx.features·'features/changed' 타입
 import type {} from './settings.ts' // ctx.settings·'settings/changed' 타입
@@ -568,16 +569,16 @@ function forgetRecord(file: string, pid: number | undefined): void {
 
 /** 키 프록시가 요청마다 쓰는 provider 의 행선지. 사고 끄기(이슈 #477, 사내망 실측: vLLM 게이트웨이의 Qwen 은 chat_template_kwargs.enable_thinking=false 면
  *  reasoning 이 비고 reasoning_tokens 0) — 켠 모델이 있는 provider 만 chat/completions 본문을 모으고, 켠 모델의 요청에만 싣는다.
- *  실제 모델 이름(이슈 #485·#491) — upstreamId 가 있는 모델(사고 끄기와 무관)의 요청만 model 을 바꾼다. 둘 다 유일한 id 로 찾는다 —
- *  사고 끔 항목은 `<id>-off` 같은 별도 id + upstreamId 라, 같은 게이트웨이 모델의 사고 켬·끔이 서로 다른 설정으로 나간다 */
+ *  엔진은 내부 키(engineModelId, 이슈 #497)를 보낸다 — 사고 끔 항목의 키는 게이트웨이 이름(id)으로 되돌린다. 사고 켬 항목의 키는 id 그대로라 바꿀 것이 없다 */
 export function proxyTarget(provider: ProviderConfig, apiKey: string | undefined): ProxyTarget {
-  const off = new Set(provider.models.filter((model) => model.thinkingOff).map((model) => model.id))
-  const upstream = new Map(provider.models.flatMap((model) => (model.upstreamId ? [[model.id, model.upstreamId] as const] : [])))
+  const off = new Map(provider.models.filter((model) => model.thinkingOff === true).map((model) => [engineModelId(model), model.id] as const))
   return {
     baseURL: provider.baseURL,
     apiKey,
-    ...(off.size > 0 && { addToBody: (model) => (off.has(model) ? { chat_template_kwargs: { enable_thinking: false } } : undefined) }),
-    ...(upstream.size > 0 && { renameModel: (model) => upstream.get(model) ?? model }),
+    ...(off.size > 0 && {
+      addToBody: (model) => (off.has(model) ? { chat_template_kwargs: { enable_thinking: false } } : undefined),
+      renameModel: (model) => off.get(model) ?? model,
+    }),
   }
 }
 

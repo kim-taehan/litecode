@@ -4,6 +4,7 @@ import type { Mode } from '../../shared/modes.ts'
 import { matchesTool, UNGATED_TOOLS } from '../../shared/hooks.ts'
 import { BROWSER_DENIED_TOOLS, BROWSER_MCP_NAME, BROWSER_QUIET_TOOLS, BROWSER_READ_TOOLS } from '../../shared/browser.ts'
 import { engineLimit } from '../../shared/outputLimit.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 import { PROJECT_SKILLS_DIR } from '../../shared/skills.ts'
 import { GIT_READ_TOOLS, GIT_WRITE_TOOLS } from '../../shared/git.ts'
 
@@ -364,18 +365,20 @@ export function engineConfig(
 ): Record<string, unknown> {
   const provider: Record<string, unknown> = {}
   for (const config of providers) {
-    // provider·모델 id 는 우리 id 그대로 — ctx.llm 이 그대로 넘긴다
+    // provider id 는 우리 id 그대로, 모델은 내부 키(engineModelId, 이슈 #497) — ctx.llm 이 대화에 저장된 키를 그대로 넘기고, 키 프록시가 게이트웨이 이름으로 되돌린다.
+    // 모델 정의에 `id`(api id)를 주지 않는다 — 그러면 opencode 가 본문 model 에 그 값을 실어 프록시가 사고 켬·끔을 못 가린다
     // 컨텍스트 길이·최대 출력·이미지 입력은 opencode 가 /api/model 로 안다 (01_probe 2026-10-01). 한도를 줘야 자동 압축이 돈다 (01o).
     // output 은 빼면 안 된다 — limit 에 output 이 없으면 설정 파일 전체가 무시돼 provider 가 사라진다 (01o).
     // 레거시는 output 을 요청 max_tokens 로 싣고 문턱(context − output)에서 뺀다 — 0 이면 둘 다 32000 이라 작은 모델에서 요약이 끝없이 돈다.
     // 그래서 최대 출력을 비우면 컨텍스트의 1/4 를 넣는다 (이슈 #27 실측, shared/outputLimit.ts)
     // 이미지 입력을 켠 모델만 modalities 를 싣는다 — 이게 있어야 file 파트 이미지가 image_url 로 나간다(attachment: true 만으론 안 된다, 01y 함정 3)
-    // 같은 id 의 사고 켬·끔 두 항목은 opencode 모델 정의가 id 당 하나라 첫 항목만 쓴다 — 사고 끄기는 프록시가 body 로 싣기 때문
+    // 같은 id 의 사고 켬·끔 두 항목은 키가 달라 정의가 둘이다. 키가 겹치는 것(읽기에서 남은 것 — 저장은 거절)은 첫 항목만
     const modelMap = new Map<string, { name: string; limit?: { context?: number; output?: number }; modalities?: { input?: string[]; output?: string[] } }>()
     for (const model of config.models) {
-      if (modelMap.has(model.id)) continue
+      const key = engineModelId(model)
+      if (modelMap.has(key)) continue
       const limit = engineLimit(model)
-      modelMap.set(model.id, { name: model.displayName, ...(limit && { limit }), ...(model.imageInput && { modalities: { input: ['text', 'image'], output: ['text'] } }) })
+      modelMap.set(key, { name: model.displayName, ...(limit && { limit }), ...(model.imageInput && { modalities: { input: ['text', 'image'], output: ['text'] } }) })
     }
     provider[config.id] = {
       npm: '@ai-sdk/openai-compatible',
@@ -419,7 +422,7 @@ function engineDefaults(providers: ProviderConfig[]): Record<string, unknown> {
   // model 이 막는다(01x 2-4, 5/5). ctx.llm 은 늘 모델을 주므로 이중 방어다. 고를 모델이 없으면 없는 모델을 가리키지 않게 뺀다
   const first = providers.find((config) => config.models.length > 0)
   return {
-    ...(first && { model: `${first.id}/${first.models[0]!.id}` }),
+    ...(first && { model: `${first.id}/${engineModelId(first.models[0]!)}` }),
     // 레거시 provider 목록에서 Zen 을 빼고, 사용자 전역의 enabled_providers 가 앱 provider 를 끄는 것(모든 턴 Model not found, 01x 4)을 덮는다
     enabled_providers: providers.map((config) => config.id),
     share: 'disabled', // share:"auto" 면 세션마다 opncd.ai 로 대화 전체를 동기화한다 (01x 5)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { findModel, initialModel, parseModelRef } from '../../renderer/modelChoice.ts'
+import { engineModelId } from '../../shared/engineModelId.ts'
 
 // 입력창 아래 모델 드롭다운의 선택 규칙 (00_request 모델 선택, 2026-10-01)
 describe('modelChoice', () => {
@@ -32,39 +33,36 @@ describe('modelChoice', () => {
     expect(parseModelRef('not json')).toBeUndefined()
     expect(parseModelRef('{"providerId":"gw"}')).toBeUndefined()
     expect(parseModelRef('null')).toBeUndefined()
-    expect(parseModelRef('{"providerId":"gw","modelId":"echo","thinkingOff":true}')).toEqual({ providerId: 'gw', modelId: 'echo', thinkingOff: true })
   })
 
-  it('같은 id 의 사고 켬·끔 두 항목을 thinkingOff 로 가려 고르고, 사고 끄기만 지워도 사고 켬은 남는다', () => {
-    const both = [
-      {
-        id: 'gw',
-        displayName: 'Gateway',
-        models: [
-          { id: 'echo', displayName: 'Echo' },
-          { id: 'echo', displayName: 'Echo', thinkingOff: true },
-        ],
-      },
-    ]
-    expect(findModel(both, { providerId: 'gw', modelId: 'echo', thinkingOff: true })?.model.thinkingOff).toBe(true)
-    expect(findModel(both, { providerId: 'gw', modelId: 'echo', thinkingOff: false })?.model.thinkingOff).toBeUndefined()
-    // thinkingOff 를 안 준(이전 저장값) 것은 id 로만 맞춰 사고 켜진 항목이 된다
-    expect(findModel(both, { providerId: 'gw', modelId: 'echo' })?.model.thinkingOff).toBeUndefined()
-    const onlyOff = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'echo', displayName: 'Echo', thinkingOff: true }] }]
-    expect(findModel(onlyOff, { providerId: 'gw', modelId: 'echo', thinkingOff: true })?.model.thinkingOff).toBe(true)
-    expect(findModel(onlyOff, { providerId: 'gw', modelId: 'echo', thinkingOff: false })).toBeUndefined()
-    // 지워진 사고 끄기 선택은 첫 모델로, 사고 켜진 선택은 그대로
-    expect(initialModel(onlyOff, { providerId: 'gw', modelId: 'echo', thinkingOff: true })).toEqual({ providerId: 'gw', modelId: 'echo', thinkingOff: true })
-  })
+  // 이슈 #497 (시안 E): 같은 id 의 사고 켬·끔 두 항목은 내부 키(engineModelId)가 다르다 — 선택은 키 하나로 쥔다
+  describe('내부 키', () => {
+    const off = engineModelId({ id: 'q', thinkingOff: true })
+    // providers.json 의 실제 형태 — 사고 끄기 항목이 먼저, 같은 id 의 사고 켬 항목이 뒤에
+    const both = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'q', displayName: 'Q', thinkingOff: true }, { id: 'q2', displayName: 'Other' }, { id: 'q', displayName: 'thinking Q' }] }]
 
-  it('사고 끄기 모델이 id 첫 항목이어도 thinkingOff:false 로는 사고 켜진 항목을 고른다 (# thinking 선택이 사고 끄기로 되돌리는 버그)', () => {
-    // providers.json 의 실제 형태 — 사고 끄기(thinkingOff:true) 가 먼저, 사고 켜진 항목이 뒤에
-    const real = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'q', displayName: 'Q', thinkingOff: true }, { id: 'q2', displayName: 'Other' }, { id: 'q', displayName: 'thinking Q' }] }]
-    // 사고 켜진 모델(id=q, thinkingOff 없음) 을 명시적 thinkingOff:false 로 선택하면 사고 끄기[0]이 아니라 뒤에 있는 사고 켜진 항목
-    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: false })?.model.displayName).toBe('thinking Q')
-    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: false })?.model.thinkingOff).toBeUndefined()
-    // 사고 끄기(thinkingOff:true) 는 그대로 사고 끄기 항목
-    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: true })?.model.displayName).toBe('Q')
-    expect(findModel(real, { providerId: 'gw', modelId: 'q', thinkingOff: true })?.model.thinkingOff).toBe(true)
+    it('findModel 은 키로 찾는다 — 사고 켬 키(=id)는 사고 켬 항목, 접미 키는 사고 끔 항목', () => {
+      expect(findModel(both, { providerId: 'gw', modelId: 'q' })?.model.displayName).toBe('thinking Q')
+      expect(findModel(both, { providerId: 'gw', modelId: off })?.model.displayName).toBe('Q')
+    })
+
+    it('사고 끔 항목만 있으면 id 로는 못 찾는다 (키가 다르다)', () => {
+      const onlyOff = [{ id: 'gw', displayName: 'Gateway', models: [{ id: 'q', displayName: 'Q', thinkingOff: true }] }]
+      expect(findModel(onlyOff, { providerId: 'gw', modelId: 'q' })).toBeUndefined()
+      expect(initialModel(onlyOff, { providerId: 'gw', modelId: off })).toEqual({ providerId: 'gw', modelId: off })
+    })
+
+    it('새 대화의 첫 모델도 키 — 첫 항목이 사고 끔이면 접미 키', () => {
+      expect(initialModel(both, undefined)).toEqual({ providerId: 'gw', modelId: off })
+    })
+
+    it('이전 저장값 {modelId, thinkingOff} 는 키로 읽는다 — 첫 모델로 돌아가지 않는다', () => {
+      const offRef = parseModelRef('{"providerId":"gw","modelId":"q","thinkingOff":true}')
+      expect(offRef).toEqual({ providerId: 'gw', modelId: off })
+      expect(initialModel(both, offRef)).toEqual({ providerId: 'gw', modelId: off })
+      const onRef = parseModelRef('{"providerId":"gw","modelId":"q","thinkingOff":false}')
+      expect(onRef).toEqual({ providerId: 'gw', modelId: 'q' })
+      expect(findModel(both, onRef)?.model.displayName).toBe('thinking Q')
+    })
   })
 })

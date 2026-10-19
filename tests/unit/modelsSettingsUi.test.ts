@@ -113,16 +113,27 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
     expect([pressed('models.imageInput', 3), pressed('models.thinkingOff', 3)]).toEqual(['false', 'false'])
   })
 
-  // 이슈 #491: 알약은 thinkingOff 만 따른다 — 별칭(upstreamId)이 있거나 id 가 `-off` 로 끝나도 thinkingOff 가 없으면 꺼져 보인다
-  it('사고 끄기 알약은 upstreamId·id 모양과 무관하게 thinkingOff 를 따른다', () => {
+  // 이슈 #497 (시안 E·F): 같은 id 를 두 항목에 쓸 수 있다 — 알약은 thinkingOff 만 따른다. (id, 사고 끄기) 가 겹치는 항목은 id 칸이 빨간 테두리
+  it('같은 id 두 항목 — 사고 끄기 알약은 각자의 thinkingOff 를 따른다', () => {
     const html = render([
-      { id: 'qwen', displayName: 'Q' },
-      { id: 'qwen-off', displayName: 'Q (사고 끔)', upstreamId: 'qwen', thinkingOff: true },
-      { id: 'fast', displayName: 'F', upstreamId: 'qwen' },
-      { id: 'x-off', displayName: 'X' },
+      { id: 'qwen', displayName: 'Q', thinkingOff: true },
+      { id: 'qwen', displayName: 'thinking Q' },
     ])
     const pressed = (n: number) => tag(html, ko('models.thinkingOff', n))!.match(/aria-pressed="(true|false)"/)?.[1]
-    expect([1, 2, 3, 4].map(pressed)).toEqual(['false', 'true', 'false', 'false'])
+    expect([1, 2].map(pressed)).toEqual(['true', 'false'])
+    expect([1, 2].map((n) => tag(html, ko('models.modelId', n)))).toEqual([expect.stringContaining('value="qwen"'), expect.stringContaining('value="qwen"')])
+  })
+
+  it('(id, 사고 끄기) 가 겹치는 항목만 id 칸이 빨간 테두리(model-card__id--clash, aria-invalid) — 사고 끄기가 다르면 아니다', () => {
+    const html = render([
+      { id: 'qwen', displayName: 'Q' },
+      { id: ' qwen ', displayName: 'Q2' },
+      { id: 'qwen', displayName: 'QT', thinkingOff: true },
+      { id: '', displayName: '' },
+      { id: '', displayName: '' },
+    ])
+    const clash = (n: number) => /model-card__id--clash/.test(tag(html, ko('models.modelId', n))!) && /aria-invalid="true"/.test(tag(html, ko('models.modelId', n))!)
+    expect([1, 2, 3, 4, 5].map(clash)).toEqual([true, true, false, false, false])
   })
 
   it('알약 글자는 기존 라벨 키, 체크박스는 더 없다', () => {
@@ -140,12 +151,26 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
     expect(buttons[1]).not.toContain('<svg')
   })
 
-  it('안내문에 사고 끄기 한 줄이 컨텍스트 길이·최대 출력 안내 앞에 있다', () => {
+  // 시안 E: 같은 모델 두 항목 안내 → 사고 끄기 설명 → 컨텍스트 길이·최대 출력 안내 순서
+  it('안내문 — 같은 id 두 항목 한 줄, 사고 끄기 한 줄이 컨텍스트 길이·최대 출력 안내 앞에 있다', () => {
     const html = render([{ id: 'm1', displayName: 'M1' }])
+    const escaped = (text: string) => text.replace(/"/g, '&quot;')
+    const twin = html.indexOf(escaped(translate('ko', 'models.twinHint')))
     const hint = html.indexOf(translate('ko', 'models.thinkingOffHint'))
-    expect(hint).toBeGreaterThan(-1)
+    expect(html).toContain(`>${translate('ko', 'models.twinHintTerm')}</strong>`)
+    expect(twin).toBeGreaterThan(-1)
+    expect(hint).toBeGreaterThan(twin)
     expect(hint).toBeLessThan(html.indexOf(translate('ko', 'models.contextLengthHint')))
     expect(html).toContain(translate('ko', 'models.maxOutputHint'))
+  })
+
+  it('안내 문구는 시안 E 그대로 (ko·en), 사고 끄기 설명은 항목을 만든다는 말이 없다', () => {
+    expect(translate('ko', 'models.twinHintTerm')).toBe('같은 모델을 사고 켬·끔 두 항목으로')
+    expect(translate('ko', 'models.twinHint')).toBe('id 는 같게 두고 "사고 끄기" 설정만 다르게 하면 됩니다. 앱이 내부에서 알아서 구분해서 보냅니다.')
+    expect(translate('ko', 'models.thinkingOffHint')).toBe('답하기 전에 생각하는 과정을 건너뛰어 더 빨리 답합니다. 어려운 작업은 정확도가 내려갈 수 있습니다.')
+    expect(translate('ko', 'error.modelIdDuplicate')).toBe('모델 id 가 겹칩니다 — 같은 id 는 "사고 끄기" 설정이 서로 달라야 합니다.')
+    expect(translate('en', 'models.thinkingOffHint')).not.toMatch(/adds/)
+    expect(translate('en', 'error.modelIdDuplicate')).toMatch(/Thinking off/)
   })
 })
 
