@@ -67,12 +67,10 @@ export function installKind(preview: ExtensionPreview): InstallKind {
   return order > 0 ? 'upgrade' : order === 0 ? 'same' : 'downgrade'
 }
 
-export type CardKind = 'on' | 'off' | 'mounting' | 'failed' | 'pending-install' | 'pending-remove'
+export type CardKind = 'on' | 'off' | 'mounting' | 'failed'
 
-/** 카드 모양 — 보류(삭제 > 설치)가 무엇보다 앞서고, 그다음 실패 · 올리는 중 · 켜짐/꺼짐 */
+/** 카드 모양 — 실패 · 올리는 중 · 켜짐/꺼짐 (설치·삭제는 곧바로 적용돼 보류 상태가 없다, 이슈 #511) */
 export function cardKind(extension: ExtensionSummary): CardKind {
-  if (extension.pending === 'remove') return 'pending-remove'
-  if (extension.pending === 'install') return 'pending-install'
   if (extension.state === 'failed') return 'failed'
   if (extension.state === 'mounting') return 'mounting'
   return extension.state === 'on' ? 'on' : 'off'
@@ -174,6 +172,18 @@ export function failureLines(failure: ExtensionStoreFailure): ProblemLine[] {
       return [{ title: { key: 'extensions.failure.not-installed' }, mono: failure.params.id }]
     case 'io-failed':
       return [{ title: { key: 'extensions.failure.io-failed' }, plain: failure.params.message }]
+    case 'apply-failed':
+      return [{ title: { key: 'extensions.failure.apply-failed' }, plain: failure.params.message }]
+    case 'not-on':
+      return [{ title: { key: 'extensions.failure.not-on' }, mono: failure.params.id }]
+    case 'entry-not-html':
+      return [{ title: { key: 'extensions.failure.entry-not-html' }, mono: failure.params.entry }]
+    case 'entry-unsafe':
+      return [{ title: { key: 'extensions.failure.entry-unsafe' }, mono: failure.params.entry }]
+    case 'entry-too-large':
+      return [{ title: { key: 'extensions.failure.entry-too-large' }, detail: sizeDetail(failure.params.bytes, failure.params.limit) }]
+    case 'entry-unreadable':
+      return [{ title: { key: 'extensions.failure.entry-unreadable' }, plain: failure.params.message }]
     default:
       return [{ title: { key: 'extensions.failure.unknown' } }]
   }

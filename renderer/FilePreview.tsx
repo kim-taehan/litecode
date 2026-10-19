@@ -1,24 +1,30 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
-import type { DirectoryListing, FilePreview, HtmlAsset } from '../shared/ipc.ts'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import type { DirectoryListing, ExtensionEntryResult, ExtensionSummary, FilePreview, HtmlAsset } from '../shared/ipc.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { GitPanel, GitTabCount } from './Git.tsx'
 import { BranchIcon } from './GitIcons.tsx'
 import {
   GIT_TAB,
+  closeExtensionTabs,
   closeFilePreview,
   closeTab,
   compareCandidates,
   exitCompare,
+  extensionFrameKey,
+  extensionIdOf,
+  isExtensionTab,
   isFileTab,
   isTaskTab,
   isTerminalTab,
   isTurnTab,
+  openExtensionTab,
   openFilePreview,
   panelTakesFocus,
   openFilesTab,
   openTerminalTab,
   revealPanel,
   selectTab,
+  setWorkspaceDirectory,
   startCompare,
   taskIdOf,
   terminalIdOf,
@@ -31,11 +37,14 @@ import {
 import { Tokens, useHighlight } from './Highlighted.tsx'
 import { languageOfPath } from './highlight.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
+import { useExtensions } from './extensionsStore.ts'
+import { failureLines, lineSummary } from './extensionsView.ts'
 import { useFeatures } from './featuresStore.ts'
 import { reason } from './ipcError.ts'
 import { lineJump } from './lineJump.ts'
+import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT } from './settingsStore.ts'
-import { TabAddMenu } from './TabAddMenu.tsx'
+import { menuExtensions, TabAddMenu } from './TabAddMenu.tsx'
 import { TaskTab } from './TaskTab.tsx'
 import { TurnTab } from './TurnTab.tsx'
 import { taskTitle } from './taskTabView.ts'
@@ -50,6 +59,7 @@ import './filePreview.css'
 // 파일 탭 본문은 고정폭 줄 번호, .md 는 마크다운, .html 은 격리된 iframe 에서 실제로 렌더링(htmlPreview.ts). 읽기·판정은 메인.
 // 이미지(png·jpg·gif·webp·svg)는 <img>, PDF 는 안내 + 기본 앱에서 열기 (이슈 #214).
 // dsh 와 다른 점: 분할 보기(두 창)는 없다, "파일" 탭은 닫을 수 없다, "+" 는 안내 탭 대신 파일 탭으로.
+// 확장 탭 (이슈 #511): 설치한 패널 확장(한 파일짜리 HTML)을 HTML 미리보기와 같은 격리된 iframe(SandboxFrame)에서 돌린다 — 탭 이름은 manifest name, 퍼즐 아이콘.
 
 const WIDTH_KEY = 'litecode.filePreview.width'
 const MIN_WIDTH = 300
@@ -79,14 +89,22 @@ export interface FilePreviewPanelProps {
   onOpenConversation?: (conversationId: string) => void
 }
 
-/** 지금 보는 대화의 프로젝트 패널일 때만 그린다 — 프로젝트를 옮기면 숨긴다 */
+/** 지금 보는 대화의 프로젝트 패널일 때만 그린다 — 프로젝트를 옮기면 숨긴다.
+ *  패널이 닫혀 있어도 늘 마운트돼 있어서 확장 목록(이슈 #511)을 여기서 듣는다: 꺼졌거나·삭제됐거나·상태가 정상이 아닌 확장의 탭을 닫고,
+ *  설정 화면의 [열기]가 탭을 열 자리(지금 프로젝트)를 알린다 */
 export function FilePreviewPanel({ directory, titleFor, activeConversationId, onOpenConversation }: FilePreviewPanelProps) {
   const state = usePanelState()
+  const extensions = useExtensions()
   const stale = !!state?.open && state.directory !== directory
   useEffect(() => {
     if (stale) closeFilePreview()
   }, [stale])
-  return state?.open && !stale ? <Panel state={state} titleFor={titleFor} activeConversationId={activeConversationId} onOpenConversation={onOpenConversation} /> : null
+  useEffect(() => setWorkspaceDirectory(directory), [directory])
+  // 바뀜 이벤트만 — 첫 읽기 전의 빈 목록으로 탭을 닫지 않게
+  useEffect(() => window.litecode.onExtensionsChanged(closeExtensionTabs), [])
+  return state?.open && !stale ? (
+    <Panel state={state} extensions={extensions} titleFor={titleFor} activeConversationId={activeConversationId} onOpenConversation={onOpenConversation} />
+  ) : null
 }
 
 /** 대화 머리 오른쪽 끝 — 오른쪽 패널을 열고 숨기는 버튼 (왼쪽 사이드바 접기 그림을 뒤집은 것). 늘 보인다 — 숨겨도 탭은 남는다 (사용자 요청 2026-10-04) */
@@ -122,7 +140,13 @@ function CompareIcon() {
   )
 }
 
-function Panel({ state, titleFor, activeConversationId, onOpenConversation }: { state: PanelState } & Omit<FilePreviewPanelProps, 'directory'>) {
+function Panel({
+  state,
+  extensions,
+  titleFor,
+  activeConversationId,
+  onOpenConversation,
+}: { state: PanelState; extensions: readonly ExtensionSummary[] } & Omit<FilePreviewPanelProps, 'directory'>) {
   const t = useT()
   const [width, setWidth] = useState(readWidth)
   const root = useRef<HTMLElement>(null)
@@ -315,6 +339,40 @@ function Panel({ state, titleFor, activeConversationId, onOpenConversation }: { 
                 </div>
               )
             }
+            const extensionId = extensionIdOf(key)
+            if (extensionId !== undefined) {
+              const name = extensions.find((extension) => extension.id === extensionId)?.name ?? extensionId
+              return (
+                <div
+                  key={key}
+                  role="tab"
+                  tabIndex={0}
+                  className="file-preview__tab file-preview__tab--extension"
+                  aria-selected={active === key}
+                  title={name}
+                  aria-label={name}
+                  data-extension={extensionId}
+                  onClick={() => selectTab(key)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
+                  onAuxClick={(event) => event.button === 1 && closeTab(key)}
+                >
+                  <PuzzleIcon size={14} className="file-preview__tab-icon file-preview__tab-icon--extension" />
+                  <span className="file-preview__tab-title">{name}</span>
+                  <button
+                    type="button"
+                    className="file-preview__tab-close"
+                    aria-label={t('filePreview.closeTab', { name })}
+                    title={t('filePreview.closeTab', { name })}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      closeTab(key)
+                    }}
+                  >
+                    <CrossIcon size={12} />
+                  </button>
+                </div>
+              )
+            }
             const terminalId = terminalIdOf(key)
             if (terminalId !== undefined) {
               const name = t('terminal.tab', { id: terminalId })
@@ -380,11 +438,13 @@ function Panel({ state, titleFor, activeConversationId, onOpenConversation }: { 
               </div>
             )
           })}
-          {/* `+` 하나 — 파일 목록 / 새 터미널(메인이 번호를 폴더에서 1부터 매겨 열고 그 탭으로) */}
+          {/* `+` 하나 — 파일 목록 / 새 터미널(메인이 번호를 폴더에서 1부터 매겨 열고 그 탭으로) / 켜 둔 확장(이슈 #511) */}
           <TabAddMenu
             terminal={terminalOn}
+            extensions={menuExtensions(extensions)}
             onFiles={() => openFilesTab(directory)}
             onTerminal={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id)).catch(() => {})}
+            onExtension={(id) => openExtensionTab(directory, id)}
           />
         </div>
         <span className="file-preview__chrome">
@@ -442,7 +502,15 @@ function Panel({ state, titleFor, activeConversationId, onOpenConversation }: { 
           onJump={onOpenConversation ? () => onOpenConversation(turnRef.conversationId) : undefined}
         />
       )}
-      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && active !== GIT_TAB && (
+      {/* 확장 탭 (이슈 #511) — 연 것은 모두 마운트해 두고 고른 것만 보인다(다른 탭에 갔다 와도 iframe 안 상태가 그대로). 탭을 닫으면 iframe 도 사라진다.
+          버전이 바뀌면(업그레이드) key 가 바뀌어 새 HTML 로 다시 그린다 */}
+      {tabs.map((key) => {
+        const id = extensionIdOf(key)
+        if (id === undefined) return null
+        const extension = extensions.find((item) => item.id === id)
+        return <ExtensionTab key={extensionFrameKey(id, extension?.version)} id={id} name={extension?.name ?? id} hidden={active !== key} />
+      })}
+      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && !isExtensionTab(active) && active !== GIT_TAB && (
         <CompareSplit compare={compare} directory={directory} active={active} jump={jump} tabs={tabs} />
       )}
     </aside>
@@ -840,7 +908,53 @@ function HtmlFrame({ directory, token, html }: { directory: string; token: strin
     }
   }, [directory, token, html])
   if (doc === undefined) return <p className="file-preview__empty">{t('filePreview.loading')}</p>
-  return <iframe className="file-preview__frame" sandbox="allow-scripts" srcDoc={doc} title={t('filePreview.frame')} referrerPolicy="no-referrer" />
+  return <SandboxFrame doc={doc} title={t('filePreview.frame')} />
+}
+
+/** 격리된 iframe — HTML 미리보기와 확장 탭(이슈 #511)이 같이 쓴다. sandbox 는 allow-scripts 만(same-origin 없음), 문서는 buildHtmlDocument(CSP 를 맨 앞에) */
+function SandboxFrame({ doc, title }: { doc: string; title: string }) {
+  return <iframe className="file-preview__frame" sandbox="allow-scripts" srcDoc={doc} title={title} referrerPolicy="no-referrer" />
+}
+
+/** 확장 탭 (이슈 #511) — 켜진 정상 확장의 진입 HTML 을 메인에서 받아(read-entry) HTML 미리보기와 같은 격리 경로로 돌린다.
+ *  한 파일짜리라 같은 폴더 리소스는 끼우지 않는다(assets 없음 — 상대 경로 리소스는 CSP 에 막힌다) */
+function ExtensionTab({ id, name, hidden }: { id: string; name: string; hidden: boolean }) {
+  const [result, setResult] = useState<ExtensionEntryResult>()
+  useEffect(() => {
+    let live = true
+    window.litecode.readExtensionEntry(id).then(
+      (read) => live && setResult(read),
+      (error: unknown) => live && setResult({ ok: false, failure: { code: 'entry-unreadable', params: { message: reason(error) } } }),
+    )
+    return () => {
+      live = false
+    }
+  }, [id])
+  return (
+    <div className="file-view file-preview__extension" hidden={hidden} data-extension={id}>
+      <ExtensionTabBody name={name} result={result} />
+    </div>
+  )
+}
+
+/** 확장 탭 본문 — 읽기 전이면 불러오는 중, 실패면 한 줄 오류(미리보기의 빈 상태 모양), 읽었으면 격리된 iframe */
+export function ExtensionTabBody({ name, result }: { name: string; result: ExtensionEntryResult | undefined }) {
+  const t = useT()
+  const doc = useMemo(() => (result?.ok ? buildHtmlDocument(result.html, []) : undefined), [result])
+  if (!result) return <p className="file-preview__empty">{t('filePreview.loading')}</p>
+  if (!result.ok) {
+    const text = failureLines(result.failure).map((line) => lineSummary(line, t)).join(' · ')
+    return (
+      <p className="file-preview__empty" role="alert">
+        {t('extensions.tab.failed', { reason: text })}
+      </p>
+    )
+  }
+  return (
+    <div className="file-preview__body file-preview__body--frame">
+      <SandboxFrame doc={doc!} title={name} />
+    </div>
+  )
 }
 
 /** 이미지 (이슈 #214, dsh ui-sidebar-documentpreview ImageBody 참조) — 메인이 준 data: 주소를 <img> 하나로, 패널 폭에 맞춰 줄인다(늘리지 않는다).

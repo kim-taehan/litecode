@@ -5,22 +5,25 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsService } from '../../src/services/settings.ts'
 import { ExtensionsService, type ExtensionsOptions } from '../../src/services/extensions.ts'
+import { EXTENSION_LIMITS } from '../../src/services/extensions/limits.ts'
 import { ExtensionStore } from '../../src/services/extensions/store.ts'
 import type { ExtensionSummary } from '../../shared/extensions.ts'
 import { makeZip, type ZipItem } from './support/zipWriter.ts'
 
 // ctx.extensions (이슈 #482, 설계 docs/superpowers/specs/2026-10-19-extension-install-design.md 5절) — 부팅 때 보류 적용 → 목록,
-// 켜짐 값(settings.extensions), 설치 흐름 위임(pick·install·cancel·remove), mount 주입 자리의 올리고 내리기. 재시작은 같은 root·설정 파일로
-// 새 Context 를 띄워 흉내 낸다. 루트·설정 파일은 임시 폴더
+// 켜짐 값(settings.extensions), 설치 흐름 위임(pick·install·cancel·remove — 이슈 #511 부터 그 호출 안에서 곧바로 적용), 진입 HTML 읽기(readEntry, #511),
+// mount 주입 자리의 올리고 내리기. 재시작은 같은 root·설정 파일로 새 Context 를 띄워 흉내 낸다. 루트·설정 파일은 임시 폴더
 
 const APP = '1.0.0'
 
-function zipItems(id: string, version: string): ZipItem[] {
+/** 한 파일짜리 HTML 패널 확장 (이슈 #511) — 진입 파일의 글은 htmlOf(id, version) */
+function zipItems(id: string, version: string, entry = 'index.html'): ZipItem[] {
   return [
-    { name: 'extension.json', data: JSON.stringify({ id, name: `${id} 이름`, description: `${id} 설명`, version, entry: 'index.js' }) },
-    { name: 'index.js', data: `// ${id} ${version}` },
+    { name: 'extension.json', data: JSON.stringify({ id, name: `${id} 이름`, description: `${id} 설명`, version, entry }) },
+    { name: entry, data: htmlOf(id, version) },
   ]
 }
+const htmlOf = (id: string, version: string) => `<!doctype html><p>${id} ${version} 한글</p>`
 
 let dir: string
 let root: string
@@ -59,6 +62,14 @@ async function pendInstall(id: string, version: string): Promise<void> {
   const store = new ExtensionStore(root)
   const staged = await store.stage(await zipFile(zipItems(id, version)), APP)
   expect(await store.install(staged.token!, APP)).toMatchObject({ ok: true })
+}
+
+/** 항목을 직접 준 보류 설치 → 곧바로 적용 */
+async function pendInstallItems(items: readonly ZipItem[]): Promise<void> {
+  const store = new ExtensionStore(root)
+  const staged = await store.stage(await zipFile(items), APP)
+  expect(await store.install(staged.token!, APP)).toMatchObject({ ok: true })
+  await store.applyPending()
 }
 
 /** 한 실행에 보류 설치 → 다음 실행에 설치됨 */
@@ -126,7 +137,7 @@ describe('부팅', () => {
 })
 
 describe('설치 흐름', () => {
-  it('pick → install → 목록에 보류 설치(off·pending install, 이름은 보류 폴더에서) → 재시작 → 켜져서 뜬다', async () => {
+  it('pick → install → 그 호출 안에서 적용된다: 목록에 on·보류 없음, 재시작 없이 readEntry 가 HTML 을 돌려준다', async () => {
     const first = await boot({ pick: pick(await zipFile(zipItems('my-ext', '1.0.0'))) })
     const picked = await first.ext.pick()
     expect(picked).toMatchObject({ ok: true, preview: { manifest: { id: 'my-ext', version: '1.0.0' }, files: { count: 2 }, problems: [] } })
@@ -134,12 +145,44 @@ describe('설치 흐름', () => {
     expect(picked.preview.existing).toBeUndefined()
 
     expect(await first.ext.install(picked.preview.token)).toEqual({ ok: true, id: 'my-ext', version: '1.0.0' })
-    const pendingRow = { id: 'my-ext', name: 'my-ext 이름', description: 'my-ext 설명', version: '1.0.0', enabled: true, state: 'off', pending: 'install' }
-    expect(await first.ext.list()).toEqual([pendingRow])
-    expect(first.events.at(-1)).toEqual([pendingRow])
-
+    const row = { id: 'my-ext', name: 'my-ext 이름', description: 'my-ext 설명', version: '1.0.0', enabled: true, state: 'on' }
+    expect(await first.ext.list()).toEqual([row])
+    expect(first.events.at(-1)).toEqual([row])
+    expect(await first.ext.readEntry('my-ext')).toEqual({ ok: true, html: htmlOf('my-ext', '1.0.0'), version: '1.0.0' })
+    // 보류로 남은 것이 없다 — 다음 부팅도 같은 목록
+    expect(new ExtensionStore(root).pendingState()).toEqual({})
     const second = await boot()
-    expect(await second.ext.list()).toEqual([{ id: 'my-ext', name: 'my-ext 이름', description: 'my-ext 설명', version: '1.0.0', enabled: true, state: 'on' }])
+    expect(await second.ext.list()).toEqual([row])
+  })
+
+  it('업그레이드도 곧바로 — 같은 실행에서 readEntry 가 새 버전의 HTML 을 돌려준다', async () => {
+    await installed('my-ext')
+    const { ext, events } = await boot({ pick: pick(await zipFile(zipItems('my-ext', '2.0.0'))) })
+    expect(await ext.readEntry('my-ext')).toMatchObject({ ok: true, version: '1.0.0', html: htmlOf('my-ext', '1.0.0') })
+    const picked = await ext.pick()
+    expect(await ext.install(picked.ok ? picked.preview!.token! : '')).toEqual({ ok: true, id: 'my-ext', version: '2.0.0' })
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', version: '2.0.0', state: 'on' }])
+    expect(events.at(-1)).toMatchObject([{ id: 'my-ext', version: '2.0.0' }])
+    expect(await ext.readEntry('my-ext')).toEqual({ ok: true, html: htmlOf('my-ext', '2.0.0'), version: '2.0.0' })
+  })
+
+  it('적용이 실패하면 install 은 apply-failed 를 돌려주고(던지지 않는다) 이전 버전이 그대로 남는다', async () => {
+    await installed('my-ext')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { ext } = await boot({ pick: pick(await zipFile(zipItems('my-ext', '2.0.0'))) })
+    const picked = await ext.pick()
+    // installed/ 에 쓸 수 없게 — installed/my-ext 를 옆으로 옮기는 rename 이 실패한다
+    await fs.chmod(path.join(root, 'installed'), 0o555)
+    try {
+      const result = await ext.install(picked.ok ? picked.preview!.token! : '')
+      expect(result).toMatchObject({ ok: false, failure: { code: 'apply-failed', params: { message: expect.any(String) } } })
+    } finally {
+      await fs.chmod(path.join(root, 'installed'), 0o755)
+    }
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', version: '1.0.0', state: 'on' }])
+    expect(await ext.readEntry('my-ext')).toMatchObject({ ok: true, version: '1.0.0', html: htmlOf('my-ext', '1.0.0') })
+    expect(new ExtensionStore(root).pendingState()).toEqual({})
+    warn.mockRestore()
   })
 
   it('이미 있는 id 를 고르면 미리보기에 그 버전 (업그레이드 확인 카드)', async () => {
@@ -187,22 +230,38 @@ describe('설치 흐름', () => {
     expect(await ext.list()).toEqual([])
   })
 
-  it('remove 예약 → 목록에 pending remove → 재시작 → 사라지고 settings 값도 지운다', async () => {
+  it('remove 는 곧바로 적용된다 — 목록에서 사라지고 settings 값도 지운다, 재시작해도 그대로', async () => {
     await installed('my-ext', 'other-ext')
     const first = await boot()
     expect(await first.ext.setEnabled('my-ext', false)).toEqual({ ok: true })
     expect(await first.ext.setEnabled('other-ext', false)).toEqual({ ok: true })
     expect(await first.ext.remove('my-ext')).toEqual({ ok: true })
-    expect((await first.ext.list()).find((item) => item.id === 'my-ext')).toMatchObject({ pending: 'remove', state: 'off' })
-    expect(first.events.at(-1)?.find((item) => item.id === 'my-ext')?.pending).toBe('remove')
+    expect((await first.ext.list()).map((item) => item.id)).toEqual(['other-ext'])
+    expect(first.events.at(-1)?.map((item) => item.id)).toEqual(['other-ext'])
+    expect(first.settings.get().extensions).toEqual({ 'other-ext': false })
+    expect(JSON.parse(await fs.readFile(settingsFile, 'utf8')).extensions).toEqual({ 'other-ext': false })
+    expect(await fs.stat(path.join(root, 'installed', 'my-ext')).catch(() => undefined)).toBeUndefined()
+    expect(await first.ext.readEntry('my-ext')).toEqual({ ok: false, failure: { code: 'not-installed', params: { id: 'my-ext' } } })
 
     const second = await boot()
     expect((await second.ext.list()).map((item) => item.id)).toEqual(['other-ext'])
-    expect(second.settings.get().extensions).toEqual({ 'other-ext': false })
-    expect(JSON.parse(await fs.readFile(settingsFile, 'utf8')).extensions).toEqual({ 'other-ext': false })
   })
 
-  it('보류 설치만 있는 확장을 remove 하면 보류가 취소되고 목록에서 곧바로 빠진다', async () => {
+  it('삭제 적용이 실패하면 apply-failed — 확장은 남는다', async () => {
+    await installed('my-ext')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { ext } = await boot()
+    await fs.chmod(path.join(root, 'installed'), 0o555)
+    try {
+      expect(await ext.remove('my-ext')).toMatchObject({ ok: false, failure: { code: 'apply-failed' } })
+    } finally {
+      await fs.chmod(path.join(root, 'installed'), 0o755)
+    }
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', state: 'on' }])
+    warn.mockRestore()
+  })
+
+  it('방금 설치한 확장을 remove 하면 곧바로 목록에서 빠진다', async () => {
     await installed('my-ext')
     const { ext } = await boot({ pick: pick(await zipFile(zipItems('new-ext', '1.0.0'))) })
     const picked = await ext.pick()
@@ -216,6 +275,100 @@ describe('설치 흐름', () => {
     const { ext } = await boot()
     expect(await ext.remove('no-such')).toEqual({ ok: false, failure: { code: 'not-installed', params: { id: 'no-such' } } })
     expect(await ext.remove('../x')).toEqual({ ok: false, failure: { code: 'id-invalid', params: { value: '../x' } } })
+  })
+})
+
+describe('readEntry — 확장 HTML 읽기 (이슈 #511)', () => {
+  const entryFile = (id: string, entry = 'index.html') => path.join(root, 'installed', id, entry)
+
+  it('켜진 정상 확장의 진입 HTML 과 버전 (UTF-8)', async () => {
+    await installed('my-ext')
+    const { ext } = await boot()
+    expect(await ext.readEntry('my-ext')).toEqual({ ok: true, html: htmlOf('my-ext', '1.0.0'), version: '1.0.0' })
+  })
+
+  it('.htm 도 읽는다, 확장자는 대소문자를 가리지 않는다', async () => {
+    await pendInstallItems(zipItems('htm-ext', '1.0.0', 'page/Index.HTM'))
+    const { ext } = await boot()
+    expect(await ext.readEntry('htm-ext')).toMatchObject({ ok: true, html: htmlOf('htm-ext', '1.0.0') })
+  })
+
+  it('꺼진 확장·깨진 확장은 not-on', async () => {
+    await installed('my-ext')
+    await fs.mkdir(path.join(root, 'installed', 'broken-ext'), { recursive: true })
+    const { ext } = await boot()
+    await ext.setEnabled('my-ext', false)
+    expect(await ext.readEntry('my-ext')).toEqual({ ok: false, failure: { code: 'not-on', params: { id: 'my-ext' } } })
+    expect(await ext.readEntry('broken-ext')).toEqual({ ok: false, failure: { code: 'not-on', params: { id: 'broken-ext' } } })
+  })
+
+  it('모르는 id 는 not-installed, id 형식 위반은 id-invalid', async () => {
+    const { ext } = await boot()
+    expect(await ext.readEntry('no-such')).toEqual({ ok: false, failure: { code: 'not-installed', params: { id: 'no-such' } } })
+    expect(await ext.readEntry('../x')).toEqual({ ok: false, failure: { code: 'id-invalid', params: { value: '../x' } } })
+    expect(await ext.readEntry('constructor')).toEqual({ ok: false, failure: { code: 'not-installed', params: { id: 'constructor' } } })
+  })
+
+  it('HTML 이 아닌 진입 파일(.js)은 entry-not-html', async () => {
+    await pendInstallItems(zipItems('js-ext', '1.0.0', 'index.js'))
+    const { ext } = await boot()
+    expect(await ext.list()).toMatchObject([{ id: 'js-ext', state: 'on' }])
+    expect(await ext.readEntry('js-ext')).toEqual({ ok: false, failure: { code: 'entry-not-html', params: { entry: 'index.js' } } })
+  })
+
+  it('진입 파일이 폴더 밖으로 가는 심볼릭 링크로 바뀌었으면 entry-unsafe — 밖의 글을 읽지 않는다', async () => {
+    await installed('my-ext')
+    const { ext } = await boot()
+    await ext.idle() // 부팅 읽기가 끝난 뒤에 디스크를 바꾼다
+    const outside = path.join(dir, 'secret.html')
+    await fs.writeFile(outside, '<p>secret</p>')
+    await fs.rm(entryFile('my-ext'))
+    await fs.symlink(outside, entryFile('my-ext'))
+    expect(await ext.readEntry('my-ext')).toEqual({ ok: false, failure: { code: 'entry-unsafe', params: { entry: 'index.html' } } })
+  })
+
+  it('진입 파일로 가는 길의 폴더가 밖을 가리키는 심볼릭 링크면 entry-unsafe', async () => {
+    await pendInstallItems(zipItems('deep-ext', '1.0.0', 'ui/index.html'))
+    const { ext } = await boot()
+    await ext.idle()
+    const outside = path.join(dir, 'elsewhere')
+    await fs.mkdir(outside)
+    await fs.writeFile(path.join(outside, 'index.html'), '<p>secret</p>')
+    await fs.rm(path.join(root, 'installed', 'deep-ext', 'ui'), { recursive: true })
+    await fs.symlink(outside, path.join(root, 'installed', 'deep-ext', 'ui'))
+    expect(await ext.readEntry('deep-ext')).toEqual({ ok: false, failure: { code: 'entry-unsafe', params: { entry: 'ui/index.html' } } })
+  })
+
+  it('진입 자리가 폴더면 entry-unsafe (일반 파일만)', async () => {
+    await installed('my-ext')
+    const { ext } = await boot()
+    await ext.idle()
+    await fs.rm(entryFile('my-ext'))
+    await fs.mkdir(entryFile('my-ext'))
+    expect(await ext.readEntry('my-ext')).toEqual({ ok: false, failure: { code: 'entry-unsafe', params: { entry: 'index.html' } } })
+  })
+
+  it('상한(EXTENSION_LIMITS.entryBytes)을 넘으면 entry-too-large', async () => {
+    await installed('my-ext')
+    const { ext } = await boot()
+    await ext.idle()
+    const bytes = EXTENSION_LIMITS.entryBytes + 1
+    await fs.writeFile(entryFile('my-ext'), 'a'.repeat(bytes))
+    expect(await ext.readEntry('my-ext')).toEqual({ ok: false, failure: { code: 'entry-too-large', params: { bytes, limit: EXTENSION_LIMITS.entryBytes } } })
+  })
+
+  it('읽을 수 없으면(권한·사라짐) entry-unreadable — 던지지 않는다', async () => {
+    await installed('my-ext', 'gone-ext')
+    const { ext } = await boot()
+    await ext.idle()
+    await fs.chmod(entryFile('my-ext'), 0o000)
+    try {
+      expect(await ext.readEntry('my-ext')).toMatchObject({ ok: false, failure: { code: 'entry-unreadable', params: { message: expect.any(String) } } })
+    } finally {
+      await fs.chmod(entryFile('my-ext'), 0o644)
+    }
+    await fs.rm(entryFile('gone-ext'))
+    expect(await ext.readEntry('gone-ext')).toMatchObject({ ok: false, failure: { code: 'entry-unreadable' } })
   })
 })
 
@@ -367,10 +520,9 @@ describe('Object.prototype 이름의 id', () => {
     expect(first.settings.get().extensions).toEqual({})
     const picked = await first.ext.pick()
     expect(await first.ext.install(picked.ok ? picked.preview!.token! : '')).toMatchObject({ ok: true, id })
-    const pendingList = await first.ext.list()
-    expect(pendingList.find((item) => item.id === id)).toMatchObject({ enabled: true, state: 'off', pending: 'install' })
-    expect(pendingList.find((item) => item.id === 'other-ext')?.pending).toBeUndefined()
-    expect(structuredClone(pendingList)).toEqual(pendingList)
+    const firstList = await first.ext.list()
+    expect(firstList.find((item) => item.id === id)).toMatchObject({ enabled: true, state: 'on' })
+    expect(structuredClone(firstList)).toEqual(firstList)
 
     const second = await boot()
     const row = () => second.ext.list().then((list) => list.find((item) => item.id === id))
@@ -381,7 +533,7 @@ describe('Object.prototype 이름의 id', () => {
     expect(await row()).toMatchObject({ enabled: true, state: 'on' })
     expect(second.settings.get().extensions).toEqual({})
     expect(await second.ext.remove(id)).toEqual({ ok: true })
-    expect(await row()).toMatchObject({ pending: 'remove' })
+    expect(await row()).toBeUndefined()
     const list = await second.ext.list()
     expect(structuredClone(list)).toEqual(list)
     for (const event of [...first.events, ...second.events]) expect(structuredClone(event)).toEqual(event)

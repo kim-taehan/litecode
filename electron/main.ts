@@ -363,8 +363,9 @@ reportBridge.inject = ['report']
 mounted.push(ctx.plugin(ReportService, { host: systemReportHost, logFile: mainLog.path, appVersion: app.getVersion() }))
 mounted.push(ctx.plugin(reportBridge))
 
-// 설치한 확장 (ctx.extensions, 이슈 #482) — 바탕이다(기능 레지스트리에 넣지 않는다, 끌 수 없다). 부팅 때 보류 설치·삭제를 적용하고 목록을 읽는다.
-// zip 고르기 대화상자는 host 가 요청을 보낸 창에 붙인다 (event.sender). 확장 코드 실행(mount, B 층)은 아직 주입하지 않는다
+// 설치한 확장 (ctx.extensions, 이슈 #482) — 바탕이다(기능 레지스트리에 넣지 않는다, 끌 수 없다). 부팅 때 남은 보류를 적용하고 목록을 읽는다(설치·삭제는 곧바로, #511).
+// zip 고르기 대화상자는 host 가 요청을 보낸 창에 붙인다 (event.sender). 확장 코드 실행(mount)은 주입하지 않는다 — 패널 확장(#511)은 진입 HTML 을
+// read-entry 로 화면에 넘기고, 화면이 격리된 iframe 에서 돌린다(메인에서 실행하지 않는다. 창 이동 차단은 아래 will-frame-navigate)
 function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_LIST, async () => ctx.extensions.list())
   handle(ctx, Channel.EXTENSIONS_PICK, async (event) => ctx.extensions.pick(event.sender))
@@ -372,6 +373,7 @@ function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_CANCEL, async (_event, token: unknown) => ctx.extensions.cancel(String(token)))
   handle(ctx, Channel.EXTENSIONS_REMOVE, async (_event, id: unknown) => ctx.extensions.remove(String(id)))
   handle(ctx, Channel.EXTENSIONS_SET_ENABLED, async (_event, id: unknown, on: unknown) => ctx.extensions.setEnabled(String(id), on === true))
+  handle(ctx, Channel.EXTENSIONS_READ_ENTRY, async (_event, id: unknown) => ctx.extensions.readEntry(String(id)))
   ctx.on('extensions/changed', (extensions) => broadcast(Channel.EXTENSIONS_CHANGED, extensions))
 }
 extensionsBridge.inject = ['extensions']

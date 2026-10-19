@@ -170,6 +170,26 @@
   right: auto;
 }
 
+/* `+` 메뉴의 "확장" 구분 (이슈 #511, 시안 mock-extension-panel Panel) — 구분선 + 작은 소제목, 항목은 퍼즐(보라 --extension, settings.css) + 이름 */
+.file-preview__add-divider {
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--border-light);
+}
+
+.file-preview__add-heading {
+  padding: 2px 8px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+.file-preview__add-extension svg,
+.file-preview__tab-icon--extension {
+  flex: none;
+  color: var(--extension);
+}
+
 .file-preview__add:hover {
   color: var(--text);
   background: var(--fill-hover);
@@ -424,7 +444,8 @@
   flex-direction: column;
 }
 
-.file-tree[hidden] {
+.file-tree[hidden],
+.file-preview__extension[hidden] {
   display: none;
 }
 
