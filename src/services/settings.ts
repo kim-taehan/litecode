@@ -10,6 +10,8 @@ import { isNotifyChannels, type NotifyChannels } from '../../shared/notifyChanne
 import { isSpeechLanguage, type SpeechLanguage } from '../../shared/speech.ts'
 import { isUpdateUrl } from '../../shared/updates.ts'
 import { isRunningTaskLimit } from '../../shared/tasks.ts'
+import type { ExtensionSwitches } from '../../shared/extensions.ts'
+import { isExtensionId } from './extensions/manifest.ts'
 
 // 앱 설정(설정 > 일반) — 언어·테마·대화 글자 크기 등. 정본은 이 서비스, 앱에서는 userData 의 settings.json 하나
 // ("설정 파일 열기" 가 여는 파일 — dsh 처럼 사용자가 텍스트로 고칠 수 있다). 손으로 고친 값은 다음 실행 때 읽는다(파일 감시 없음).
@@ -47,6 +49,8 @@ export interface Settings {
   dismissedUpdate?: string
   /** 대화마다 동시에 실행할 백그라운드 하위 작업 수 (설정 > 일반, 이슈 #321) — 1~8, 없으면 2(shared/tasks.ts MAX_RUNNING_TASKS). 나머지는 대기 */
   maxRunningTasks?: number
+  /** 설치한 확장별 켜기 (이슈 #482) — false 로 적힌 확장만 꺼진다. 없으면 모두 켜짐 (ctx.extensions 가 쓴다). 키는 확장 id 형식만 */
+  extensions?: ExtensionSwitches
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 새 대화는 기본 모드(01k §6).
@@ -85,6 +89,8 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   updateUrl: isUpdateUrl,
   dismissedUpdate: (value): value is string => typeof value === 'string',
   maxRunningTasks: isRunningTaskLimit,
+  extensions: (value): value is ExtensionSwitches =>
+    !!value && typeof value === 'object' && !Array.isArray(value) && Object.entries(value).every(([id, on]) => isExtensionId(id) && typeof on === 'boolean'),
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 
