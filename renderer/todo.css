@@ -154,6 +154,16 @@
   color: var(--warn);
 }
 
+.todo-dock__next {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* "지금: …" 앞 맥박 점 (이슈 #252) — 진행 항목이 있고 턴이 돌 때만. 숨쉬기는 알림 점(notices.css notice-breathe)과 같은 1.5s ease-in-out */
 .todo-dock__pulse {
   flex: none;
