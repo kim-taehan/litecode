@@ -83,7 +83,7 @@ describe('startKeyProxy', () => {
 // 프록시가 켠 모델의 chat/completions 본문에만 병합한다. 깨진 본문은 그대로 넘기고(요청을 실패시키지 않는다), 응답은 스트림 그대로
 describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', () => {
   type Seen = { body: string; contentLength?: string }
-  const thinkingOff = (model: string) => (model === 'qwen' ? { chat_template_kwargs: { enable_thinking: false } } : undefined)
+  const thinkingOff = (model: string) => (model === 'qwen' ? { model, add: { chat_template_kwargs: { enable_thinking: false } } } : undefined)
 
   async function echoUpstream(seen: Seen[]): Promise<string> {
     upstream = http.createServer((req, res) => {
@@ -110,7 +110,7 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
   it('켠 모델의 chat/completions 본문에만 enable_thinking=false 를 싣고 content-length 를 다시 센다', async () => {
     const seen: Seen[] = []
     const baseURL = await echoUpstream(seen)
-    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    proxy = await startKeyProxy(() => ({ baseURL, rewrite: thinkingOff }))
 
     expect((await send('/chat/completions', JSON.stringify({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }] }))).status).toBe(200)
     const sent = JSON.parse(seen[0]!.body)
@@ -121,7 +121,7 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
   it('다른 모델·다른 경로에는 싣지 않는다 (본문 바이트 그대로)', async () => {
     const seen: Seen[] = []
     const baseURL = await echoUpstream(seen)
-    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    proxy = await startKeyProxy(() => ({ baseURL, rewrite: thinkingOff }))
     const other = JSON.stringify({ model: 'llama', messages: [] })
     const elsewhere = JSON.stringify({ model: 'qwen', input: 'x' })
 
@@ -133,7 +133,7 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
   it('이미 있는 chat_template_kwargs 의 다른 키는 남긴다', async () => {
     const seen: Seen[] = []
     const baseURL = await echoUpstream(seen)
-    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    proxy = await startKeyProxy(() => ({ baseURL, rewrite: thinkingOff }))
 
     await send('/chat/completions', JSON.stringify({ model: 'qwen', chat_template_kwargs: { foo: 1, enable_thinking: true } }))
     expect(JSON.parse(seen[0]!.body).chat_template_kwargs).toEqual({ foo: 1, enable_thinking: false })
@@ -142,7 +142,7 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
   it('깨진 JSON·JSON 아닌 본문은 손대지 않고 넘긴다 (content-length 도 맞다)', async () => {
     const seen: Seen[] = []
     const baseURL = await echoUpstream(seen)
-    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    proxy = await startKeyProxy(() => ({ baseURL, rewrite: thinkingOff }))
     const broken = '{"model":"qwen",'
     const text = 'model=qwen'
 
@@ -164,7 +164,7 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
     })
     await new Promise<void>((resolve) => upstream!.listen(0, '127.0.0.1', resolve))
     const baseURL = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`
-    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    proxy = await startKeyProxy(() => ({ baseURL, rewrite: thinkingOff }))
 
     const res = await send('/chat/completions', JSON.stringify({ model: 'qwen', stream: true }))
     const reader = res.body!.getReader()
@@ -179,7 +179,7 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
   it('Expect: 100-continue 요청도 던지지 않고 값을 싣는다 (모으는 요청은 expect 를 넘기지 않는다 — 03_qa 경고)', async () => {
     const seen: Seen[] = []
     const baseURL = await echoUpstream(seen)
-    proxy = await startKeyProxy(() => ({ baseURL, addToBody: thinkingOff }))
+    proxy = await startKeyProxy(() => ({ baseURL, rewrite: thinkingOff }))
     const body = JSON.stringify({ model: 'qwen', messages: [] })
     const proxyURL = new URL(`${proxy.baseURLFor('gw')}/chat/completions`)
 
@@ -203,22 +203,20 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
     expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
   })
 
-  // 이슈 #497 (시안 E): 같은 게이트웨이 id 의 사고 켬·끔 두 항목 — 엔진은 내부 키(engineModelId)를 보내고, 프록시가 설정(proxyTarget)으로
-  // 그 키의 항목을 찾아 게이트웨이 이름(id)으로 바꾸고 사고 끔이면 enable_thinking=false 를 싣는다 (값 찾기는 바꾸기 전 키로)
-  describe('내부 키 → 게이트웨이 id (이슈 #497)', () => {
+  // 이슈 #500: Thinking 모델 — 엔진은 키(디폴트=id, 켬=id--think, 끔=id--nothink)를 보내고, 프록시가 설정(proxyTarget)으로 키를 풀어
+  // 켬·끔이면 게이트웨이 이름(id)으로 바꾸고 enable_thinking 을 싣는다. 디폴트는 바이트 그대로
+  describe('Thinking 키 → 게이트웨이 id (이슈 #500)', () => {
     const gateway = (baseURL: string): ProviderConfig => ({
       id: 'gw',
       displayName: 'GW',
       baseURL,
       protocol: 'openai-chat-completions',
-      models: [
-        { id: 'qwen', displayName: 'Q' },
-        { id: 'qwen', displayName: 'Q off', thinkingOff: true },
-      ],
+      models: [{ id: 'qwen', displayName: 'Q', thinking: true }],
     })
-    const off = engineModelId({ id: 'qwen', thinkingOff: true })
+    const on = engineModelId({ id: 'qwen' }, 'on')
+    const off = engineModelId({ id: 'qwen' }, 'off')
 
-    it('사고 끔 키는 실제 id 로 바꾸고 enable_thinking=false 를 싣는다 (content-length 다시 셈)', async () => {
+    it('끔 키는 실제 id 로 바꾸고 enable_thinking=false 를 싣는다 (content-length 다시 셈)', async () => {
       const seen: Seen[] = []
       const baseURL = await echoUpstream(seen)
       proxy = await startKeyProxy(() => proxyTarget(gateway(baseURL), undefined))
@@ -228,16 +226,25 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
       expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
     })
 
-    it('사고 켬 키(=id)는 바이트 그대로', async () => {
+    it('켬 키는 실제 id 로 바꾸고 enable_thinking=true 를 싣는다 — 기존 chat_template_kwargs 의 다른 키는 남긴다', async () => {
       const seen: Seen[] = []
       const baseURL = await echoUpstream(seen)
       proxy = await startKeyProxy(() => proxyTarget(gateway(baseURL), undefined))
-      const on = JSON.stringify({ model: 'qwen', messages: [] })
 
-      await send('/chat/completions', on)
-      expect(seen[0]!.body).toBe(on)
+      await send('/chat/completions', JSON.stringify({ model: on, chat_template_kwargs: { foo: 1, enable_thinking: false } }))
+      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', chat_template_kwargs: { foo: 1, enable_thinking: true } })
+      expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
     })
 
+    it('디폴트 키(=id)는 바이트 그대로', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => proxyTarget(gateway(baseURL), undefined))
+      const plain = JSON.stringify({ model: 'qwen', messages: [] })
+
+      await send('/chat/completions', plain)
+      expect(seen[0]!.body).toBe(plain)
+    })
     it('다른 경로·비 JSON·깨진 본문은 바이트 그대로 (content-length 도 맞다)', async () => {
       const seen: Seen[] = []
       const baseURL = await echoUpstream(seen)

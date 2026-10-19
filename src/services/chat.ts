@@ -1,5 +1,5 @@
 import { Context, Service } from 'cordis'
-import { engineModelId } from '../../shared/engineModelId.ts'
+import { resolveModelKey } from '../../shared/engineModelId.ts'
 import './llm.ts'
 import './sessions.ts'
 import './providers.ts'
@@ -163,7 +163,7 @@ export class ChatService extends Service {
 
   /** 그 모델이 이미지를 받는가 (설정 > 모델의 "이미지 입력") — 모르는 모델이면 false */
   acceptsImages(model: { providerId: string; modelId: string } | undefined): boolean {
-    return !!model && !!this.ctx.providers.get(model.providerId)?.models.find((entry) => engineModelId(entry) === model.modelId)?.imageInput
+    return !!model && !!resolveModelKey(this.ctx.providers.get(model.providerId)?.models ?? [], model.modelId)?.model.imageInput
   }
 
   /** 보낸다. 그 대화의 턴이 도는 중이면 사람이 친 글은 그 턴에 끼워 넣고('interjected', 이슈 #250), 그 밖(다른 대화의 지시·끼워 넣을 수 없을 때·

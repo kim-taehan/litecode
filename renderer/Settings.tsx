@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ModelCatalogEntry, ProviderInput, ProviderSummary } from '../shared/ipc.ts'
 import { providerIdFor } from '../shared/providerId.ts'
-import { engineModelId } from '../shared/engineModelId.ts'
+import { engineModelKeys } from '../shared/engineModelId.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
 import { MobilePage } from './MobileSettings.tsx'
@@ -319,9 +319,11 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const id = provider?.id ?? providerIdFor(displayName, (candidate) => taken.some((entry) => entry.id === candidate))
-  // (id, 사고 끄기) 가 겹치는 항목 — 저장이 거절할 것을 id 칸 빨간 테두리로 미리 (이슈 #497 시안 F). 저장 검증과 같은 내부 키 기준, 빈 id 는 따로 거절된다
-  const keys = models.map((model) => engineModelId({ ...model, id: model.id.trim() }))
-  const clashes = (index: number) => !!models[index]!.id.trim() && keys.indexOf(keys[index]!) !== keys.lastIndexOf(keys[index]!)
+  // 키가 겹치는 항목 — 저장이 거절할 것을 id 칸 빨간 테두리로 미리 (이슈 #497 시안 F → #500). 저장 검증과 같은 키 기준(같은 id, Thinking 모델의
+  // 파생 키 id--think·id--nothink 와 같은 진짜 id), 빈 id 는 따로 거절된다
+  const keys = models.map((model) => engineModelKeys({ ...model, id: model.id.trim() }))
+  const clashes = (index: number) =>
+    !!models[index]!.id.trim() && keys.some((other, at) => at !== index && other.some((key) => keys[index]!.includes(key)))
 
   function setModel(index: number, change: Partial<ModelCatalogEntry>): void {
     setModels((current) => current.map((model, at) => (at === index ? { ...model, ...change } : model)))
@@ -463,25 +465,21 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
                 disabled={busy}
                 onToggle={(on) => setModel(index, { imageInput: on || undefined })}
               />
-              {/* 사고 끄기 — 켠 모델의 요청에 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다 (이슈 #477). 기본 꺼짐 */}
+              {/* Thinking 모델 선언 (이슈 #500 시안) — 켠 모델은 입력창 모델 메뉴에서 대화마다 Thinking 을 디폴트·켬·끔으로 고른다. 기본 꺼짐 */}
               <ModelToggle
-                on={model.thinkingOff === true}
-                label={t('models.thinkingOffLabel')}
-                ariaLabel={t('models.thinkingOff', { n: index + 1 })}
-                title={t('models.thinkingOffTitle')}
+                on={model.thinking === true}
+                label={t('models.thinkingLabel')}
+                ariaLabel={t('models.thinking', { n: index + 1 })}
+                title={t('models.thinkingTitle')}
                 disabled={busy}
-                // 이 항목의 thinkingOff 만 — 같은 모델을 사고 켬·끔 둘로 두려면 같은 id 의 항목을 하나 더 두고 이것만 달리한다 (이슈 #497 시안 E)
-                onToggle={(on) => setModel(index, { thinkingOff: on || undefined })}
+                onToggle={(on) => setModel(index, { thinking: on || undefined })}
               />
             </div>
           </div>
         </div>
       ))}
       <p className="context-length-hint">
-        <strong className="context-length-hint__term">{t('models.twinHintTerm')}</strong> — {t('models.twinHint')}
-      </p>
-      <p className="context-length-hint">
-        <strong className="context-length-hint__term">{t('models.thinkingOffLabel')}</strong> — {t('models.thinkingOffHint')}
+        <strong className="context-length-hint__term">{t('models.thinkingLabel')}</strong> — {t('models.thinkingHint')}
       </p>
       <ContextLengthNotes models={models} />
       <div className="provider-editor__model-actions">

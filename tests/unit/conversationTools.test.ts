@@ -80,7 +80,7 @@ class FakeProviders extends Service {
     super(ctx, 'providers')
   }
   get(id: string) {
-    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3', thinkingOff: true }] } : undefined
+    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3', thinking: true }] } : undefined
   }
 }
 
@@ -267,18 +267,18 @@ describe('new_conversation', () => {
     expect((await ctx.sessions.list())).toHaveLength(1)
   })
 
-  // 이슈 #497: 대화는 모델을 내부 키로 가리킨다 — 사고 끔 항목은 접미 키로만 쓸 수 있고 id 로는 못 쓴다
-  it('사고 끔 항목은 내부 키면 쓸 수 있고, id 만으로는 못 쓴다', async () => {
+  // 이슈 #500: 대화는 모델을 키로 가리킨다 — Thinking 모델(m3)은 켬·끔 키로도 쓸 수 있고, 새 대화도 그 키를 그대로 물려받는다
+  it('Thinking 모델의 끔 키를 가리키는 대화는 쓸 수 있고, 새 대화도 같은 키', async () => {
     const { call, sessions, say, calledBy } = await start()
-    const key = engineModelId({ id: 'm3', thinkingOff: true })
+    const key = engineModelId({ id: 'm3' }, 'off')
     const turn = await say(A, '주문 화면', { model: { providerId: 'gw', modelId: key } })
     calledBy(turn)
     expect(await createdOf(await call({ title: '키', message: 'y' }), sessions)).toMatchObject({ model: { providerId: 'gw', modelId: key } })
   })
 
-  it('사고 끔 항목의 id 만 가리키는 대화는 쓸 수 있는 모델이 아니다', async () => {
+  it('Thinking 모델로 선언 안 된 항목의 접미 키는 쓸 수 있는 모델이 아니다', async () => {
     const { call, say, calledBy } = await start()
-    const turn = await say(A, '주문 화면', { model: { providerId: 'gw', modelId: 'm3' } })
+    const turn = await say(A, '주문 화면', { model: { providerId: 'gw', modelId: engineModelId({ id: 'm1' }, 'on') } })
     calledBy(turn)
     await expect(call({ title: 'x', message: 'y' })).rejects.toThrow('no conversation in this project with a usable model')
   })
