@@ -63,6 +63,11 @@ export function checkManifest(
   return problems.length > 0 ? { problems } : { manifest: raw as unknown as ExtensionManifest, problems }
 }
 
+/** 확장 id 형식 — 폴더 이름·설정 키로 써도 안전하다 (예약어 검사는 하지 않는다) */
+export function isExtensionId(value: unknown): value is string {
+  return typeof value === 'string' && ID.test(value)
+}
+
 export function isSemver(value: unknown): value is string {
   return typeof value === 'string' && SEMVER.test(value)
 }

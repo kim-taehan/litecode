@@ -13,8 +13,11 @@ import { isEntryPath, unsafePathReason } from './paths.ts'
 // 사유를 모을 수 없고, 백슬래시를 `/` 로 바꿔 읽는다. 이름은 직접 푼다: 플래그 0x800 이면 UTF-8, 아니면 latin1 — yauzl 은 CP437 로 풀지만
 // 검사에 쓰는 글자(`/` `\` `.` `:` 널)는 둘 다 ASCII 그대로라 판정이 같다. Info-ZIP 유니코드 경로 필드(0x7075)는 풀 때 헤더 이름 대신
 // 쓰이므로 그 이름도 검사한다(헤더엔 safe.txt, 필드엔 ../evil 인 우회).
+//
+// macOS Finder 로 만든 zip 에 딸려 오는 `__MACOSX/` 아래 항목과 `.DS_Store` 는 규칙 계산(항목 수·크기·중복·extension.json 자리)에서 뺀다 —
+// 안 빼면 래퍼 폴더 zip 이 manifest-misplaced 로 거절된다(이슈 #480). 경로 안전 검사(위험한 이름·심볼릭 링크)는 그대로 건다. 풀 때도 건너뛴다.
 
-interface Item {
+export interface Item {
   name: string
   isDir: boolean
   entry: yauzl.Entry
@@ -42,6 +45,7 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
         if (reason) problems.push({ code: 'unsafe-path', params: { path: name, reason } })
       }
       if (isSymlink(item.entry)) problems.push({ code: 'symlink', params: { path: item.name } })
+      if (isFinderJunk(item.name)) continue
       // 대소문자를 안 가리는 디스크(macOS·윈도 기본)에선 A.js 와 a.js 가 같은 파일이다 — 하나가 다른 것을 덮는다
       const key = path.posix.normalize(item.name).replace(/\/$/, '').toLowerCase()
       if (seen.has(key)) problems.push({ code: 'duplicate-path', params: { path: item.name } })
@@ -54,7 +58,8 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
     }
     if (files.totalBytes > limits.totalBytes) problems.push({ code: 'total-too-large', params: { bytes: files.totalBytes, limit: limits.totalBytes } })
 
-    const located = locateManifest(items)
+    const kept = items.filter((item) => !isFinderJunk(item.name))
+    const located = locateManifest(kept)
     if ('problem' in located) {
       problems.push(located.problem)
       return { files, problems }
@@ -80,7 +85,7 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
     const entry = (value as { entry?: unknown } | null)?.entry
     if (typeof entry === 'string' && isEntryPath(entry)) {
       const target = root + entry
-      if (!items.some((item) => !item.isDir && item.name === target)) problems.push({ code: 'entry-missing', params: { entry } })
+      if (!kept.some((item) => !item.isDir && item.name === target)) problems.push({ code: 'entry-missing', params: { entry } })
     }
     return { manifest: checked.manifest, files, problems }
   } catch (error) {
@@ -91,7 +96,7 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
 }
 
 /** extension.json 의 자리 — 최상위 한 곳, 또는 zip 전체가 폴더 하나로 감싸여 있을 때 그 폴더 바로 안 한 곳. root 는 entry 앞에 붙일 접두어 */
-function locateManifest(items: readonly Item[]): { item: Item; root: string } | { problem: ExtensionProblem } {
+export function locateManifest(items: readonly Item[]): { item: Item; root: string } | { problem: ExtensionProblem } {
   const candidates = items.filter((item) => !item.isDir && (item.name === MANIFEST_FILE || /^[^/]+\/extension\.json$/.test(item.name)))
   if (candidates.length === 0) return { problem: { code: 'manifest-missing', params: {} } }
   if (candidates.length > 1) return { problem: { code: 'manifest-ambiguous', params: { paths: candidates.map((item) => item.name).join(', ') } } }
@@ -102,13 +107,18 @@ function locateManifest(items: readonly Item[]): { item: Item; root: string } | 
   return { problem: { code: 'manifest-misplaced', params: { path: only.name } } }
 }
 
-function openZip(file: string): Promise<yauzl.ZipFile> {
+/** Finder 가 붙이는 부산물 — 최상위 `__MACOSX/` 아래 전부와 어느 깊이든 `.DS_Store` 파일 */
+export function isFinderJunk(name: string): boolean {
+  return name.startsWith('__MACOSX/') || name.split('/').pop() === '.DS_Store'
+}
+
+export function openZip(file: string): Promise<yauzl.ZipFile> {
   return new Promise((resolve, reject) => {
     yauzl.open(file, { lazyEntries: true, decodeStrings: false, autoClose: false }, (error, zip) => (error ? reject(error) : resolve(zip)))
   })
 }
 
-function listItems(zip: yauzl.ZipFile): Promise<Item[]> {
+export function listItems(zip: yauzl.ZipFile): Promise<Item[]> {
   return new Promise((resolve, reject) => {
     const items: Item[] = []
     zip.on('entry', (entry: yauzl.Entry) => {
@@ -147,12 +157,12 @@ function unicodeName(entry: yauzl.Entry): string | undefined {
 }
 
 /** 검사할 이름들 — 헤더 이름과, 있으면 유니코드 경로 필드의 이름 (풀 때 어느 쪽이 쓰일지는 CRC 대조에 달려 있어 둘 다 본다) */
-function namesOf(entry: yauzl.Entry, name: string): string[] {
+export function namesOf(entry: yauzl.Entry, name: string): string[] {
   const header = decodeName(entry)
   return header === name ? [name] : [header, name]
 }
 
 /** external attributes 위 16비트의 유닉스 파일 종류가 심볼릭 링크 — 만든 OS 바이트와 상관없이 본다 (더 엄격한 쪽) */
-function isSymlink(entry: yauzl.Entry): boolean {
+export function isSymlink(entry: yauzl.Entry): boolean {
   return ((entry.externalFileAttributes >>> 16) & 0o170000) === 0o120000
 }
