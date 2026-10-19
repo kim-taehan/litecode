@@ -231,4 +231,52 @@ describe('startKeyProxy — 본문에 더할 값 (사고 끄기, 이슈 #477)', 
       for (const entry of seen) expect(Number(entry.contentLength)).toBe(Buffer.byteLength(entry.body))
     })
   })
+
+  // 사고 끔 항목은 유일한 id(예: qwen-off) — 프록시가 upstreamId(실제 이름)로 바꾸고 사고 끄기도 싣는다 (이슈 #491)
+  describe('별칭 변환 (upstreamId)', () => {
+    const rename = (model: string) => (model === 'qwen-off' ? 'qwen' : model)
+    const addToBody = (model: string) => (model === 'qwen-off' ? { chat_template_kwargs: { enable_thinking: false } } : undefined)
+
+    it('별칭만 있어도(addToBody 없음) 본문을 모아 model 을 바꾸고 content-length 를 다시 센다', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, renameModel: rename }))
+
+      await send('/chat/completions', JSON.stringify({ model: 'qwen-off', messages: [{ role: 'user', content: '안녕' }] }))
+      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [{ role: 'user', content: '안녕' }] })
+      expect(Number(seen[0]!.contentLength)).toBe(Buffer.byteLength(seen[0]!.body))
+    })
+
+    it('별칭만 있을 때 다른 경로·비 JSON·깨진 본문은 바이트 그대로', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, renameModel: rename }))
+      const elsewhere = JSON.stringify({ model: 'qwen-off', input: 'x' })
+      const broken = '{"model":"qwen-off",'
+      const text = 'model=qwen-off'
+
+      await send('/embeddings', elsewhere)
+      await send('/chat/completions', broken)
+      await send('/chat/completions', text, 'text/plain')
+      expect(seen.map((entry) => entry.body)).toEqual([elsewhere, broken, text])
+    })
+
+    it('가상 id 요청은 실제 id 로 변환되고 enable_thinking=false 도 함께 싣는다 (변환 전 id 로 사고 끄기 판정)', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, addToBody, renameModel: rename }))
+
+      await send('/chat/completions', JSON.stringify({ model: 'qwen-off', messages: [] }))
+      expect(JSON.parse(seen[0]!.body)).toEqual({ model: 'qwen', messages: [], chat_template_kwargs: { enable_thinking: false } })
+    })
+
+    it('실제 id 로 오는 사고 켜진 요청은 그대로 (변환도 추가도 없음)', async () => {
+      const seen: Seen[] = []
+      const baseURL = await echoUpstream(seen)
+      proxy = await startKeyProxy(() => ({ baseURL, addToBody, renameModel: rename }))
+      const on = JSON.stringify({ model: 'qwen', messages: [] })
+      await send('/chat/completions', on)
+      expect(seen[0]!.body).toBe(on)
+    })
+  })
 })

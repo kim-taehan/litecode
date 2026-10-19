@@ -641,6 +641,37 @@ describe('proxyTarget — id 중복', () => {
   })
 })
 
+// 이슈 #491: 사고 끔 항목은 유일한 id(예: qwen-off) + upstreamId(게이트웨이의 실제 이름). upstreamId 는 사고 끄기와 무관한 일반 별칭이다
+describe('proxyTarget — 별칭 (upstreamId)', () => {
+  it('사고 끔 + 별칭: 그 id 만 실제 이름으로 바꾸고 사고 끄기를 싣는다, 사고 켬 id 는 그대로', () => {
+    const models = [
+      { id: 'qwen', displayName: 'Q on' },
+      { id: 'qwen-off', displayName: 'Q off', thinkingOff: true, upstreamId: 'qwen' },
+    ]
+    const target = proxyTarget({ ...provider('a'), models }, 'sk')
+    expect(target.renameModel!('qwen-off')).toBe('qwen')
+    expect(target.renameModel!('qwen')).toBe('qwen')
+    expect(target.addToBody!('qwen-off')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+    expect(target.addToBody!('qwen')).toBeUndefined()
+  })
+
+  it('별칭만 있으면(사고 끄기 없음) renameModel 만, 둘 다 없으면 둘 다 없다', () => {
+    const only = proxyTarget({ ...provider('a'), models: [{ id: 'fast', displayName: 'F', upstreamId: 'qwen3.8-27b' }, { id: 'llama', displayName: 'L' }] }, undefined)
+    expect(only).not.toHaveProperty('addToBody')
+    expect(only.renameModel!('fast')).toBe('qwen3.8-27b')
+    expect(only.renameModel!('llama')).toBe('llama')
+    const none = proxyTarget({ ...provider('a'), models: [{ id: 'llama', displayName: 'L' }] }, undefined)
+    expect(none).not.toHaveProperty('addToBody')
+    expect(none).not.toHaveProperty('renameModel')
+  })
+
+  it('별칭 없는 사고 끔 항목은 renameModel 없이 addToBody 만 (`-off` 접미사로 추측하지 않는다)', () => {
+    const target = proxyTarget({ ...provider('a'), models: [{ id: 'qwen-off', displayName: 'Q off', thinkingOff: true }] }, 'sk')
+    expect(target).not.toHaveProperty('renameModel')
+    expect(target.addToBody!('qwen-off')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+  })
+})
+
 describe('engineEnv — opencode 자식 프로세스 env', () => {
   it('설정 폴더·DB·비밀번호를 싣고, 카탈로그 받기를 끄며(폐쇄망), 사용자명 재정의는 뺀다', () => {
     const env = engineEnv({ PATH: '/bin', OPENCODE_SERVER_USERNAME: 'x' }, { configDir: '/c', db: '/d.db', password: 'pw' })
