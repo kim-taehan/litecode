@@ -610,6 +610,13 @@
   font-size: 13px;
 }
 
+/* (id, 사고 끄기) 가 겹치는 항목의 id 칸 (이슈 #497 시안 F) */
+.model-card__id--clash,
+.model-card__id--clash:focus {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
 .model-card__number {
   flex: none;
   width: 120px;

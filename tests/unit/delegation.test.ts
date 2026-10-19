@@ -60,7 +60,7 @@ class FakeProviders extends Service {
     super(ctx, 'providers')
   }
   get(id: string) {
-    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }] } : undefined
+    return id === 'gw' ? { models: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3', thinkingOff: true }] } : undefined
   }
 }
 
@@ -200,6 +200,9 @@ describe('send — 자격과 전송', () => {
     await idle(B, '주문 API 설계', { project: backend })
     await view(B)
     await sessions.patch(B, () => ({ model: { providerId: 'gone', modelId: 'm1' } }))
+    await expect(send(ctx)).rejects.toThrow('Target conversation has no usable model.')
+    // 대화는 모델을 내부 키로 가리킨다 (#497) — 사고 끔 항목(m3)을 id 로 가리키면 쓸 수 있는 모델이 아니다
+    await sessions.patch(B, () => ({ model: { providerId: 'gw', modelId: 'm3' } }))
     await expect(send(ctx)).rejects.toThrow('Target conversation has no usable model.')
     await sessions.patch(B, () => ({ model: MODEL }))
     const turn = await say(B, '바쁨', { project: backend })

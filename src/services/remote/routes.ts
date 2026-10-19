@@ -1,4 +1,5 @@
 import type { Context } from 'cordis'
+import { engineModelId } from '../../../shared/engineModelId.ts'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import { tr } from '../../i18n.ts'
@@ -225,7 +226,7 @@ export function remoteRoutes(host: RouteHost): Record<string, Route> {
 function models(host: RouteHost): RemoteModel[] {
   return host.ctx.providers
     .list()
-    .flatMap((provider) => provider.models.map((model) => ({ providerId: provider.id, providerName: provider.displayName, modelId: model.id, displayName: model.displayName || model.id })))
+    .flatMap((provider) => provider.models.map((model) => ({ providerId: provider.id, providerName: provider.displayName, modelId: engineModelId(model), displayName: model.displayName || model.id })))
 }
 
 /** 폰이 고른 모델 — 데스크탑에 설정된 것만 */
