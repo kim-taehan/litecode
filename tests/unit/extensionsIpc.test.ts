@@ -40,6 +40,11 @@ describe('확장 IPC 채널', () => {
     expect(preload).toMatch(/listen\(Channel\.EXTENSIONS_CHANGED, listener\)/)
   })
 
+  it('broadcast 는 창마다 send 를 감싼다 — 창 하나의 실패가 나머지 창과 서비스 쪽으로 번지지 않는다 (QA 03_qa_ext_pr3)', () => {
+    const body = /^function broadcast\(channel: string, \.\.\.args: unknown\[\]\): void \{\n([\s\S]*?)^\}/m.exec(main)?.[1]
+    expect(body).toMatch(/for \(const win of BrowserWindow\.getAllWindows\(\)\) \{\s*try \{\s*win\.webContents\.send\(channel, \.\.\.args\)\s*\} catch/)
+  })
+
   it('브리지는 inject 로 extensions 를 기다리고, 기능 묶음이 아니라 바탕으로 올라간다 (부팅 진단 목록에도)', () => {
     expect(main).toMatch(/^extensionsBridge\.inject = \['extensions'\]$/m)
     expect(main).toMatch(/^mounted\.push\(ctx\.plugin\(extensionsBridge\)\)$/m)

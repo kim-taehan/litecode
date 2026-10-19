@@ -378,9 +378,15 @@ extensionsBridge.inject = ['extensions']
 mounted.push(ctx.plugin(ExtensionsService, systemExtensionsHost(userData)))
 mounted.push(ctx.plugin(extensionsBridge))
 
-/** 모든 앱 창에 보낸다 */
+/** 모든 앱 창에 보낸다. 창 하나의 send 실패(못 옮기는 값·닫히는 창)는 로그만 — 나머지 창과, 이벤트를 낸 서비스 쪽(cordis emit 은 리스너 예외를 던진다)으로 번지지 않게 (QA 03_qa_ext_pr3) */
 function broadcast(channel: string, ...args: unknown[]): void {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, ...args)
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      win.webContents.send(channel, ...args)
+    } catch (error) {
+      console.error(`[ipc] ${channel} 보내기 실패`, error)
+    }
+  }
 }
 
 // ── 기능 묶음 (이슈 #8) — 기능 서비스와 그 IPC 연결을 한 플러그인으로 올리고 내린다. 켜고 끄기는 ctx.features 가 settings 를 보고 한다

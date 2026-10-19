@@ -353,3 +353,80 @@ describe('mount 주입 자리', () => {
     expect(await ext.list()).toMatchObject([{ id: 'my-ext', state: 'on' }])
   })
 })
+
+// QA 03_qa_ext_pr3 차단 — 보류 목록·settings.extensions 를 일반 객체로 읽으면 id 가 Object.prototype 의 이름(`constructor`)일 때
+// 상속된 함수가 pending·enabled 자리에 들어가 목록을 IPC(structured clone)로 못 보낸다. 서비스는 자기 키만 읽어야 한다
+describe('Object.prototype 이름의 id', () => {
+  it('constructor — 설치·재시작·끄기·켜기·삭제 내내 목록이 맞고 목록·이벤트가 structuredClone 된다', async () => {
+    const id = 'constructor'
+    // 다른 확장을 껐다 켜서 settings.extensions 가 {} 인 상태도 함께 본다
+    await installed('other-ext')
+    const first = await boot({ pick: pick(await zipFile(zipItems(id, '1.0.0'))) })
+    await first.ext.setEnabled('other-ext', false)
+    await first.ext.setEnabled('other-ext', true)
+    expect(first.settings.get().extensions).toEqual({})
+    const picked = await first.ext.pick()
+    expect(await first.ext.install(picked.ok ? picked.preview!.token! : '')).toMatchObject({ ok: true, id })
+    const pendingList = await first.ext.list()
+    expect(pendingList.find((item) => item.id === id)).toMatchObject({ enabled: true, state: 'off', pending: 'install' })
+    expect(pendingList.find((item) => item.id === 'other-ext')?.pending).toBeUndefined()
+    expect(structuredClone(pendingList)).toEqual(pendingList)
+
+    const second = await boot()
+    const row = () => second.ext.list().then((list) => list.find((item) => item.id === id))
+    expect(await row()).toEqual({ id, name: `${id} 이름`, description: `${id} 설명`, version: '1.0.0', enabled: true, state: 'on' })
+    expect(await second.ext.setEnabled(id, false)).toEqual({ ok: true })
+    expect(await row()).toMatchObject({ enabled: false, state: 'off' })
+    expect(await second.ext.setEnabled(id, true)).toEqual({ ok: true })
+    expect(await row()).toMatchObject({ enabled: true, state: 'on' })
+    expect(second.settings.get().extensions).toEqual({})
+    expect(await second.ext.remove(id)).toEqual({ ok: true })
+    expect(await row()).toMatchObject({ pending: 'remove' })
+    const list = await second.ext.list()
+    expect(structuredClone(list)).toEqual(list)
+    for (const event of [...first.events, ...second.events]) expect(structuredClone(event)).toEqual(event)
+
+    const third = await boot()
+    expect((await third.ext.list()).map((item) => item.id)).toEqual(['other-ext'])
+  })
+
+  it('constructor 가 아닌 Object.prototype 이름(toString·hasOwnProperty·valueOf)은 대문자라 id 규칙에서 막힌다 — 목록·설정에 들어올 수 없다', async () => {
+    for (const name of ['toString', 'hasOwnProperty', 'valueOf']) {
+      const { ext, settings } = await boot({ pick: pick(await zipFile(zipItems(name, '1.0.0'))) })
+      expect(await ext.pick()).toMatchObject({ ok: true, preview: { problems: [{ code: 'id-invalid' }] } })
+      expect(await ext.setEnabled(name, false)).toMatchObject({ ok: false, failure: { code: 'not-installed' } })
+      expect(await ext.remove(name)).toMatchObject({ ok: false, failure: { code: 'id-invalid' } })
+      expect(() => settings.set({ extensions: { [name]: false } })).toThrow()
+    }
+  })
+
+  it('없는 id 로 켜짐 값을 물어도 상속 키를 읽지 않는다 — settings.extensions 가 {} 여도 다른 확장은 켜짐', async () => {
+    await installed('my-ext')
+    await fs.writeFile(settingsFile, JSON.stringify({ extensions: {} }))
+    const { ext } = await boot()
+    const list = await ext.list()
+    expect(list).toEqual([{ id: 'my-ext', name: 'my-ext 이름', description: 'my-ext 설명', version: '1.0.0', enabled: true, state: 'on' }])
+  })
+})
+
+// QA 03_qa_ext_pr3 경고 2 — cordis emit 은 리스너 예외를 부른 쪽으로 던진다. 알림(창으로 보내기) 실패가 요청 결과를 깨면 안 된다
+describe('extensions/changed 리스너가 던질 때', () => {
+  it('요청은 구조화된 결과를 돌려주고 상태는 바뀌며, 오류는 로그로만 남는다', async () => {
+    await installed('my-ext')
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { ctx, ext } = await boot({ pick: pick(await zipFile(zipItems('new-ext', '1.0.0'))) })
+    await ext.idle()
+    ctx.on('extensions/changed', () => {
+      throw new Error('send failed')
+    })
+    expect(await ext.setEnabled('my-ext', false)).toEqual({ ok: true })
+    expect(await ext.list()).toMatchObject([{ id: 'my-ext', enabled: false, state: 'off' }])
+    const picked = await ext.pick()
+    expect(picked).toMatchObject({ ok: true, preview: { problems: [] } })
+    expect(await ext.install(picked.ok ? picked.preview!.token! : '')).toEqual({ ok: true, id: 'new-ext', version: '1.0.0' })
+    expect(await ext.remove('my-ext')).toEqual({ ok: true })
+    expect(await ext.cancel('0'.repeat(32))).toEqual({ ok: true })
+    expect(error).toHaveBeenCalledWith('[extensions] 바뀜 알림 실패', expect.objectContaining({ message: 'send failed' }))
+    error.mockRestore()
+  })
+})

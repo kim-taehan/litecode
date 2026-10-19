@@ -18,7 +18,8 @@ import './settings.ts'
 
 // 설치한 확장 (ctx.extensions, 이슈 #482 — 설계 docs/superpowers/specs/2026-10-19-extension-install-design.md 5절). 바탕 서비스다(끌 수 없다).
 // 부팅: (1) 보류 작업 적용 (2) installed/ 를 읽어 manifest 재검증 (3) 켜진 확장마다 올림. 생성자는 던지지 않는다(CLAUDE.md 함정 4) —
-// 폴더 하나가 깨져도 그 확장만 failed 로 남고(삭제할 수 있게) 앱은 뜬다.
+// 폴더 하나가 깨져도 그 확장만 failed 로 남고 앱은 뜬다. 삭제는 폴더 이름이 id 형식일 때만 된다 — 손으로 만든 다른 이름의 깨진 폴더는
+// 목록에 failed 로 보이지만 앱에서 지울 수 없다(후속, QA 03_qa_ext_pr3 경고 3).
 // 켜짐 값은 settings.extensions (기본 켜짐 — false 만 남긴다). 켜고 끄기는 곧바로 올리고 내린다(설치·업데이트·삭제만 재시작).
 // 올리기는 주입된 mount(B 층 자리 — features 의 definitions 와 같은 패턴)로 한다. mount 가 없으면(A 층 단독) 아무것도 실행하지 않고 상태만 on.
 // 부팅·설치·삭제·켜고 끄기는 한 줄(큐)로 선다 — features.ts 처럼, 끄자마자 켜도 앞의 올리기가 끝난 뒤 내린다.
@@ -239,8 +240,10 @@ export class ExtensionsService extends Service {
 
   // --- 목록 ---
 
+  /** 자기 키만 읽는다 — id `constructor` 는 id 규칙을 통과하는데, 일반 객체에서 읽으면 상속된 Object 함수가 나온다 (QA 03_qa_ext_pr3) */
   private enabled(id: string): boolean {
-    return this.ctx.settings.get().extensions?.[id] ?? true
+    const switches = this.ctx.settings.get().extensions
+    return switches && Object.hasOwn(switches, id) ? switches[id]! : true
   }
 
   private summaries(): ExtensionSummary[] {
@@ -270,13 +273,18 @@ export class ExtensionsService extends Service {
     const key = JSON.stringify(list)
     if (key === this.published) return
     this.published = key
-    this.ctx.emit('extensions/changed', list)
+    // cordis emit 은 리스너 예외를 여기로 던진다 — 알림(창으로 보내기) 실패가 줄의 일과 요청 결과로 번지지 않게 로그만 (console 은 로그 파일이 비밀을 가린다)
+    try {
+      this.ctx.emit('extensions/changed', list)
+    } catch (error) {
+      console.error('[extensions] 바뀜 알림 실패', error)
+    }
   }
 
   /** 지워진 확장의 켜짐 값을 지운다 — 못 지워도(설정 파일을 못 읽는 등) 남는 것은 쓰이지 않는 값 하나다 */
   private forget(id: string): void {
     const switches = this.ctx.settings.get().extensions
-    if (!switches || !(id in switches)) return
+    if (!switches || !Object.hasOwn(switches, id)) return
     const { [id]: _removed, ...others } = switches
     try {
       this.ctx.settings.set({ extensions: others })
@@ -314,7 +322,7 @@ function storeAccess(root: string, appVersion: string) {
     read: async (): Promise<Entry[]> => {
       const pending = store.pendingState()
       const installed = await store.listInstalled(appVersion)
-      const entries: Entry[] = installed.map(({ id, manifest, problems }) => ({ id, installed: true, ...(manifest && { manifest }), problems, ...(pending[id] && { pending: pending[id] }) }))
+      const entries: Entry[] = installed.map(({ id, manifest, problems }) => ({ id, installed: true, ...(manifest && { manifest }), problems, ...(Object.hasOwn(pending, id) && { pending: pending[id] }) }))
       for (const [id, op] of Object.entries(pending)) {
         if (op !== 'install' || installed.some((item) => item.id === id)) continue
         entries.push({ id, installed: false, ...(await pendingManifest(root, id, appVersion)), problems: [], pending: 'install' })
