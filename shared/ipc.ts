@@ -22,6 +22,7 @@ import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 import type { UpdateStatus } from './updates.ts'
 import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
+import type { ExtensionInstallResult, ExtensionPickResult, ExtensionResult, ExtensionSummary } from './extensions.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Mode } from './modes.ts'
@@ -44,6 +45,7 @@ export type { McpToolSelection } from './mcpTools.ts'
 export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
 export type { UpdateState, UpdateStatus } from './updates.ts'
+export type { ExtensionFailedReason, ExtensionInstallResult, ExtensionPickResult, ExtensionPreview, ExtensionResult, ExtensionState, ExtensionSummary } from './extensions.ts'
 export type { SpeechErrorCode, SpeechLanguage, SpeechPartial, SpeechReply, SpeechState, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened, SpeechTranscript, SpeechUnavailable } from './speech.ts'
 
 export const Channel = {
@@ -241,6 +243,20 @@ export const Channel = {
   GIT_OPEN_REMOTE: 'git:open-remote',
   /** 메인 → 화면 (directory) — 그 폴더의 저장소가 바뀌었을 수 있다 (화면·AI 의 작업 뒤) */
   GIT_CHANGED: 'git:changed',
+  /** 설치한 확장(ctx.extensions, 이슈 #482) — 바탕이라 늘 걸려 있다. 화면 → 메인 → ExtensionSummary[] */
+  EXTENSIONS_LIST: 'extensions:list',
+  /** 화면 → 메인 → ExtensionPickResult — zip 고르기 대화상자(요청한 창에 붙는다) + 검사 미리보기 */
+  EXTENSIONS_PICK: 'extensions:pick',
+  /** 화면 → 메인 (token) → ExtensionInstallResult — 보류 설치 (다음 부팅에 적용) */
+  EXTENSIONS_INSTALL: 'extensions:install',
+  /** 화면 → 메인 (token) → ExtensionResult — 확인 카드 취소 */
+  EXTENSIONS_CANCEL: 'extensions:cancel',
+  /** 화면 → 메인 (id) → ExtensionResult — 삭제 예약 (다음 부팅에 적용) */
+  EXTENSIONS_REMOVE: 'extensions:remove',
+  /** 화면 → 메인 (id, on) → ExtensionResult — 곧바로 올리고 내린다 */
+  EXTENSIONS_SET_ENABLED: 'extensions:set-enabled',
+  /** 메인 → 화면 (ExtensionSummary[]) — 확장 목록이 바뀌었다 */
+  EXTENSIONS_CHANGED: 'extensions:changed',
 } as const
 
 export interface LitecodeBridge {
@@ -501,6 +517,15 @@ export interface LitecodeBridge {
   gitRun(directory: string, action: GitAction): Promise<GitResult<Record<string, unknown>>>
   openGitRemote(directory: string): Promise<boolean>
   onGitChanged(listener: (directory: string) => void): () => void
+  /** 설치한 확장 (ctx.extensions, 이슈 #482) — 늘 있다. 요청 결과는 던지지 않고 { ok, failure } 로 온다 */
+  listExtensions(): Promise<ExtensionSummary[]>
+  /** zip 을 고르고 검사한 미리보기 — preview 가 없으면 취소. preview.problems 가 비면 token 이 있다 */
+  pickExtension(): Promise<ExtensionPickResult>
+  installExtension(token: string): Promise<ExtensionInstallResult>
+  cancelExtension(token: string): Promise<ExtensionResult>
+  removeExtension(id: string): Promise<ExtensionResult>
+  setExtensionEnabled(id: string, on: boolean): Promise<ExtensionResult>
+  onExtensionsChanged(listener: (extensions: ExtensionSummary[]) => void): () => void
 }
 
 declare global {
