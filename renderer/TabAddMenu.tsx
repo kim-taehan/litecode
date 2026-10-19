@@ -38,7 +38,8 @@ export function TabAddMenu({
 
   useEffect(() => {
     if (!at) return
-    root.current?.querySelector<HTMLButtonElement>('.open-in__item')?.focus()
+    // 메뉴는 fixed 라 포커스가 가려진 조상(.app overflow:hidden)을 가로로 밀어 화면이 틀어진다 (#513)
+    root.current?.querySelector<HTMLButtonElement>('.open-in__item')?.focus({ preventScroll: true })
     const onMouseDown = (event: MouseEvent) => {
       if (!root.current?.contains(event.target as Node)) setAt(undefined)
     }
