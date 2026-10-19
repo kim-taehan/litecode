@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import type { ProviderSummary } from '../shared/ipc.ts'
 import { focusComposerInput } from './composerFocus.ts'
 import { findModel, withThinking, type ModelRef } from './modelChoice.ts'
-import { engineModelId } from '../shared/engineModelId.ts'
+import { engineModelId, resolveModelKey, type Thinking } from '../shared/engineModelId.ts'
 import { useT } from './settingsStore.ts'
-import { ModelRootPane, ThinkingPane, thinkingLabel } from './ThinkingPane.tsx'
+import { ModelRootPane, ThinkingBulb, ThinkingPane, thinkingLabel } from './ThinkingPane.tsx'
 
 interface ModelSelectProps {
   providers: ProviderSummary[]
@@ -16,13 +16,21 @@ interface ModelSelectProps {
 /** 메뉴가 보이는 패널 — 루트(Model / Thinking 두 줄)는 Thinking 모델을 고른 동안만 (이슈 #500) */
 export type ModelMenuPane = 'root' | 'model' | 'thinking'
 
-/** 메뉴를 열 때의 패널 — Thinking 모델이 골라져 있으면 루트, 아니면 곧바로 모델 목록 (지금까지와 같다) */
+/** 그 선택의 Thinking 값 — Thinking 모델이고, 켬·끔 키가 그 항목으로 되돌아올 때만. 파생 키가 같은 provider 의 다른 항목 id 와 겹치는
+ *  읽기 상태(저장은 거절)면 없음 — "켬"이 다른 진짜 모델로 가지 않게 Thinking 을 고르지 못한다 (이슈 #503) */
+export function thinkingOf(current: ReturnType<typeof findModel>): Thinking | undefined {
+  if (current?.model.thinking !== true) return undefined
+  const intact = (['on', 'off'] as const).every((value) => resolveModelKey(current.provider.models, engineModelId(current.model, value))?.model === current.model)
+  return intact ? current.thinking : undefined
+}
+
+/** 메뉴를 열 때의 패널 — Thinking 을 고를 수 있으면 루트, 아니면 곧바로 모델 목록 (지금까지와 같다) */
 export function openingPane(current: ReturnType<typeof findModel>): ModelMenuPane {
-  return current?.model.thinking === true ? 'root' : 'model'
+  return thinkingOf(current) ? 'root' : 'model'
 }
 
 /** 입력창 아래 모델 드롭다운 (dsh ui-model-selection 참조). 설정의 모든 모델을 provider 묶음으로 보이고, 지금 모델 줄에 체크.
- *  Thinking 모델(이슈 #500)을 고른 동안은 칩에 Thinking 값이 연한 글자로 붙고, 메뉴는 루트 패널(Model / Thinking)로 열린다.
+ *  Thinking 모델(이슈 #500)을 고른 동안은 칩에 Thinking 값이 전구 아이콘으로 붙고(#503), 메뉴는 루트 패널(Model / Thinking)로 열린다.
  *  열면 첫 줄(모델 목록이면 지금 모델 줄)에 포커스, ↑/↓ 로 옮기고 Enter·클릭으로 들어가거나 고른다. Esc·Shift+Tab 은 들어간 패널에서 루트로,
  *  루트(또는 루트가 없는 모델 목록)에서는 고르지 않고 닫는다. 바깥 클릭도 닫는다. 닫히면 포커스는 입력창으로 (#374) */
 export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
@@ -39,10 +47,11 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
   /** 루트로 돌아올 때 포커스를 돌려줄 줄 — 그 패널을 연 줄 (dsh) */
   const cameFrom = useRef<'model' | 'thinking'>(undefined)
   const current = findModel(providers, value)
-  const thinking = current?.model.thinking === true ? current.thinking : undefined
+  const thinking = thinkingOf(current)
   const label = current?.model.displayName ?? (providers.length === 0 ? t('model.loading') : t('model.none'))
-  // 지워진 모델은 dsh 처럼 저장된 provider/모델 id 를 보여 준다 (툴팁)
+  // 지워진 모델은 dsh 처럼 저장된 provider/모델 id 를 보여 준다 (툴팁). Thinking 값은 아이콘이라 툴팁 첫 줄에 글자로 (#503)
   const detail = current ? `${current.provider.displayName} · ${current.model.id}` : value && t('model.missing', { ref: `${value.providerId}/${value.modelId}` })
+  const title = thinking ? `${t('model.thinkingTitle', { value: thinkingLabel(t, thinking) })}\n${detail}` : detail
 
   const rows = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]') ?? [])]
 
@@ -115,13 +124,13 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
         aria-label={thinking ? t('model.labelThinking', { name: label, value: thinkingLabel(t, thinking) }) : t('model.label', { name: label })}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={detail}
+        title={title}
         disabled={providers.length === 0}
         onClick={() => (open ? close() : show())}
       >
         <span className="composer__model">{label}</span>
-        {/* Thinking 모델이면 값이 연한 글자로 (시안 ③) */}
-        {thinking && <span className="model-select__thinking">· {thinkingLabel(t, thinking)}</span>}
+        {/* Thinking 모델이면 값이 전구 아이콘으로 (#503 시안 — 디폴트 윤곽선·켬 채움·끔 사선) */}
+        {thinking && <ThinkingBulb value={thinking} />}
         {/* dsh IconChevronDownOutline (14px, 캡션색), 열리면 뒤집힌다 */}
         <svg className="model-select__caret" width="14" height="14" viewBox="0 0 16 16" fill="none" strokeWidth="1" aria-hidden="true">
           <path d="M4 6L7.3 9.3C7.7 9.7 8.3 9.7 8.7 9.3L12 6" stroke="currentColor" />

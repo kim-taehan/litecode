@@ -6,9 +6,36 @@ import type { Translate } from './settingsStore.ts'
 
 const THINKING: readonly Thinking[] = ['default', 'on', 'off']
 
-/** 닫힌 칩·루트 줄에 보이는 값 이름 (디폴트·켬·끔) */
+/** 루트 줄·Thinking 패널에 보이는 값 이름 (디폴트·켬·끔). 닫힌 칩에서는 접근성 이름·툴팁에 */
 export function thinkingLabel(t: Translate, value: Thinking): string {
   return t(`model.thinking.${value}` as const)
+}
+
+/** 닫힌 칩 전구의 모양 (이슈 #503 시안) — 색에만 기대지 않게 모양으로 나눈다 */
+export function bulbShape(value: Thinking): 'outline' | 'filled' | 'slashed' {
+  return value === 'on' ? 'filled' : value === 'off' ? 'slashed' : 'outline'
+}
+
+/** 닫힌 칩의 Thinking 전구 (16px, aria-hidden — 값은 트리거의 aria-label·title 이 읽힌다). 색은 styles.css 의 --{value} 변형 */
+export function ThinkingBulb({ value }: { value: Thinking }) {
+  const shape = bulbShape(value)
+  return (
+    <svg
+      className={`model-select__bulb model-select__bulb--${value}`}
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill={shape === 'filled' ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z" />
+      {shape === 'slashed' && <path className="model-select__bulb-slash" d="M3.5 3.5l17 17" />}
+    </svg>
+  )
 }
 
 /** 루트 패널 — 왼쪽 작은 라벨, 가운데 지금 값, 오른쪽 ›. 누르면 그 패널로 들어간다 */

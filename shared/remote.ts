@@ -174,6 +174,7 @@ export type RemoteProject = Project
 
 /** GET /v1/conversations?project= 의 항목 — 목록 정보 중 서버가 실제로 싣는 것(ctx.remote 의 toRemote)만 + 상태 점. usage·labels·첨부 표·
  *  고정·`!` 카드(shells)는 오지 않는다 — 카드는 대화 스냅샷(ConversationSnapshot.shells)에 읽기 전용으로 온다 (폰에 셸을 열지 않는다) */
+/** model 은 GET /v1/models 의 그 항목 키다 — 데스크탑에서 Thinking 켬·끔으로 둔 대화도 디폴트 키로 보인다 (이슈 #503, 대화에 저장된 키는 그대로) */
 export interface RemoteConversation extends Pick<Conversation, 'id' | 'project' | 'title' | 'updatedAt' | 'engineSessionId' | 'model' | 'mode'> {
   status?: ConversationStatus
 }
