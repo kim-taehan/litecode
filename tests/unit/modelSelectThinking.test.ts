@@ -23,8 +23,8 @@ vi.mock('../../renderer/settingsStore.ts', () => ({
 }))
 vi.mock('../../renderer/composerFocus.ts', () => ({ focusComposerInput: () => true }))
 
-const { ModelSelect, openingPane } = await import('../../renderer/ModelSelect.tsx')
-const { ThinkingPane, thinkingLabel } = await import('../../renderer/ThinkingPane.tsx')
+const { ModelSelect, openingPane, thinkingOf } = await import('../../renderer/ModelSelect.tsx')
+const { ThinkingPane, thinkingLabel, bulbShape } = await import('../../renderer/ThinkingPane.tsx')
 
 const ko = (key: MessageKey, vars?: Record<string, string | number>) => translate('ko', key, vars)
 const providers: ProviderSummary[] = [
@@ -84,21 +84,74 @@ describe('openingPane — 루트 패널은 Thinking 모델을 고른 동안만',
   })
 })
 
+// 이슈 #503 (시안 mock-thinking/ChipIcon): 칩의 Thinking 값은 글자 대신 전구 아이콘 하나 — 모양으로 구분한다(윤곽선 / 채움 / 사선)
+describe('bulbShape — 상태 → 아이콘 모양', () => {
+  it('디폴트=윤곽선, 켬=채움, 끔=사선', () => {
+    expect((['default', 'on', 'off'] as const).map(bulbShape)).toEqual(['outline', 'filled', 'slashed'])
+  })
+})
+
+// #503 (#502-3): 선언된 모델의 켬·끔 키가 같은 provider 의 다른 항목 id 와 겹치는 읽기 상태(저장은 거절) — Thinking 값을 쓰지 않는다
+describe('thinkingOf — 파생 키 겹침이면 Thinking 없음', () => {
+  const clash = (id: string): ProviderSummary[] => [{ ...providers[0]!, models: [{ id: 'q', displayName: 'Q', thinking: true }, { id, displayName: 'Real' }] }]
+
+  it('켬·끔 키가 다른 항목 id 와 겹치면 undefined, 겹치지 않으면 지금 값', () => {
+    for (const id of ['q--think', 'q--nothink']) expect(thinkingOf(findModel(clash(id), ref('q')))).toBeUndefined()
+    expect(thinkingOf(findModel(clash('other'), ref('q--nothink')))).toBe('off')
+    expect(thinkingOf(findModel(providers, qwen('on')))).toBe('on')
+    expect(thinkingOf(findModel(providers, ref('glm')))).toBeUndefined()
+  })
+
+  it('겹침이면 메뉴는 모델 목록으로 열리고, 칩에 아이콘이 없고, 루트 패널을 그리지 않는다', () => {
+    const collided = clash('q--think')
+    expect(openingPane(findModel(collided, ref('q')))).toBe('model')
+    overrides = []
+    const chip = renderToStaticMarkup(createElement(ModelSelect, { providers: collided, value: ref('q'), onChange: () => {} }))
+    expect(chip).not.toContain('model-select__bulb')
+    expect(chip).toContain(`aria-label="${ko('model.label', { name: 'Q' })}"`)
+    overrides = [true, 'root']
+    expect(renderToStaticMarkup(createElement(ModelSelect, { providers: collided, value: ref('q'), onChange: () => {} }))).not.toContain('role="menuitem"')
+  })
+})
+
 describe('ModelSelect — 닫힌 칩', () => {
-  it('Thinking 모델은 이름 뒤에 연한 값 글자 · 디폴트/켬/끔, 접근성 이름에도 값', () => {
+  it('Thinking 모델은 이름 뒤에 전구 아이콘(aria-hidden) — 글자 값은 없고, 접근성 이름·툴팁에 값', () => {
     for (const [thinking, word] of [['default', '디폴트'], ['on', '켬'], ['off', '끔']] as const) {
       const html = markup(qwen(thinking))
-      expect(html).toContain('<span class="composer__model">Qwen3.8 27B</span><span class="model-select__thinking">· ' + word + '</span>')
+      expect(html).toContain(`<span class="composer__model">Qwen3.8 27B</span><svg class="model-select__bulb model-select__bulb--${thinking}"`)
+      expect(html).not.toContain(`· ${word}`)
+      expect(html).not.toContain('model-select__thinking')
+      expect(html).toMatch(/<svg class="model-select__bulb[^"]*" width="16" height="16" viewBox="0 0 24 24"[^>]*aria-hidden="true"/)
       expect(html).toContain(`aria-label="${ko('model.labelThinking', { name: 'Qwen3.8 27B', value: word })}"`)
+      expect(html).toContain(`title="Thinking: ${word}\nGateway · qwen"`)
       expect(html).not.toContain('role="menu"')
     }
+  })
+
+  it('세 상태의 모양 — 디폴트 윤곽선, 켬 채움, 끔 윤곽선 + 사선', () => {
+    const bulb = (thinking: Thinking) => markup(qwen(thinking)).match(/<svg class="model-select__bulb.*?<\/svg>/)![0]
+    const BULB = 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z'
+    const SLASH = 'M3.5 3.5l17 17'
+    for (const thinking of ['default', 'on', 'off'] as const) expect(bulb(thinking)).toContain(`d="${BULB}"`)
+    expect(bulb('default')).toContain('fill="none"')
+    expect(bulb('default')).not.toContain(SLASH)
+    expect(bulb('on')).toContain('fill="currentColor"')
+    expect(bulb('on')).not.toContain(SLASH)
+    expect(bulb('off')).toContain('fill="none"')
+    expect(bulb('off')).toContain(`<path class="model-select__bulb-slash" d="${SLASH}"`)
+  })
+
+  it('툴팁 문구 (ko·en) — 값 글자는 thinking.* 를 다시 쓴다', () => {
+    expect(ko('model.thinkingTitle', { value: ko('model.thinking.off') })).toBe('Thinking: 끔')
+    expect(translate('en', 'model.thinkingTitle', { value: translate('en', 'model.thinking.off') })).toBe('Thinking: Off')
   })
 
   it('미선언 모델은 지금처럼 이름만', () => {
     const html = markup(ref('glm'))
     expect(html).toContain('<span class="composer__model">GLM-5.2</span>')
-    expect(html).not.toContain('model-select__thinking')
+    expect(html).not.toContain('model-select__bulb')
     expect(html).toContain(`aria-label="${ko('model.label', { name: 'GLM-5.2' })}"`)
+    expect(html).toContain('title="Gateway · glm"')
   })
 })
 

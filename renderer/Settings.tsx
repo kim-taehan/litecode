@@ -479,7 +479,8 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
         </div>
       ))}
       <p className="context-length-hint">
-        <strong className="context-length-hint__term">{t('models.thinkingLabel')}</strong> — {t('models.thinkingHint')}
+        {/* 선언을 끄면 켬·끔 키가 풀리지 않는다 — 다시 고르라는 안내만 (#503, 접미 키를 디폴트로 푸는 폴백은 두지 않는다) */}
+        <strong className="context-length-hint__term">{t('models.thinkingLabel')}</strong> — {t('models.thinkingHint')} {t('models.thinkingOffHint')}
       </p>
       <ContextLengthNotes models={models} />
       <div className="provider-editor__model-actions">

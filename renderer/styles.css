@@ -948,11 +948,19 @@ button {
   color: var(--accent);
 }
 
-/* Thinking 모델(이슈 #500 시안) — 닫힌 칩의 연한 값 글자, 메뉴의 루트 패널(Model / Thinking 두 줄)과 Thinking 패널(머리줄 + 제목·설명 세 줄) */
-.model-select__thinking {
+/* Thinking 모델(이슈 #500 시안) — 닫힌 칩의 전구 아이콘(#503 시안: 디폴트 회색 윤곽선·켬 진한 채움·끔 진한 윤곽선 + 위험색 사선),
+   메뉴의 루트 패널(Model / Thinking 두 줄)과 Thinking 패널(머리줄 + 제목·설명 세 줄) */
+.model-select__bulb {
   flex: none;
+  color: var(--text);
+}
+
+.model-select__bulb--default {
   color: var(--text-tertiary);
-  white-space: nowrap;
+}
+
+.model-select__bulb-slash {
+  stroke: var(--danger);
 }
 
 .model-menu__cell {
