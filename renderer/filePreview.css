@@ -165,9 +165,15 @@
   color: var(--text-secondary);
 }
 
+.file-preview__add-wrap {
+  position: relative;
+  flex: none;
+}
+
 .file-preview__add-menu {
-  position: fixed;
+  left: 0;
   right: auto;
+  min-width: 200px;
 }
 
 /* `+` 메뉴의 "확장" 구분 (이슈 #511, 시안 mock-extension-panel Panel) — 구분선 + 작은 소제목, 항목은 퍼즐(보라 --extension, settings.css) + 이름 */

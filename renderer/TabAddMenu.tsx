@@ -4,7 +4,7 @@ import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT } from './settingsStore.ts'
 
 // 탭 줄 끝의 `+` 하나 — 눌러서 "파일 목록 / 새 터미널" 을 고른다 (2026-10-12, 사용자 "버튼 > + 2개 하나로", dsh ui-dockkit 의 add 컨트롤 하나).
-// 터미널 기능이 꺼져 있으면 고를 것이 없으니 바로 파일 목록. 메뉴는 탭 줄이 가로로 스크롤돼도 잘리지 않게 fixed 로 그린다.
+// 터미널 기능이 꺼져 있으면 고를 것이 없으니 바로 파일 목록. 메뉴는 탭 줄(스크롤 칸) 밖, 버튼 바로 아래에 absolute 로 붙인다 (#513 — fixed 좌표는 패널 안에서 화면 밖으로 밀렸다).
 // 모양은 .open-in__menu / .open-in__item 을 그대로 쓴다.
 // 패널 확장 (이슈 #511, 시안 _workspace/mock-extension-panel Panel) — 켜 둔 정상 확장이 있으면 구분선 + 소제목 "확장" 아래에 퍼즐 아이콘 + 이름.
 // 누르면 그 확장 탭(이미 있으면 그 탭). 터미널이 꺼져 있어도 켜 둔 확장이 있으면 메뉴를 보인다.
@@ -32,47 +32,46 @@ export function TabAddMenu({
   initialOpen?: boolean
 }) {
   const t = useT()
-  const [at, setAt] = useState<{ left: number; top: number } | undefined>(initialOpen ? { left: 0, top: 0 } : undefined)
+  const [open, setOpen] = useState(initialOpen)
   const root = useRef<HTMLDivElement>(null)
   const menu = terminal || extensions.length > 0
 
   useEffect(() => {
-    if (!at) return
-    // 메뉴는 fixed 라 포커스가 가려진 조상(.app overflow:hidden)을 가로로 밀어 화면이 틀어진다 (#513)
+    if (!open) return
+    // 포커스가 가려진 조상(.app overflow:hidden)을 가로로 밀지 않게 (#513)
     root.current?.querySelector<HTMLButtonElement>('.open-in__item')?.focus({ preventScroll: true })
     const onMouseDown = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setAt(undefined)
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', onMouseDown)
     return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [at])
+  }, [open])
 
   function pick(action: () => void): void {
-    setAt(undefined)
+    setOpen(false)
     action()
   }
 
   return (
-    <div ref={root} onKeyDown={(event) => event.key === 'Escape' && setAt(undefined)}>
+    <div ref={root} className="file-preview__add-wrap" onKeyDown={(event) => event.key === 'Escape' && setOpen(false)}>
       <button
         type="button"
         className="file-preview__add"
         aria-label={t(menu ? 'filePreview.newTab' : 'filePreview.addTab')}
         title={t(menu ? 'filePreview.newTab' : 'filePreview.addTab')}
         aria-haspopup={menu ? 'menu' : undefined}
-        aria-expanded={menu ? at !== undefined : undefined}
-        onClick={(event) => {
+        aria-expanded={menu ? open : undefined}
+        onClick={() => {
           if (!menu) return onFiles()
-          const rect = event.currentTarget.getBoundingClientRect()
-          setAt(at ? undefined : { left: rect.left, top: rect.bottom + 4 })
+          setOpen(!open)
         }}
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
           <path d="M8 3V13M3 8H13" />
         </svg>
       </button>
-      {menu && at && (
-        <div className="open-in__menu file-preview__add-menu" role="menu" style={{ left: at.left, top: at.top }}>
+      {menu && open && (
+        <div className="open-in__menu file-preview__add-menu" role="menu">
           <button type="button" role="menuitem" className="open-in__item" onClick={() => pick(onFiles)}>
             {t('filePreview.addTab')}
           </button>

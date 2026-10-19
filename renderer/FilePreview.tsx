@@ -438,15 +438,15 @@ function Panel({
               </div>
             )
           })}
-          {/* `+` 하나 — 파일 목록 / 새 터미널(메인이 번호를 폴더에서 1부터 매겨 열고 그 탭으로) / 켜 둔 확장(이슈 #511) */}
-          <TabAddMenu
-            terminal={terminalOn}
-            extensions={menuExtensions(extensions)}
-            onFiles={() => openFilesTab(directory)}
-            onTerminal={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id)).catch(() => {})}
-            onExtension={(id) => openExtensionTab(directory, id)}
-          />
         </div>
+        {/* `+` 하나 — 파일 목록 / 새 터미널(메인이 번호를 폴더에서 1부터 매겨 열고 그 탭으로) / 켜 둔 확장(이슈 #511) */}
+        <TabAddMenu
+          terminal={terminalOn}
+          extensions={menuExtensions(extensions)}
+          onFiles={() => openFilesTab(directory)}
+          onTerminal={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id)).catch(() => {})}
+          onExtension={(id) => openExtensionTab(directory, id)}
+        />
         <span className="file-preview__chrome">
           {compare && (
             <>
