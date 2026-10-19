@@ -129,8 +129,8 @@ export function ModelSelect({ providers, value, onChange }: ModelSelectProps) {
         onClick={() => (open ? close() : show())}
       >
         <span className="composer__model">{label}</span>
-        {/* Thinking 이 켬일 때만 채운 전구 하나 (#505) — 디폴트·끔은 아이콘 없이 aria-label·title 로만 */}
-        {thinking === 'on' && <ThinkingBulb />}
+        {/* 켬은 채운 전구, 끔은 사선 전구 (#505·#507) — 디폴트는 아이콘 없이 aria-label·title 로만 */}
+        {(thinking === 'on' || thinking === 'off') && <ThinkingBulb value={thinking} />}
         {/* dsh IconChevronDownOutline (14px, 캡션색), 열리면 뒤집힌다 */}
         <svg className="model-select__caret" width="14" height="14" viewBox="0 0 16 16" fill="none" strokeWidth="1" aria-hidden="true">
           <path d="M4 6L7.3 9.3C7.7 9.7 8.3 9.7 8.7 9.3L12 6" stroke="currentColor" />

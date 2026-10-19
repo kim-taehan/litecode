@@ -11,15 +11,16 @@ export function thinkingLabel(t: Translate, value: Thinking): string {
   return t(`model.thinking.${value}` as const)
 }
 
-/** 닫힌 칩의 Thinking 켬 표시 — 채운 전구 하나(13px, aria-hidden — 값은 트리거의 aria-label·title 이 읽힌다). 디폴트·끔일 때는 그리지 않는다 (이슈 #505) */
-export function ThinkingBulb() {
+/** 닫힌 칩의 Thinking 표시 — 켬은 채운 전구, 끔은 윤곽선 전구 + 위험색 사선(13px, aria-hidden — 값은 트리거의 aria-label·title 이 읽힌다).
+ *  디폴트일 때는 그리지 않는다 — 켬·끔에만 아이콘이 있어서 끔과 디폴트가 칩에서 구분된다 (이슈 #505·#507) */
+export function ThinkingBulb({ value }: { value: 'on' | 'off' }) {
   return (
     <svg
-      className="model-select__bulb"
+      className={`model-select__bulb model-select__bulb--${value}`}
       width="13"
       height="13"
       viewBox="0 0 24 24"
-      fill="currentColor"
+      fill={value === 'on' ? 'currentColor' : 'none'}
       stroke="currentColor"
       strokeWidth="1.8"
       strokeLinecap="round"
@@ -27,6 +28,7 @@ export function ThinkingBulb() {
       aria-hidden="true"
     >
       <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z" />
+      {value === 'off' && <path className="model-select__bulb-slash" d="M3.5 3.5l17 17" />}
     </svg>
   )
 }
