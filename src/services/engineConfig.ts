@@ -365,21 +365,23 @@ export function engineConfig(
   const provider: Record<string, unknown> = {}
   for (const config of providers) {
     // provider·모델 id 는 우리 id 그대로 — ctx.llm 이 그대로 넘긴다
+    // 컨텍스트 길이·최대 출력·이미지 입력은 opencode 가 /api/model 로 안다 (01_probe 2026-10-01). 한도를 줘야 자동 압축이 돈다 (01o).
+    // output 은 빼면 안 된다 — limit 에 output 이 없으면 설정 파일 전체가 무시돼 provider 가 사라진다 (01o).
+    // 레거시는 output 을 요청 max_tokens 로 싣고 문턱(context − output)에서 뺀다 — 0 이면 둘 다 32000 이라 작은 모델에서 요약이 끝없이 돈다.
+    // 그래서 최대 출력을 비우면 컨텍스트의 1/4 를 넣는다 (이슈 #27 실측, shared/outputLimit.ts)
+    // 이미지 입력을 켠 모델만 modalities 를 싣는다 — 이게 있어야 file 파트 이미지가 image_url 로 나간다(attachment: true 만으론 안 된다, 01y 함정 3)
+    // 같은 id 의 사고 켬·끔 두 항목은 opencode 모델 정의가 id 당 하나라 첫 항목만 쓴다 — 사고 끄기는 프록시가 body 로 싣기 때문
+    const modelMap = new Map<string, { name: string; limit?: { context?: number; output?: number }; modalities?: { input?: string[]; output?: string[] } }>()
+    for (const model of config.models) {
+      if (modelMap.has(model.id)) continue
+      const limit = engineLimit(model)
+      modelMap.set(model.id, { name: model.displayName, ...(limit && { limit }), ...(model.imageInput && { modalities: { input: ['text', 'image'], output: ['text'] } }) })
+    }
     provider[config.id] = {
       npm: '@ai-sdk/openai-compatible',
       name: config.displayName,
       options: { baseURL: proxy.baseURLFor(config.id), apiKey: proxy.token },
-      // 컨텍스트 길이를 주면 opencode 가 /api/model 의 limit 으로 그대로 안다 (01_probe 2026-10-01). 한도를 줘야 자동 압축이 돈다 (01o)
-      // output 은 빼면 안 된다 — limit 에 output 이 없으면 설정 파일 전체가 무시돼 provider 가 사라진다 (01o).
-      // 레거시는 output 을 요청 max_tokens 로 싣고 문턱(context − output)에서 뺀다 — 0 이면 둘 다 32000 이라 작은 모델에서 요약이 끝없이 돈다.
-      // 그래서 최대 출력을 비우면 컨텍스트의 1/4 를 넣는다 (이슈 #27 실측, shared/outputLimit.ts)
-      models: Object.fromEntries(
-        config.models.map((model) => {
-          const limit = engineLimit(model)
-          // 이미지 입력을 켠 모델만 modalities 를 싣는다 — 이게 있어야 file 파트 이미지가 image_url 로 나간다(`attachment: true` 만으론 안 된다, 01y 함정 3)
-          return [model.id, { name: model.displayName, ...(limit && { limit }), ...(model.imageInput && { modalities: { input: ['text', 'image'], output: ['text'] } }) }]
-        }),
-      ),
+      models: Object.fromEntries(modelMap),
     }
   }
   const hidden = hiddenEnvNames(extra.childEnv ?? {})

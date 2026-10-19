@@ -208,42 +208,30 @@ describe('ProviderRegistry', () => {
     expect(providers.get('gw')!.models[0]).toEqual({ id: 'm1', displayName: 'M', thinkingOff: true })
   })
 
-  // 실제 모델 이름(이슈 #485) — 같은 게이트웨이 모델을 id 만 다르게 두 항목(사고 켬·끔)으로. id 만 유일하고 실제 이름은 겹쳐도 된다
-  it('실제 모델 이름은 트림해 비어 있지 않을 때만 남고, 두 항목이 같은 실제 이름이어도 저장된다', async () => {
+  // 같은 id 는 사고 끄기가 다른 항목과 겹쳐도 된다 — 사고 켬·끔 두 항목으로 같은 게이트웨이 모델을 둔다
+  it('id 가 같아도 사고 끄기가 다른 항목은 저장되고, 사고 끄기가 같은 id 겹침만 거절한다', async () => {
     const providers = await registry(files)
     providers.save({
       ...config,
       models: [
-        { id: 'qwen', displayName: 'Q', upstreamId: ' qwen3.8-27b ', thinkingOff: true },
-        { id: 'qwen-thinking', displayName: 'QT', upstreamId: 'qwen3.8-27b' },
-        { id: 'm3', displayName: 'N', upstreamId: '   ' },
-        { id: 'm4', displayName: 'O', upstreamId: '' },
-        { id: 'm5', displayName: 'P', upstreamId: 'm5' },
+        { id: 'qwen', displayName: 'Q' },
+        { id: 'qwen', displayName: 'QT', thinkingOff: true },
+        { id: 'm3', displayName: 'N' },
       ],
     })
     expect((await registry(files)).get('gw')!.models).toEqual([
-      { id: 'qwen', displayName: 'Q', upstreamId: 'qwen3.8-27b', thinkingOff: true },
-      { id: 'qwen-thinking', displayName: 'QT', upstreamId: 'qwen3.8-27b' },
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen', displayName: 'QT', thinkingOff: true },
       { id: 'm3', displayName: 'N' },
-      { id: 'm4', displayName: 'O' },
-      { id: 'm5', displayName: 'P' },
     ])
-  })
 
-  it('id 가 겹치면 실제 모델 이름이 달라도 거절한다', async () => {
-    const providers = await registry(files)
-    const models = [
-      { id: 'qwen', displayName: 'Q', upstreamId: 'a' },
-      { id: 'qwen', displayName: 'Q2', upstreamId: 'b' },
-    ]
-    expect(() => providers.save({ ...config, models })).toThrow(tr('error.modelIdDuplicate'))
-  })
-
-  it('실제 모델 이름이 문자열이 아니거나 200자를 넘거나 제어 문자·개행이 있으면 거절한다', async () => {
-    const providers = await registry(files)
-    const save = (upstreamId: unknown) => providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', upstreamId } as unknown as ModelCatalogEntry] })
-    for (const bad of [42, 'a'.repeat(201), 'qwen\nx', 'qwen\tx', 'q\u0000']) expect(() => save(bad)).toThrow(tr('error.upstreamId'))
-    expect(save('a'.repeat(200))[0]!.models[0]!.upstreamId).toBe('a'.repeat(200))
+    expect(() => providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen', displayName: 'Q2' }] })).toThrow(tr('error.modelIdDuplicate'))
+    expect(() =>
+      providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen', displayName: 'Q2', thinkingOff: false }] }),
+    ).toThrow(tr('error.modelIdDuplicate'))
+    expect(() =>
+      providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q', thinkingOff: true }, { id: 'qwen', displayName: 'Q2', thinkingOff: true }] }),
+    ).toThrow(tr('error.modelIdDuplicate'))
   })
 
   // 03_qa 1차 재확인 · 리더 결정: 주소를 바꿔 저장하려면 키를 다시 넣어야 한다 — 안 그러면 save → fetch 로 저장 키가 새 주소로 간다

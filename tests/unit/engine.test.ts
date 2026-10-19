@@ -596,6 +596,26 @@ describe('engineConfig — 이미지 입력 (이슈 #44)', () => {
   })
 })
 
+describe('engineConfig — id 중복', () => {
+  it('같은 id 의 항목이 여러 개이면 첫 항목으로 하나의 모델 정의만 싣는다', () => {
+    const config = engineConfig(
+      [
+        {
+          ...provider('a'),
+          models: [
+            { id: 'qwen', displayName: 'Q', thinkingOff: false, contextLength: 32_768 },
+            { id: 'qwen', displayName: 'QT', thinkingOff: true },
+          ],
+        },
+      ],
+      { token: 't', baseURLFor: (id: string) => `http://127.0.0.1:9/${id}` },
+    )
+    expect((config.provider as Record<string, { models: unknown }>)['a']!.models).toEqual({
+      qwen: { name: 'Q', limit: { context: 32_768, output: 8_192 } },
+    })
+  })
+})
+
 // 이슈 #477: 사고 끄기는 opencode.json 이 아니라 키 프록시 본문에서 — 켠 모델만, 켠 모델이 없으면 본문을 모으지 않는다
 describe('proxyTarget — 사고 끄기 (이슈 #477)', () => {
   it('켠 모델에만 chat_template_kwargs.enable_thinking=false 를 돌려주고, 켠 모델이 없으면 addToBody 가 없다', () => {
@@ -607,26 +627,17 @@ describe('proxyTarget — 사고 끄기 (이슈 #477)', () => {
   })
 })
 
-// 이슈 #485: 실제 모델 이름 — 적은 모델만 프록시가 본문 model 을 바꾼다. 사고 끄기는 id 기준이라 같은 실제 이름의 두 항목이 갈린다
-describe('proxyTarget — 실제 모델 이름 (이슈 #485)', () => {
-  const models = [
-    { id: 'qwen', displayName: 'Q', upstreamId: 'qwen3.8-27b', thinkingOff: true },
-    { id: 'qwen-thinking', displayName: 'QT', upstreamId: 'qwen3.8-27b' },
-    { id: 'llama', displayName: 'L' },
-  ]
-
-  it('적은 모델의 id 를 실제 이름으로, 안 적은 모델은 undefined. 사고 끄기는 id 로 찾는다', () => {
+// 같은 id 는 사고 켬·끔 두 항목으로 중복될 수 있다 — 프록시 목표는 id 한 개로 사고 끄기 여부를 모은다
+describe('proxyTarget — id 중복', () => {
+  it('같은 id 에 사고 끄기 한 항목이라도 그 id 요청에는 사고 끄기를 싣는다', () => {
+    const models = [
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen', displayName: 'QT', thinkingOff: true },
+      { id: 'llama', displayName: 'L' },
+    ]
     const target = proxyTarget({ ...provider('a'), models }, 'sk')
-    expect(['qwen', 'qwen-thinking', 'llama', 'qwen3.8-27b'].map((id) => target.upstreamModel!(id))).toEqual(['qwen3.8-27b', 'qwen3.8-27b', undefined, undefined])
     expect(target.addToBody!('qwen')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
-    expect(target.addToBody!('qwen-thinking')).toBeUndefined()
-  })
-
-  it('실제 이름만 있고 사고 끄기가 없으면 upstreamModel 만, 둘 다 없으면 둘 다 없다', () => {
-    const only = proxyTarget({ ...provider('a'), models: [models[1]!, models[2]!] }, undefined)
-    expect(only).toHaveProperty('upstreamModel')
-    expect(only).not.toHaveProperty('addToBody')
-    expect(proxyTarget({ ...provider('a'), models: [models[2]!] }, undefined)).not.toHaveProperty('upstreamModel')
+    expect(target.addToBody!('llama')).toBeUndefined()
   })
 })
 

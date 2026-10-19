@@ -25,15 +25,10 @@ export interface ModelCatalogEntry {
    *  붙인 이미지를 "ERROR: Cannot read …(this model does not support image input)" 글로 바꿔 보낸다 (01y). 기본 꺼짐 */
   imageInput?: boolean
   /** 사고 끄기(선택, 이슈 #477) — 켠 모델의 chat/completions 본문에 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다
-   *  (사내망 실측: vLLM 게이트웨이의 Qwen 이 reasoning 을 끈다). 요청마다 저장된 값을 보므로 엔진 재시작 없이 다음 요청부터. 기본 없음 */
+    *  (사내망 실측: vLLM 게이트웨이의 Qwen 이 reasoning 을 끈다). 요청마다 저장된 값을 보므로 엔진 재시작 없이 다음 요청부터. 기본 없음.
+    *  같은 id 는 thinkingOff 가 다른 항목과 겹쳐도 된다 — 프록시는 본문 model(id) 과 thinkingOff 로 항목을 찾는다 */
   thinkingOff?: boolean
-  /** 실제 모델 이름(선택, 이슈 #485) — 키 프록시가 게이트웨이에 보낼 때 본문 model 을 id 대신 이 이름으로 바꾼다. 같은 모델을 id 만 다르게
-   *  두 항목(사고 켬·끔)으로 둘 때 쓴다 — id 는 provider 안에서 유일하지만 이 값은 겹쳐도 된다. 비우면 id 그대로. opencode.json 에는 id 만 간다 */
-  upstreamId?: string
 }
-
-/** 실제 모델 이름 상한 — 게이트웨이 모델 이름으로 충분히 길다 */
-const UPSTREAM_ID_MAX = 200
 
 export interface ProviderConfig {
   id: string
@@ -153,17 +148,11 @@ export class ProviderRegistry extends Service {
     const baseURL = input.baseURL.trim()
     if (!displayName) throw new Error(tr('error.displayNameRequired'))
     if (!isHttpUrl(baseURL)) throw new Error(tr('error.baseUrlInvalid'))
-    // 실제 모델 이름 — 헤더가 아니라 JSON 본문에 실리지만 줄바꿈·제어 문자는 붙여넣기 실수다
-    const badUpstream = (value: unknown) => value !== undefined && (typeof value !== 'string' || value.trim().length > UPSTREAM_ID_MAX || /\p{Cc}/u.test(value.trim()))
-    if (input.models.some((model) => badUpstream(model.upstreamId))) throw new Error(tr('error.upstreamId'))
     const models = input.models.map((model) => {
       const id = model.id.trim()
-      // id 와 같으면 바꿀 것이 없다 — 남기지 않는다
-      const upstreamId = model.upstreamId?.trim()
       return {
         id,
         displayName: model.displayName.trim() || id,
-        ...(upstreamId && upstreamId !== id && { upstreamId }),
         ...(model.contextLength !== undefined && { contextLength: model.contextLength }),
         ...(model.maxOutput !== undefined && { maxOutput: model.maxOutput }),
         ...(model.imageInput === true && { imageInput: true }),
@@ -180,7 +169,7 @@ export class ProviderRegistry extends Service {
       !(Number.isSafeInteger(model.maxOutput) && model.maxOutput > 0 && (model.contextLength === undefined || model.maxOutput < model.contextLength))
     if (models.some(badOutput)) throw new Error(tr('error.maxOutput'))
     if (models.length === 0 || models.some((model) => !model.id)) throw new Error(tr('error.modelsRequired'))
-    if (new Set(models.map((model) => model.id)).size !== models.length) throw new Error(tr('error.modelIdDuplicate'))
+    if (new Set(models.map((model) => `${model.id}\u0000${model.thinkingOff === true ? 1 : 0}`)).size !== models.length) throw new Error(tr('error.modelIdDuplicate'))
     const apiKey = input.apiKey?.trim()
     // 키는 키 프록시가 Authorization 헤더로 싣는다 — 헤더에 못 쓰는 문자(줄바꿈·제어 문자·U+200B 같은 보이지 않는 문자·비ASCII)는
     // 붙여넣기 실수이고, 저장되면 요청마다 실패한다 (03_qa 2차). 메시지에 키 값은 넣지 않는다
