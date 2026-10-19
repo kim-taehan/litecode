@@ -10,6 +10,9 @@ import { FeatureIcon } from './featureIcons.tsx'
 import { FEATURE_ROWS, filterByQuery } from './featuresView.ts'
 import { SessionSearch, type SearchLabels } from './SessionListTools.tsx'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
+import { ExtensionAddButton, ExtensionsNotice, ExtensionsSection } from './ExtensionsSettings.tsx'
+import { useExtensions } from './extensionsStore.ts'
+import { filterExtensions } from './extensionsView.ts'
 
 // 설정 > 기능 (이슈 #8) — 한 줄에 기능 하나 (사용자 2026-10-07 "그냥 한줄에 하나씩 넣고", "상세 볼 수 있게", 시안 _workspace/mock-features
 // Main·Detail). 묶음마다 둥근 테두리 목록 한 장, 줄 = 펼침 버튼(▸ + 이름 + 한 줄 요약, 말줄임) · 스위치(따로 눌리는 요소, 일반 페이지와 같은 36×20).
@@ -26,6 +29,7 @@ import { updateSettings, useSettings, useT } from './settingsStore.ts'
 // 고정된 필수 기능(FEATURE_FIXED)은 줄이 없다 (#302, 사용자 "애들은 그냥 안 보여도 될 것 같아" — #277 의 접힌 "항상 켜짐" 구역을 뺐다).
 // 앱 전체(Global)/대화마다(Session) 큰 묶음과 모드 권한 표는 없앴다 (#281, 사용자 "별로다, 구분 없애자").
 // 맨 위 찾기 칸(사이드바 SessionSearch 를 문구만 바꿔 쓴다)은 이름·한 줄 요약·뱃지 이름을 대소문자 무시 부분일치로 거른다. 하나도 없으면 "일치하는 기능이 없습니다."
+// 설치한 확장 (이슈 #489) — 찾기 칸 옆 [확장 추가 (zip)], 보류가 있으면 노란 배너, 기능 카드 아래 "설치한 확장" 카드. 찾기는 확장도 거른다 (ExtensionsSettings.tsx)
 
 const SEARCH_LABELS: SearchLabels = { label: 'settings.features.search', placeholder: 'settings.features.searchPlaceholder', clear: 'settings.features.searchClear' }
 
@@ -53,6 +57,7 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
   const [expanded, setExpanded] = useState<ChoosableFeatureId | undefined>(initialExpanded)
   const [query, setQuery] = useState(initialQuery)
   const stored = settings.features ?? {}
+  const extensions = useExtensions()
 
   function toggle(feature: ChoosableFeatureId): void {
     const next = { ...stored }
@@ -90,6 +95,7 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
     t(`feature.${feature}.description`),
     t(`settings.features.group.${group}`),
   ])
+  const extensionRows = filterExtensions(extensions, query)
 
   /** 펼친 아래의 자세한 설명 + 칩(필요 · 기본값 · 쓰는 곳) */
   function featureDetail(feature: ChoosableFeatureId, extra: { failure?: FeatureReason; wanted: boolean }): ReactNode {
@@ -204,8 +210,17 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
       <p className="features-page__intro">{t('settings.features.intro')}</p>
       <div className="features-page__search">
         <SessionSearch value={query} onChange={setQuery} labels={SEARCH_LABELS} />
+        <ExtensionAddButton />
       </div>
-      {rows.length === 0 ? <p className="features-page__empty">{t('settings.features.noMatch')}</p> : <ul className="feature-rows">{rows.map(choosableRow)}</ul>}
+      <ExtensionsNotice extensions={extensions} />
+      {rows.length === 0 && extensionRows.length === 0 ? (
+        <p className="features-page__empty">{t('settings.features.noMatch')}</p>
+      ) : (
+        <>
+          {rows.length > 0 && <ul className="feature-rows">{rows.map(choosableRow)}</ul>}
+          <ExtensionsSection extensions={extensionRows} />
+        </>
+      )}
     </div>
   )
 }
