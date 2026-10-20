@@ -47,6 +47,11 @@ export const EXTENSION_LIMITS = {
   fetchRedirects: 5,
   /** project.readFile. 근거: 설정 파일(sonar-project.properties 등)을 읽는 용도라 수 KB — 소스 파일 하나도 대부분 들어가는 256KB */
   projectFileBytes: 256 * 1024,
+  /** project.pickPath (이슈 #538, QA 03_qa_538) — 고르기 창은 앱 창에 모달로 붙는다. 확장이 취소된 창을 곧바로 다시 띄우면 사용자가 그 확장을 끄러 갈
+   *  틈이 없다. 이 사이에 두 번 연달아 취소하면 pickBlockMs 동안 열지 않는다. 근거: 사람이 실수로 취소하고 다시 고르는 데는 몇 초면 되고,
+   *  되풀이를 알아채고 설정 > 기능에서 끄기에는 30초면 넉넉하다 */
+  pickCancelWindowMs: 10_000,
+  pickBlockMs: 30_000,
 }
 
 export type ExtensionLimits = typeof EXTENSION_LIMITS

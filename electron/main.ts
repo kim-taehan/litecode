@@ -380,9 +380,9 @@ function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_READ_LOCALE, async (_event, language: unknown) => ctx.extensions.readLocale(String(language)))
   ctx.on('extensions/changed', (extensions) => broadcast(Channel.EXTENSIONS_CHANGED, extensions))
   // 확장 ↔ 앱 통로 (이슈 #536) — 화면이 준 폴더는 등록된 프로젝트일 때만 넘긴다(아니면 프로젝트 없음)
-  handle(ctx, Channel.EXTENSIONS_CALL, async (_event, id: unknown, method: unknown, params: unknown, directory: unknown) => {
+  handle(ctx, Channel.EXTENSIONS_CALL, async (event, id: unknown, method: unknown, params: unknown, directory: unknown) => {
     const found = typeof directory === 'string' ? (await ctx.projects.list()).find((project) => project.path === directory) : undefined
-    return ctx.extensions.call(String(id), String(method), params, found && { directory: found.path, name: found.name })
+    return ctx.extensions.call(String(id), String(method), params, found && { directory: found.path, name: found.name }, event.sender)
   })
   handle(ctx, Channel.EXTENSIONS_ALLOW_ORIGIN, async (_event, id: unknown, origin: unknown) => ctx.extensions.allowOrigin(String(id), String(origin)))
   handle(ctx, Channel.EXTENSIONS_REVOKE_ORIGIN, async (_event, id: unknown, origin: unknown) => ctx.extensions.revokeOrigin(String(id), String(origin)))

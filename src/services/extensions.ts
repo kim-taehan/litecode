@@ -17,11 +17,13 @@ import type {
 } from '../../shared/extensions.ts'
 import { DEFAULT_LANGUAGE, isBuiltinLanguage } from '../../shared/i18n/index.ts'
 import { setMainLocalePack } from '../i18n.ts'
+import { changedFiles } from './extensions/changes.ts'
 import { ExtensionData } from './extensions/data.ts'
 import { EXTENSION_LIMITS } from './extensions/limits.ts'
 import { isExtensionId } from './extensions/manifest.ts'
 import { fetchForExtension, isAppAddress, parseFetchRequest, selfAddresses, type ExtensionFetch } from './extensions/network.ts'
 import { isEntryPath } from './extensions/paths.ts'
+import { projectRelativePaths } from './extensions/pick.ts'
 import { ExtensionStore, readInsideFile } from './extensions/store.ts'
 import { failureReason } from './features.ts'
 import type { KeyCipher } from './providers.ts'
@@ -76,6 +78,10 @@ export interface ExtensionsOptions {
   fetch?: (id: string) => ExtensionFetch
   /** 앱 자신의 로컬 서버 포트 — network.fetch 가 동의와 상관없이 거절한다(address-reserved). 포트는 런타임에 정해지므로 부를 때마다 읽는다 */
   reservedPorts?: () => number[]
+  /** project.pickPath 의 고르기 창 (이슈 #538) — 요청한 창(owner)에 붙이고 directory 에서 시작한다. 취소면 undefined. 없으면 io-failed */
+  pickPaths?: (owner: unknown, request: { directory: string; multiple: boolean }) => Promise<string[] | undefined>
+  /** project.changedFiles 가 띄우는 git 실행 파일 (기본: PATH 의 git — ctx.git 과 같다) */
+  git?: string
 }
 
 /** 통로 요청을 부른 프로젝트 — 다리가 등록된 프로젝트인지 확인한 것만 온다 */
@@ -96,6 +102,8 @@ const METHODS = new Map<string, ExtensionPermission | null>([
   ['project.info', 'project'],
   ['project.readFile', 'project'],
   ['project.openFile', 'project'],
+  ['project.pickPath', 'project'],
+  ['project.changedFiles', 'project'],
 ])
 
 type CallFailure = { ok: false; error: ExtensionCallError; origin?: string }
@@ -118,6 +126,10 @@ export class ExtensionsService extends Service {
   private dataQueue: Promise<unknown> = Promise.resolve()
   /** 확장 id → 허용한 origin (목록에 싣는다) */
   private origins = new Map<string, string[]>()
+  /** 고르기 창이 떠 있는 확장 (project.pickPath — 확장마다 하나) */
+  private picking = new Set<string>()
+  /** 확장마다 마지막 취소 시각과 막힘이 풀리는 시각 (project.pickPath — 되풀이해 띄우기 막기) */
+  private pickCancels = new Map<string, { canceledAt: number; blockedUntil: number }>()
   private entries: Entry[] = []
   private queue: Promise<unknown> = Promise.resolve()
   private readonly booted: Promise<void>
@@ -238,8 +250,9 @@ export class ExtensionsService extends Service {
     })
   }
 
-  /** 확장 ↔ 앱 통로 (이슈 #536) — id 는 화면이 iframe 출처로 정한 것. 켜진 정상 확장만, 메서드마다 manifest 권한을 본다. 던지지 않는다 */
-  async call(id: string, method: string, params: unknown, project?: CallProject): Promise<ExtensionCallResult> {
+  /** 확장 ↔ 앱 통로 (이슈 #536) — id 는 화면이 iframe 출처로 정한 것. 켜진 정상 확장만, 메서드마다 manifest 권한을 본다. 던지지 않는다.
+   *  owner 는 요청한 창(IPC event.sender) — 고르기 창을 거기 붙인다 (#538) */
+  async call(id: string, method: string, params: unknown, project?: CallProject, owner?: unknown): Promise<ExtensionCallResult> {
     await this.booted
     const manifest = this.onManifest(id)
     if (!manifest) return fail('not-on')
@@ -258,6 +271,10 @@ export class ExtensionsService extends Service {
           return await this.secrets(id, method, params)
         case 'network.fetch':
           return await this.fetch(id, params)
+        case 'project.pickPath':
+          return await this.pickPath(id, params, project, owner)
+        case 'project.changedFiles':
+          return await this.changedFiles(project)
         default:
           return await this.project(method, params, project)
       }
@@ -513,6 +530,44 @@ export class ExtensionsService extends Service {
     } catch {
       return fail('not-text')
     }
+  }
+
+  /** project.pickPath (이슈 #538) — 파일·폴더 고르기 창. 결과는 프로젝트 기준 상대 경로(밖은 빼고 outside 개수), 취소면 canceled.
+   *  같은 확장이 창을 띄운 동안 또 부르면 busy (창이 겹쳐 쌓이지 않게) */
+  private async pickPath(id: string, params: unknown, project: CallProject | undefined, owner: unknown): Promise<ExtensionCallResult> {
+    const multiple = typeof params === 'object' && params !== null ? (params as { multiple?: unknown }).multiple : undefined
+    if (multiple !== undefined && typeof multiple !== 'boolean') return fail('params-invalid')
+    if (!project) return fail('no-project')
+    if (!this.options.pickPaths) return fail('io-failed')
+    if (this.picking.has(id)) return fail('busy')
+    if (Date.now() < (this.pickCancels.get(id)?.blockedUntil ?? 0)) return fail('pick-blocked')
+    this.picking.add(id)
+    try {
+      const chosen = await this.options.pickPaths(owner, { directory: project.directory, multiple: multiple ?? false })
+      if (!chosen) {
+        this.noteCancel(id)
+        return done({ paths: [], canceled: true })
+      }
+      this.pickCancels.delete(id)
+      return done(await projectRelativePaths(project.directory, chosen))
+    } finally {
+      this.picking.delete(id)
+    }
+  }
+
+  /** 취소 하나를 적는다 — 앞 취소에서 pickCancelWindowMs 안이면 pickBlockMs 동안 막는다 (QA 03_qa_538) */
+  private noteCancel(id: string): void {
+    const now = Date.now()
+    const previous = this.pickCancels.get(id)
+    const repeated = previous !== undefined && now - previous.canceledAt <= EXTENSION_LIMITS.pickCancelWindowMs
+    this.pickCancels.set(id, { canceledAt: now, blockedUntil: repeated ? now + EXTENSION_LIMITS.pickBlockMs : 0 })
+  }
+
+  /** project.changedFiles (이슈 #538) — 기준 브랜치 대비 내 변경. git 기능(ctx.git)이 꺼져 있어도 돈다 (extensions/changes.ts) */
+  private async changedFiles(project: CallProject | undefined): Promise<ExtensionCallResult> {
+    if (!project) return fail('no-project')
+    const changed = await changedFiles(this.options.git ?? 'git', project.directory)
+    return changed.ok ? done({ base: changed.base, files: changed.files }) : changed
   }
 
   /** storage·secrets 파일의 값 — 없거나 모양이 틀리면 빈 객체 */

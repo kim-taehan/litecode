@@ -212,6 +212,16 @@ export type ExtensionCallError =
   | 'file-unreadable'
   /** UTF-8 글이 아니다 */
   | 'not-text'
+  /** 같은 확장의 고르기 창이 이미 떠 있다 (project.pickPath, 이슈 #538) */
+  | 'busy'
+  /** project.changedFiles (이슈 #538) — git 을 찾지 못했다 · 프로젝트가 저장소가 아니다 · git 이 실패했다(기한 등) */
+  | 'git-unavailable'
+  | 'not-a-repo'
+  | 'git-failed'
+  /** 바뀐 파일 목록이 너무 길어 잘렸다 — 일부만 주지 않는다 (QA 03_qa_538) */
+  | 'too-many-changes'
+  /** 같은 확장의 고르기 창을 짧은 사이에 연달아 취소했다 — 한동안 열지 않는다 (QA 03_qa_538) */
+  | 'pick-blocked'
   | 'io-failed'
 
 export type ExtensionCallResult = { ok: true; result: unknown } | { ok: false; error: ExtensionCallError; origin?: string }
