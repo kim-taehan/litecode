@@ -118,6 +118,8 @@ const userData = app.getPath('userData')
 // 지금부터의 console.error·warn 은 userData/logs/main.log 에도 남는다 (1MB × 3개로 돈다, 비밀은 가린다 — logFile.ts).
 const mainLog = createLogFile(path.join(userData, 'logs'))
 captureConsole(mainLog)
+// 띄운 터미널이 닫히면 stdout·stderr 쓰기가 뒤늦게 'error'(EIO·EPIPE)로 온다 — 안 받으면 uncaughtException → console.error → 또 실패로 헛돈다(#532)
+for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {})
 // 메인의 잡히지 않은 오류 — 기록하고 계속 돈다. (리스너를 걸면 Electron 기본 오류 대화상자는 더 안 뜬다 — 스택을 사용자에게 보이는 대신 파일에 남긴다)
 process.on('uncaughtException', (error) => console.error('[fatal] uncaughtException', error))
 process.on('unhandledRejection', (reason) => console.error('[fatal] unhandledRejection', reason))

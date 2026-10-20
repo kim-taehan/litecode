@@ -70,7 +70,11 @@ export function captureConsole(log: LogFile, target: Pick<Console, LogLevel> = c
   const original = { error: target.error, warn: target.warn }
   for (const level of ['error', 'warn'] as const) {
     target[level] = (...args: unknown[]) => {
-      original[level].apply(target, args)
+      try {
+        original[level].apply(target, args)
+      } catch {
+        // 터미널이 닫히면 출력이 EIO 로 던진다 — 그걸 다시 찍으면 끝없이 돈다(#532). 파일에는 남긴다
+      }
       log.write(level, args)
     }
   }
