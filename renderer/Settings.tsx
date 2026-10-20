@@ -7,7 +7,10 @@ import { FeaturesPage } from './FeaturesSettings.tsx'
 import { MobilePage } from './MobileSettings.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
-import { ContextLengthNotes } from './ContextLengthNotes.tsx'
+import { COMPACTION_MIN_THRESHOLD, isLowContext } from './compaction.ts'
+import { modelBudget, providerInitials, tokenLabel } from './modelBudget.ts'
+import { MoreMenu } from './ExtensionsSettings.tsx'
+import './compaction.css'
 import { defaultOutputLimit } from '../shared/outputLimit.ts'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
 import { useFocusTrap } from './focusTrap.ts'
@@ -219,42 +222,10 @@ export function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalP
           {error}
         </p>
       )}
-      {providers.map((provider) => (
-        <div key={provider.id} className="provider-card">
-          <div className="provider-card__head">
-            <span className="provider-card__name">{provider.displayName}</span>
-            {provider.custom && <span className="provider-card__tag">Custom</span>}
-            <span
-              className={`status-dot${provider.hasKey ? ' status-dot--ok' : ' status-dot--none'}`}
-              title={provider.hasKey ? t('models.keySet') : t('models.keyNone')}
-              role="img"
-              aria-label={provider.hasKey ? t('models.keySet') : t('models.keyNone')}
-            />
-            <span className="provider-card__actions">
-              {confirmingDelete === provider.id ? (
-                <>
-                  <button type="button" className="settings-button settings-button--compact settings-button--danger" onClick={() => void remove(provider.id)}>
-                    {t('models.confirmDelete')}
-                  </button>
-                  <button type="button" className="settings-button settings-button--compact" onClick={() => setConfirmingDelete(undefined)}>
-                    {t('models.cancel')}
-                  </button>
-                </>
-              ) : (
-                editing !== provider.id && (
-                  <>
-                    <button type="button" className="settings-button settings-button--compact" onClick={() => setEditing(provider.id)}>
-                      {t('models.edit')}
-                    </button>
-                    <button type="button" className="settings-button settings-button--compact settings-button--ghost-danger" onClick={() => setConfirmingDelete(provider.id)}>
-                      {t('models.delete')}
-                    </button>
-                  </>
-                )
-              )}
-            </span>
-          </div>
-          {editing === provider.id && (
+      {providers.map((provider) =>
+        // 편집 중인 provider 는 머리줄 대신 편집기(시안 E — 자기 머리에 이름·상태를 그린다)만 회색 바탕 카드에
+        editing === provider.id ? (
+          <div key={provider.id} className="provider-card provider-card--editing">
             <ProviderEditor
               provider={provider}
               taken={providers}
@@ -263,14 +234,45 @@ export function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalP
                 setEditing(undefined)
               }}
             />
-          )}
-        </div>
-      ))}
-      {editing === NEW ? (
-        <div className="provider-card">
-          <div className="provider-card__head">
-            <span className="provider-card__name">{t('models.newProvider')}</span>
           </div>
+        ) : (
+          <div key={provider.id} className="provider-card">
+            <div className="provider-card__head">
+              <span className="provider-card__name">{provider.displayName}</span>
+              {provider.custom && <span className="provider-card__tag">Custom</span>}
+              <span
+                className={`status-dot${provider.hasKey ? ' status-dot--ok' : ' status-dot--none'}`}
+                title={provider.hasKey ? t('models.keySet') : t('models.keyNone')}
+                role="img"
+                aria-label={provider.hasKey ? t('models.keySet') : t('models.keyNone')}
+              />
+              <span className="provider-card__actions">
+                {confirmingDelete === provider.id ? (
+                  <>
+                    <button type="button" className="settings-button settings-button--compact settings-button--danger" onClick={() => void remove(provider.id)}>
+                      {t('models.confirmDelete')}
+                    </button>
+                    <button type="button" className="settings-button settings-button--compact" onClick={() => setConfirmingDelete(undefined)}>
+                      {t('models.cancel')}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="settings-button settings-button--compact" onClick={() => setEditing(provider.id)}>
+                      {t('models.edit')}
+                    </button>
+                    <button type="button" className="settings-button settings-button--compact settings-button--ghost-danger" onClick={() => setConfirmingDelete(provider.id)}>
+                      {t('models.delete')}
+                    </button>
+                  </>
+                )}
+              </span>
+            </div>
+          </div>
+        ),
+      )}
+      {editing === NEW ? (
+        <div className="provider-card provider-card--editing">
           <ProviderEditor
             taken={providers}
             onDone={(saved) => {
@@ -288,19 +290,61 @@ export function ModelsPage({ providers, onProvidersChange }: Omit<SettingsModalP
   )
 }
 
-/** 모델 카드 아랫줄의 알약 토글 — 켜면 어두운 채움 + 체크, 끄면 테두리만 (이슈 #477 시안 A) */
+/** 모델 카드의 알약 토글 — 켜면 연한 파랑 채움 + 체크, 끄면 점선 (이슈 #477 → #542 시안 E) */
 function ModelToggle({ on, label, ariaLabel, title, disabled, onToggle }: { on: boolean; label: string; ariaLabel: string; title: string; disabled: boolean; onToggle(on: boolean): void }) {
   return (
     <button type="button" className="model-card__toggle" aria-pressed={on} aria-label={ariaLabel} title={title} disabled={disabled} onClick={() => onToggle(!on)}>
+      {label}
       {on && (
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M5 12l5 5L20 7" />
         </svg>
       )}
-      {label}
     </button>
   )
 }
+
+/** 모델 카드의 컨텍스트·출력 숫자와 막대 — 대화 몫(연한 파랑) | 출력 몫(진한 파랑), 아래 요약 지점. 컨텍스트가 비면 빗금 막대 (시안 E) */
+function ModelBudgetView({ model }: { model: ModelCatalogEntry }) {
+  const t = useT()
+  const budget = modelBudget(model)
+  return (
+    <span className="model-budget">
+      <span className="model-budget__numbers">
+        <span>
+          {t('models.context')} <b>{budget.context ? tokenLabel(budget.context) : '—'}</b>
+        </span>
+        <span>
+          {t('models.output')} {budget.output !== undefined && <b>{tokenLabel(budget.output)}</b>} {budget.outputAuto && t('models.auto')}
+        </span>
+      </span>
+      {budget.percent !== undefined ? (
+        <>
+          <span className="model-budget__bar" aria-hidden="true">
+            <span className="model-budget__chat" style={{ width: `${budget.percent}%` }} />
+          </span>
+          <span className="model-budget__mark">
+            {/* 눈금 글은 지점에 걸치되 카드 밖으로 안 나가게 — 0% 면 왼쪽 맞춤, 100% 면 오른쪽 맞춤 */}
+            <span style={{ left: `${budget.percent}%`, transform: `translateX(-${budget.percent}%)` }}>{t('models.summarizeAt', { n: tokenLabel(budget.summarizeAt!) })}</span>
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="model-budget__bar model-budget__bar--unknown" aria-hidden="true" />
+          <span className="model-budget__mark">
+            <span>{t('models.summarizeOnReject')}</span>
+          </span>
+        </>
+      )}
+    </span>
+  )
+}
+
+/** 머리·고르는 칸의 프로토콜 이름 — 지금은 하나뿐 */
+const PROTOCOL_LABEL = 'OpenAI Chat'
+
+/** 컨텍스트 빠른 버튼 (시안 E) */
+const CONTEXT_PRESETS = [32_768, 131_072, 262_144]
 
 interface ProviderEditorProps {
   /** 없으면 새 provider */
@@ -308,25 +352,43 @@ interface ProviderEditorProps {
   taken: ProviderSummary[]
   /** 적용했으면 바뀐 목록, 취소면 undefined */
   onDone(saved?: ProviderSummary[]): void
+  /** 처음 펼쳐 둘 모델 — 테스트가 편집 영역을 그릴 때 */
+  initialOpen?: number
 }
 
-export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps) {
+// provider 편집 (이슈 #542 시안 E, _workspace/mock-models-redesign/Combo.dc.html): 흰 상자 안에 머리(이니셜 타일·이름·id·키 상태)와 연결(프로토콜|Base URL 한 줄,
+// API 키는 있으면 •••• [바꾸기]), 상자 밖에 "모델 N" 줄과 2열 모델 카드. 카드를 누르면 아래에 그 모델의 편집 영역(한 번에 하나).
+// 긴 설명 문단은 칸 이름의 title 툴팁으로 옮겼다. 동작(저장·검증·가져오기)은 그대로
+export function ProviderEditor({ provider, taken, onDone, initialOpen }: ProviderEditorProps) {
   const t = useT()
   const [displayName, setDisplayName] = useState(provider?.displayName ?? '')
   const [baseURL, setBaseURL] = useState(provider?.baseURL ?? '')
   const [apiKey, setApiKey] = useState('')
+  const [changingKey, setChangingKey] = useState(false)
   const [models, setModels] = useState<ModelCatalogEntry[]>(provider?.models ?? [])
+  const [open, setOpen] = useState(initialOpen)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const id = provider?.id ?? providerIdFor(displayName, (candidate) => taken.some((entry) => entry.id === candidate))
-  // 키가 겹치는 항목 — 저장이 거절할 것을 id 칸 빨간 테두리로 미리 (이슈 #497 시안 F → #500). 저장 검증과 같은 키 기준(같은 id, Thinking 모델의
+  // 키가 겹치는 항목 — 저장이 거절할 것을 카드·id 칸 빨간 표시로 미리 (이슈 #497 시안 F → #500). 저장 검증과 같은 키 기준(같은 id, Thinking 모델의
   // 파생 키 id--think·id--nothink 와 같은 진짜 id), 빈 id 는 따로 거절된다
   const keys = models.map((model) => engineModelKeys({ ...model, id: model.id.trim() }))
   const clashes = (index: number) =>
     !!models[index]!.id.trim() && keys.some((other, at) => at !== index && other.some((key) => keys[index]!.includes(key)))
+  const modelName = (model: ModelCatalogEntry) => model.displayName || model.id || t('models.untitledModel')
 
   function setModel(index: number, change: Partial<ModelCatalogEntry>): void {
     setModels((current) => current.map((model, at) => (at === index ? { ...model, ...change } : model)))
+  }
+
+  function removeModel(index: number): void {
+    setModels((current) => current.filter((_, at) => at !== index))
+    setOpen((now) => (now === undefined || now === index ? undefined : now > index ? now - 1 : now))
+  }
+
+  function addModel(): void {
+    setModels((current) => [...current, { id: '', displayName: '' }])
+    setOpen(models.length) // 빈 카드는 고칠 것뿐이다 — 바로 펼친다
   }
 
   async function run(action: () => Promise<void>): Promise<void> {
@@ -353,144 +415,251 @@ export function ProviderEditor({ provider, taken, onDone }: ProviderEditorProps)
       onDone(await window.litecode.saveProvider(input))
     })
 
+  const editing = open !== undefined ? models[open] : undefined
+
   return (
     <div className="provider-editor">
-      <label className="settings-field">
-        <span className="settings-field__label">{t('models.displayName')}</span>
-        <input className="settings-input" aria-label={t('models.displayName')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} />
-      </label>
-      <label className="settings-field">
-        <span className="settings-field__label">id</span>
-        <input className="settings-input settings-input--readonly" aria-label="id" value={id} readOnly tabIndex={-1} />
-      </label>
-      <label className="settings-field">
-        <span className="settings-field__label">{t('models.apiKey')}</span>
-        <input
-          className="settings-input"
-          aria-label={t('models.apiKey')}
-          type="password"
-          autoComplete="new-password"
-          value={apiKey}
-          placeholder={provider?.hasKey ? t('models.keyPlaceholderSet') : t('models.keyPlaceholderNone')}
-          disabled={busy}
-          onChange={(event) => setApiKey(event.target.value)}
-        />
-      </label>
-      <label className="settings-field">
-        <span className="settings-field__label">Base URL</span>
-        <input
-          className="settings-input"
-          aria-label="Base URL"
-          value={baseURL}
-          placeholder="https://gateway.example/v1"
-          disabled={busy}
-          onChange={(event) => setBaseURL(event.target.value)}
-        />
-      </label>
-      <label className="settings-field">
-        <span className="settings-field__label">{t('models.protocol')}</span>
-        <select className="settings-input" aria-label={t('models.protocol')} value="openai-chat-completions" disabled={busy} onChange={() => {}}>
-          <option value="openai-chat-completions">OpenAI Chat Completions</option>
-        </select>
-      </label>
-
-      <div className="settings-field__label">{t('models.models')}</div>
-      {/* 모델마다 카드 하나 — 윗줄 id·표시 이름·삭제, 아랫줄 컨텍스트 길이·최대 출력·알약 토글 (이슈 #477 시안 A "카드형 두 줄":
-          체크 둘이 한 줄에 늘어 id·이름 칸이 잘려 보였다). 아랫줄은 좁으면 줄바꿈한다 */}
-      {models.map((model, index) => (
-        <div key={index} className="model-card">
-          <div className="model-card__row">
+      <div className="provider-box">
+        <div className="provider-box__head">
+          <span className="provider-box__tile" aria-hidden="true">
+            {providerInitials(displayName) || '+'}
+          </span>
+          <span className="provider-box__title">
             <input
-              className={`settings-input model-card__id${clashes(index) ? ' model-card__id--clash' : ''}`}
-              aria-invalid={clashes(index) || undefined}
-              aria-label={t('models.modelId', { n: index + 1 })}
-              placeholder={t('models.modelIdPlaceholder')}
-              value={model.id}
+              className="provider-box__name"
+              aria-label={t('models.displayName')}
+              placeholder={t('models.newProvider')}
+              value={displayName}
               disabled={busy}
-              onChange={(event) => setModel(index, { id: event.target.value })}
+              onChange={(event) => setDisplayName(event.target.value)}
             />
+            <span className="provider-box__sub">
+              {id} · {PROTOCOL_LABEL}
+            </span>
+          </span>
+          {/* 상태 알약은 앱이 아는 것만 — 키 유무 (연결 확인은 없다). 새 provider 는 아직 저장된 것이 없어 안 그린다 */}
+          {provider && (
+            <span className={`provider-box__status${provider.hasKey ? ' provider-box__status--ok' : ''}`}>
+              <span className={`status-dot${provider.hasKey ? ' status-dot--ok' : ' status-dot--none'}`} aria-hidden="true" />
+              {provider.hasKey ? t('models.keySet') : t('models.keyNone')}
+            </span>
+          )}
+        </div>
+        <section className="provider-box__section">
+          <h3 className="models-label">{t('models.connection')}</h3>
+          <div className="provider-box__endpoint">
+            <select className="provider-box__protocol" aria-label={t('models.protocol')} value="openai-chat-completions" disabled={busy} onChange={() => {}}>
+              <option value="openai-chat-completions">{PROTOCOL_LABEL}</option>
+            </select>
             <input
-              className="settings-input"
-              aria-label={t('models.modelName', { n: index + 1 })}
-              placeholder={t('models.modelNamePlaceholder')}
-              value={model.displayName}
+              className="provider-box__url"
+              aria-label="Base URL"
+              value={baseURL}
+              placeholder="https://gateway.example/v1"
               disabled={busy}
-              onChange={(event) => setModel(index, { displayName: event.target.value })}
+              onChange={(event) => setBaseURL(event.target.value)}
             />
-            <button
-              type="button"
-              className="settings-icon-button"
-              aria-label={t('models.removeModel', { n: index + 1 })}
-              title={t('models.removeModelTitle')}
-              disabled={busy}
-              onClick={() => setModels((current) => current.filter((_, at) => at !== index))}
-            >
-              ×
-            </button>
           </div>
-          <div className="model-card__row">
-            {/* opencode 는 custom 모델의 한도를 모른다 — 적으면 엔진에 넘기고 입력창 통계 줄의 컨텍스트 % 가 보인다 (비우면 "—") */}
-            <input
-              className="settings-input model-card__number"
-              aria-label={t('models.contextLength', { n: index + 1 })}
-              placeholder={t('models.contextLengthPlaceholder')}
-              title={t('models.contextLengthTitle')}
-              type="number"
-              min={1}
-              step={1}
-              value={model.contextLength ?? ''}
-              disabled={busy}
-              onChange={(event) => setModel(index, { contextLength: event.target.value === '' ? undefined : Number(event.target.value) })}
-            />
-            {/* 최대 출력 — 요청 max_tokens 이자 요약 문턱(컨텍스트 − 출력)의 몫. 비우면 엔진이 정하는 값을 흐리게 보인다 (이슈 #27) */}
-            <input
-              className="settings-input model-card__number"
-              aria-label={t('models.maxOutput', { n: index + 1 })}
-              placeholder={model.contextLength ? t('models.maxOutputAuto', { n: defaultOutputLimit(model.contextLength) }) : t('models.maxOutputPlaceholder')}
-              title={t('models.maxOutputTitle')}
-              type="number"
-              min={1}
-              step={1}
-              value={model.maxOutput ?? ''}
-              disabled={busy}
-              onChange={(event) => setModel(index, { maxOutput: event.target.value === '' ? undefined : Number(event.target.value) })}
-            />
-            <div className="model-card__toggles">
-              {/* 이미지 입력 — 켠 모델만 엔진이 이미지를 받는 모델로 알린다 (이슈 #44, 01y: 이 표시 없이는 붙인 이미지가 오류 글로 바뀐다). 기본 꺼짐 */}
-              <ModelToggle
-                on={model.imageInput === true}
-                label={t('models.imageInputLabel')}
-                ariaLabel={t('models.imageInput', { n: index + 1 })}
-                title={t('models.imageInputTitle')}
+          <div className="provider-box__key">
+            <span className="provider-box__key-label">{t('models.apiKey')}</span>
+            {provider?.hasKey && !changingKey ? (
+              <>
+                <span className="provider-box__dots" aria-hidden="true">
+                  ••••••••
+                </span>
+                <span className="provider-box__key-state">{t('models.keyStored')}</span>
+                <button type="button" className="models-text-button" disabled={busy} onClick={() => setChangingKey(true)}>
+                  {t('models.changeKey')}
+                </button>
+              </>
+            ) : (
+              <input
+                className="settings-input provider-box__key-input"
+                aria-label={t('models.apiKey')}
+                type="password"
+                autoComplete="new-password"
+                autoFocus={changingKey}
+                value={apiKey}
+                placeholder={provider?.hasKey ? t('models.keyPlaceholderSet') : t('models.keyPlaceholderNone')}
                 disabled={busy}
-                onToggle={(on) => setModel(index, { imageInput: on || undefined })}
+                onChange={(event) => setApiKey(event.target.value)}
               />
-              {/* Thinking 모델 선언 (이슈 #500 시안) — 켠 모델은 입력창 모델 메뉴에서 대화마다 Thinking 을 디폴트·켬·끔으로 고른다. 기본 꺼짐 */}
-              <ModelToggle
-                on={model.thinking === true}
-                label={t('models.thinkingLabel')}
-                ariaLabel={t('models.thinking', { n: index + 1 })}
-                title={t('models.thinkingTitle')}
-                disabled={busy}
-                onToggle={(on) => setModel(index, { thinking: on || undefined })}
-              />
+            )}
+          </div>
+        </section>
+      </div>
+
+      <section className="models-section">
+        <div className="models-section__head">
+          <h3 className="models-label">
+            {t('models.models')} <span className="models-label__count">{models.length}</span>
+          </h3>
+          <button type="button" className="models-text-button" disabled={busy || !baseURL.trim()} onClick={() => void fetchModels()}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+              <path d="M20 4v7h-7" />
+            </svg>
+            {t('models.fetch')}
+          </button>
+          <button type="button" className="models-dark-button" disabled={busy} onClick={addModel}>
+            {t('models.addModel')}
+          </button>
+        </div>
+        {models.length > 0 && (
+          <div className="model-grid">
+            {models.map((model, index) => (
+              <article key={index} className={`model-card${open === index ? ' model-card--open' : ''}${clashes(index) ? ' model-card--clash' : ''}`}>
+                <div className="model-card__head">
+                  {/* 이름·id·막대를 누르면 아래 편집 영역이 이 모델로 펼쳐진다 (다시 누르면 접힌다) */}
+                  <button
+                    type="button"
+                    className="model-card__open"
+                    aria-expanded={open === index}
+                    aria-controls={open === index ? 'model-edit' : undefined}
+                    onClick={() => setOpen(open === index ? undefined : index)}
+                  >
+                    <span className="model-card__name">{modelName(model)}</span>
+                    <span className="model-card__model-id">{model.id}</span>
+                    <ModelBudgetView model={model} />
+                  </button>
+                  <MoreMenu
+                    label={t('models.modelMenu', { name: modelName(model) })}
+                    items={[
+                      { label: t('models.edit'), onSelect: () => setOpen(index) },
+                      { label: t('models.removeModelTitle'), danger: true, onSelect: () => removeModel(index) },
+                    ]}
+                  />
+                </div>
+                <div className="model-card__toggles">
+                  {/* 이미지 입력 — 켠 모델만 엔진이 이미지를 받는 모델로 알린다 (이슈 #44, 01y: 이 표시 없이는 붙인 이미지가 오류 글로 바뀐다). 기본 꺼짐 */}
+                  <ModelToggle
+                    on={model.imageInput === true}
+                    label={t('models.imageInputLabel')}
+                    ariaLabel={t('models.imageInput', { n: index + 1 })}
+                    title={t('models.imageInputTitle')}
+                    disabled={busy}
+                    onToggle={(on) => setModel(index, { imageInput: on || undefined })}
+                  />
+                  {/* Thinking 모델 선언 (이슈 #500 시안) — 켠 모델은 입력창 모델 메뉴에서 대화마다 Thinking 을 디폴트·켬·끔으로 고른다. 기본 꺼짐 */}
+                  <ModelToggle
+                    on={model.thinking === true}
+                    label={t('models.thinkingLabel')}
+                    ariaLabel={t('models.thinking', { n: index + 1 })}
+                    title={t('models.thinkingTitle')}
+                    disabled={busy}
+                    onToggle={(on) => setModel(index, { thinking: on || undefined })}
+                  />
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        {editing && open !== undefined && (
+          <div className="model-edit" id="model-edit">
+            <span className="model-edit__title">{t('models.editModel', { name: modelName(editing) })}</span>
+            <div className="model-edit__names">
+              <label className="model-edit__field">
+                <span className="model-edit__label">{t('models.modelIdPlaceholder')}</span>
+                <input
+                  className={`settings-input model-card__id${clashes(open) ? ' model-card__id--clash' : ''}`}
+                  aria-invalid={clashes(open) || undefined}
+                  aria-label={t('models.modelId', { n: open + 1 })}
+                  value={editing.id}
+                  disabled={busy}
+                  onChange={(event) => setModel(open, { id: event.target.value })}
+                />
+              </label>
+              <label className="model-edit__field">
+                <span className="model-edit__label">{t('models.displayName')}</span>
+                <input
+                  className="settings-input"
+                  aria-label={t('models.modelName', { n: open + 1 })}
+                  placeholder={t('models.modelNamePlaceholder')}
+                  value={editing.displayName}
+                  disabled={busy}
+                  onChange={(event) => setModel(open, { displayName: event.target.value })}
+                />
+              </label>
+            </div>
+            <div className="model-edit__limits">
+              {/* opencode 는 custom 모델의 한도를 모른다 — 적으면 엔진에 넘기고 입력창 통계 줄의 컨텍스트 % 가 보인다 (비우면 "—") */}
+              <label className="model-edit__field">
+                <span className="model-edit__label" title={t('models.contextLengthHint')}>
+                  {t('models.context')}
+                </span>
+                <span className="model-edit__number">
+                  <input
+                    aria-label={t('models.contextLength', { n: open + 1 })}
+                    title={t('models.contextLengthTitle')}
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={editing.contextLength ?? ''}
+                    disabled={busy}
+                    onChange={(event) => setModel(open, { contextLength: event.target.value === '' ? undefined : Number(event.target.value) })}
+                  />
+                  <span className="model-edit__unit">{t('models.tokens')}</span>
+                </span>
+              </label>
+              {CONTEXT_PRESETS.map((tokens) => (
+                <button
+                  key={tokens}
+                  type="button"
+                  className="model-edit__preset"
+                  aria-pressed={editing.contextLength === tokens}
+                  disabled={busy}
+                  onClick={() => setModel(open, { contextLength: tokens })}
+                >
+                  {tokenLabel(tokens)}
+                </button>
+              ))}
+              {/* 최대 출력 — 요청 max_tokens 이자 요약 문턱(컨텍스트 − 출력)의 몫. 비우면 엔진이 정하는 값을 흐리게 보인다 (이슈 #27) */}
+              <label className="model-edit__field model-edit__field--end">
+                <span className="model-edit__label" title={t('models.maxOutputHint')}>
+                  {t('models.maxOutputPlaceholder')}
+                </span>
+                <span className="model-edit__number">
+                  <input
+                    aria-label={t('models.maxOutput', { n: open + 1 })}
+                    placeholder={editing.contextLength ? t('models.maxOutputAuto', { n: tokenLabel(defaultOutputLimit(editing.contextLength)) }) : t('models.auto')}
+                    title={t('models.maxOutputTitle')}
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={editing.maxOutput ?? ''}
+                    disabled={busy}
+                    onChange={(event) => setModel(open, { maxOutput: event.target.value === '' ? undefined : Number(event.target.value) })}
+                  />
+                  <span className="model-edit__unit">{t('models.tokens')}</span>
+                </span>
+              </label>
+            </div>
+            {/* 문턱(컨텍스트 − 출력)이 너무 작은 모델만 경고 (01o 권고 ①) */}
+            {isLowContext(editing) && (
+              <p className="context-length-hint context-length-hint--warn" role="status">
+                {t('models.contextLengthLow', { model: editing.id || '?', min: COMPACTION_MIN_THRESHOLD })}
+              </p>
+            )}
+            {/* 선언을 끄면 켬·끔 키가 풀리지 않는다 — 다시 고르라는 안내만 (#503, 접미 키를 디폴트로 푸는 폴백은 두지 않는다) */}
+            {editing.thinking && (
+              <p className="context-length-hint">
+                <strong className="context-length-hint__term" title={t('models.thinkingHint')}>
+                  {t('models.thinkingLabel')}
+                </strong>{' '}
+                — {t('models.thinkingOffHint')}
+              </p>
+            )}
+            <div className="model-edit__foot">
+              <button type="button" className="models-text-button models-text-button--danger" disabled={busy} onClick={() => removeModel(open)}>
+                {t('models.deleteThisModel')}
+              </button>
+              <button type="button" className="models-text-button models-text-button--quiet" onClick={() => setOpen(undefined)}>
+                {t('models.collapse')}
+              </button>
             </div>
           </div>
-        </div>
-      ))}
-      <p className="context-length-hint">
-        {/* 선언을 끄면 켬·끔 키가 풀리지 않는다 — 다시 고르라는 안내만 (#503, 접미 키를 디폴트로 푸는 폴백은 두지 않는다) */}
-        <strong className="context-length-hint__term">{t('models.thinkingLabel')}</strong> — {t('models.thinkingHint')} {t('models.thinkingOffHint')}
-      </p>
-      <ContextLengthNotes models={models} />
-      <div className="provider-editor__model-actions">
-        <button type="button" className="settings-button settings-button--compact" disabled={busy} onClick={() => setModels((current) => [...current, { id: '', displayName: '' }])}>
-          {t('models.addModel')}
-        </button>
-        <button type="button" className="settings-button settings-button--compact" disabled={busy || !baseURL.trim()} onClick={() => void fetchModels()}>
-          {t('models.fetch')}
-        </button>
-      </div>
+        )}
+      </section>
 
       {error && (
         <p className="settings-error" role="alert">

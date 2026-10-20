@@ -579,50 +579,556 @@
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
-/* 설정 > 모델 — 모델마다 카드 하나, 두 줄 (이슈 #477 시안 A "카드형 두 줄"). 윗줄 id·표시 이름(반씩)·삭제,
-   아랫줄 컨텍스트 길이·최대 출력(고정폭)·오른쪽 알약 토글 — 좁으면 아랫줄이 줄바꿈해 칸이 잘리지 않는다 */
-.model-card {
+/* 설정 > 모델 — provider 편집 (이슈 #542 시안 E, _workspace/mock-models-redesign/Combo.dc.html).
+   편집 중인 provider 카드는 회색 바탕, 그 안에 흰 상자(머리·연결) → 상자 밖 "모델 N" 줄 → 2열 모델 카드 → 고른 카드의 편집 영역 */
+.provider-card--editing {
+  padding: 20px;
+  border: none;
+  background: var(--bg-sidebar);
+}
+
+.provider-card--editing > .provider-editor {
+  margin-top: 0;
+  gap: 22px;
+}
+
+.provider-box {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 0.5px solid var(--border-strong);
-  border-radius: 14px;
+  gap: 20px;
+  padding: 20px 22px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
 }
 
-.model-card__row {
+.provider-box__head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 14px;
 }
 
-.model-card__row:first-child {
-  flex-wrap: nowrap;
+.provider-box__tile {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--on-text);
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.model-card__row:first-child .settings-input {
+.provider-box__title {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
+/* 표시 이름 — 제목 크기, 테두리 없는 입력 (눌러 고친다) */
+.provider-box__name {
+  width: 100%;
+  height: 30px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.provider-box__name:hover {
+  background: var(--fill-hover);
+}
+
+.provider-box__name:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: transparent;
+}
+
+.provider-box__sub,
+.provider-box__url,
+.provider-box__dots,
+.model-card__model-id,
 .model-card__id {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.provider-box__sub {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+/* 상태 알약 — 키 유무만 (연결 확인은 없다) */
+.provider-box__status {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  background: var(--module);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.provider-box__status--ok {
+  color: var(--ok);
+}
+
+.provider-box__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.models-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+}
+
+.models-label__count {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* 프로토콜 | Base URL 을 한 칸으로 붙인다 */
+.provider-box__endpoint {
+  display: flex;
+  height: 40px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--fill-selector);
+  overflow: hidden;
+}
+
+.provider-box__endpoint:focus-within {
+  border-color: var(--accent);
+}
+
+.provider-box__protocol {
+  padding: 0 10px 0 12px;
+  border: none;
+  border-right: 0.5px solid var(--border-strong);
+  background: var(--fill-hover);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong-hover);
+}
+
+.provider-box__url {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.provider-box__protocol:focus,
+.provider-box__url:focus {
+  outline: none;
+}
+
+.provider-box__key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
   font-size: 13px;
 }
 
+.provider-box__key-label {
+  flex-shrink: 0;
+  width: 52px;
+  color: var(--text-secondary);
+}
+
+.provider-box__dots {
+  letter-spacing: 2px;
+  color: var(--text-strong-hover);
+}
+
+.provider-box__key-state {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.provider-box__key-input {
+  flex: 1;
+}
+
+/* 글 버튼(파랑) — [바꾸기]·[서버에서 가져오기]·[이 모델 삭제](빨강)·[접기](회색) */
+.models-text-button {
+  height: 28px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.models-text-button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.models-text-button:disabled,
+.models-dark-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.models-text-button--danger {
+  padding: 0 4px;
+  font-weight: 400;
+  color: var(--danger);
+}
+
+.models-text-button--quiet {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.models-dark-button {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--on-text);
+}
+
+.models-dark-button:hover:not(:disabled) {
+  background: var(--text-strong-hover);
+}
+
+.models-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.models-section__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.models-section__head .models-label {
+  flex: 1;
+}
+
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* 모델 카드 — 이름·id·숫자·막대(눌러 펼친다) + ⋯ 메뉴, 아래 알약 토글. 고른 카드는 파란 테두리 */
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.model-card--open {
+  box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-panel);
+}
+
+/* 키가 겹치는 항목 (이슈 #497 시안 F, #500 부터 같은 id·Thinking 모델의 파생 키 기준) — 카드는 빨간 테두리·id 글 빨강, 편집 영역은 id 칸 */
+.model-card--clash {
+  box-shadow: 0 0 0 1.5px var(--danger), var(--shadow-panel);
+}
+
+.model-card--clash .model-card__model-id {
+  color: var(--danger);
+}
+
+.model-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.model-card__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+}
+
+.model-card__name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card__model-id {
+  min-height: 16px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-budget {
+  margin-top: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-budget__numbers {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.model-budget__numbers b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 대화 몫(연한 파랑) | 출력 몫(진한 파랑). 컨텍스트를 모르면 빗금 */
+.model-budget__bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--accent);
+}
+
+.model-budget__chat {
+  background: var(--accent-soft);
+}
+
+.model-budget__bar--unknown {
+  background: repeating-linear-gradient(135deg, var(--fill-active) 0 4px, transparent 4px 8px);
+}
+
+.model-budget__mark {
+  position: relative;
+  height: 14px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.model-budget__mark > span {
+  position: absolute;
+  white-space: nowrap;
+}
+
+.model-card__toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 알약 토글 — 끄면 점선, 켜면 연한 파랑 채움 + 체크 */
+.model-card__toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--border-ring);
+  border-radius: 14px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.model-card__toggle:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.model-card__toggle[aria-pressed='true'] {
+  border: 1px solid transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.model-card__toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 고른 모델의 편집 영역 */
+.model-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.model-edit__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.model-edit__names {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.model-edit__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.model-edit__field--end {
+  margin-left: auto;
+}
+
+.model-edit__label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.model-edit__limits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* 숫자 칸 — 오른쪽 정렬 숫자 + "토큰" 꼬리 */
+.model-edit__number {
+  display: flex;
+  align-items: center;
+  width: 150px;
+  height: 32px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.model-edit__number:focus-within {
+  border-color: var(--accent);
+}
+
+.model-edit__number input {
+  flex: 1;
+  width: 0;
+  padding: 0 8px 0 10px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text);
+  appearance: textfield;
+}
+
+.model-edit__number input:focus {
+  outline: none;
+}
+
+.model-edit__number input::-webkit-inner-spin-button,
+.model-edit__number input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.model-edit__unit {
+  padding-right: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.model-edit__preset {
+  height: 30px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 8px;
+  background: var(--module);
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.model-edit__preset:hover:not(:disabled) {
+  background: var(--fill-active);
+}
+
+.model-edit__preset[aria-pressed='true'] {
+  background: var(--text);
+  color: var(--on-text);
+}
+
+.model-edit__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 편집 영역의 경고·안내 줄 (compaction.css 의 .context-length-hint) — 영역의 gap 이 간격을 맡는다 */
+.model-edit .context-length-hint {
+  margin: 0;
+}
+
 /* 키가 겹치는 항목의 id 칸 (이슈 #497 시안 F, #500 부터 같은 id·Thinking 모델의 파생 키 기준) */
+.model-card__id {
+  font-size: 13px;
+}
+
 .model-card__id--clash,
 .model-card__id--clash:focus {
   border-color: var(--danger);
   background: var(--danger-bg);
 }
 
-.model-card__number {
-  flex: none;
-  width: 120px;
-}
-
-.model-card .settings-icon-button {
+.settings-icon-button {
   flex: none;
   width: 28px;
   height: 28px;
