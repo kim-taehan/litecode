@@ -13,9 +13,10 @@ export interface ExtensionLocale {
 }
 
 /** 확장이 앱에 요청할 수 있는 권한 (이슈 #536) — network: 사용자가 허용한 주소에 메인이 대신 요청 · secrets: 비밀 값(safeStorage) ·
- *  project: 지금 프로젝트의 이름·파일 읽기·파일 열기 · server: manifest 의 server 선언대로 앱이 내장 서버를 띄우고 내림(이슈 #537).
+ *  project: 지금 프로젝트의 이름·파일 읽기·파일 열기 · server: manifest 의 server 선언대로 앱이 내장 서버를 띄우고 내림(이슈 #537) ·
+ *  chat: 지금 프로젝트에 새 대화를 열고 입력창을 채움 — 보내기는 사용자가 누른다(이슈 #557).
  *  storage(확장별 JSON 값)는 권한 없이 쓴다. 이 밖의 값은 설치 거절 */
-export const EXTENSION_PERMISSIONS = ['network', 'secrets', 'project', 'server'] as const
+export const EXTENSION_PERMISSIONS = ['network', 'secrets', 'project', 'server', 'chat'] as const
 export type ExtensionPermission = (typeof EXTENSION_PERMISSIONS)[number]
 
 /** 내장 서버 선언 (이슈 #537) — 앱이 이 선언대로만 띄운다(확장의 JS 는 메인에서 실행하지 않는다). 검사는 src/services/extensions/server.ts.

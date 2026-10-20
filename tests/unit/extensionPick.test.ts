@@ -281,4 +281,14 @@ describe('서비스 — ctx.extensions.call', () => {
     expect(await ext.call('p-ext', 'project.listDir', { path: 'outlink' }, here())).toEqual({ ok: false, error: 'path-unsafe' })
     expect(await ext.call('bare-ext', 'project.listDir', {}, here())).toEqual({ ok: false, error: 'permission-missing' })
   })
+
+  it('chat.compose — chat 권한·프로젝트가 있고 글이 맞으면 그 글을 돌려준다(여는 것은 화면). 아니면 permission-missing·no-project·params-invalid (이슈 #557)', async () => {
+    await install('c-ext', ['chat'])
+    await install('bare-ext')
+    const ext = await boot()
+    expect(await ext.call('c-ext', 'chat.compose', { text: '고쳐 주세요' }, here())).toEqual({ ok: true, result: { text: '고쳐 주세요' } })
+    expect(await ext.call('c-ext', 'chat.compose', { text: '고쳐 주세요' })).toEqual({ ok: false, error: 'no-project' })
+    for (const params of [{}, { text: '  ' }, { text: 1 }, { text: 'x'.repeat(20_001) }]) expect(await ext.call('c-ext', 'chat.compose', params, here())).toEqual({ ok: false, error: 'params-invalid' })
+    expect(await ext.call('bare-ext', 'chat.compose', { text: 'x' }, here())).toEqual({ ok: false, error: 'permission-missing' })
+  })
 })

@@ -124,6 +124,7 @@ const METHODS = new Map<string, ExtensionPermission | null>([
   ['server.project', 'server'],
   ['server.analyze', 'server'],
   ['server.log', 'server'],
+  ['chat.compose', 'chat'],
 ])
 
 type CallFailure = { ok: false; error: ExtensionCallError; origin?: string }
@@ -314,6 +315,13 @@ export class ExtensionsService extends Service {
         case 'server.stop':
         case 'server.setOptions':
           return await this.server(id, manifest, method, params)
+        case 'chat.compose': {
+          // 새 대화 + 입력창 채우기 (이슈 #557) — 여는 것은 화면(탭의 통로)이 한다. 메인은 권한·모양만 본다. 보내기는 사용자가 누른다
+          if (!project) return fail('no-project')
+          const text = typeof params === 'object' && params !== null ? (params as { text?: unknown }).text : undefined
+          if (typeof text !== 'string' || text.trim() === '' || text.length > EXTENSION_LIMITS.composeChars) return fail('params-invalid')
+          return done({ text })
+        }
         case 'server.log': {
           const source = typeof params === 'object' && params !== null ? (params as { source?: unknown }).source ?? 'server' : 'server'
           if (source !== 'server' && source !== 'scanner') return fail('params-invalid')

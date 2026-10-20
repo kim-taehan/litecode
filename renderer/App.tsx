@@ -26,6 +26,7 @@ import { DelegationContext } from './Delegation.tsx'
 import { peerOf, projectTargets } from './delegationView.ts'
 import { runningIn } from './backgroundView.ts'
 import { useEscapeTwice, useStopTurn } from './stopTurn.tsx'
+import { onCompose, type ComposeRequest } from './composeRequest.ts'
 import { changeDraft, draftOf, restoreInto, withoutDrafts, type Draft, type Drafts } from './drafts.ts'
 import { questionDrafts } from './Attention.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
@@ -549,16 +550,26 @@ export function App() {
     },
   })
 
-  /** 새 대화 — 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace). 이미 있으면 새로 만들지 않고 그리로 간다 */
-  function startNewChat(): void {
-    if (!project) return
+  /** 새 대화 — 빈 대화는 첫 메시지 전까지 하나만 (dsh ui-workspace). 이미 있으면 새로 만들지 않고 그리로 간다. 연 대화의 id 를 준다 */
+  function startNewChat(): string | undefined {
+    if (!project) return undefined
     const blank = sessions.find((session) => session.project === project.path && isBlank(session))
     const session = blank ?? newSession(project.path)
     if (!blank) setSessions((sessionsNow) => [session, ...sessionsNow])
     setActiveIds((current) => ({ ...current, [project.path]: session.id }))
     // 열린 즉시 바로 쓸 수 있도록 (이슈 #343) — `/clear` 도 이 함수라 같은 효과가 붙는다
     trigger.inputRef.current?.focus()
+    return session.id
   }
+
+  // 확장의 "수정 요청" (이슈 #557, chat.compose) — 지금 프로젝트의 확장 탭이면 새 대화를 열고 입력창을 채운다. 보내기는 사용자가
+  const composeRef = useRef<(request: ComposeRequest) => void>(() => {})
+  composeRef.current = ({ directory, text }) => {
+    if (!project || project.path !== directory) return
+    const id = startNewChat()
+    if (id) changeDraftOf(id, (draft) => ({ ...draft, text }))
+  }
+  useEffect(() => onCompose((request) => composeRef.current(request)), [])
 
   function updateSession(id: string, mutate: (session: Session) => Session): void {
     setSessions((sessionsNow) => sessionsNow.map((session) => (session.id === id ? mutate(session) : session)))
