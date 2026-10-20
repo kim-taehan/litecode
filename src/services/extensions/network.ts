@@ -46,8 +46,9 @@ export function parseFetchRequest(params: unknown): { ok: true; request: FetchRe
  *  사설 IP 에서 듣는다). 허용하면 확장이 사용자의 LLM 키로 요청하거나 엔진을 조종할 수 있다. 같은 기기를 가리키는 다른 이름(DNS·mDNS)은 못 가린다 */
 export function isAppAddress(url: URL, ports: readonly number[], self: readonly string[]): boolean {
   if (!ports.includes(Number(url.port || (url.protocol === 'https:' ? 443 : 80)))) return false
-  const host = url.hostname.replace(/^\[|\]$/g, '') // URL 이 소문자·IPv4 숫자 표기(2130706433 → 127.0.0.1)를 정규화한다
-  return host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '0.0.0.0' || host === '::' || host === '::1' || /^::ffff:7f/.test(host) || self.includes(host)
+  // URL 이 소문자·IPv4 숫자 표기(2130706433 → 127.0.0.1)를 정규화한다. 끝의 점(`localhost.`)은 남겨 두는데 Chromium 은 같은 곳으로 푼다 (QA #536)
+  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  return host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '0.0.0.0' || host === '::' || host === '::1' || /^::ffff:7f/.test(host) || host === '::ffff:0:0' || self.includes(host)
 }
 
 /** 이 기기의 네트워크 주소 (isAppAddress 의 self) */

@@ -165,7 +165,7 @@ describe('isAppAddress — 앱 자신의 로컬 서버(키 프록시·엔진·�
   const reserved = (url: string) => isAppAddress(new URL(url), ports, self)
 
   it('루프백·이 기기 주소에서 앱 포트면 예약 — 이름·표기가 달라도', () => {
-    for (const url of ['http://127.0.0.1:4096/', 'http://localhost:4096/x', 'http://LOCALHOST:4096/', 'http://a.localhost:4096/', 'http://[::1]:4096/', 'http://127.1.2.3:4096/', 'http://2130706433:4096/', 'http://0.0.0.0:4096/', 'http://[::]:4096/', 'http://[::ffff:127.0.0.1]:4096/', 'https://192.168.0.7:47600/', 'http://[fe80::1]:47600/']) {
+    for (const url of ['http://127.0.0.1:4096/', 'http://localhost:4096/x', 'http://LOCALHOST:4096/', 'http://a.localhost:4096/', 'http://[::1]:4096/', 'http://127.1.2.3:4096/', 'http://2130706433:4096/', 'http://0.0.0.0:4096/', 'http://[::]:4096/', 'http://[::ffff:127.0.0.1]:4096/', 'http://localhost.:4096/', 'http://a.localhost.:4096/', 'http://127.0.0.1.:4096/', 'http://[::ffff:0.0.0.0]:4096/', 'https://192.168.0.7.:47600/', 'https://192.168.0.7:47600/', 'http://[fe80::1]:47600/']) {
       expect(reserved(url), url).toBe(true)
     }
   })
