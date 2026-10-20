@@ -579,97 +579,406 @@
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
-/* 설정 > 모델 — 모델마다 카드 하나, 두 줄 (이슈 #477 시안 A "카드형 두 줄"). 윗줄 id·표시 이름(반씩)·삭제,
-   아랫줄 컨텍스트 길이·최대 출력(고정폭)·오른쪽 알약 토글 — 좁으면 아랫줄이 줄바꿈해 칸이 잘리지 않는다 */
-.model-card {
+/* 설정 > 모델 — provider 편집 (이슈 #542 시안 A, _workspace/mock-models-redesign/Main.dc.html).
+   편집 중인 provider 는 카드 틀 없이 흰 바탕: 큰 제목 + `키 상태 · id · 모델 N개` → 연결 → 모델 표 → 한 줄 설명 */
+.provider-card--editing {
+  padding: 8px 0 0;
+  border: none;
+  background: transparent;
+}
+
+.provider-card--editing > .provider-editor {
+  margin-top: 0;
+  gap: 28px;
+}
+
+.provider-head {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 0.5px solid var(--border-strong);
-  border-radius: 14px;
+  gap: 6px;
 }
 
-.model-card__row {
+/* 표시 이름 — 큰 제목, 테두리 없는 입력 (눌러 고친다) */
+.provider-head__name {
+  height: 36px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.provider-head__name:hover {
+  background: var(--fill-hover);
+}
+
+.provider-head__name:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: transparent;
+}
+
+.provider-head__meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
-.model-card__row:first-child {
-  flex-wrap: nowrap;
+/* 상태 — 키 유무만 (연결 확인은 없다) */
+.provider-head__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
-.model-card__row:first-child .settings-input {
-  flex: 1;
+.provider-head__status--ok {
+  color: var(--ok);
 }
 
+.provider-head__id,
+.provider-conn__url,
+.provider-conn__dots,
 .model-card__id {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.provider-conn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.models-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+}
+
+/* 프로토콜 | Base URL 을 한 칸으로 붙인다 */
+.provider-conn__endpoint {
+  display: flex;
+  height: 40px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--fill-selector);
+  overflow: hidden;
+}
+
+.provider-conn__endpoint:focus-within {
+  border-color: var(--accent);
+}
+
+.provider-conn__protocol {
+  padding: 0 10px 0 12px;
+  border: none;
+  border-right: 0.5px solid var(--border-strong);
+  background: var(--fill-hover);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-strong-hover);
+}
+
+.provider-conn__url {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.provider-conn__protocol:focus,
+.provider-conn__url:focus {
+  outline: none;
+}
+
+.provider-conn__key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
   font-size: 13px;
 }
 
-/* 키가 겹치는 항목의 id 칸 (이슈 #497 시안 F, #500 부터 같은 id·Thinking 모델의 파생 키 기준) */
-.model-card__id--clash,
-.model-card__id--clash:focus {
-  border-color: var(--danger);
-  background: var(--danger-bg);
+.provider-conn__key-label {
+  flex-shrink: 0;
+  width: 52px;
+  color: var(--text-secondary);
 }
 
-.model-card__number {
-  flex: none;
-  width: 120px;
+.provider-conn__dots {
+  letter-spacing: 2px;
+  color: var(--text-strong-hover);
 }
 
-.model-card .settings-icon-button {
-  flex: none;
-  width: 28px;
+.provider-conn__key-state {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.provider-conn__key-input {
+  flex: 1;
+}
+
+/* 글 버튼(파랑) — [바꾸기]·[서버에서 가져오기] */
+.models-text-button {
   height: 28px;
-}
-
-.model-card__toggles {
-  margin-left: auto;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-/* 알약 토글 — 끄면 테두리만, 켜면 어두운 채움 + 체크 (켠 모양은 settings-button--primary 와 같은 색) */
-.model-card__toggle {
+  padding: 0 10px;
   display: flex;
   align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.models-text-button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.models-text-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.models-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.models-section__head {
+  display: flex;
+  align-items: center;
+}
+
+.models-section__head .models-label {
+  flex: 1;
+}
+
+.models-section__hint {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+}
+
+/* 모델 표 — 열: id · 표시 이름 · 컨텍스트 · 최대 출력 · 기능 · × */
+.model-table {
+  display: flex;
+  flex-direction: column;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 84px 96px 76px 28px;
+  column-gap: 12px;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 14px;
+  border-bottom: 0.5px solid var(--border-light);
+  font-size: 13px;
+}
+
+.model-row--header {
+  min-height: 32px;
+  background: var(--bg-sidebar);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+/* 편집 중인 줄 — 연한 파랑 바탕 + 왼쪽 파란 선 */
+.model-row--editing {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 키가 겹치는 줄 — 왼쪽 빨간 선 (편집 줄이어도) */
+.model-row--clash {
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+
+.model-row__end {
+  text-align: right;
+}
+
+.model-row__center {
+  text-align: center;
+}
+
+/* 편집 줄이 아닌 칸 — 글처럼 보이는 버튼, 누르면 그 줄을 편집 */
+.model-row__cell {
+  width: 100%;
+  min-height: 30px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-strong-hover);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-row__cell.model-row__end {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-row__cell.model-card__id {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.model-row__cell--strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.model-row__cell--empty,
+.model-row__cell.model-card__id.model-row__cell--empty {
+  color: var(--text-caption);
+}
+
+.model-row__cell--clash,
+.model-row__cell.model-card__id.model-row__cell--clash {
+  color: var(--danger);
+}
+
+.model-row__input {
+  height: 30px;
+  margin-left: -8px;
+  width: calc(100% + 8px);
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+
+.model-row__number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+
+.model-row__number::-webkit-inner-spin-button,
+.model-row__number::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.model-row__toggles {
+  display: flex;
+  justify-content: center;
   gap: 4px;
-  height: 32px;
-  padding: 0 12px;
-  border: 0.5px solid var(--border-ring);
-  border-radius: 999px;
+}
+
+/* 아이콘 토글 — 켜면 연한 파랑 채움, 끄면 흐린 아이콘 */
+.model-row__toggle {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-caption);
+}
+
+.model-row__toggle:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.model-row__toggle[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.model-row--editing .model-row__toggle[aria-pressed='true'] {
+  background: var(--surface);
+}
+
+.model-row__remove {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-caption);
+}
+
+.model-row__remove:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.model-row__toggle:disabled,
+.model-row__remove:disabled,
+.model-row__cell:disabled,
+.model-table__add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 그 줄의 경고·안내 — 줄 너비 전체, 줄 아래 */
+.model-row__note {
+  grid-column: 1 / -1;
+  margin: 0 0 10px;
+}
+
+/* 표 끝 "+ 모델 추가" — 점선 위 줄 */
+.model-table__add {
+  height: 44px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-top: 1px dashed var(--border-ring);
+  margin-top: -0.5px;
   background: transparent;
   font-family: inherit;
   font-size: 13px;
   color: var(--text-secondary);
-  white-space: nowrap;
+  text-align: left;
 }
 
-.model-card__toggle:hover:not(:disabled) {
+.model-table__add:hover:not(:disabled) {
   background: var(--fill-hover);
 }
 
-.model-card__toggle[aria-pressed='true'] {
-  padding-left: 10px;
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--on-text);
-  font-weight: 600;
+/* 키가 겹치는 항목의 id 칸 (이슈 #497 시안 F, #500 부터 같은 id·Thinking 모델의 파생 키 기준) */
+.model-card__id {
+  font-size: 13px;
 }
 
-.model-card__toggle[aria-pressed='true']:hover:not(:disabled) {
-  background: var(--text-strong-hover);
-}
-
-.model-card__toggle:disabled {
-  opacity: 0.5;
-  cursor: default;
+.model-card__id--clash,
+.model-card__id--clash:focus {
+  border-color: var(--danger);
+  background: var(--danger-bg);
 }
 
 .settings-icon-button {
