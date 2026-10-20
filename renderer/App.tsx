@@ -562,14 +562,23 @@ export function App() {
     return session.id
   }
 
-  // 확장의 "수정 요청" (이슈 #557, chat.compose) — 지금 프로젝트의 확장 탭이면 새 대화를 열고 입력창을 채운다. 보내기는 사용자가
+  // 확장의 "수정 요청" (이슈 #557, chat.compose) — 지금 프로젝트의 확장 탭이면 새 대화를 열고 입력창을 채운다.
+  // send 면 그 대화가 활성이 된 뒤 곧바로 보낸다(#559) — 보낼 수 없으면(모델 없음 등) 글은 입력창에 남는다
   const composeRef = useRef<(request: ComposeRequest) => void>(() => {})
-  composeRef.current = ({ directory, text }) => {
+  const pendingSend = useRef<string | undefined>(undefined)
+  composeRef.current = ({ directory, text, send: sendNow }) => {
     if (!project || project.path !== directory) return
     const id = startNewChat()
-    if (id) changeDraftOf(id, (draft) => ({ ...draft, text }))
+    if (!id) return
+    changeDraftOf(id, (draft) => ({ ...draft, text }))
+    if (sendNow) pendingSend.current = id
   }
   useEffect(() => onCompose((request) => composeRef.current(request)), [])
+  useEffect(() => {
+    if (!pendingSend.current || active?.id !== pendingSend.current || !draft.trim()) return
+    pendingSend.current = undefined
+    send()
+  })
 
   function updateSession(id: string, mutate: (session: Session) => Session): void {
     setSessions((sessionsNow) => sessionsNow.map((session) => (session.id === id ? mutate(session) : session)))

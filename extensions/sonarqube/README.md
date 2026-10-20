@@ -3,7 +3,7 @@
 SonarQube 확장 — 확장에 든 SonarQube CE 를 이 기기에서 띄워 지금 프로젝트를 분석하고 결과를 오른쪽 패널에서 본다 (이슈 #537 내장 서버, #545 패널).
 사내(외부) SonarQube 서버에 붙는 화면은 아직 없다.
 
-- `extension.json` — 권한 `server`(내장 서버) · `chat`(수정 요청 — 새 대화를 열고 입력창을 채운다) · `network`(자기 서버에 요청 — 동의 없이, 인증은 앱이 붙인다) · `project`(범위 고르기·내 변경·파일 열기)
+- `extension.json` — 권한 `server`(내장 서버) · `chat`(수정 요청 — 새 대화를 열고 바로 보낸다) · `network`(자기 서버에 요청 — 동의 없이, 인증은 앱이 붙인다) · `project`(범위 고르기·내 변경·파일 열기)
 - `index.html` — 패널: 서버 띄우기·멈추기·단계, [분석](범위 전체 / 폴더·파일 / 내 변경 — 범위는 `<키>__scope` 로 따로), 품질 게이트·지표·이슈
 - 프로젝트 키: 프로젝트 폴더의 `sonar-project.properties` 의 `sonar.projectKey`, 없으면 프로젝트 이름에서 만든다
 
@@ -15,7 +15,7 @@ SonarQube 확장 — 확장에 든 SonarQube CE 를 이 기기에서 띄워 지�
 node scripts/fetch-sonarqube.mjs            # build/vendor/sonarqube/<타깃>/server/ 에 받는다 (버전·sha256 고정)
 mkdir -p /tmp/sq && cp extensions/sonarqube/extension.json extensions/sonarqube/index.html /tmp/sq/
 cp -R build/vendor/sonarqube/mac-arm64/server /tmp/sq/server
-(cd /tmp/sq && zip -qry -1 ../sonarqube-0.2.5-mac-arm64.zip .)
+(cd /tmp/sq && zip -qry -1 ../sonarqube-0.2.6-mac-arm64.zip .)
 ```
 
 zip 은 697MB 남짓이라 git 에 넣지 않는다(`server` 권한 확장만 상한이 1GB 다). 패널만 고쳤으면 있는 zip 의 두 파일만 바꿔 넣는다:

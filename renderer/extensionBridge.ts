@@ -35,8 +35,8 @@ export interface BridgeDeps {
   allow(origin: string): Promise<ExtensionCallResult>
   /** 오른쪽 패널에 파일을 연다 (project.openFile) */
   open(path: string, line: number | undefined): void
-  /** 지금 프로젝트에 새 대화를 열고 입력창을 채운다 (chat.compose, 이슈 #557) — 보내지 않는다 */
-  compose(text: string): void
+  /** 지금 프로젝트에 새 대화를 열고 입력창을 채운다 (chat.compose, 이슈 #557) — send 면 곧바로 보낸다(#559) */
+  compose(text: string, send: boolean): void
 }
 
 /** 요청 하나 — 허용 목록에 없는 주소면 묻고(거절 → network-denied, 허용 → 목록에 넣고 다시), openFile 이 통과하면 패널에 연다. 던지지 않는다 */
@@ -56,7 +56,8 @@ export async function runBridgeCall(request: BridgeRequest, deps: BridgeDeps): P
       return { ok: true, result: null }
     }
     if (result.ok && request.method === 'chat.compose') {
-      deps.compose((result.result as { text: string }).text)
+      const { text, send } = result.result as { text: string; send?: boolean }
+      deps.compose(text, send === true)
       return { ok: true, result: null }
     }
     return result
