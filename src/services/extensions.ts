@@ -4,6 +4,7 @@ import type {
   ExtensionEntryResult,
   ExtensionFailedReason,
   ExtensionInstallResult,
+  ExtensionLocaleResult,
   ExtensionManifest,
   ExtensionPickResult,
   ExtensionProblem,
@@ -11,6 +12,8 @@ import type {
   ExtensionStoreFailure,
   ExtensionSummary,
 } from '../../shared/extensions.ts'
+import { DEFAULT_LANGUAGE, isBuiltinLanguage } from '../../shared/i18n/index.ts'
+import { setMainLocalePack } from '../i18n.ts'
 import { isExtensionId } from './extensions/manifest.ts'
 import { ExtensionStore } from './extensions/store.ts'
 import { failureReason } from './features.ts'
@@ -26,6 +29,8 @@ import './settings.ts'
 // 올리기는 주입된 mount(B 층 자리 — features 의 definitions 와 같은 패턴)로 한다. mount 가 없으면(A 층 단독) 아무것도 실행하지 않고 상태만 on.
 // 부팅·설치·삭제·켜고 끄기는 한 줄(큐)로 선다 — features.ts 처럼, 끄자마자 켜도 앞의 올리기가 끝난 뒤 내린다.
 // 대화상자는 host(pick), 파일 작업은 저장소(ExtensionStore — 2/4). 저장소 호출은 아래 `files` 한 곳에만 모았다(저장소의 공개 모양이 바뀌면 거기만 고친다).
+// 언어 팩(#525, type 'locale'): 실행할 것이 없는 JSON 번들이다. readLocale 로 사전을 화면에 넘기고, 고른 언어(settings.language)가 팩 언어면
+// 메인 문구(tr)에도 넣는다. 고른 팩이 지워지거나 꺼지거나 깨지면 언어를 기본(en)으로 되돌린다 — sync 끝의 followLanguage. 설치만으로는 언어를 바꾸지 않는다.
 // Electron 을 import 하지 않는다 — 단위 테스트가 임시 폴더 root 로 돈다.
 
 declare module 'cordis' {
@@ -160,6 +165,16 @@ export class ExtensionsService extends Service {
     })
   }
 
+  /** 켜진 정상(on) 언어 팩의 사전 (이슈 #525) — 같은 언어의 팩이 여럿이면 id 순 첫 팩. 던지지 않는다 */
+  readLocale(language: string): Promise<ExtensionLocaleResult> {
+    return this.enqueue(async (): Promise<ExtensionLocaleResult> => {
+      const entry = this.localeEntry(language)
+      if (!entry?.manifest) return { ok: false, failure: { code: 'locale-unavailable', params: { language } } }
+      const read = await this.files.readLocale(entry.id, entry.manifest.entry).catch(ioFailed)
+      return read.ok ? { ok: true, messages: read.messages, version: entry.manifest.version } : read
+    })
+  }
+
   /** 켜기/끄기 — settings.extensions 에 저장(기본 켜짐이라 false 만 남긴다)하고 곧바로 올리거나 내린다 */
   setEnabled(id: string, on: boolean): Promise<ExtensionResult> {
     return this.enqueue(async (): Promise<ExtensionResult> => {
@@ -240,7 +255,38 @@ export class ExtensionsService extends Service {
         }
       }
     }
+    await this.followLanguage()
     this.publish()
+  }
+
+  /** 고른 언어가 팩 언어면 그 팩의 사전을 메인 문구에 넣고, 그런 팩이 없거나(지움·꺼짐·깨짐) 읽지 못하면 기본 언어로 되돌린다 (이슈 #525).
+   *  publish 보다 먼저 한다 — 화면은 extensions:changed 를 받으면 설정을 다시 읽는다. 언어를 되돌리면 settings/changed 로 sync 가 한 번 더 돈다(내장 언어라 여기서 멈춘다) */
+  private async followLanguage(): Promise<void> {
+    const language = this.ctx.settings.get().language
+    if (isBuiltinLanguage(language)) {
+      setMainLocalePack(undefined)
+      return
+    }
+    const entry = this.localeEntry(language)
+    const read = entry?.manifest ? await this.files.readLocale(entry.id, entry.manifest.entry).catch(ioFailed) : undefined
+    if (read?.ok) {
+      setMainLocalePack({ language, messages: read.messages })
+      return
+    }
+    setMainLocalePack(undefined)
+    console.warn(`[extensions] 언어 ${language} 의 팩을 쓸 수 없어 기본 언어로 돌아간다${read ? ` (${read.failure.code})` : ''}`)
+    try {
+      this.ctx.settings.set({ language: DEFAULT_LANGUAGE })
+    } catch (error) {
+      console.warn('[extensions] 언어를 되돌리지 못했다', error)
+    }
+  }
+
+  /** 그 언어의 켜진 정상(on) 언어 팩 — id 순 첫 팩 */
+  private localeEntry(language: string): Entry | undefined {
+    return this.entries.find(
+      (entry) => entry.manifest?.type === 'locale' && entry.manifest.locale?.language === language && this.state(entry, this.enabled(entry.id)).state === 'on',
+    )
   }
 
   private async mountOne(mount: NonNullable<ExtensionsOptions['mount']>, extension: MountedExtension): Promise<void> {
@@ -275,6 +321,7 @@ export class ExtensionsService extends Service {
         id: entry.id,
         ...(manifest && { name: manifest.name, description: manifest.description, version: manifest.version }),
         ...(manifest?.details !== undefined && { details: manifest.details }),
+        ...(manifest?.type === 'locale' && manifest.locale && { type: 'locale' as const, locale: { language: manifest.locale.language, label: manifest.locale.label } }),
         enabled,
         ...this.state(entry, enabled),
       }
@@ -340,6 +387,7 @@ function storeAccess(root: string, appVersion: string) {
       return { removed: applied.flatMap((op) => (op.op === 'remove' ? [op.id] : [])), failed }
     },
     readEntry: (id: string, entry: string) => store.readEntry(id, entry),
+    readLocale: (id: string, entry: string) => store.readLocale(id, entry),
     /** 설치된 것 (id 순 — 저장소가 정렬한다). 보류는 설치·삭제 호출 안에서 곧바로 적용되므로 목록에 없다 (이슈 #511) */
     read: async (): Promise<Entry[]> =>
       (await store.listInstalled(appVersion)).map(({ id, manifest, problems }) => ({ id, ...(manifest && { manifest }), problems })),

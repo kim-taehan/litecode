@@ -8,8 +8,10 @@ import type {
   ExtensionProblem,
   ExtensionStoreFailure,
 } from '../../../shared/extensions.ts'
+import type { LocaleMessages } from '../../../shared/i18n/index.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../jsonFile.ts'
 import { EXTENSION_LIMITS } from './limits.ts'
+import { parseLocaleBundle } from './locale.ts'
 import { checkManifest, isExtensionId, MANIFEST_FILE } from './manifest.ts'
 import { isEntryPath } from './paths.ts'
 import { unpackZip } from './unpack.ts'
@@ -57,6 +59,7 @@ export interface StageResult {
 export type InstallResult = { ok: true; id: string; version: string } | { ok: false; failure: ExtensionStoreFailure }
 export type RemoveResult = { ok: true } | { ok: false; failure: ExtensionStoreFailure }
 export type ReadEntryResult = { ok: true; html: string } | { ok: false; failure: ExtensionStoreFailure }
+export type ReadLocaleResult = { ok: true; messages: LocaleMessages } | { ok: false; failure: ExtensionStoreFailure }
 
 export interface ApplyResult {
   applied: ExtensionPendingOp[]
@@ -292,20 +295,16 @@ export class ExtensionStore {
     if (!isExtensionId(id)) return failure('id-invalid', { value: id })
     if (!isEntryPath(entry)) return failure('entry-unsafe', { entry })
     if (!/\.html?$/i.test(entry)) return failure('entry-not-html', { entry })
-    const dir = path.join(this.installedDir, id)
-    const file = path.join(dir, entry)
-    try {
-      const [realDir, realFile, stat] = await Promise.all([fs.realpath(dir), fs.realpath(file), fs.lstat(file)])
-      if (!realFile.startsWith(realDir + path.sep) || !stat.isFile()) return failure('entry-unsafe', { entry })
-      const limit = EXTENSION_LIMITS.entryBytes
-      if (stat.size > limit) return failure('entry-too-large', { bytes: stat.size, limit })
-      const bytes = await fs.readFile(realFile)
-      // 확인과 읽기 사이에 커졌을 수 있다
-      if (bytes.length > limit) return failure('entry-too-large', { bytes: bytes.length, limit })
-      return { ok: true, html: bytes.toString('utf8') }
-    } catch (error) {
-      return failure('entry-unreadable', { message: messageOf(error) })
-    }
+    const read = await readInsideFile(path.join(this.installedDir, id), entry, EXTENSION_LIMITS.entryBytes)
+    return read.ok ? { ok: true, html: read.bytes.toString('utf8') } : read
+  }
+
+  /** 설치된 언어 팩의 번들 (이슈 #525) — readEntry 와 같은 안전한 읽기(경로·심볼릭 링크·일반 파일·크기 localeBytes) 뒤 parseLocaleBundle 로 거른다.
+   *  읽기 전용이라 줄에 서지 않는다. 던지지 않는다 */
+  async readLocale(id: string, entry: string): Promise<ReadLocaleResult> {
+    if (!isExtensionId(id)) return failure('id-invalid', { value: id })
+    if (!isEntryPath(entry)) return failure('entry-unsafe', { entry })
+    return readLocaleFile(path.join(this.installedDir, id), entry)
   }
 
   /** 다음 부팅에 적용될 보류 작업 — id 별 마지막 op. 던지지 않는다 */
@@ -480,7 +479,48 @@ async function readInstalled(dir: string, expectedId: string, appVersion: string
   if (manifest.id !== expectedId) return { id: expectedId, problems: [{ code: 'id-mismatch', params: { folder: expectedId, id: manifest.id } }] }
   const entry = await fs.lstat(path.join(dir, manifest.entry)).catch(() => undefined)
   if (!entry?.isFile()) return { id: expectedId, problems: [{ code: 'entry-missing', params: { entry: manifest.entry } }] }
+  if (manifest.type === 'locale') {
+    // 언어 팩은 번들도 다시 본다 (이슈 #525) — 깨진 번들의 팩은 failed 로 남아 언어 선택지에 나오지 않는다
+    const read = await readLocaleFile(dir, manifest.entry)
+    if (!read.ok) return { id: expectedId, problems: [localeProblem(read.failure)] }
+  }
   return { id: expectedId, manifest, problems: [] }
+}
+
+/** 폴더 안의 파일을 읽는다 — 실제 경로(realpath)가 폴더 안, 일반 파일(lstat), 크기 상한(확인과 읽기 사이에 커졌을 때도). 던지지 않는다 */
+async function readInsideFile(dir: string, entry: string, limit: number): Promise<{ ok: true; bytes: Buffer } | { ok: false; failure: ExtensionStoreFailure }> {
+  const file = path.join(dir, entry)
+  try {
+    const [realDir, realFile, stat] = await Promise.all([fs.realpath(dir), fs.realpath(file), fs.lstat(file)])
+    if (!realFile.startsWith(realDir + path.sep) || !stat.isFile()) return failure('entry-unsafe', { entry })
+    if (stat.size > limit) return failure('entry-too-large', { bytes: stat.size, limit })
+    const bytes = await fs.readFile(realFile)
+    // 확인과 읽기 사이에 커졌을 수 있다
+    if (bytes.length > limit) return failure('entry-too-large', { bytes: bytes.length, limit })
+    return { ok: true, bytes }
+  } catch (error) {
+    return failure('entry-unreadable', { message: messageOf(error) })
+  }
+}
+
+async function readLocaleFile(dir: string, entry: string): Promise<ReadLocaleResult> {
+  const read = await readInsideFile(dir, entry, EXTENSION_LIMITS.localeBytes)
+  if (!read.ok) return read
+  const parsed = parseLocaleBundle(read.bytes.toString('utf8'))
+  return 'error' in parsed ? failure('locale-unreadable', { message: parsed.error }) : { ok: true, messages: parsed.messages }
+}
+
+/** 번들 읽기 실패 → 설치 폴더 재검증의 사유 */
+function localeProblem(failed: ExtensionStoreFailure): ExtensionProblem {
+  switch (failed.code) {
+    case 'entry-too-large':
+      return { code: 'locale-too-large', params: failed.params }
+    case 'locale-unreadable':
+    case 'entry-unreadable':
+      return { code: 'locale-unreadable', params: failed.params }
+    default:
+      return { code: 'locale-unreadable', params: { message: failed.code } }
+  }
 }
 
 /** 폴더의 extension.json 의 version — 못 읽으면 undefined */

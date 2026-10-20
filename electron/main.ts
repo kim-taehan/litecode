@@ -374,6 +374,7 @@ function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_REMOVE, async (_event, id: unknown) => ctx.extensions.remove(String(id)))
   handle(ctx, Channel.EXTENSIONS_SET_ENABLED, async (_event, id: unknown, on: unknown) => ctx.extensions.setEnabled(String(id), on === true))
   handle(ctx, Channel.EXTENSIONS_READ_ENTRY, async (_event, id: unknown) => ctx.extensions.readEntry(String(id)))
+  handle(ctx, Channel.EXTENSIONS_READ_LOCALE, async (_event, language: unknown) => ctx.extensions.readLocale(String(language)))
   ctx.on('extensions/changed', (extensions) => broadcast(Channel.EXTENSIONS_CHANGED, extensions))
 }
 extensionsBridge.inject = ['extensions']

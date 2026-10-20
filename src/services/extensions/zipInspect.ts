@@ -6,11 +6,12 @@ import zlib from 'node:zlib'
 import yauzl from 'yauzl'
 import type { ExtensionInspection, ExtensionProblem } from '../../../shared/extensions.ts'
 import { EXTENSION_LIMITS, type ExtensionLimits } from './limits.ts'
+import { parseLocaleBundle } from './locale.ts'
 import { checkManifest, MANIFEST_FILE } from './manifest.ts'
 import { isEntryPath, unsafePathReason } from './paths.ts'
 
 // 확장 zip 검사 (이슈 #478, 설계 3절 "zip 안전 검사"·4절 "검사(pick)") — 풀지 않고 중앙 디렉터리의 항목 목록만 읽는다. 메모리로 읽는 내용은
-// extension.json 하나뿐(상한 manifestBytes). 사유를 모두 모아 돌려준다. 크기는 헤더에 선언된 해제 크기 기준 — 실제 크기는 풀 때(2/4) 다시 본다.
+// extension.json 하나뿐(상한 manifestBytes) — 언어 팩(이슈 #525)이면 번들 .json 도(상한 localeBytes). 사유를 모두 모아 돌려준다. 크기는 헤더에 선언된 해제 크기 기준 — 실제 크기는 풀 때(2/4) 다시 본다.
 //
 // yauzl 은 decodeStrings:false 로 연다. 기본값(true)은 `..`·절대 경로·백슬래시 이름을 만나면 그 자리에서 오류를 내고 목록 읽기를 멈춰서
 // 사유를 모을 수 없고, 백슬래시를 `/` 로 바꿔 읽는다. 이름은 직접 푼다: 플래그 0x800 이면 UTF-8, 아니면 latin1 — yauzl 은 CP437 로 풀지만
@@ -88,7 +89,17 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
     const entry = (value as { entry?: unknown } | null)?.entry
     if (typeof entry === 'string' && isEntryPath(entry)) {
       const target = root + entry
-      if (!kept.some((item) => !item.isDir && item.name === target)) problems.push({ code: 'entry-missing', params: { entry } })
+      const entryItem = kept.find((item) => !item.isDir && item.name === target)
+      if (!entryItem) problems.push({ code: 'entry-missing', params: { entry } })
+      else if (checked.manifest?.type === 'locale') {
+        // 언어 팩 번들 (이슈 #525) — 크기는 선언값으로 먼저 보고, 넘지 않을 때만 메모리로 읽어 JSON 객체인지 본다
+        const bytes = entryItem.entry.uncompressedSize
+        if (bytes > limits.localeBytes) problems.push({ code: 'locale-too-large', params: { bytes, limit: limits.localeBytes } })
+        else {
+          const parsed = parseLocaleBundle(await readEntry(zip, entryItem), limits)
+          if ('error' in parsed) problems.push({ code: 'locale-unreadable', params: { message: parsed.error } })
+        }
+      }
     }
     return { manifest: checked.manifest, files, problems }
   } catch (error) {

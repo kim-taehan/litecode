@@ -4,7 +4,7 @@ import { openExtensionTab, workspaceDirectory } from './filePreviewStore.ts'
 import { useFocusTrap } from './focusTrap.ts'
 import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT, type Translate } from './settingsStore.ts'
-import { cardKind, failedReasonText, failureLines, formatBytes, installKind, lineSummary, problemLine, type ProblemLine } from './extensionsView.ts'
+import { cardKind, failedReasonText, failureLines, formatBytes, installKind, lineSummary, opensAfterInstall, problemLine, type ProblemLine } from './extensionsView.ts'
 
 // 설정 > 기능의 확장 (이슈 #489, 시안 _workspace/mock-extension Main·Confirm·Reject). 기능 페이지(FeaturesSettings.tsx)에 끼우는 조각들:
 // 검색창 옆 [확장 추가 (zip)] · 설치 직후 안내 · 기능 카드 아래 "설치한 확장" 구분선 + 카드 · 설치 확인/거절 대화상자.
@@ -247,7 +247,7 @@ export function ExtensionAddButton({ onInstalled }: { onInstalled?(note: Install
           onClose={close}
           onInstalled={(id) => {
             const name = dialog.preview.manifest?.name ?? id
-            onInstalled?.({ name, opened: openExtensionTab(workspaceDirectory(), id) })
+            onInstalled?.({ name, opened: opensAfterInstall(dialog.preview) && openExtensionTab(workspaceDirectory(), id) })
           }}
         />
       )}
