@@ -183,6 +183,15 @@ describe('logFile — 메인 로그 파일', () => {
     expect(lines).toContain('WARN [engine] 표식을 못 뒀다\n')
     expect(lines).not.toContain('되돌린 뒤')
   })
+
+  it('captureConsole — 원래 출력이 던져도(터미널이 닫힘, EIO) 삼키고 파일에는 남긴다', () => {
+    const log = createLogFile(folder(), { now: () => at })
+    const fail = (..._args: unknown[]): void => { throw new Error('write EIO') }
+    const target = { error: fail, warn: fail }
+    captureConsole(log, target)
+    expect(() => target.error('[fatal] uncaughtException')).not.toThrow()
+    expect(fs.readFileSync(log.path, 'utf8')).toContain('ERROR [fatal] uncaughtException\n')
+  })
 })
 
 describe('outputBuffer — 자식 프로세스 출력 모으기', () => {
