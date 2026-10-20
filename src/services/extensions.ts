@@ -123,6 +123,7 @@ const METHODS = new Map<string, ExtensionPermission | null>([
   ['server.setOptions', 'server'],
   ['server.project', 'server'],
   ['server.analyze', 'server'],
+  ['server.log', 'server'],
 ])
 
 type CallFailure = { ok: false; error: ExtensionCallError; origin?: string }
@@ -313,6 +314,11 @@ export class ExtensionsService extends Service {
         case 'server.stop':
         case 'server.setOptions':
           return await this.server(id, manifest, method, params)
+        case 'server.log': {
+          const source = typeof params === 'object' && params !== null ? (params as { source?: unknown }).source ?? 'server' : 'server'
+          if (source !== 'server' && source !== 'scanner') return fail('params-invalid')
+          return done({ source, text: this.servers.log(id, source) })
+        }
         case 'server.project':
         case 'server.analyze':
           return await this.analysis(id, manifest, method, params, project)

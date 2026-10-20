@@ -438,6 +438,8 @@ export const ko = {
   'settings.features.noMatch': '일치하는 기능이 없습니다.',
   // 설치한 확장 (이슈 #489, 시안 _workspace/mock-extension) — 사유 코드(shared/extensions.ts)마다 문구 하나
   'extensions.add': '확장 추가 (zip)',
+  'extensions.checking': 'zip 확인 중…',
+  'extensions.installing': '설치 중…',
   'extensions.section': '설치한 확장',
   'extensions.badge': '확장',
   'extensions.more': '{name} 더보기',

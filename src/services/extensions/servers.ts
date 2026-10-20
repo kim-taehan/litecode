@@ -4,7 +4,7 @@ import type { ExtensionServer, ExtensionServerOptions, ExtensionServerStatus } f
 import { execProgram } from '../exec.ts'
 import { keepTail } from '../outputBuffer.ts'
 import type { KeyCipher } from '../providers.ts'
-import { leftoverAlive, reapServerRecord, startServer, type ServerHandle, type ServerOptions, type ServerState } from './server.ts'
+import { leftoverAlive, reapServerRecord, SERVER_LOG, startServer, tailText, type ServerHandle, type ServerOptions, type ServerState } from './server.ts'
 import { prepareSonarAdmin, sonarPassword, type AdminSecrets } from './serverAdmin.ts'
 import { projectTsconfigs, reportTaskId, sonarProjectKey, sonarScanArgs } from './sonarAnalysis.ts'
 
@@ -19,6 +19,10 @@ const ADMIN_FILE = 'admin.json'
 /** 분석(스캐너) 기한 — 이 저장소(340파일) 전체가 15초였다(실측 §11). 큰 저장소를 보고 넉넉히 */
 const ANALYZE_TIMEOUT_MS = 15 * 60_000
 const ANALYZE_OUTPUT = 4_000
+/** 스캐너 출력 — 데이터 폴더에 분석마다 새로 쓴다. 패널의 로그 창이 읽는다 (이슈 #551) */
+export const SCANNER_LOG = 'scanner.log'
+/** 로그 창 한 번에 줄 글자 수 */
+const LOG_CHARS = 16_000
 
 export type AnalyzeResult =
   | { ok: true; projectKey: string; taskId?: string; skipped: string[] }
@@ -136,13 +140,23 @@ export class ExtensionServers {
     try {
       fs.rmSync(path.join(workDir, 'report-task.txt'), { force: true })
       const output = keepTail(ANALYZE_OUTPUT)
+      const logFile = path.join(this.dataDir(id), SCANNER_LOG)
+      fs.mkdirSync(path.dirname(logFile), { recursive: true })
+      fs.writeFileSync(logFile, '')
       const end = await execProgram({
         file: path.join(extensionDir, 'server', 'scanner', 'bin', 'sonar-scanner'),
         args: scan.args,
         cwd: projectDir,
         timeoutMs: ANALYZE_TIMEOUT_MS,
         env: { JAVA_HOME: path.join(extensionDir, 'server', 'runtime'), SONAR_TOKEN: token, SONAR_USER_HOME: path.join(this.dataDir(id), 'scanner-home') },
-        onOutput: (_stream, text) => output.push(text),
+        onOutput: (_stream, text) => {
+          output.push(text)
+          try {
+            fs.appendFileSync(logFile, text)
+          } catch {
+            // 로그는 보조 — 못 써도 분석은 계속
+          }
+        },
       }).done
       if (end.status !== 'done' || end.exitCode !== 0) return { ok: false, error: 'analysis-failed', detail: (end.error ?? output.text()).trim().slice(-ANALYZE_OUTPUT) }
       const taskId = reportTaskId(workDir)
@@ -150,6 +164,11 @@ export class ExtensionServers {
     } finally {
       this.analyzing.delete(id)
     }
+  }
+
+  /** 로그 창 (이슈 #551) — server: 서버 출력(server.log), scanner: 마지막 분석의 스캐너 출력(scanner.log). 끝 LOG_CHARS 자 */
+  log(id: string, source: 'server' | 'scanner'): string {
+    return tailText(path.join(this.dataDir(id), source === 'server' ? SERVER_LOG : SCANNER_LOG), LOG_CHARS)
   }
 
   /** 내장 서버로 가는 요청에 붙일 토큰 — 관리자 준비가 끝났을 때만 */

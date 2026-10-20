@@ -417,6 +417,8 @@ export const en = {
   'settings.features.searchClear': 'Clear search',
   'settings.features.noMatch': 'No matching features.',
   'extensions.add': 'Add extension (zip)',
+  'extensions.checking': 'Checking zip…',
+  'extensions.installing': 'Installing…',
   'extensions.section': 'Installed extensions',
   'extensions.badge': 'Extension',
   'extensions.more': 'More for {name}',
