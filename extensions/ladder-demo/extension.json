@@ -1,0 +1,7 @@
+{
+  "id": "ladder-demo",
+  "name": "사다리 게임 (데모)",
+  "description": "한 파일짜리 사다리 타기 — 이름과 결과를 적고 줄을 따라가 봅니다",
+  "version": "0.1.1",
+  "entry": "index.html"
+}

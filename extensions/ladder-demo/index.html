@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>사다리 게임 (데모)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; background: #14161b; color: #e8eaf0; font-family: -apple-system, "Apple SD Gothic Neo", system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px 12px; box-sizing: border-box; }
+  h1 { margin: 0; font-size: 18px; }
+  .bar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8a909c; }
+  button { height: 32px; padding: 0 14px; border: 0; border-radius: 10px; background: #e8eaf0; color: #14161b; font-size: 13px; font-weight: 600; cursor: pointer; }
+  button.ghost { background: #2a2e38; color: #e8eaf0; }
+  #wrap { display: grid; gap: 6px; }
+  .row { display: grid; column-gap: 0; padding: 0 2px; box-sizing: content-box; }
+  .row > div > * { width: 56px; margin: 0 auto; display: flex; box-sizing: border-box; }
+  .row > div > button.pick { justify-content: center; align-items: center; }
+  select { height: 32px; border: 1px solid #2a2e38; border-radius: 8px; background: #1d2028; color: #e8eaf0; font-size: 13px; }
+  input.prize { border: 0; text-align: center; font-weight: 600; }
+  .prize { height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #1d2028; color: #e8eaf0; font-size: 13px; font-weight: 600; }
+  .prize.win { background: #ffa726; color: #14161b; }
+  .prize.lose { background: #2a2e38; color: #e8eaf0; }
+  input { min-width: 0; width: 100%; box-sizing: border-box; height: 30px; border: 1px solid #2a2e38; border-radius: 8px; background: #1d2028; color: #e8eaf0; text-align: center; font-size: 13px; }
+  .pick { background: #2a2e38; color: #e8eaf0; font-size: 18px; padding: 0; }
+  .pick { position: relative; }
+  .pick::after { content: attr(data-name); position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); padding: 3px 8px; border-radius: 8px; background: #e8eaf0; color: #14161b; font-size: 12px; font-weight: 600; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .1s; z-index: 5; }
+  .pick:hover::after, .pick:focus-visible::after { opacity: 1; }
+  .pick.on { background: #5c6bc0; }
+  canvas { background: #0c0d11; border: 2px solid #2a2e38; border-radius: 8px; max-width: 100%; }
+  #out { font-size: 13px; color: #8a909c; line-height: 1.8; text-align: center; min-height: 22px; }
+  #out b { color: #e8eaf0; }
+</style>
+</head>
+<body>
+<h1>사다리 게임</h1>
+<div class="bar">
+  <span>인원</span>
+  <button class="ghost" id="minus" type="button" aria-label="인원 줄이기">−</button>
+  <b id="count">4</b>
+  <button class="ghost" id="plus" type="button" aria-label="인원 늘리기">+</button>
+  <span>당첨</span>
+  <select id="win" aria-label="당첨 개수"></select>
+  <button class="ghost" id="shuffle" type="button">사다리 새로 그리기</button>
+  <button class="ghost" id="all" type="button">전체 결과</button>
+</div>
+<div id="wrap">
+  <div class="row" id="tops"></div>
+  <canvas id="board"></canvas>
+  <div class="row" id="bottoms"></div>
+</div>
+<div id="out">가운데 가로줄은 가려져 있습니다. 위쪽 동물을 눌러 사다리를 타 보세요. 아래 칸에 5000, 4000 처럼 원하는 글자를 직접 적어 차등을 둘 수 있어요.</div>
+<script>
+(() => {
+  const HIDE_FROM = 2, HIDE_TO = 10 // 가로줄 단계 2~9(가운데 8단)만 가린다
+  const MIN = 2, MAX = 8, GAP = 64, TOP = 16, H = 360, STEPS = 12
+  const ANIMALS = ['🐶', '🐱', '🐰', '🦊', '🐻', '🐼', '🐯', '🐸']
+  const NAMES = ['강아지', '고양이', '토끼', '여우', '곰', '판다', '호랑이', '개구리']
+  const COLORS = ['#4dd0e1', '#5c6bc0', '#ffa726', '#ffee58', '#66bb6a', '#ab47bc', '#ef5350', '#f48fb1']
+  const $ = (id) => document.getElementById(id)
+  const canvas = $('board'), ctx = canvas.getContext('2d')
+  let n = 4, wins = 1, words = { W: '🎁 당첨', L: '꽝' }, texts = [], revealed = false, rungs = [], names = [], results = [], shown = new Map(), timer
+  const dpr = window.devicePixelRatio || 1
+
+  const text = (v) => words[v]
+  const defaults = () => {
+    names = Array.from({ length: n }, (_, i) => names[i] || ANIMALS[i])
+    wins = Math.min(wins, n - 1)
+  }
+  // 가로줄: 0..STEPS-1 단계마다 이웃한 두 세로줄을 잇되, 같은 단계에서 겹치지 않게
+  const draw = (keep) => {
+    rungs = Array.from({ length: STEPS }, () => [])
+    for (let s = 0; s < STEPS; s++) {
+      for (let c = 0; c < n - 1; c++) {
+        const last = rungs[s][rungs[s].length - 1]
+        if (last === c - 1) continue
+        if (Math.random() < 0.38) rungs[s].push(c)
+      }
+    }
+    if (keep && texts.length === n) texts = texts.slice().sort(() => Math.random() - 0.5)
+    else texts = Array.from({ length: n }, (_, i) => (i < wins ? words.W : words.L)).sort(() => Math.random() - 0.5)
+    results = texts
+    revealed = false; shown.clear(); render(); $('out').textContent = '사다리를 새로 그렸습니다. 가운데 가로줄은 가려져 있어요.'
+  }
+  const x = (c) => 32 + c * GAP
+  const y = (s) => TOP + 24 + s * ((H - TOP * 2 - 24) / STEPS)
+  const trace = (start) => {
+    const pts = [[x(start), TOP]]
+    let c = start
+    for (let s = 0; s < STEPS; s++) {
+      const right = rungs[s].includes(c), left = rungs[s].includes(c - 1)
+      pts.push([x(c), y(s)])
+      if (right) c++; else if (left) c--
+      if (right || left) pts.push([x(c), y(s)])
+    }
+    pts.push([x(c), H - TOP])
+    return { pts, end: c }
+  }
+  const render = (upto) => {
+    const w = 32 * 2 + (n - 1) * GAP
+    canvas.width = w * dpr; canvas.height = H * dpr
+    canvas.style.width = w + 'px'; canvas.style.height = H + 'px'
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, w, H)
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+    ctx.strokeStyle = '#3a3f4c'; ctx.lineWidth = 3
+    for (let c = 0; c < n; c++) { ctx.beginPath(); ctx.moveTo(x(c), TOP); ctx.lineTo(x(c), H - TOP); ctx.stroke() }
+    rungs.forEach((row, s) => { if (!revealed && s >= HIDE_FROM && s < HIDE_TO) return; row.forEach((c) => { ctx.beginPath(); ctx.moveTo(x(c), y(s)); ctx.lineTo(x(c + 1), y(s)); ctx.stroke() }) })
+    if (!revealed) {
+      // 가로줄이 있을 자리를 가린다 — 지나간 길만 보인다
+      ctx.fillStyle = 'rgba(92,107,192,.10)'; ctx.fillRect(x(0) + 6, y(HIDE_FROM) - 12, (n - 1) * GAP - 12, y(HIDE_TO - 1) - y(HIDE_FROM) + 24)
+      ctx.fillStyle = '#5a6070'; ctx.font = '600 22px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      if (shown.size === 0) ctx.fillText('?', (x(0) + x(n - 1)) / 2, (y(HIDE_FROM) + y(HIDE_TO - 1)) / 2)
+    }
+    for (const [start, len] of shown) {
+      const { pts } = trace(start)
+      const cut = upto && upto.start === start ? upto.len : len
+      ctx.strokeStyle = COLORS[start % COLORS.length]; ctx.lineWidth = 5
+      ctx.beginPath(); ctx.moveTo(...pts[0])
+      for (let i = 1; i < Math.min(cut, pts.length); i++) ctx.lineTo(...pts[i])
+      ctx.stroke()
+    }
+  }
+  const labels = () => {
+    for (const [id, vals, cls] of [['tops', names, 'name'], ['bottoms', results, 'result']]) {
+      const el = $(id); el.innerHTML = ''
+      el.style.gridTemplateColumns = `repeat(${n}, ${GAP}px)`
+      el.style.width = n * GAP + 'px'
+      vals.slice(0, n).forEach((v, i) => {
+        const cell = document.createElement('div')
+        if (cls === 'name') {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'pick'; b.textContent = v; b.setAttribute('data-name', NAMES[i]); b.setAttribute('aria-label', `${NAMES[i]} — 눌러서 타기`)
+          b.onclick = () => go(i)
+          cell.append(b)
+        } else {
+          const ed = document.createElement('input'); ed.value = texts[i]; ed.maxLength = 8; ed.setAttribute('aria-label', `${i + 1}번째 칸 글자`)
+          ed.className = texts[i] === words.L ? 'prize lose' : 'prize win'
+          ed.oninput = () => { texts[i] = ed.value || words.L; ed.className = texts[i] === words.L ? 'prize lose' : 'prize win' }
+          cell.append(ed)
+        }
+        el.append(cell)
+      })
+    }
+    $('count').textContent = n
+    $('wrap').style.width = 'min-content'
+  }
+  const go = (start) => {
+    clearInterval(timer)
+    const { pts, end } = trace(start)
+    let len = 1
+    shown.set(start, 1)
+    timer = setInterval(() => {
+      len++
+      shown.set(start, len)
+      render()
+      if (len >= pts.length) { clearInterval(timer); $('out').innerHTML = `<b>${names[start]}</b> → <b>${texts[end]}</b>` }
+    }, 70)
+  }
+  const reveal = () => {
+    clearInterval(timer)
+    const lines = []
+    for (let i = 0; i < n; i++) { shown.set(i, trace(i).pts.length); lines.push(`<b>${names[i]}</b> → <b>${texts[trace(i).end]}</b>`) }
+    revealed = true; render(); $('out').innerHTML = lines.join('<br>')
+  }
+  const resize = (d) => {
+    const next = Math.max(MIN, Math.min(MAX, n + d))
+    if (next === n) return
+    n = next; defaults(); fillWin(); draw(); labels()
+  }
+  function fillWin() { const sel = $('win'); sel.innerHTML = ''; for (let k = 1; k < n; k++) sel.add(new Option(k + '개', k)); sel.value = wins }
+  $('win').onchange = () => { wins = +$('win').value; draw(); labels() }
+  $('minus').onclick = () => resize(-1)
+  $('plus').onclick = () => resize(1)
+  $('shuffle').onclick = () => { draw(true); labels() }
+  $('all').onclick = reveal
+  defaults(); fillWin(); draw(); labels()
+})()
+</script>
+</body>
+</html>

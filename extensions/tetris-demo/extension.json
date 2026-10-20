@@ -1,0 +1,7 @@
+{
+  "id": "tetris-demo",
+  "name": "테트리스 (데모)",
+  "description": "설치 흐름을 시험해 보는 예제 확장 — 한 파일짜리 테트리스 게임",
+  "version": "0.1.0",
+  "entry": "index.html"
+}
