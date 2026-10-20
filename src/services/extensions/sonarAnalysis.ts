@@ -28,6 +28,31 @@ export interface ScanTarget {
   projectDir: string
   /** 스캐너 작업 폴더 — 데이터 폴더 안. 프로젝트에 .scannerwork 를 남기지 않는다 */
   workDir: string
+  /** TypeScript 분석기에 줄 tsconfig.json 목록(프로젝트 기준) — projectTsconfigs */
+  tsconfigs?: readonly string[]
+}
+
+/** 숨김 폴더·node_modules 밖의 tsconfig.json (이슈 #548). TypeScript 분석기는 분석 범위와 상관없이 프로젝트 폴더의 tsconfig.json 을 전부 찾아
+ *  타입 정보를 만든다 — 숨김 폴더에 레포 사본(.claude/worktrees 43개 → 88개)이 있으면 범위 하나만 골라도 Node 가 4GB 를 넘겨 죽었다(실측 2026-10-20).
+ *  찾은 것만 넘기면 같은 분석이 12초에 끝났다. 깊이·개수에 상한을 둔다 */
+export function projectTsconfigs(projectDir: string, maxDepth = 6, maxCount = 50): string[] {
+  const found: string[] = []
+  const walk = (relative: string, depth: number): void => {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(path.join(projectDir, relative), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (found.length >= maxCount) return
+      const child = relative === '' ? entry.name : `${relative}/${entry.name}`
+      if (entry.isFile() && entry.name === 'tsconfig.json') found.push(child)
+      else if (entry.isDirectory() && depth < maxDepth && !entry.name.startsWith('.') && entry.name !== 'node_modules') walk(child, depth + 1)
+    }
+  }
+  walk('', 0)
+  return found
 }
 
 /** 스캐너 인자 — paths 가 없으면 전체(프로젝트 키 그대로), 있으면 범위(`<키>__scope`, scopedScanArgs). 토큰은 인자가 아니라 env(SONAR_TOKEN)로 — ps 에 보인다 */
@@ -42,6 +67,8 @@ export function sonarScanArgs(
     `-Dsonar.working.directory=${target.workDir}`,
     // 동봉 런타임으로 돈다 — 서버에서 JRE 를 내려받지 않는다
     '-Dsonar.scanner.skipJreProvisioning=true',
+    // 쉼표가 든 경로는 목록을 깨므로 뺀다
+    ...(target.tsconfigs?.length ? [`-Dsonar.typescript.tsconfigPaths=${target.tsconfigs.filter((file) => !file.includes(',')).join(',')}`] : []),
   ]
   if (paths === undefined) return { ok: true, projectKey: target.projectKey, skipped: [], args: [...common, `-Dsonar.projectKey=${target.projectKey}`, '-Dsonar.sources=.'] }
   const scoped = scopedScanArgs(target.projectKey, paths, exists)

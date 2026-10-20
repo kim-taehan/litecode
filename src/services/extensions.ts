@@ -1,4 +1,5 @@
 import { Context, Service, type Fiber } from 'cordis'
+import fs from 'node:fs'
 import path from 'node:path'
 import type {
   ExtensionCallError,
@@ -115,6 +116,7 @@ const METHODS = new Map<string, ExtensionPermission | null>([
   ['project.openFile', 'project'],
   ['project.pickPath', 'project'],
   ['project.changedFiles', 'project'],
+  ['project.listDir', 'project'],
   ['server.status', 'server'],
   ['server.start', 'server'],
   ['server.stop', 'server'],
@@ -561,6 +563,7 @@ export class ExtensionsService extends Service {
   private async project(method: string, params: unknown, project: CallProject | undefined): Promise<ExtensionCallResult> {
     if (!project) return fail('no-project')
     if (method === 'project.info') return done({ name: project.name })
+    if (method === 'project.listDir') return this.listDir(params, project)
     const { path: relPath, line } = (typeof params === 'object' && params !== null ? params : {}) as { path?: unknown; line?: unknown }
     if (typeof relPath !== 'string' || relPath === '') return fail('params-invalid')
     if (!isEntryPath(relPath)) return fail('path-unsafe')
@@ -575,6 +578,27 @@ export class ExtensionsService extends Service {
       return done(new TextDecoder('utf-8', { fatal: true }).decode(read.bytes))
     } catch {
       return fail('not-text')
+    }
+  }
+
+  /** project.listDir (이슈 #548) — 프로젝트 안 폴더 하나의 항목. 패널이 프로젝트 안에서만 고르는 트리를 그린다(OS 고르기 창은 프로젝트 밖으로 나갈 수 있다).
+   *  path 는 프로젝트 기준(빈 글 = 프로젝트). 숨김 항목·node_modules·심볼릭 링크는 뺀다. 실제 위치(realpath)가 프로젝트 밖이면 path-unsafe, 폴더가 먼저·이름순, 상한 개수 */
+  private async listDir(params: unknown, project: CallProject): Promise<ExtensionCallResult> {
+    const relPath = typeof params === 'object' && params !== null ? (params as { path?: unknown }).path ?? '' : ''
+    if (typeof relPath !== 'string') return fail('params-invalid')
+    const trimmed = relPath.replace(/\/+$/, '')
+    if (trimmed !== '' && !isEntryPath(trimmed)) return fail('path-unsafe')
+    try {
+      const root = await fs.promises.realpath(project.directory)
+      const dir = await fs.promises.realpath(path.join(root, trimmed))
+      if (dir !== root && !dir.startsWith(root + path.sep)) return fail('path-unsafe')
+      const entries = (await fs.promises.readdir(dir, { withFileTypes: true }))
+        .filter((entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules' && (entry.isDirectory() || entry.isFile()))
+        .map((entry) => ({ name: entry.name, dir: entry.isDirectory() }))
+        .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name))
+      return done({ path: trimmed, entries: entries.slice(0, EXTENSION_LIMITS.listDirEntries), truncated: entries.length > EXTENSION_LIMITS.listDirEntries })
+    } catch {
+      return fail('file-unreadable')
     }
   }
 

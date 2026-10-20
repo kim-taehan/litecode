@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { reportTaskId, sonarProjectKey, sonarScanArgs } from '../../src/services/extensions/sonarAnalysis.ts'
+import { projectTsconfigs, reportTaskId, sonarProjectKey, sonarScanArgs } from '../../src/services/extensions/sonarAnalysis.ts'
 
 // SonarQube 분석 (이슈 #545) — 프로젝트 키 정하기·스캐너 인자·분석 작업 id 읽기. 스캐너를 띄우는 쪽은 servers.ts
 
@@ -86,5 +86,22 @@ describe('reportTaskId', () => {
     expect(reportTaskId(dir)).toBeUndefined()
     fs.writeFileSync(path.join(dir, 'report-task.txt'), 'projectKey=app\nceTaskId=AZ-abc_123\nceTaskUrl=http://x\n')
     expect(reportTaskId(dir)).toBe('AZ-abc_123')
+  })
+})
+
+describe('projectTsconfigs (이슈 #548)', () => {
+  it('숨김 폴더·node_modules 안의 tsconfig.json 은 빼고 프로젝트 기준 경로로', () => {
+    const dir = folder()
+    for (const file of ['tsconfig.json', 'mobile/tsconfig.json', '.claude/worktrees/a/tsconfig.json', 'node_modules/x/tsconfig.json', 'a/b/tsconfig.json']) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+      fs.writeFileSync(path.join(dir, file), '{}')
+    }
+    expect(projectTsconfigs(dir)).toEqual(['a/b/tsconfig.json', 'mobile/tsconfig.json', 'tsconfig.json'])
+    expect(projectTsconfigs(dir, 6, 2)).toHaveLength(2)
+  })
+
+  it('목록이 있으면 스캐너 인자로 넘긴다 — 쉼표가 든 경로는 뺀다', () => {
+    const result = sonarScanArgs({ serverUrl: 'http://s', projectKey: 'app', projectDir: '/p', workDir: '/w', tsconfigs: ['tsconfig.json', 'a,b/tsconfig.json', 'mobile/tsconfig.json'] }, undefined, () => true)
+    expect(result.ok && result.args).toContain('-Dsonar.typescript.tsconfigPaths=tsconfig.json,mobile/tsconfig.json')
   })
 })

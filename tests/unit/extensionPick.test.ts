@@ -265,4 +265,20 @@ describe('서비스 — ctx.extensions.call', () => {
     ext = await boot({ git: path.join(dir, 'no-git-here') })
     expect(await ext.call('p-ext', 'project.changedFiles', undefined, here())).toEqual({ ok: false, error: 'git-unavailable' })
   })
+
+  it('project.listDir — 프로젝트 안 폴더의 항목(폴더 먼저·이름순), 숨김·node_modules·심볼릭 링크는 빼고, 밖(.., 밖을 가리키는 링크)은 path-unsafe (이슈 #548)', async () => {
+    await install('p-ext', ['project'])
+    await install('bare-ext')
+    const ext = await boot()
+    for (const file of ['b.ts', 'src/a.ts', '.claude/x.json', 'node_modules/m/i.js', 'Zdir/z.ts']) await write(file)
+    await fs.symlink(dir, path.join(project, 'outlink'))
+    expect(await ext.call('p-ext', 'project.listDir', {}, here())).toEqual({
+      ok: true,
+      result: { path: '', truncated: false, entries: [{ name: 'src', dir: true }, { name: 'Zdir', dir: true }, { name: 'b.ts', dir: false }] },
+    })
+    expect(await ext.call('p-ext', 'project.listDir', { path: 'src/' }, here())).toEqual({ ok: true, result: { path: 'src', truncated: false, entries: [{ name: 'a.ts', dir: false }] } })
+    expect(await ext.call('p-ext', 'project.listDir', { path: '../' }, here())).toEqual({ ok: false, error: 'path-unsafe' })
+    expect(await ext.call('p-ext', 'project.listDir', { path: 'outlink' }, here())).toEqual({ ok: false, error: 'path-unsafe' })
+    expect(await ext.call('bare-ext', 'project.listDir', {}, here())).toEqual({ ok: false, error: 'permission-missing' })
+  })
 })
