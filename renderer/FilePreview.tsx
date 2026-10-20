@@ -24,7 +24,6 @@ import {
   openTerminalTab,
   revealPanel,
   selectTab,
-  setWorkspaceDirectory,
   startCompare,
   taskIdOf,
   terminalIdOf,
@@ -99,7 +98,6 @@ export function FilePreviewPanel({ directory, titleFor, activeConversationId, on
   useEffect(() => {
     if (stale) closeFilePreview()
   }, [stale])
-  useEffect(() => setWorkspaceDirectory(directory), [directory])
   // 바뀜 이벤트만 — 첫 읽기 전의 빈 목록으로 탭을 닫지 않게
   useEffect(() => window.litecode.onExtensionsChanged(closeExtensionTabs), [])
   return state?.open && !stale ? (

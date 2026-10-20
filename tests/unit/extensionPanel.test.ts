@@ -16,8 +16,6 @@ import {
   openFilePreview,
   closeFilePreview,
   selectTab,
-  setWorkspaceDirectory,
-  workspaceDirectory,
 } from '../../renderer/filePreviewStore.ts'
 import { HTML_PREVIEW_CSP } from '../../renderer/htmlPreview.ts'
 import { ExtensionTabBody } from '../../renderer/FilePreview.tsx'
@@ -72,14 +70,6 @@ describe('확장 탭 — 저장소', () => {
 
   it('프로젝트가 없으면(대화 없음) 열지 못한다 — false', () => {
     expect(openExtensionTab(undefined, 'tetris-demo')).toBe(false)
-  })
-
-  it('설정 화면은 지금 보는 프로젝트(패널이 알린 workspace)에 연다', () => {
-    setWorkspaceDirectory('/ws')
-    expect(workspaceDirectory()).toBe('/ws')
-    expect(openExtensionTab(workspaceDirectory(), 'my-ext')).toBe(true)
-    expect(read()).toMatchObject({ directory: '/ws', active: extensionTabKey('my-ext') })
-    setWorkspaceDirectory(undefined)
   })
 
   it('목록이 바뀌면 꺼졌거나·삭제됐거나·상태가 정상(on)이 아닌 확장의 탭을 닫는다 — 고른 탭이면 이웃으로', () => {
@@ -180,13 +170,12 @@ describe('설정 — 설치 직후 안내, [열기] 버튼·옛 보류 UI 없음
     expect(html(createElement(ExtensionCard, { extension: ext({ id: 'on-ext' }) }))).not.toContain('extension-row__open')
   })
 
-  it('설치 직후 초록 안내 한 줄 — "<이름> 를 설치했습니다. 오른쪽 패널에서 열렸습니다." (열지 못했으면 앞 문장만)', () => {
-    const out = html(createElement(ExtensionInstalledNotice, { name: '테트리스 (데모)', opened: true }))
+  it('설치 직후 초록 안내 한 줄 — "<이름> 를 설치했습니다." (탭을 자동으로 열지 않는다)', () => {
+    const out = html(createElement(ExtensionInstalledNotice, { name: '테트리스 (데모)' }))
     expect(out).toContain('role="status"')
     expect(out).toContain('class="extensions-installed"')
-    expect(out).toContain(ko('extensions.installed', { name: '테트리스 (데모)' }))
-    expect(ko('extensions.installed', { name: '테트리스 (데모)' })).toBe('테트리스 (데모) 를 설치했습니다. 오른쪽 패널에서 열렸습니다.')
-    expect(html(createElement(ExtensionInstalledNotice, { name: 'x', opened: false }))).toContain(ko('extensions.installedOnly', { name: 'x' }))
+    expect(ko('extensions.installed', { name: '테트리스 (데모)' })).toBe('테트리스 (데모) 를 설치했습니다.')
+    expect(out).not.toContain('열렸습니다')
   })
 
   it('카드 상태는 on·off·mounting·failed 뿐 — 점선·삭제 예정·잠긴 스위치 없음', () => {
