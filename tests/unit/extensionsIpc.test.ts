@@ -54,7 +54,8 @@ describe('확장 IPC 채널', () => {
     expect(preload).toMatch(/callExtension: \(id, method, params, directory\) => ipcRenderer\.invoke\(Channel\.EXTENSIONS_CALL, id, method, params, directory\)/)
     const body = bridgeBody()
     expect(body).toMatch(/\(await ctx\.projects\.list\(\)\)\.find\(\(project\) => project\.path === directory\)/)
-    expect(body).toMatch(/ctx\.extensions\.call\(String\(id\), String\(method\), params, found && \{ directory: found\.path, name: found\.name \}\)/)
+    // 요청한 창(event.sender)을 넘긴다 — project.pickPath 의 고르기 창이 거기 붙는다 (이슈 #538)
+    expect(body).toMatch(/ctx\.extensions\.call\(String\(id\), String\(method\), params, found && \{ directory: found\.path, name: found\.name \}, event\.sender\)/)
   })
 
   it('요청 채널마다 preload 가 invoke 하고 main 의 브리지가 handle 한다', () => {

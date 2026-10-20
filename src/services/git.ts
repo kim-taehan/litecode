@@ -43,10 +43,10 @@ const LOG_LIMIT = 50
 const LOG_PAGE_SIZE = 200
 const LOG_PAGE_MAX = 500
 
-const READ_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', '-c', 'color.ui=false']
+export const READ_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', '-c', 'color.ui=false']
 const ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_MERGE_AUTOEDIT: 'no', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANGUAGE: 'C' }
 
-interface Run {
+export interface Run {
   code: number | null
   stdout: string
   stderr: string
@@ -204,6 +204,33 @@ export function parseRefs(decorate: string, remotes: ReadonlySet<string>): GitLo
   return refs
 }
 
+/** git 하나를 띄운다 — 안전 env(물음·창 없음, 선택적 잠금 없음, C 로케일)·기한·출력 상한. 던지지 않는다.
+ *  ctx.git 과 확장 통로(project.changedFiles, 이슈 #536·#538 — git 기능이 꺼져 있어도 돈다)가 같이 쓴다 */
+export function runGit(binary: string, cwd: string, args: readonly string[], opts: { timeoutMs?: number; stdin?: string } = {}): Promise<Run> {
+  let stdout = ''
+  let stderr = ''
+  const handle = execProgram({
+    file: binary,
+    args,
+    cwd,
+    timeoutMs: opts.timeoutMs ?? LOCAL_TIMEOUT_MS,
+    env: ENV,
+    stdin: opts.stdin,
+    onOutput(stream, text) {
+      if (stream === 'stdout') {
+        if (stdout.length < MAX_OUTPUT) stdout += text
+      } else if (stderr.length < MAX_OUTPUT) stderr += text
+    },
+  })
+  return handle.done.then((end) => ({
+    code: end.exitCode,
+    stdout,
+    stderr,
+    missing: end.status === 'error' && /ENOENT|EACCES/.test(end.error ?? ''),
+    timeout: end.status === 'timeout',
+  }))
+}
+
 const withStats = (files: GitFile[], stats: Map<string, { added: number; removed: number }>): GitFile[] => files.map((file) => ({ ...file, ...stats.get(file.path) }))
 
 export class GitService extends Service {
@@ -215,28 +242,7 @@ export class GitService extends Service {
   }
 
   private run(cwd: string, args: readonly string[], opts: { timeoutMs?: number; stdin?: string } = {}): Promise<Run> {
-    let stdout = ''
-    let stderr = ''
-    const handle = execProgram({
-      file: this.binary,
-      args,
-      cwd,
-      timeoutMs: opts.timeoutMs ?? LOCAL_TIMEOUT_MS,
-      env: ENV,
-      stdin: opts.stdin,
-      onOutput(stream, text) {
-        if (stream === 'stdout') {
-          if (stdout.length < MAX_OUTPUT) stdout += text
-        } else if (stderr.length < MAX_OUTPUT) stderr += text
-      },
-    })
-    return handle.done.then((end) => ({
-      code: end.exitCode,
-      stdout,
-      stderr,
-      missing: end.status === 'error' && /ENOENT|EACCES/.test(end.error ?? ''),
-      timeout: end.status === 'timeout',
-    }))
+    return runGit(this.binary, cwd, args, opts)
   }
 
   /** 저장소 루트 — git 이 없거나 저장소가 아니면 GitError */

@@ -15,5 +15,14 @@ export function systemExtensionsHost(userData: string): ExtensionsOptions {
       const chosen = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
       return chosen.canceled ? undefined : chosen.filePaths[0]
     },
+    // 확장의 project.pickPath (이슈 #538) — 파일·폴더를 같이 고른다. macOS 만 한 창에서 둘 다 되고, Windows·Linux 는 Electron 이 폴더 고르기 창으로 바꾼다
+    // (dialog.showOpenDialog 문서) — 거기서는 폴더 단위로만 고른다. 시작 폴더는 지금 프로젝트
+    async pickPaths(owner, { directory, multiple }) {
+      const win = owner ? BrowserWindow.fromWebContents(owner as WebContents) : null
+      const properties: ('openFile' | 'openDirectory' | 'multiSelections')[] = ['openFile', 'openDirectory', ...(multiple ? (['multiSelections'] as const) : [])]
+      const options = { defaultPath: directory, properties }
+      const chosen = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+      return chosen.canceled ? undefined : chosen.filePaths
+    },
   }
 }

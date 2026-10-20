@@ -212,6 +212,12 @@ export type ExtensionCallError =
   | 'file-unreadable'
   /** UTF-8 글이 아니다 */
   | 'not-text'
+  /** 같은 확장의 고르기 창이 이미 떠 있다 (project.pickPath, 이슈 #538) */
+  | 'busy'
+  /** project.changedFiles (이슈 #538) — git 을 찾지 못했다 · 프로젝트가 저장소가 아니다 · git 이 실패했다(기한 등) */
+  | 'git-unavailable'
+  | 'not-a-repo'
+  | 'git-failed'
   | 'io-failed'
 
 export type ExtensionCallResult = { ok: true; result: unknown } | { ok: false; error: ExtensionCallError; origin?: string }
