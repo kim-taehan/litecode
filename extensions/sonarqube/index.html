@@ -459,7 +459,7 @@ const GATE_METRIC = { new_coverage: '새 코드 커버리지', coverage: '커버
 
 const running = () => state.server?.phase === 'running'
 
-// --- 수정 요청 (이슈 #557) — 지금 프로젝트에 새 대화를 열고 입력창에 요청 글을 채운다(chat.compose). 보내기는 사용자가 누른다
+// --- 수정 요청 (이슈 #557·#559) — 지금 프로젝트에 새 대화를 열고 요청 글을 곧바로 보낸다(chat.compose send). 덧붙일 말은 그 대화에서 이어서
 const picked = new Set()
 
 function fixPrompt(issues, prefix) {
@@ -474,7 +474,7 @@ function fixPrompt(issues, prefix) {
 async function askFix(issues, prefix) {
   if (!issues.length) return
   try {
-    await call('chat.compose', { text: fixPrompt(issues, prefix) })
+    await call('chat.compose', { text: fixPrompt(issues, prefix), send: true })
     picked.clear()
     render()
   } catch (error) {

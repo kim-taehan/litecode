@@ -468,7 +468,7 @@ export const en = {
   'extensions.permission.project': 'Know the current project · open files',
   'extensions.permission.project.note': 'Reads the open project name and its files, and opens files in the right panel.',
   'extensions.permission.chat': 'Open a new chat',
-  'extensions.permission.chat.note': 'Opens a new chat in the current project and fills in the message. You press send yourself.',
+  'extensions.permission.chat.note': 'Opens a new chat in the current project and sends a request.',
   'extensions.permission.server': 'Run a server',
   'extensions.permission.server.note': 'Starts and stops a program bundled with the extension on this device, with your account\'s permissions. The app checks it at 127.0.0.1:{port}.',
   'extensions.confirm.cancel': 'Cancel',

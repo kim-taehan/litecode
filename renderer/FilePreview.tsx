@@ -997,7 +997,7 @@ function ExtensionTab({ id, name, hidden, directory }: { id: string; name: strin
         ask: (origin) => consent.ask(origin),
         allow: (origin) => window.litecode.allowExtensionOrigin(id, origin),
         open: (path, line) => openFilePreview(directory, path, line),
-        compose: (text) => requestCompose(directory, text),
+        compose: (text, send) => requestCompose(directory, text, send),
       }).then((reply) => frame.postMessage(bridgeReply(request.id, reply), '*'))
     }
     window.addEventListener('message', onMessage)

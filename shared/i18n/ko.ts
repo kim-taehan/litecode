@@ -490,7 +490,7 @@ export const ko = {
   'extensions.permission.project': '지금 프로젝트 알기 · 파일 열기',
   'extensions.permission.project.note': '열린 프로젝트의 이름과 파일을 읽고, 파일을 오른쪽 패널에 엽니다.',
   'extensions.permission.chat': '새 대화 열기',
-  'extensions.permission.chat.note': '지금 프로젝트에 새 대화를 열고 입력창에 요청 글을 채웁니다. 보내기는 직접 누릅니다.',
+  'extensions.permission.chat.note': '지금 프로젝트에 새 대화를 열고 요청을 보냅니다.',
   'extensions.permission.server': '서버 실행',
   'extensions.permission.server.note': '확장에 든 프로그램을 내 계정 권한으로 이 기기에서 띄우고 내립니다. 앱은 127.0.0.1:{port} 로 상태를 확인합니다.',
   'extensions.confirm.cancel': '취소',
