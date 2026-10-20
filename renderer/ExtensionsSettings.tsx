@@ -140,7 +140,7 @@ export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { prev
                   <PermissionIcon permission={permission} className="extension-permission__icon" />
                   <span className="extension-permission__text">
                     <span className="extension-permission__name">{t(`extensions.permission.${permission}`)}</span>
-                    <span className="extension-permission__note">{t(`extensions.permission.${permission}.note`)}</span>
+                    <span className="extension-permission__note">{t(`extensions.permission.${permission}.note`, { port: manifest?.server?.port ?? '' })}</span>
                   </span>
                 </li>
               ))}

@@ -148,6 +148,38 @@ describe('inspectZip — 상한', () => {
     expect(codes(result)).toEqual(['total-too-large'])
   })
 
+  // server 권한 확장만 상한이 크다 (이슈 #537, 실측 zip 727MB · 풀면 832MB · 최대 파일 126MB) — 권한은 extension.json 을 읽어야 안다
+  describe('server 권한 확장', () => {
+    const SERVER = JSON.stringify({
+      id: 'my-ext', name: 'n', description: 'd', version: '1.0.0', entry: 'index.js', permissions: ['server'],
+      server: { command: 'bin/java', args: [], port: 9000, health: { path: '/s', field: 'status', ready: 'UP' } },
+    })
+    const serverBase: ZipItem[] = [{ name: 'extension.json', data: SERVER }, { name: 'index.js', data: 'x' }, { name: 'bin/java', data: 'x'.repeat(500) }]
+    const tight = small({ zipBytes: 100, totalBytes: 300, fileBytes: 400, server: { zipBytes: 100_000, totalBytes: 100_000, fileBytes: 1_000 } })
+
+    it('기본 상한 값 — zip 1GB · 총 1200MB · 파일 하나 256MB', () => {
+      expect(EXTENSION_LIMITS.server).toEqual({ zipBytes: 1024 * 1024 * 1024, totalBytes: 1200 * 1024 * 1024, fileBytes: 256 * 1024 * 1024 })
+    })
+
+    it('server 권한이 있으면 server 상한으로 본다 — zip·총량·파일 하나가 기본 상한을 넘어도 통과', async () => {
+      expect((await inspect(serverBase, tight)).problems).toEqual([])
+    })
+
+    it('같은 크기라도 server 권한이 없으면 기본 상한으로 거절 (zip 이 크면 그것 하나만)', async () => {
+      const plain = [{ name: 'extension.json', data: MANIFEST }, ...serverBase.slice(1)]
+      const result = await inspect(plain, tight)
+      expect(codes(result)).toEqual(['zip-too-large'])
+      expect(result.manifest).toBeUndefined()
+      expect(codes(await inspect(plain, { ...tight, zipBytes: 100_000 }))).toEqual(['file-too-large', 'total-too-large'])
+    })
+
+    it('server 상한도 넘으면 server 상한으로 거절', async () => {
+      const result = await inspect(serverBase, { ...tight, server: { zipBytes: 100_000, totalBytes: 100_000, fileBytes: 450 } })
+      expect(result.problems).toEqual([{ code: 'file-too-large', params: { path: 'bin/java', bytes: 500, limit: 450 } }])
+      expect(codes(await inspect(serverBase, { ...tight, server: { zipBytes: 100, totalBytes: 100_000, fileBytes: 1_000 } }))).toEqual(['zip-too-large'])
+    })
+  })
+
   it('extension.json 이 manifest 상한을 넘으면 읽지 않는다', async () => {
     const result = await inspect(base, small({ manifestBytes: 10 }))
     expect(result.problems).toEqual([{ code: 'manifest-too-large', params: { bytes: MANIFEST_BYTES, limit: 10 } }])

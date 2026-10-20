@@ -10,7 +10,7 @@ import { isNotifyChannels, type NotifyChannels } from '../../shared/notifyChanne
 import { isSpeechLanguage, type SpeechLanguage } from '../../shared/speech.ts'
 import { isUpdateUrl } from '../../shared/updates.ts'
 import { isRunningTaskLimit } from '../../shared/tasks.ts'
-import type { ExtensionSwitches } from '../../shared/extensions.ts'
+import type { ExtensionServerSettings, ExtensionSwitches } from '../../shared/extensions.ts'
 import { isExtensionId } from './extensions/manifest.ts'
 
 // 앱 설정(설정 > 일반) — 언어·테마·대화 글자 크기 등. 정본은 이 서비스, 앱에서는 userData 의 settings.json 하나
@@ -51,6 +51,8 @@ export interface Settings {
   maxRunningTasks?: number
   /** 설치한 확장별 켜기 (이슈 #482) — false 로 적힌 확장만 꺼진다. 없으면 모두 켜짐 (ctx.extensions 가 쓴다). 키는 확장 id 형식만 */
   extensions?: ExtensionSwitches
+  /** 확장의 내장 서버 설정 (이슈 #537) — 앱을 켤 때 같이 띄우기·끌 때 같이 내리기. 확장 storage 가 아니라 여기 둔다(사용자가 패널에서 고르고 패널이 server.setOptions 로 쓴다). 키는 확장 id 형식만 */
+  extensionServers?: ExtensionServerSettings
 }
 
 /** 사용자 결정 2026-10-01: 영어·라이트. 글자 크기는 dsh 기본 14. 새 대화는 기본 모드(01k §6).
@@ -91,6 +93,18 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   maxRunningTasks: isRunningTaskLimit,
   extensions: (value): value is ExtensionSwitches =>
     !!value && typeof value === 'object' && !Array.isArray(value) && Object.entries(value).every(([id, on]) => isExtensionId(id) && typeof on === 'boolean'),
+  extensionServers: (value): value is ExtensionServerSettings =>
+    !!value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.entries(value).every(
+      ([id, options]) =>
+        isExtensionId(id) &&
+        !!options &&
+        typeof options === 'object' &&
+        !Array.isArray(options) &&
+        Object.entries(options).every(([key, on]) => (key === 'startWithApp' || key === 'stopWithApp') && typeof on === 'boolean'),
+    ),
 }
 const KEYS = Object.keys(valid) as (keyof Settings)[]
 

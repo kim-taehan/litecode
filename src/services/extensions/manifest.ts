@@ -3,6 +3,7 @@ import { EXTENSION_PERMISSIONS, type ExtensionManifest, type ExtensionProblem, t
 import { isBuiltinLanguage, isLanguage } from '../../../shared/i18n/index.ts'
 import { EXTENSION_LIMITS, type ExtensionLimits } from './limits.ts'
 import { isEntryPath } from './paths.ts'
+import { parseServerDeclaration } from './server.ts'
 
 // extension.json 검증 (이슈 #478, 설계 3절 필드 표). 사유를 모두 모아 돌려준다 — 첫 사유에서 멈추지 않는다.
 // 모르는 필드는 무시하지 않고 거절한다 (`permisions` 같은 오타가 조용히 넘어가면 권한 선언이 빠진 채 설치된다)
@@ -11,7 +12,7 @@ import { isEntryPath } from './paths.ts'
 export const MANIFEST_FILE = 'extension.json'
 
 const REQUIRED = ['id', 'name', 'description', 'version', 'entry'] as const
-const KNOWN: readonly string[] = [...REQUIRED, 'details', 'litecode', 'permissions', 'type', 'locale']
+const KNOWN: readonly string[] = [...REQUIRED, 'details', 'litecode', 'permissions', 'type', 'locale', 'server']
 const LOCALE_KNOWN: readonly string[] = ['language', 'label']
 /** 폴더 이름과 설정 키로 쓰이므로 엄격하게 */
 const ID = /^[a-z0-9-]{3,40}$/
@@ -85,7 +86,17 @@ export function checkManifest(
     }
   }
 
-  return problems.length > 0 ? { problems } : { manifest: raw as unknown as ExtensionManifest, problems }
+  // 내장 서버 (이슈 #537) — 선언과 server 권한은 같이만. 선언은 앱이 그대로 띄우는 것이라 검사 결과(정규화된 값)를 manifest 에 싣는다
+  let server: ExtensionManifest['server']
+  if (raw.server !== undefined) {
+    const parsed = parseServerDeclaration(raw.server)
+    if (!parsed.ok) problems.push({ code: 'server-invalid', params: { field: parsed.field } })
+    else server = parsed.server
+  }
+  const serverPermission = Array.isArray(raw.permissions) && raw.permissions.includes('server')
+  if ((raw.server !== undefined) !== serverPermission) problems.push({ code: 'server-mismatch', params: {} })
+
+  return problems.length > 0 ? { problems } : { manifest: { ...(raw as unknown as ExtensionManifest), ...(server && { server }) }, problems }
 }
 
 /** 언어 팩의 locale 선언 — { language, label }. 내장 언어(ko·en)는 대소문자와 상관없이 거절한다 */

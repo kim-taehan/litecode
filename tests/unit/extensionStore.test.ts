@@ -222,6 +222,28 @@ describe('install — 보류 설치', () => {
     await expect(unpackZip(file, path.join(dir, 'out2'), { ...EXTENSION_LIMITS, totalBytes: 300 })).rejects.toThrow(/total exceeds 300 bytes/)
   })
 
+  // 내장 서버(이슈 #537)는 동봉한 Java 런타임(bin/java·lib/jspawnhelper)을 실행해야 한다 — 서버 확장만 zip 의 실행 비트를 살린다
+  it('executable 을 주면 zip 의 실행 비트를 살린다 (아니면 실행 비트 없이 푼다)', async () => {
+    const file = path.join(dir, 'exec.zip')
+    await fs.writeFile(file, makeZip([...flat('my-ext', '1.0.0'), { name: 'bin/java', data: '#!', mode: 0o100755 }, { name: 'lib/a.jar', data: 'x', mode: 0o100644 }]))
+    await unpackZip(file, path.join(dir, 'kept'), EXTENSION_LIMITS, { executable: true })
+    expect((await fs.stat(path.join(dir, 'kept', 'bin', 'java'))).mode & 0o111).toBe(0o111)
+    expect((await fs.stat(path.join(dir, 'kept', 'lib', 'a.jar'))).mode & 0o111).toBe(0)
+    await unpackZip(file, path.join(dir, 'plain'))
+    expect((await fs.stat(path.join(dir, 'plain', 'bin', 'java'))).mode & 0o111).toBe(0)
+  })
+
+  it('server 권한 확장을 설치하면 실행 비트가 남는다', async () => {
+    const manifest = {
+      id: 'srv-ext', name: 'n', description: 'd', version: '1.0.0', entry: 'index.html', permissions: ['server'],
+      server: { command: 'bin/java', args: [], port: 9000, health: { path: '/s', field: 'status', ready: 'UP' } },
+    }
+    const staged = await stageItems([{ name: 'extension.json', data: JSON.stringify(manifest) }, { name: 'index.html', data: '<p>' }, { name: 'bin/java', data: '#!', mode: 0o100755 }])
+    expect(staged.result.problems).toEqual([])
+    expect(await store.install(staged.token!, APP)).toMatchObject({ ok: true })
+    expect((await fs.stat(path.join(pendingDir('srv-ext'), 'bin', 'java'))).mode & 0o111).toBe(0o111)
+  })
+
   it('보류 설치가 있는 id 를 다시 설치하면 새 것으로 바꾸고 op 는 하나만 남는다', async () => {
     await installItems(flat('my-ext', '1.0.0'))
     await installItems(flat('my-ext', '1.1.0'))

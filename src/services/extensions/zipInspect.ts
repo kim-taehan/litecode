@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises'
 import zlib from 'node:zlib'
 import yauzl from 'yauzl'
 import type { ExtensionInspection, ExtensionProblem } from '../../../shared/extensions.ts'
-import { EXTENSION_LIMITS, type ExtensionLimits } from './limits.ts'
+import { EXTENSION_LIMITS, limitsFor, type ExtensionLimits } from './limits.ts'
 import { parseLocaleBundle } from './locale.ts'
 import { checkManifest, MANIFEST_FILE } from './manifest.ts'
 import { isEntryPath, unsafePathReason } from './paths.ts'
@@ -31,8 +31,19 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
   const files = { count: 0, totalBytes: 0 }
   const problems: ExtensionProblem[] = []
 
+  // 크기 상한은 server 권한 확장이면 더 크다(이슈 #537, limitsFor) — 그 권한은 extension.json 을 읽어야 안다. 서버 확장의 상한도 넘으면 읽지 않고,
+  // 그 사이면 목록과 extension.json 을 읽은 뒤 그 확장의 상한으로 판정한다 (zip·총량·파일 하나)
   const { size } = await fs.stat(file)
-  if (size > limits.zipBytes) return { files, problems: [{ code: 'zip-too-large', params: { bytes: size, limit: limits.zipBytes } }] }
+  const zipTooLarge = (effective: ExtensionLimits) => ({ files, problems: [{ code: 'zip-too-large' as const, params: { bytes: size, limit: effective.zipBytes } }] })
+  if (size > Math.max(limits.zipBytes, limits.server.zipBytes)) return zipTooLarge(limits)
+  const oversized: Item[] = []
+  /** 그 상한으로 본 파일 하나·총량 사유 */
+  const sizeProblems = (effective: ExtensionLimits): ExtensionProblem[] => [
+    ...oversized
+      .filter((item) => item.entry.uncompressedSize > effective.fileBytes)
+      .map((item) => ({ code: 'file-too-large' as const, params: { path: item.name, bytes: item.entry.uncompressedSize, limit: effective.fileBytes } })),
+    ...(files.totalBytes > effective.totalBytes ? [{ code: 'total-too-large' as const, params: { bytes: files.totalBytes, limit: effective.totalBytes } }] : []),
+  ]
 
   let zip: yauzl.ZipFile | undefined
   try {
@@ -56,22 +67,23 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
       seen.add(key)
 
       const bytes = item.entry.uncompressedSize
-      if (bytes > limits.fileBytes) problems.push({ code: 'file-too-large', params: { path: item.name, bytes, limit: limits.fileBytes } })
+      if (bytes > Math.min(limits.fileBytes, limits.server.fileBytes)) oversized.push(item)
       files.totalBytes += bytes
       if (!item.isDir) files.count++
     }
-    if (files.totalBytes > limits.totalBytes) problems.push({ code: 'total-too-large', params: { bytes: files.totalBytes, limit: limits.totalBytes } })
 
     const kept = items.filter((item) => !isFinderJunk(item.name))
     const located = locateManifest(kept)
     if ('problem' in located) {
-      problems.push(located.problem)
+      if (size > limits.zipBytes) return zipTooLarge(limits)
+      problems.push(...sizeProblems(limits), located.problem)
       return { files, problems }
     }
     const { item: manifestItem, root } = located
     const manifestBytes = manifestItem.entry.uncompressedSize
     if (manifestBytes > limits.manifestBytes) {
-      problems.push({ code: 'manifest-too-large', params: { bytes: manifestBytes, limit: limits.manifestBytes } })
+      if (size > limits.zipBytes) return zipTooLarge(limits)
+      problems.push(...sizeProblems(limits), { code: 'manifest-too-large', params: { bytes: manifestBytes, limit: limits.manifestBytes } })
       return { files, problems }
     }
 
@@ -80,9 +92,13 @@ export async function inspectZip(file: string, appVersion: string, limits: Exten
       value = JSON.parse(await readEntry(zip, manifestItem))
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error
-      problems.push({ code: 'manifest-invalid', params: { message: error.message } })
+      if (size > limits.zipBytes) return zipTooLarge(limits)
+      problems.push(...sizeProblems(limits), { code: 'manifest-invalid', params: { message: error.message } })
       return { files, problems }
     }
+    const effective = limitsFor(limits, (value as { permissions?: unknown } | null)?.permissions)
+    if (size > effective.zipBytes) return zipTooLarge(effective)
+    problems.push(...sizeProblems(effective))
     const checked = checkManifest(value, appVersion, limits)
     problems.push(...checked.problems)
 

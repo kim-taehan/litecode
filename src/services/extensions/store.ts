@@ -10,7 +10,7 @@ import type {
 } from '../../../shared/extensions.ts'
 import type { LocaleMessages } from '../../../shared/i18n/index.ts'
 import { readJsonFileSync, writeJsonFileSync } from '../jsonFile.ts'
-import { EXTENSION_LIMITS } from './limits.ts'
+import { EXTENSION_LIMITS, limitsFor } from './limits.ts'
 import { parseLocaleBundle } from './locale.ts'
 import { checkManifest, isExtensionId, MANIFEST_FILE } from './manifest.ts'
 import { isEntryPath } from './paths.ts'
@@ -194,7 +194,8 @@ export class ExtensionStore {
 
     const temp = path.join(this.pendingInstallDir, `${id}${TEMP_MARK}${token}`)
     try {
-      await unpackZip(staged, temp)
+      // server 권한 확장은 상한이 크고(이슈 #537) 동봉한 런타임을 실행해야 해서 실행 비트를 살린다
+      await unpackZip(staged, temp, limitsFor(EXTENSION_LIMITS, inspection.manifest.permissions), { executable: inspection.manifest.server !== undefined })
     } catch (error) {
       await fs.rm(temp, { recursive: true, force: true })
       return failure('unpack-failed', { message: messageOf(error) })
