@@ -47,7 +47,8 @@ import './settings.ts'
 // 처리한다. 확장이 남기는 값·허용한 주소는 data/<id>/ (extensions/data.ts), 지우면 같이 지운다. 허용 목록에 없는 주소는 요청하지 않고 consent-required —
 // 화면이 동의 띠로 묻고 허용하면 allowOrigin 뒤에 다시 부른다(메인은 묻는 동안의 상태를 쥐지 않는다). 통로 일은 큰 줄에 서지 않는다(15초 요청이
 // 설치·켜고 끄기를 막지 않게) — 자료 파일 쓰기만 자기 줄(dataQueue)에 서고, 삭제의 자료 지우기도 그 줄에 서서 쓰는 중인 값이 되살아나지 않는다.
-// 내장 서버(#537, server 권한): manifest 의 server 선언대로 앱이 띄우고 내린다(extensions/servers.ts). 통로 메서드 server.status·start·stop·setOptions.
+// 내장 서버(#537, server 권한): manifest 의 server 선언대로 앱이 띄우고 내린다(extensions/servers.ts). 통로 메서드 server.status·start·stop·setOptions,
+// 그리고 SonarQube 분석(#545) server.project·analyze.
 // 앱을 켤 때 — 켜진 서버 확장 중 설정 startWithApp 이거나 지난 실행의 서버가 남은 것(stopWithApp 끔·강제 종료)을 한 번 띄운다(남은 서버는 다시 잡는다).
 // 끄거나 깨지거나 지우거나 업그레이드하면 내린다. 앱이 꺼질 때는 stopWithApp 인 서버에 정상 종료 신호를 보낸다(dispose).
 // network.fetch 가 그 확장의 내장 서버 주소(http://127.0.0.1:<port>)로 가면 동의를 묻지 않고, 패널이 준 authorization 을 버리고 관리자 토큰을 붙인다.
@@ -118,6 +119,8 @@ const METHODS = new Map<string, ExtensionPermission | null>([
   ['server.start', 'server'],
   ['server.stop', 'server'],
   ['server.setOptions', 'server'],
+  ['server.project', 'server'],
+  ['server.analyze', 'server'],
 ])
 
 type CallFailure = { ok: false; error: ExtensionCallError; origin?: string }
@@ -308,6 +311,9 @@ export class ExtensionsService extends Service {
         case 'server.stop':
         case 'server.setOptions':
           return await this.server(id, manifest, method, params)
+        case 'server.project':
+        case 'server.analyze':
+          return await this.analysis(id, manifest, method, params, project)
         default:
           return await this.project(method, params, project)
       }
@@ -625,6 +631,18 @@ export class ExtensionsService extends Service {
       this.ctx.settings.set({ extensionServers: { ...others, [id]: { ...previous, ...patch } } })
     }
     return done(this.servers.status(id, server, this.serverOptions(id)))
+  }
+
+  /** server.project · server.analyze (이슈 #545) — 지금 프로젝트의 SonarQube 키, [분석]. 분석의 성공·실패는 통로 실패가 아니라 결과 값({ ok, … })으로 준다
+   *  (실패 사유인 스캐너 출력을 패널에 보이려고 — 통로 실패는 코드만 싣는다). 분석은 끝날 때까지 기다린다(전체 15초 남짓, 기한 15분) */
+  private async analysis(id: string, manifest: ExtensionManifest, method: string, params: unknown, project: CallProject | undefined): Promise<ExtensionCallResult> {
+    const server = manifest.server
+    if (!server) return fail('permission-missing')
+    if (!project) return fail('no-project')
+    if (method === 'server.project') return done({ name: project.name, projectKey: this.servers.projectKey(project) })
+    const paths = typeof params === 'object' && params !== null ? (params as { paths?: unknown }).paths : undefined
+    if (paths !== undefined && !(Array.isArray(paths) && paths.every((item) => typeof item === 'string'))) return fail('params-invalid')
+    return done(await this.servers.analyze(id, server, this.files.installedDir(id), project, paths as string[] | undefined))
   }
 
   private serverOptions(id: string): ExtensionServerOptions {

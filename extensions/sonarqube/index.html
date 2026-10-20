@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SonarQube</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1c1f26;--sub:#6b7180;--faint:#9aa0ab;--line:#e3e5ea;--soft:#eef0f4;--accent:#4176e6;--ok:#23774a;--ok-bg:#e9f6ee;--bad:#a12a2f;--bad-bg:#fdecec;--warn:#9a5b00;--warn-bg:#fff3e0;--btn:#1c1f26;--btn-text:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#16181d;--card:#1f2228;--text:#e8eaf0;--sub:#a3a9b5;--faint:#7c8290;--line:#2e323a;--soft:#2a2e36;--accent:#7aa2ff;--ok:#6fd39b;--ok-bg:#1d3327;--bad:#ff8a8f;--bad-bg:#3a2224;--warn:#f5b860;--warn-bg:#3a2e1c;--btn:#e8eaf0;--btn-text:#16181d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",system-ui,sans-serif}
+main{display:flex;flex-direction:column;gap:12px;padding:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px}
+.pad{padding:14px 16px}
+.row{display:flex;align-items:center;gap:8px}
+.grow{flex:1;min-width:0}
+h1{margin:0;font-size:15px;font-weight:600}
+.sub{color:var(--sub);font-size:12px}
+.faint{color:var(--faint)}
+button{font:inherit;cursor:pointer;border-radius:8px;height:30px;padding:0 12px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+button.primary{border:0;background:var(--btn);color:var(--btn-text);font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.chip{height:28px;padding:0 12px;border-radius:14px;font-size:12.5px}
+.chip[aria-checked=true]{border:0;background:var(--btn);color:var(--btn-text)}
+.path{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 4px 0 10px;border-radius:6px;background:var(--soft);font:12px ui-monospace,Menlo,monospace}
+.path button{height:20px;width:20px;padding:0;border:0;background:transparent;color:var(--faint)}
+.steps{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--sub);margin-top:10px}
+.steps .now{color:var(--text)}
+.bar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden;margin-top:10px}
+.bar>i{display:block;height:6px;background:var(--accent);transition:width .3s}
+.gate{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px}
+.gate.ok{background:var(--ok-bg);color:var(--ok)}
+.gate.bad{background:var(--bad-bg);color:var(--bad)}
+.gate b{font-size:14px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.metric{padding:10px;border:1px solid var(--line);border-radius:10px}
+.metric span{display:block;font-size:11.5px;color:var(--sub)}
+.metric b{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.issue{display:flex;gap:10px;padding:10px 16px;border-top:1px solid var(--line)}
+.sev{flex-shrink:0;margin-top:2px;height:18px;padding:0 6px;border-radius:4px;font-size:11px;font-weight:600;line-height:18px}
+.sev.high{background:var(--bad-bg);color:var(--bad)}
+.sev.mid{background:var(--warn-bg);color:var(--warn)}
+.sev.low{background:var(--soft);color:var(--sub)}
+.file{border:0;background:none;padding:0;height:auto;color:var(--accent);font:12px ui-monospace,Menlo,monospace;text-align:left;cursor:pointer}
+.error{padding:8px 10px;border-radius:8px;background:var(--bad-bg);color:var(--bad);font-size:12.5px;white-space:pre-wrap;word-break:break-word}
+.note{padding:8px 10px;border-radius:8px;background:var(--soft);color:var(--sub);font-size:12.5px}
+label.check{display:flex;align-items:center;gap:8px;font-size:12.5px}
+pre{margin:0;max-height:160px;overflow:auto;font:11px ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<main id="app"><div class="card pad sub">불러오는 중…</div></main>
+<script>
+// SonarQube 확장 패널 (이슈 #545) — 확장에 든 SonarQube 를 이 기기에서 띄우고, 지금 프로젝트를 분석해 결과를 본다.
+// 앱과는 통로로만 말한다: parent.postMessage({ litecode: 1, id, method, params }) → { litecode: 1, id, ok, result | error }.
+// 내장 서버로 가는 network.fetch 는 동의 없이 닿고 인증은 앱이 붙인다 — 이 패널은 토큰을 모른다.
+
+let seq = 0
+const waiting = new Map()
+window.addEventListener('message', (event) => {
+  const data = event.data
+  if (event.source !== parent || !data || data.litecode !== 1 || !waiting.has(data.id)) return
+  const { resolve } = waiting.get(data.id)
+  waiting.delete(data.id)
+  resolve(data)
+})
+/** 통로 호출 — 실패면 Error(code) 를 던진다 */
+function call(method, params) {
+  const id = ++seq
+  return new Promise((resolve, reject) => {
+    waiting.set(id, { resolve: (reply) => (reply.ok ? resolve(reply.result) : reject(new Error(reply.error))) })
+    parent.postMessage({ litecode: 1, id, method, params }, '*')
+  })
+}
+
+const state = {
+  server: undefined, // server.status 결과
+  project: undefined, // { name, projectKey }
+  scope: 'all', // all | paths | changes
+  paths: [],
+  changes: undefined, // { base, files } | { error }
+  analysis: undefined, // { phase: 'scanning' | 'processing' | 'done' | 'failed', detail }
+  results: undefined, // { key, gate, measures, issues, total, missing } | { error }
+  error: undefined,
+}
+
+const PHASES = ['port', 'launching', 'starting', 'admin', 'running']
+const PHASE_TEXT = { port: '포트 확인', launching: '서버 띄우기', starting: '시작하는 중', admin: '관리자 토큰 만들기', running: '실행 중' }
+const FAILURE_TEXT = {
+  'port-in-use': '다른 프로그램이 포트를 쓰고 있습니다',
+  'spawn-failed': '서버 실행 파일을 띄우지 못했습니다',
+  exited: '서버가 스스로 꺼졌습니다',
+  'not-ready': '제한 시간 안에 서버가 준비되지 않았습니다',
+  'admin-failed': '관리자 토큰을 만들지 못했습니다',
+}
+const ERROR_TEXT = {
+  'no-project': '열린 프로젝트가 없습니다',
+  'server-not-running': '서버가 실행 중이 아닙니다',
+  'scope-empty': '고른 범위에 분석할 파일이 없습니다',
+  'analysis-failed': '분석에 실패했습니다',
+  busy: '이미 분석하고 있습니다',
+  'git-unavailable': 'git 이 없어 내 변경을 알 수 없습니다',
+  'not-a-repo': '이 프로젝트는 git 저장소가 아닙니다',
+  'too-many-changes': '바뀐 파일이 너무 많습니다 — 폴더로 골라 주세요',
+}
+const text = (code) => ERROR_TEXT[code] || code
+
+const el = (tag, attrs = {}, ...children) => {
+  const node = document.createElement(tag)
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === undefined || value === false) continue
+    if (key.startsWith('on')) node.addEventListener(key.slice(2), value)
+    else if (key === 'class') node.className = value
+    else node.setAttribute(key, value === true ? '' : value)
+  }
+  for (const child of children.flat()) if (child !== undefined && child !== null && child !== false) node.append(child)
+  return node
+}
+
+// --- 서버 ---
+
+async function refreshServer() {
+  try {
+    state.server = await call('server.status')
+  } catch (error) {
+    state.error = error.message
+  }
+  render()
+}
+
+async function serverAction(method) {
+  try {
+    state.server = await call(method)
+  } catch (error) {
+    state.error = error.message
+  }
+  render()
+}
+
+async function setOption(key, value) {
+  state.server = await call('server.setOptions', { [key]: value })
+  render()
+}
+
+let pollTimer
+function schedule() {
+  clearTimeout(pollTimer)
+  const phase = state.server?.phase
+  const busy = phase && phase !== 'stopped' && phase !== 'failed' && phase !== 'running'
+  pollTimer = setTimeout(async () => {
+    const before = state.server?.phase
+    await refreshServer()
+    if (before !== 'running' && state.server?.phase === 'running') loadResults()
+    schedule()
+  }, busy ? 1000 : 5000)
+}
+
+// --- 내장 서버 요청 ---
+
+async function api(pathAndQuery) {
+  const response = await call('network.fetch', { url: state.server.url + pathAndQuery, method: 'GET' })
+  if (response.status === 404) return undefined
+  if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
+  return JSON.parse(response.body)
+}
+
+const resultKey = () => (state.scope === 'all' ? state.project.projectKey : `${state.project.projectKey}__scope`)
+
+async function loadResults() {
+  if (!state.project || state.server?.phase !== 'running') return
+  const key = resultKey()
+  try {
+    const q = encodeURIComponent(key)
+    const component = await api(`/api/components/show?component=${q}`)
+    if (!component) {
+      state.results = { key, missing: true }
+      return render()
+    }
+    const [gate, measures, issues] = await Promise.all([
+      api(`/api/qualitygates/project_status?projectKey=${q}`),
+      api(`/api/measures/component?component=${q}&metricKeys=bugs,vulnerabilities,coverage,duplicated_lines_density`),
+      api(`/api/issues/search?componentKeys=${q}&resolved=false&ps=100&s=SEVERITY&asc=false`),
+    ])
+    const values = Object.fromEntries((measures?.component?.measures ?? []).map((m) => [m.metric, m.value]))
+    state.results = { key, analysisDate: component.component?.analysisDate, gate: gate?.projectStatus, values, issues: issues?.issues ?? [], total: issues?.paging?.total ?? issues?.total ?? 0 }
+  } catch (error) {
+    state.results = { key, error: error.message }
+  }
+  render()
+}
+
+// --- 범위·분석 ---
+
+async function setScope(scope) {
+  state.scope = scope
+  state.results = undefined
+  if (scope === 'changes' && !state.changes) {
+    try {
+      state.changes = await call('project.changedFiles')
+    } catch (error) {
+      state.changes = { error: error.message }
+    }
+  }
+  render()
+  loadResults()
+}
+
+async function pickPaths() {
+  try {
+    const picked = await call('project.pickPath', { multiple: true })
+    for (const p of picked.paths ?? []) if (p !== './' && !state.paths.includes(p)) state.paths.push(p)
+  } catch (error) {
+    state.error = error.message
+  }
+  render()
+}
+
+function scopePaths() {
+  if (state.scope === 'paths') return state.paths
+  if (state.scope === 'changes') return state.changes?.files ?? []
+  return undefined
+}
+
+async function analyze() {
+  const paths = scopePaths()
+  state.analysis = { phase: 'scanning' }
+  render()
+  let result
+  try {
+    result = await call('server.analyze', paths === undefined ? {} : { paths })
+  } catch (error) {
+    state.analysis = { phase: 'failed', detail: text(error.message) }
+    return render()
+  }
+  if (!result.ok) {
+    state.analysis = { phase: 'failed', detail: text(result.error), log: result.detail }
+    return render()
+  }
+  state.analysis = { phase: 'processing', skipped: result.skipped }
+  render()
+  // 서버가 올린 결과를 처리하는 동안 기다린다
+  for (let i = 0; result.taskId && i < 300; i++) {
+    const task = await api(`/api/ce/task?id=${encodeURIComponent(result.taskId)}`).catch(() => undefined)
+    const status = task?.task?.status
+    if (status === 'SUCCESS') break
+    if (status === 'FAILED' || status === 'CANCELED') {
+      state.analysis = { phase: 'failed', detail: `서버가 결과를 처리하지 못했습니다 (${status})`, log: task?.task?.errorMessage }
+      return render()
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  state.analysis = { phase: 'done', skipped: result.skipped }
+  await loadResults()
+}
+
+// --- 그리기 ---
+
+function serverCard() {
+  const s = state.server
+  const phase = s.phase
+  const index = PHASES.indexOf(phase)
+  const busy = index >= 0 && phase !== 'running'
+  const dot = phase === 'running' ? 'var(--ok)' : phase === 'failed' ? 'var(--bad)' : busy || phase === 'stopping' ? '#e0a100' : 'var(--faint)'
+  const title = phase === 'running' ? '실행 중' : phase === 'failed' ? '실패' : phase === 'stopping' ? '멈추는 중…' : phase === 'stopped' ? '꺼져 있음' : '시작하는 중…'
+  return el(
+    'section',
+    { class: 'card pad' },
+    el(
+      'div',
+      { class: 'row' },
+      el('span', { style: `width:8px;height:8px;border-radius:4px;background:${dot}` }),
+      el('span', { class: 'grow' }, el('b', {}, `SonarQube 서버 · ${title}`), busy ? el('span', { class: 'faint' }, ' 1분 남짓 걸립니다') : null),
+      phase === 'running' || busy
+        ? el('button', { onclick: () => serverAction('server.stop'), disabled: phase === 'stopping' }, '멈추기')
+        : el('button', { class: 'primary', onclick: () => serverAction('server.start'), disabled: phase === 'stopping' }, '띄우기'),
+    ),
+    busy
+      ? [
+          el('div', { class: 'bar' }, el('i', { style: `width:${Math.round(((index + 0.5) / PHASES.length) * 100)}%` })),
+          el(
+            'div',
+            { class: 'steps' },
+            PHASES.slice(0, -1).map((p, i) => el('span', { class: i === index ? 'now' : '' }, `${i < index ? '✓' : i === index ? '…' : '·'} ${PHASE_TEXT[p]}${i === index && s.detail ? ` (${s.detail})` : ''}`)),
+          ),
+        ]
+      : null,
+    phase === 'failed' ? el('div', { class: 'error', style: 'margin-top:10px' }, `${FAILURE_TEXT[s.error] || s.error}${s.detail ? ` — ${s.detail}` : ''}`) : null,
+    el(
+      'div',
+      { class: 'sub', style: 'margin-top:10px;display:flex;flex-direction:column;gap:4px' },
+      el('span', {}, `주소 ${s.url} · 이 기기에서만 접속 · 메모리 약 2GB`),
+      el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: s.options.startWithApp, onchange: (e) => setOption('startWithApp', e.target.checked) }), '앱을 켤 때 같이 띄우기'),
+      el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: s.options.stopWithApp, onchange: (e) => setOption('stopWithApp', e.target.checked) }), '앱을 끌 때 같이 내리기'),
+    ),
+  )
+}
+
+function scopeRow() {
+  const chip = (value, label) => el('button', { class: 'chip', role: 'radio', 'aria-checked': String(state.scope === value), onclick: () => setScope(value) }, label)
+  const rows = [el('div', { class: 'row', role: 'radiogroup', 'aria-label': '검토 범위' }, el('span', { class: 'sub', style: 'width:32px' }, '범위'), chip('all', '전체'), chip('paths', '폴더·파일'), chip('changes', '내 변경'))]
+  if (state.scope === 'paths') {
+    rows.push(
+      el(
+        'div',
+        { class: 'row', style: 'flex-wrap:wrap;padding-left:40px' },
+        state.paths.map((p) => el('span', { class: 'path' }, p, el('button', { 'aria-label': `${p} 빼기`, onclick: () => ((state.paths = state.paths.filter((x) => x !== p)), render()) }, '×'))),
+        el('button', { style: 'height:26px;border-style:dashed;font-size:12px', onclick: pickPaths }, '+ 폴더·파일 고르기'),
+      ),
+    )
+  }
+  if (state.scope === 'changes') {
+    const c = state.changes
+    rows.push(el('div', { class: 'sub', style: 'padding-left:40px' }, !c ? '불러오는 중…' : c.error ? text(c.error) : `바뀐 파일 ${c.files.length}개${c.base ? ` · ${c.base} 대비` : ' · 커밋 안 한 것만'}`))
+  }
+  return el('div', { style: 'display:flex;flex-direction:column;gap:8px;padding:12px 16px;border-top:1px solid var(--line)' }, rows)
+}
+
+function analysisNote() {
+  const a = state.analysis
+  if (!a) return null
+  if (a.phase === 'scanning') return el('div', { class: 'note' }, '분석하는 중… (전체는 수십 초 걸립니다)')
+  if (a.phase === 'processing') return el('div', { class: 'note' }, '서버가 결과를 정리하는 중…')
+  if (a.phase === 'failed') return el('div', { class: 'error' }, a.detail, a.log ? el('pre', {}, a.log) : null)
+  if (a.skipped?.length) return el('div', { class: 'note' }, `없는 경로는 빼고 분석했습니다: ${a.skipped.join(', ')}`)
+  return null
+}
+
+const SEVERITY = { BLOCKER: ['높음', 'high'], CRITICAL: ['높음', 'high'], MAJOR: ['보통', 'mid'], MINOR: ['낮음', 'low'], INFO: ['낮음', 'low'] }
+const TYPE = { BUG: '버그', VULNERABILITY: '취약점', CODE_SMELL: '코드 냄새', SECURITY_HOTSPOT: '보안 검토' }
+const GATE_METRIC = { new_coverage: '새 코드 커버리지', coverage: '커버리지', new_bugs: '새 버그', new_vulnerabilities: '새 취약점', new_duplicated_lines_density: '새 코드 중복', new_security_hotspots_reviewed: '보안 검토율', new_reliability_rating: '새 코드 신뢰성', new_security_rating: '새 코드 보안', new_maintainability_rating: '새 코드 유지보수성', new_violations: '새 이슈' }
+
+function results() {
+  const r = state.results
+  if (!r) return el('div', { class: 'sub pad' }, '결과를 불러오는 중…')
+  if (r.error) return el('div', { class: 'pad' }, el('div', { class: 'error' }, `결과를 읽지 못했습니다 — ${r.error}`))
+  if (r.missing) return el('div', { class: 'pad sub' }, state.scope === 'all' ? '아직 분석하지 않았습니다. [분석] 을 누르세요.' : '이 범위로 아직 분석하지 않았습니다. [분석] 을 누르세요.')
+  const failed = (r.gate?.conditions ?? []).filter((c) => c.status === 'ERROR')
+  const gateOk = r.gate?.status === 'OK'
+  const prefix = `${r.key}:`
+  const v = r.values
+  const fmt = (value, unit = '') => (value === undefined ? '—' : `${value}${unit}`)
+  return [
+    el(
+      'div',
+      { class: 'pad', style: 'display:flex;flex-direction:column;gap:12px' },
+      r.gate
+        ? el('div', { class: `gate ${gateOk ? 'ok' : 'bad'}` }, el('span', { class: 'grow' }, el('b', {}, gateOk ? '품질 게이트 통과' : '품질 게이트 실패'), failed.length ? el('div', { style: 'font-size:12px' }, failed.map((c) => `${GATE_METRIC[c.metricKey] || c.metricKey} ${c.actualValue} (기준 ${c.errorThreshold})`).join(' · ')) : null))
+        : null,
+      el('div', { class: 'metrics' }, [
+        el('div', { class: 'metric' }, el('span', {}, '버그'), el('b', {}, fmt(v.bugs))),
+        el('div', { class: 'metric' }, el('span', {}, '취약점'), el('b', {}, fmt(v.vulnerabilities))),
+        el('div', { class: 'metric' }, el('span', {}, '커버리지'), el('b', {}, fmt(v.coverage, '%'))),
+        el('div', { class: 'metric' }, el('span', {}, '중복'), el('b', {}, fmt(v.duplicated_lines_density, '%'))),
+      ]),
+      el('div', { class: 'row' }, el('b', { class: 'grow' }, `열린 이슈 ${r.total}`), r.total > r.issues.length ? el('span', { class: 'sub' }, `위 ${r.issues.length}개만`) : null),
+    ),
+    r.issues.map((issue) => {
+      const [label, tone] = SEVERITY[issue.severity] || ['낮음', 'low']
+      const file = issue.component.startsWith(prefix) ? issue.component.slice(prefix.length) : issue.component
+      return el(
+        'div',
+        { class: 'issue' },
+        el('span', { class: `sev ${tone}` }, label),
+        el(
+          'span',
+          { class: 'grow', style: 'display:flex;flex-direction:column;gap:3px' },
+          el('span', {}, issue.message),
+          el('button', { class: 'file', onclick: () => call('project.openFile', { path: file, ...(issue.line ? { line: issue.line } : {}) }).catch(() => {}) }, `${file}${issue.line ? `:${issue.line}` : ''}`),
+        ),
+        el('span', { class: 'sub', style: 'flex-shrink:0' }, TYPE[issue.type] || ''),
+      )
+    }),
+  ]
+}
+
+function render() {
+  const app = document.getElementById('app')
+  const parts = []
+  if (state.error) parts.push(el('div', { class: 'error' }, text(state.error)))
+  if (state.server) parts.push(serverCard())
+  if (state.server?.phase === 'running' && state.project) {
+    const analyzing = state.analysis?.phase === 'scanning' || state.analysis?.phase === 'processing'
+    const when = state.results?.analysisDate ? new Date(state.results.analysisDate).toLocaleString() : undefined
+    parts.push(
+      el(
+        'section',
+        { class: 'card' },
+        el(
+          'div',
+          { class: 'row pad' },
+          el('div', { class: 'grow' }, el('h1', {}, state.project.projectKey), el('div', { class: 'sub' }, when ? `마지막 분석 ${when}` : state.project.name, state.scope !== 'all' ? ' · 범위 결과는 따로 보관합니다' : '')),
+          el('button', { class: 'primary', onclick: analyze, disabled: analyzing || (state.scope === 'paths' && state.paths.length === 0) || (state.scope === 'changes' && !(state.changes?.files?.length)) }, analyzing ? '분석 중…' : '분석'),
+          el('button', { 'aria-label': '다시 읽기', onclick: loadResults }, '↻'),
+        ),
+        scopeRow(),
+        analysisNote() ? el('div', { style: 'padding:0 16px 12px' }, analysisNote()) : null,
+        el('div', { style: 'border-top:1px solid var(--line)' }, results()),
+      ),
+    )
+  }
+  app.replaceChildren(...parts)
+}
+
+async function start() {
+  try {
+    state.project = await call('server.project')
+  } catch (error) {
+    state.error = error.message
+  }
+  await refreshServer()
+  if (state.server?.phase === 'running') loadResults()
+  schedule()
+}
+start()
+</script>
+</body>
+</html>

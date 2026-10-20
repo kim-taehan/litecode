@@ -52,6 +52,15 @@ http.createServer((req, res) => {
 }).listen(Number(process.argv[2]), '127.0.0.1')
 `
 
+/** 가짜 스캐너 (이슈 #545) — 받은 인자·env 를 작업 폴더의 seen.txt 에 적고 report-task.txt 를 남긴다. 소스에 fail 이 있으면 출력을 내고 실패 */
+const SCANNER = `#!/bin/sh
+for a in "$@"; do case "$a" in -Dsonar.working.directory=*) work="\${a#*=}";; esac; done
+mkdir -p "$work"
+{ printf '%s\\n' "$@"; echo "TOKEN=$SONAR_TOKEN"; echo "HOME=$SONAR_USER_HOME"; echo "JAVA=$JAVA_HOME"; } > "$work/seen.txt"
+case "$*" in *fail*) echo "ERROR: 분석 실패 사유"; exit 2;; esac
+printf 'projectKey=x\\nceTaskId=TASK-1\\n' > "$work/report-task.txt"
+`
+
 let dir: string
 let root: string
 let port: number
@@ -106,6 +115,7 @@ async function install(id = 'srv-ext', extra: Record<string, unknown> = {}): Pro
       { name: 'index.html', data: '<p>x</p>' },
       { name: 'fake.mjs', data: FAKE },
       { name: 'bin/server', data: script, mode: 0o100755 },
+      { name: 'server/scanner/bin/sonar-scanner', data: SCANNER, mode: 0o100755 },
     ]),
   )
   const store = new ExtensionStore(root)
@@ -232,6 +242,71 @@ describe('server.* 통로', () => {
     for (const params of [{}, { startWithApp: 'yes' }, { port: 1 }, null, [true]]) {
       expect(await ext.call('srv-ext', 'server.setOptions', params), JSON.stringify(params)).toEqual({ ok: false, error: 'params-invalid' })
     }
+  })
+})
+
+describe('server.project · server.analyze (이슈 #545)', () => {
+  const project = (): { directory: string; name: string } => ({ directory: path.join(dir, 'proj'), name: 'my proj' })
+  const seen = async (): Promise<string> => fs.readFile(path.join(root, 'data', 'srv-ext', 'server', 'scanner-work', 'seen.txt'), 'utf8')
+
+  it('project — 프로젝트 이름에서 만든 키(sonar-project.properties 가 없을 때). 프로젝트가 없으면 no-project', async () => {
+    await install()
+    await fs.mkdir(project().directory)
+    const { ext } = await boot()
+    expect(await ext.call('srv-ext', 'server.project', undefined, project())).toEqual({ ok: true, result: { name: 'my proj', projectKey: 'my-proj' } })
+    expect(await ext.call('srv-ext', 'server.analyze', undefined)).toEqual({ ok: false, error: 'no-project' })
+  })
+
+  it('서버가 안 떠 있으면 server-not-running (통로는 성공, 결과 값으로)', async () => {
+    await install()
+    await fs.mkdir(project().directory)
+    const { ext } = await boot()
+    expect(await ext.call('srv-ext', 'server.analyze', undefined, project())).toEqual({ ok: true, result: { ok: false, error: 'server-not-running' } })
+  })
+
+  it('전체 분석 — 동봉 스캐너를 토큰·캐시·런타임 env 로 띄우고 작업 id 를 준다. 토큰은 인자에 없다', async () => {
+    await install()
+    await fs.mkdir(path.join(project().directory, 'src'), { recursive: true })
+    const { ext } = await boot()
+    await ext.call('srv-ext', 'server.start', undefined)
+    await until(async () => (await status(ext)).phase === 'running')
+    expect(await ext.call('srv-ext', 'server.analyze', {}, project())).toEqual({ ok: true, result: { ok: true, projectKey: 'my-proj', skipped: [], taskId: 'TASK-1' } })
+    const text = await seen()
+    expect(text).toContain(`-Dsonar.host.url=http://127.0.0.1:${port}`)
+    expect(text).toContain('-Dsonar.projectKey=my-proj\n-Dsonar.sources=.')
+    expect(text).toMatch(/TOKEN=squ_\w+/)
+    expect(text).toContain(`HOME=${path.join(root, 'data', 'srv-ext', 'server', 'scanner-home')}`)
+    expect(text).toContain(`JAVA=${path.join(root, 'installed', 'srv-ext', 'server', 'runtime')}`)
+    expect(text.split('TOKEN=')[0]).not.toContain('squ_')
+  })
+
+  it('범위 분석 — __scope 키와 고른 경로만, 없는 경로는 skipped, 비면 scope-empty, 스캐너가 실패하면 출력을 사유로', async () => {
+    await install()
+    await fs.mkdir(path.join(project().directory, 'src'), { recursive: true })
+    await fs.mkdir(path.join(project().directory, 'fail'))
+    const { ext } = await boot()
+    await ext.call('srv-ext', 'server.start', undefined)
+    await until(async () => (await status(ext)).phase === 'running')
+    expect(await ext.call('srv-ext', 'server.analyze', { paths: ['src/', 'gone.ts'] }, project())).toEqual({
+      ok: true,
+      result: { ok: true, projectKey: 'my-proj__scope', skipped: ['gone.ts'], taskId: 'TASK-1' },
+    })
+    expect(await seen()).toContain('-Dsonar.projectKey=my-proj__scope\n-Dsonar.sources=src')
+    expect(await ext.call('srv-ext', 'server.analyze', { paths: ['gone.ts'] }, project())).toEqual({ ok: true, result: { ok: false, error: 'scope-empty' } })
+    expect(await ext.call('srv-ext', 'server.analyze', { paths: 'src' }, project())).toEqual({ ok: false, error: 'params-invalid' })
+    const failed = await ext.call('srv-ext', 'server.analyze', { paths: ['fail'] }, project())
+    expect(failed).toMatchObject({ ok: true, result: { ok: false, error: 'analysis-failed' } })
+    expect(((failed as { result: { detail: string } }).result.detail)).toContain('분석 실패 사유')
+  })
+
+  it('server 권한이 없는 확장은 permission-missing', async () => {
+    const file = path.join(dir, 'plain2.zip')
+    await fs.writeFile(file, makeZip([{ name: 'extension.json', data: JSON.stringify({ id: 'plain-ext', name: 'n', description: 'd', version: '1.0.0', entry: 'index.html' }) }, { name: 'index.html', data: '<p>' }]))
+    const store = new ExtensionStore(root)
+    await store.install((await store.stage(file, APP)).token!, APP)
+    await store.applyPending()
+    const { ext } = await boot()
+    for (const method of ['server.project', 'server.analyze']) expect(await ext.call('plain-ext', method, {}, project()), method).toEqual({ ok: false, error: 'permission-missing' })
   })
 })
 
