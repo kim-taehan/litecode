@@ -1238,10 +1238,6 @@
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
-.extension-row__open {
-  flex-shrink: 0;
-}
-
 .extension-row__more {
   width: 28px;
   height: 28px;

@@ -173,13 +173,11 @@ describe('`+` 메뉴 — "확장" 구분', () => {
   })
 })
 
-describe('설정 — [열기]·설치 직후 안내, 옛 보류 UI 없음', () => {
-  it('정상(on) 카드에만 [열기]', () => {
-    const open = `>${ko('extensions.open')}</button>`
-    expect(html(createElement(ExtensionCard, { extension: ext({ id: 'on-ext' }) }))).toContain(open)
-    expect(html(createElement(ExtensionCard, { extension: ext({ id: 'off-ext', enabled: false, state: 'off' }) }))).not.toContain(open)
-    expect(html(createElement(ExtensionCard, { extension: ext({ id: 'm-ext', state: 'mounting' }) }))).not.toContain(open)
-    expect(html(createElement(ExtensionCard, { extension: ext({ id: 'f-ext', state: 'failed', reason: { code: 'mount-failed', params: { message: 'x' } } }) }))).not.toContain(open)
+describe('설정 — 설치 직후 안내, [열기] 버튼·옛 보류 UI 없음', () => {
+  it('카드에 [열기] 버튼이 없다 — 여는 길은 + 메뉴와 설치 직후 안내', () => {
+    const open = '>열기</button>'
+    expect(html(createElement(ExtensionCard, { extension: ext({ id: 'on-ext' }) }))).not.toContain(open)
+    expect(html(createElement(ExtensionCard, { extension: ext({ id: 'on-ext' }) }))).not.toContain('extension-row__open')
   })
 
   it('설치 직후 초록 안내 한 줄 — "<이름> 를 설치했습니다. 오른쪽 패널에서 열렸습니다." (열지 못했으면 앞 문장만)', () => {
