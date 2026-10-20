@@ -100,6 +100,17 @@ describe('ExtensionCard — 네 상태 (보류 상태는 이슈 #511 에서 없�
     expect(card({ ...ON, details: '숨은 글' })).not.toContain('숨은 글')
   })
 
+  it('펼친 상세의 "허용한 주소" (이슈 #536) — origin 마다 고정폭 + [거두기], 없으면 그 줄이 없다', () => {
+    const out = card({ ...ON, origins: ['http://sonar.corp.local:9000', 'https://ci.corp.local'] }, true)
+    expect(out).toContain(ko('extensions.info.origins'))
+    expect(count(out, 'class="extension-origin"')).toBe(2)
+    expect(out).toContain('<code>http://sonar.corp.local:9000</code>')
+    expect(out).toContain('<code>https://ci.corp.local</code>')
+    expect(count(out, `>${ko('extensions.origins.revoke')}</button>`)).toBe(2)
+    expect(out).toContain(`aria-label="${ko('extensions.origins.revokeLabel', { origin: 'https://ci.corp.local' })}"`)
+    expect(card(ON, true)).not.toContain(ko('extensions.info.origins'))
+  })
+
   it('⋯ 메뉴에 "정보 보기" 가 없다 — 삭제만 (본문 펼침과 중복, 이슈 #519)', () => {
     expect(Object.keys(koDict)).not.toContain('extensions.menu.info')
     expect(readFileSync(new URL('../../renderer/ExtensionsSettings.tsx', import.meta.url), 'utf8')).not.toContain('extensions.menu.info')
@@ -163,12 +174,33 @@ describe('ExtensionConfirmDialog — 설치 확인', () => {
   })
 
   it('권한·앱 버전이 있으면: 권한 나열 + "0.9.0 이상"', () => {
-    const out = confirm(preview({}, { permissions: ['fs.read', 'net'], litecode: '0.9.0' }))
-    expect(out).toContain('<code>fs.read</code>')
-    expect(out).toContain('<code>net</code>')
+    const out = confirm(preview({}, { permissions: ['network', 'secrets'], litecode: '0.9.0' }))
     expect(out).not.toContain(ko('extensions.confirm.permissionsNone'))
     expect(out).toContain(ko('extensions.confirm.appAtLeast', { version: '0.9.0' }))
     expect(out).toContain(ko('extensions.confirm.appMet'))
+  })
+
+  it('권한 (이슈 #536, 시안 Confirm) — "이 확장이 요청하는 권한" 아래 권한마다 아이콘·이름·한 줄 설명, 경고는 권한 문구, 버튼은 [권한 허용하고 설치]', () => {
+    const out = confirm(preview({}, { permissions: ['network', 'secrets', 'project'] }))
+    expect(out).toContain(ko('extensions.confirm.permissionsTitle'))
+    expect(count(out, 'class="extension-permission"')).toBe(3)
+    for (const permission of ['network', 'secrets', 'project'] as const) {
+      expect(out).toContain(`data-permission="${permission}"`)
+      expect(out).toContain(ko(`extensions.permission.${permission}`))
+      expect(out).toContain(ko(`extensions.permission.${permission}.note`))
+    }
+    expect(count(out, '<svg')).toBeGreaterThanOrEqual(4) // 퍼즐 타일 + 권한 셋
+    expect(out).toContain(ko('extensions.confirm.warningPermissions'))
+    expect(out).not.toContain(ko('extensions.confirm.warning'))
+    expect(out).toContain(`>${ko('extensions.confirm.installWithPermissions')}</button>`)
+    // 업그레이드여도 권한이 있으면 같은 버튼
+    expect(confirm(preview({ existing: { version: '1.1.0' } }, { permissions: ['network'] }))).toContain(`>${ko('extensions.confirm.installWithPermissions')}</button>`)
+  })
+
+  it('권한이 없으면 권한 목록 없이 "요청 권한: 없음" (지금과 같다)', () => {
+    const out = confirm(preview())
+    expect(out).not.toContain(ko('extensions.confirm.permissionsTitle'))
+    expect(out).not.toContain('class="extension-permission"')
   })
 })
 

@@ -33,6 +33,20 @@ export const EXTENSION_LIMITS = {
   localeValueLength: 2000,
   /** manifest 의 locale.label — 설정 > 일반 언어 드롭다운의 한 줄 */
   localeLabelLength: 40,
+  // 확장 ↔ 앱 통로 (이슈 #536)
+  /** storage 값 전체(확장 하나, JSON 글자 수). 근거: 서버 주소·고른 프로젝트 키·화면 상태 같은 설정이면 수 KB 다. 쓸 때마다 파일 전체를 다시 쓰고
+   *  get 마다 IPC 로 오가므로 manifest 상한과 같은 크기에서 멈춘다 — 큰 자료(응답 캐시)는 담지 않는다 */
+  storageBytes: 64 * 1024,
+  /** secrets 파일 전체(봉한 값의 base64 포함). 근거: 토큰·비밀번호 몇 개 — 봉하면 base64 로 약 1.4배가 되어도 storage 와 같은 상한이면 넉넉하다 */
+  secretsBytes: 64 * 1024,
+  /** network.fetch 의 기한 — 요청부터 본문 끝까지. 근거: 사내 서버 API 는 보통 1초 안이고, 느린 검색 API 도 몇 초다. 패널이 오래 멈춰 보이지 않게 15초에서 끊는다 */
+  fetchTimeoutMs: 15_000,
+  /** network.fetch 응답 본문. 근거: JSON API 한 쪽(이슈 500개 페이지)이 수백 KB — 글로 IPC 두 번(메인→화면→iframe) 오가므로 5MB 에서 끊는다 */
+  fetchBytes: 5 * MB,
+  /** 같은 origin 리다이렉트를 따라가는 횟수 (브라우저는 20 — 로그인 리다이렉트 몇 번이면 충분하다) */
+  fetchRedirects: 5,
+  /** project.readFile. 근거: 설정 파일(sonar-project.properties 등)을 읽는 용도라 수 KB — 소스 파일 하나도 대부분 들어가는 256KB */
+  projectFileBytes: 256 * 1024,
 }
 
 export type ExtensionLimits = typeof EXTENSION_LIMITS

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type RefObject } from 'react'
 import type { DirectoryListing, ExtensionEntryResult, ExtensionSummary, FilePreview, HtmlAsset } from '../shared/ipc.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { GitPanel, GitTabCount } from './Git.tsx'
@@ -36,12 +36,14 @@ import {
 } from './filePreviewStore.ts'
 import { Tokens, useHighlight } from './Highlighted.tsx'
 import { languageOfPath } from './highlight.ts'
+import { bridgeReply, bridgeRequestOf, ConsentQueue, runBridgeCall } from './extensionBridge.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
 import { useExtensions } from './extensionsStore.ts'
 import { failureLines, lineSummary } from './extensionsView.ts'
 import { useFeatures } from './featuresStore.ts'
 import { reason } from './ipcError.ts'
 import { lineJump } from './lineJump.ts'
+import { PermissionIcon } from './PermissionIcon.tsx'
 import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT } from './settingsStore.ts'
 import { menuExtensions, TabAddMenu } from './TabAddMenu.tsx'
@@ -507,7 +509,7 @@ function Panel({
         const id = extensionIdOf(key)
         if (id === undefined) return null
         const extension = extensions.find((item) => item.id === id)
-        return <ExtensionTab key={extensionFrameKey(id, extension?.version)} id={id} name={extension?.name ?? id} hidden={active !== key} />
+        return <ExtensionTab key={extensionFrameKey(id, extension?.version)} id={id} name={extension?.name ?? id} hidden={active !== key} directory={directory} />
       })}
       {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && !isExtensionTab(active) && active !== GIT_TAB && (
         <CompareSplit compare={compare} directory={directory} active={active} jump={jump} tabs={tabs} />
@@ -958,14 +960,22 @@ function HtmlFrame({ directory, token, html }: { directory: string; token: strin
 }
 
 /** 격리된 iframe — HTML 미리보기와 확장 탭(이슈 #511)이 같이 쓴다. sandbox 는 allow-scripts 만(same-origin 없음), 문서는 buildHtmlDocument(CSP 를 맨 앞에) */
-function SandboxFrame({ doc, title }: { doc: string; title: string }) {
-  return <iframe className="file-preview__frame" sandbox="allow-scripts" srcDoc={doc} title={title} referrerPolicy="no-referrer" />
+function SandboxFrame({ doc, title, frameRef }: { doc: string; title: string; frameRef?: RefObject<HTMLIFrameElement | null> }) {
+  return <iframe ref={frameRef} className="file-preview__frame" sandbox="allow-scripts" srcDoc={doc} title={title} referrerPolicy="no-referrer" />
 }
 
 /** 확장 탭 (이슈 #511) — 켜진 정상 확장의 진입 HTML 을 메인에서 받아(read-entry) HTML 미리보기와 같은 격리 경로로 돌린다.
- *  한 파일짜리라 같은 폴더 리소스는 끼우지 않는다(assets 없음 — 상대 경로 리소스는 CSP 에 막힌다) */
-function ExtensionTab({ id, name, hidden }: { id: string; name: string; hidden: boolean }) {
+ *  한 파일짜리라 같은 폴더 리소스는 끼우지 않는다(assets 없음 — 상대 경로 리소스는 CSP 에 막힌다).
+ *  통로 (이슈 #536): 이 탭의 iframe 이 보낸 요청만 받아(extensionBridge.bridgeRequestOf — 확장 id 는 탭이 쥔 id) 메인에 넘기고 그 iframe 으로 답한다.
+ *  허용하지 않은 주소면 iframe 위에 동의 띠를 그린다(앱이 그린다 — 확장이 흉내 낼 수 없게 iframe 바깥) */
+function ExtensionTab({ id, name, hidden, directory }: { id: string; name: string; hidden: boolean; directory: string }) {
   const [result, setResult] = useState<ExtensionEntryResult>()
+  const frameRef = useRef<HTMLIFrameElement>(null)
+  const [consent] = useState(() => new ConsentQueue())
+  const asking = useSyncExternalStore(
+    (listener) => consent.subscribe(listener),
+    () => consent.current,
+  )
   useEffect(() => {
     let live = true
     window.litecode.readExtensionEntry(id).then(
@@ -976,15 +986,69 @@ function ExtensionTab({ id, name, hidden }: { id: string; name: string; hidden: 
       live = false
     }
   }, [id])
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const frame = frameRef.current?.contentWindow
+      const request = bridgeRequestOf(event, frame)
+      if (!request || !frame) return
+      void runBridgeCall(request, {
+        call: (method, params) => window.litecode.callExtension(id, method, params, directory),
+        ask: (origin) => consent.ask(origin),
+        allow: (origin) => window.litecode.allowExtensionOrigin(id, origin),
+        open: (path, line) => openFilePreview(directory, path, line),
+      }).then((reply) => frame.postMessage(bridgeReply(request.id, reply), '*'))
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [id, directory, consent])
+  // 탭이 닫히면 남은 질문은 거절로 — 기다리던 요청이 끝난다
+  useEffect(() => () => consent.clear(), [consent])
   return (
     <div className="file-view file-preview__extension" hidden={hidden} data-extension={id}>
-      <ExtensionTabBody name={name} result={result} />
+      {asking !== undefined && <ExtensionConsentBar name={name} origin={asking} onAnswer={(allowed) => consent.answer(allowed)} />}
+      <ExtensionTabBody name={name} result={result} frameRef={frameRef} dimmed={asking !== undefined} />
     </div>
   )
 }
 
-/** 확장 탭 본문 — 읽기 전이면 불러오는 중, 실패면 한 줄 오류(미리보기의 빈 상태 모양), 읽었으면 격리된 iframe */
-export function ExtensionTabBody({ name, result }: { name: string; result: ExtensionEntryResult | undefined }) {
+/** 동의 띠 (이슈 #536, 시안 _workspace/mock-sonarqube-ext Ask) — 확장이 허용하지 않은 주소에 접속하려 한다. [거절][허용] */
+export function ExtensionConsentBar({ name, origin, onAnswer }: { name: string; origin: string; onAnswer(allowed: boolean): void }) {
+  const t = useT()
+  const title = t('extensions.consent.title', { name })
+  return (
+    <div className="extension-consent" role="alertdialog" aria-label={title}>
+      <div className="extension-consent__head">
+        <PermissionIcon permission="network" className="extension-consent__icon" />
+        <div className="extension-consent__text">
+          <b>{title}</b>
+          <code>{origin}</code>
+          <span className="extension-consent__note">{t('extensions.consent.note')}</span>
+        </div>
+      </div>
+      <div className="extension-consent__actions">
+        <button type="button" className="settings-button settings-button--compact" onClick={() => onAnswer(false)}>
+          {t('extensions.consent.deny')}
+        </button>
+        <button type="button" className="settings-button settings-button--compact settings-button--primary" onClick={() => onAnswer(true)}>
+          {t('extensions.consent.allow')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** 확장 탭 본문 — 읽기 전이면 불러오는 중, 실패면 한 줄 오류(미리보기의 빈 상태 모양), 읽었으면 격리된 iframe. dimmed — 동의 띠가 묻는 동안 흐리게 */
+export function ExtensionTabBody({
+  name,
+  result,
+  frameRef,
+  dimmed = false,
+}: {
+  name: string
+  result: ExtensionEntryResult | undefined
+  frameRef?: RefObject<HTMLIFrameElement | null>
+  dimmed?: boolean
+}) {
   const t = useT()
   const doc = useMemo(() => (result?.ok ? buildHtmlDocument(result.html, []) : undefined), [result])
   if (!result) return <p className="file-preview__empty">{t('filePreview.loading')}</p>
@@ -997,8 +1061,8 @@ export function ExtensionTabBody({ name, result }: { name: string; result: Exten
     )
   }
   return (
-    <div className="file-preview__body file-preview__body--frame">
-      <SandboxFrame doc={doc!} title={name} />
+    <div className={dimmed ? 'file-preview__body file-preview__body--frame file-preview__body--dimmed' : 'file-preview__body file-preview__body--frame'}>
+      <SandboxFrame doc={doc!} title={name} frameRef={frameRef} />
     </div>
   )
 }

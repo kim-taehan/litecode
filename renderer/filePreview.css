@@ -434,6 +434,65 @@
   overflow: hidden;
 }
 
+/* 동의 띠가 묻는 동안 (이슈 #536, 시안 Ask) */
+.file-preview__body--dimmed {
+  opacity: 0.45;
+}
+
+/* 확장의 주소 접속 동의 띠 (이슈 #536, 시안 _workspace/mock-sonarqube-ext Ask) — iframe 바깥, 탭 본문 위. 주황 경고 띠(승인 카드 색) */
+.extension-consent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 12px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--warn-border);
+  border-radius: 12px;
+  background: var(--warn-soft);
+}
+
+.extension-consent__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.extension-consent__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+.extension-consent__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.extension-consent__text b {
+  font-size: 14px;
+}
+
+.extension-consent__text code {
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.extension-consent__note {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.extension-consent__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .file-preview__frame {
   display: block;
   width: 100%;

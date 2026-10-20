@@ -1,11 +1,14 @@
 import { Context, Service, type Fiber } from 'cordis'
 import path from 'node:path'
 import type {
+  ExtensionCallError,
+  ExtensionCallResult,
   ExtensionEntryResult,
   ExtensionFailedReason,
   ExtensionInstallResult,
   ExtensionLocaleResult,
   ExtensionManifest,
+  ExtensionPermission,
   ExtensionPickResult,
   ExtensionProblem,
   ExtensionResult,
@@ -14,9 +17,14 @@ import type {
 } from '../../shared/extensions.ts'
 import { DEFAULT_LANGUAGE, isBuiltinLanguage } from '../../shared/i18n/index.ts'
 import { setMainLocalePack } from '../i18n.ts'
+import { ExtensionData } from './extensions/data.ts'
+import { EXTENSION_LIMITS } from './extensions/limits.ts'
 import { isExtensionId } from './extensions/manifest.ts'
-import { ExtensionStore } from './extensions/store.ts'
+import { fetchForExtension, isAppAddress, parseFetchRequest, selfAddresses, type ExtensionFetch } from './extensions/network.ts'
+import { isEntryPath } from './extensions/paths.ts'
+import { ExtensionStore, readInsideFile } from './extensions/store.ts'
 import { failureReason } from './features.ts'
+import type { KeyCipher } from './providers.ts'
 import './settings.ts'
 
 // 설치한 확장 (ctx.extensions, 이슈 #482 — 설계 docs/superpowers/specs/2026-10-19-extension-install-design.md 5절). 바탕 서비스다(끌 수 없다).
@@ -31,6 +39,10 @@ import './settings.ts'
 // 대화상자는 host(pick), 파일 작업은 저장소(ExtensionStore — 2/4). 저장소 호출은 아래 `files` 한 곳에만 모았다(저장소의 공개 모양이 바뀌면 거기만 고친다).
 // 언어 팩(#525, type 'locale'): 실행할 것이 없는 JSON 번들이다. readLocale 로 사전을 화면에 넘기고, 고른 언어(settings.language)가 팩 언어면
 // 메인 문구(tr)에도 넣는다. 고른 팩이 지워지거나 꺼지거나 깨지면 언어를 기본(en)으로 되돌린다 — sync 끝의 followLanguage. 설치만으로는 언어를 바꾸지 않는다.
+// 확장 ↔ 앱 통로(#536): 화면의 확장 탭이 iframe 에서 받은 요청을 call(id, method, params, project) 로 넘긴다 — 여기서 권한(manifest permissions)을 검사하고
+// 처리한다. 확장이 남기는 값·허용한 주소는 data/<id>/ (extensions/data.ts), 지우면 같이 지운다. 허용 목록에 없는 주소는 요청하지 않고 consent-required —
+// 화면이 동의 띠로 묻고 허용하면 allowOrigin 뒤에 다시 부른다(메인은 묻는 동안의 상태를 쥐지 않는다). 통로 일은 큰 줄에 서지 않는다(15초 요청이
+// 설치·켜고 끄기를 막지 않게) — 자료 파일 쓰기만 자기 줄(dataQueue)에 서고, 삭제의 자료 지우기도 그 줄에 서서 쓰는 중인 값이 되살아나지 않는다.
 // Electron 을 import 하지 않는다 — 단위 테스트가 임시 폴더 root 로 돈다.
 
 declare module 'cordis' {
@@ -58,7 +70,37 @@ export interface ExtensionsOptions {
   pick?: (owner?: unknown) => Promise<string | undefined>
   /** 확장을 올리는 플러그인 — B 층의 주입 자리. 없으면 켜진 확장은 상태만 on */
   mount?: (extension: MountedExtension) => (ctx: Context) => void | Promise<void>
+  /** secrets 를 봉하는 safeStorage (provider 키와 같은 것, 이슈 #536). 없거나 못 쓰면 secrets-unavailable */
+  cipher?: KeyCipher
+  /** network.fetch 가 쓰는 fetch — 확장마다 하나(쿠키·캐시를 확장끼리 섞지 않는다). 앱은 메인의 Chromium 네트워크(electron/extensionFetch.ts), 테스트가 주입한다. 기본 globalThis.fetch */
+  fetch?: (id: string) => ExtensionFetch
+  /** 앱 자신의 로컬 서버 포트 — network.fetch 가 동의와 상관없이 거절한다(address-reserved). 포트는 런타임에 정해지므로 부를 때마다 읽는다 */
+  reservedPorts?: () => number[]
 }
+
+/** 통로 요청을 부른 프로젝트 — 다리가 등록된 프로젝트인지 확인한 것만 온다 */
+export interface CallProject {
+  directory: string
+  name: string
+}
+
+/** 메서드 → 필요한 권한 (null: 권한 없이). 없는 메서드는 method-unknown */
+const METHODS = new Map<string, ExtensionPermission | null>([
+  ['storage.get', null],
+  ['storage.set', null],
+  ['storage.delete', null],
+  ['secrets.get', 'secrets'],
+  ['secrets.set', 'secrets'],
+  ['secrets.delete', 'secrets'],
+  ['network.fetch', 'network'],
+  ['project.info', 'project'],
+  ['project.readFile', 'project'],
+  ['project.openFile', 'project'],
+])
+
+type CallFailure = { ok: false; error: ExtensionCallError; origin?: string }
+const fail = (error: ExtensionCallError): CallFailure => ({ ok: false, error })
+const done = (result: unknown = null): ExtensionCallResult => ({ ok: true, result })
 
 /** 한 확장의 파일 쪽 사실 — 설치 폴더(installed/<id>)에서 읽은 것 */
 interface Entry {
@@ -71,6 +113,11 @@ export class ExtensionsService extends Service {
   static readonly inject = ['settings']
 
   private readonly files: ReturnType<typeof storeAccess>
+  private readonly data: ExtensionData
+  /** 자료 파일(data/<id>) 쓰기·지우기의 줄 */
+  private dataQueue: Promise<unknown> = Promise.resolve()
+  /** 확장 id → 허용한 origin (목록에 싣는다) */
+  private origins = new Map<string, string[]>()
   private entries: Entry[] = []
   private queue: Promise<unknown> = Promise.resolve()
   private readonly booted: Promise<void>
@@ -87,6 +134,7 @@ export class ExtensionsService extends Service {
   ) {
     super(ctx, 'extensions')
     this.files = storeAccess(options.root, options.appVersion)
+    this.data = new ExtensionData(options.root)
     this.booted = this.enqueue(() => this.boot())
     // 올리기는 따로 세운다 — 목록(list)은 읽기까지만 기다리고, 오래 걸리는 mount 는 mounting 으로 보인다
     void this.enqueue(() => this.sync())
@@ -190,6 +238,66 @@ export class ExtensionsService extends Service {
     })
   }
 
+  /** 확장 ↔ 앱 통로 (이슈 #536) — id 는 화면이 iframe 출처로 정한 것. 켜진 정상 확장만, 메서드마다 manifest 권한을 본다. 던지지 않는다 */
+  async call(id: string, method: string, params: unknown, project?: CallProject): Promise<ExtensionCallResult> {
+    await this.booted
+    const manifest = this.onManifest(id)
+    if (!manifest) return fail('not-on')
+    const permission = METHODS.get(method)
+    if (permission === undefined) return fail('method-unknown')
+    if (permission !== null && !manifest.permissions?.includes(permission)) return fail('permission-missing')
+    try {
+      switch (method) {
+        case 'storage.get':
+        case 'storage.set':
+        case 'storage.delete':
+          return await this.storage(id, method, params)
+        case 'secrets.get':
+        case 'secrets.set':
+        case 'secrets.delete':
+          return await this.secrets(id, method, params)
+        case 'network.fetch':
+          return await this.fetch(id, params)
+        default:
+          return await this.project(method, params, project)
+      }
+    } catch (error) {
+      console.warn(`[extensions] ${id} ${method} 실패`, error)
+      return fail('io-failed')
+    }
+  }
+
+  /** 동의 띠의 [허용] — 그 확장의 허용 목록에 origin 을 넣는다. network 권한이 있는 켜진 확장만 */
+  async allowOrigin(id: string, origin: string): Promise<ExtensionCallResult> {
+    await this.booted
+    const manifest = this.onManifest(id)
+    if (!manifest) return fail('not-on')
+    if (!manifest.permissions?.includes('network')) return fail('permission-missing')
+    if (!isOrigin(origin)) return fail('url-invalid')
+    if (this.reserved(new URL(origin))) return fail('address-reserved')
+    return this.withData(async () => {
+      if (!this.onManifest(id)) return fail('not-on')
+      const list = this.origins.get(id) ?? []
+      if (!list.includes(origin)) await this.saveOrigins(id, [...list, origin])
+      return done()
+    })
+  }
+
+  /** 카드 상세의 [거두기] — 꺼진 확장도 거둘 수 있다 */
+  async revokeOrigin(id: string, origin: string): Promise<ExtensionResult> {
+    await this.booted
+    if (!this.entries.some((entry) => entry.id === id)) return { ok: false, failure: { code: 'not-installed', params: { id } } }
+    return this.withData(async (): Promise<ExtensionResult> => {
+      try {
+        const list = this.origins.get(id) ?? []
+        if (list.includes(origin)) await this.saveOrigins(id, list.filter((item) => item !== origin))
+        return { ok: true }
+      } catch (error) {
+        return ioFailed(error)
+      }
+    })
+  }
+
   /** 밀린 일이 다 끝날 때까지 (테스트용) */
   async idle(): Promise<void> {
     await this.booted
@@ -205,6 +313,13 @@ export class ExtensionsService extends Service {
     return run
   }
 
+  /** 자료 파일 일을 자기 줄 끝에 세운다 */
+  private withData<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.dataQueue.then(task)
+    this.dataQueue = run.catch(() => {})
+    return run
+  }
+
   private async boot(): Promise<void> {
     await this.applyNow()
     await this.read()
@@ -214,7 +329,10 @@ export class ExtensionsService extends Service {
   private async applyNow(id?: string): Promise<{ ok: false; failure: ExtensionStoreFailure } | undefined> {
     try {
       const { removed, failed } = await this.files.applyPending()
-      for (const removedId of removed) this.forget(removedId)
+      for (const removedId of removed) {
+        this.forget(removedId)
+        await this.dropData(removedId)
+      }
       const reason = failed.find((item) => item.id === id)?.reason
       return reason === undefined ? undefined : { ok: false, failure: { code: 'apply-failed', params: { message: reason } } }
     } catch (error) {
@@ -230,6 +348,12 @@ export class ExtensionsService extends Service {
     } catch (error) {
       console.warn('[extensions] 목록을 읽지 못했다', error)
     }
+    const origins = new Map<string, string[]>()
+    for (const { id } of this.entries) {
+      const list = await this.data.read(id, 'origins').catch(() => undefined)
+      if (Array.isArray(list)) origins.set(id, list.filter(isOrigin))
+    }
+    this.origins = origins
   }
 
   /** 다시 읽고 올리기·내리기를 맞춘다 */
@@ -305,6 +429,112 @@ export class ExtensionsService extends Service {
     }
   }
 
+  // --- 통로 (이슈 #536) ---
+
+  /** 켜진 정상(on) 확장의 manifest — 아니면 undefined */
+  private onManifest(id: string): ExtensionManifest | undefined {
+    const entry = this.entries.find((item) => item.id === id)
+    return entry?.manifest && this.state(entry, this.enabled(id)).state === 'on' ? entry.manifest : undefined
+  }
+
+  private async storage(id: string, method: string, params: unknown): Promise<ExtensionCallResult> {
+    const key = keyOf(params)
+    if (key === undefined) return fail('params-invalid')
+    // 자기 키만 읽는다 — 'constructor' 같은 상속 키는 함수가 나와 IPC 복제가 깨진다 (QA #536)
+    if (method === 'storage.get') return done(ownValue(await this.values(id, 'storage'), key) ?? null)
+    const value = (params as { value?: unknown }).value
+    if (method === 'storage.set' && value === undefined) return fail('params-invalid')
+    return this.withData(async () => {
+      if (!this.onManifest(id)) return fail('not-on')
+      const { [key]: _old, ...others } = await this.values(id, 'storage')
+      const next = method === 'storage.set' ? { ...others, [key]: value } : others
+      if (JSON.stringify(next).length > EXTENSION_LIMITS.storageBytes) return fail('storage-full')
+      await this.data.write(id, 'storage', next)
+      return done()
+    })
+  }
+
+  private async secrets(id: string, method: string, params: unknown): Promise<ExtensionCallResult> {
+    const key = keyOf(params)
+    if (key === undefined) return fail('params-invalid')
+    const value = (params as { value?: unknown }).value
+    if (method === 'secrets.set' && typeof value !== 'string') return fail('params-invalid')
+    const cipher = this.options.cipher
+    if (!cipher?.available()) return fail('secrets-unavailable')
+    if (method === 'secrets.get') {
+      const sealed = ownValue(await this.values(id, 'secrets'), key)
+      return done(typeof sealed === 'string' ? cipher.decrypt(Buffer.from(sealed, 'base64')) : null)
+    }
+    return this.withData(async () => {
+      if (!this.onManifest(id)) return fail('not-on')
+      const { [key]: _old, ...others } = await this.values(id, 'secrets')
+      const next = method === 'secrets.set' ? { ...others, [key]: cipher.encrypt(value as string).toString('base64') } : others
+      if (JSON.stringify(next).length > EXTENSION_LIMITS.secretsBytes) return fail('storage-full')
+      await this.data.write(id, 'secrets', next)
+      return done()
+    })
+  }
+
+  private async fetch(id: string, params: unknown): Promise<ExtensionCallResult> {
+    const parsed = parseFetchRequest(params)
+    if (!parsed.ok) return parsed
+    const origin = parsed.request.url.origin
+    // 리다이렉트는 같은 origin 만 따라가므로 처음 주소만 보면 된다
+    if (this.reserved(parsed.request.url)) return fail('address-reserved')
+    if (!this.origins.get(id)?.includes(origin)) return { ok: false, error: 'consent-required', origin }
+    return fetchForExtension(parsed.request, {
+      fetch: this.options.fetch?.(id) ?? globalThis.fetch,
+      timeoutMs: EXTENSION_LIMITS.fetchTimeoutMs,
+      maxBytes: EXTENSION_LIMITS.fetchBytes,
+      maxRedirects: EXTENSION_LIMITS.fetchRedirects,
+    })
+  }
+
+  private reserved(url: URL): boolean {
+    return isAppAddress(url, this.options.reservedPorts?.() ?? [], selfAddresses())
+  }
+
+  /** project.* — info 는 이름만(경로는 주지 않는다: 확장에 필요 없고 홈 폴더·사용자 이름이 드러난다). 파일 경로는 프로젝트 기준 상대 경로만 */
+  private async project(method: string, params: unknown, project: CallProject | undefined): Promise<ExtensionCallResult> {
+    if (!project) return fail('no-project')
+    if (method === 'project.info') return done({ name: project.name })
+    const { path: relPath, line } = (typeof params === 'object' && params !== null ? params : {}) as { path?: unknown; line?: unknown }
+    if (typeof relPath !== 'string' || relPath === '') return fail('params-invalid')
+    if (!isEntryPath(relPath)) return fail('path-unsafe')
+    if (method === 'project.openFile') {
+      // 여는 것은 화면이 오른쪽 패널의 파일 미리보기로 한다 — 그 길이 등록된 프로젝트 안만 읽는다
+      if (line !== undefined && !(Number.isInteger(line) && (line as number) >= 1)) return fail('params-invalid')
+      return done({ path: relPath, ...(line !== undefined && { line }) })
+    }
+    const read = await readInsideFile(project.directory, relPath, EXTENSION_LIMITS.projectFileBytes)
+    if (!read.ok) return fail(read.failure.code === 'entry-unsafe' ? 'path-unsafe' : read.failure.code === 'entry-too-large' ? 'file-too-large' : 'file-unreadable')
+    try {
+      return done(new TextDecoder('utf-8', { fatal: true }).decode(read.bytes))
+    } catch {
+      return fail('not-text')
+    }
+  }
+
+  /** storage·secrets 파일의 값 — 없거나 모양이 틀리면 빈 객체 */
+  private async values(id: string, kind: 'storage' | 'secrets'): Promise<Record<string, unknown>> {
+    const value = await this.data.read(id, kind)
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  }
+
+  private async saveOrigins(id: string, list: string[]): Promise<void> {
+    await this.data.write(id, 'origins', list)
+    this.origins.set(id, list)
+    this.publish()
+  }
+
+  /** 지워진 확장의 자료(storage·secrets·허용 목록)를 지운다 — 쓰는 중인 값이 있으면 그 뒤에 */
+  private async dropData(id: string): Promise<void> {
+    await this.withData(async () => {
+      this.origins.delete(id)
+      await this.data.remove(id).catch((error: unknown) => console.warn(`[extensions] ${id} 의 자료를 지우지 못했다`, error))
+    })
+  }
+
   // --- 목록 ---
 
   /** 자기 키만 읽는다 — id `constructor` 는 id 규칙을 통과하는데, 일반 객체에서 읽으면 상속된 Object 함수가 나온다 (QA 03_qa_ext_pr3) */
@@ -324,6 +554,7 @@ export class ExtensionsService extends Service {
         ...(manifest?.type === 'locale' && manifest.locale && { type: 'locale' as const, locale: { language: manifest.locale.language, label: manifest.locale.label } }),
         enabled,
         ...this.state(entry, enabled),
+        ...(this.origins.get(entry.id)?.length && { origins: this.origins.get(entry.id) }),
       }
     })
   }
@@ -362,6 +593,23 @@ export class ExtensionsService extends Service {
   }
 }
 
+/** storage·secrets 의 키 — 비지 않은 글 */
+function keyOf(params: unknown): string | undefined {
+  const key = typeof params === 'object' && params !== null ? (params as { key?: unknown }).key : undefined
+  return typeof key === 'string' && key !== '' ? key : undefined
+}
+
+/** 허용 목록에 넣을 수 있는 origin — http/https 의 `scheme://host[:port]` 그대로(경로·끝 / 없음) */
+function isOrigin(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === value
+  } catch {
+    return false
+  }
+}
+
 function failed(reason: ExtensionFailedReason): Pick<ExtensionSummary, 'state' | 'reason'> {
   return { state: 'failed', reason }
 }
@@ -393,4 +641,8 @@ function storeAccess(root: string, appVersion: string) {
       (await store.listInstalled(appVersion)).map(({ id, manifest, problems }) => ({ id, ...(manifest && { manifest }), problems })),
     installedDir: (id: string) => path.join(path.resolve(root), 'installed', id),
   }
+}
+
+function ownValue(values: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(values, key) ? values[key] : undefined
 }

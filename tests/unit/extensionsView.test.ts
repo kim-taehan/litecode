@@ -40,6 +40,8 @@ const PROBLEMS: { [C in ExtensionProblem['code']]: Extract<ExtensionProblem, { c
   'app-too-old': { code: 'app-too-old', params: { required: '9.0.0', current: '0.4.0' } },
   'entry-invalid': { code: 'entry-invalid', params: { value: '../index.js' } },
   'permissions-invalid': { code: 'permissions-invalid', params: {} },
+  'permission-unknown': { code: 'permission-unknown', params: { value: 'netwrok', suggestion: 'network' } },
+  'permissions-unexpected': { code: 'permissions-unexpected', params: {} },
   'entry-missing': { code: 'entry-missing', params: { entry: 'index.js' } },
   'id-mismatch': { code: 'id-mismatch', params: { folder: 'old-name', id: 'new-name' } },
   'type-invalid': { code: 'type-invalid', params: { value: 'theme' } },

@@ -259,6 +259,8 @@ export class EngineService extends Service {
   private disposed = false
   /** 엔진과 수명을 같이 한다 (토큰은 앱 실행마다 바뀐다) */
   private proxy?: Promise<KeyProxy>
+  /** 마지막으로 연 서버·키 프록시 포트 (localPorts) */
+  private ports: { server?: number; proxy?: number } = {}
   /** DB 정리는 한 번에 하나만 */
   private purging: Promise<void> = Promise.resolve()
   /** 떠 있는(띄우는 중인) 서버의 opencode.json 에 넣은 웹 도구 켜짐(설정 > 기능 web, 기본 꺼짐)·스킬 설정·게이트 (JSON — 바뀌었는지만 본다).
@@ -346,6 +348,11 @@ export class EngineService extends Service {
   /** 지금(또는 마지막으로 띄운) 서버의 stdout·stderr 끝 (MAX_OUTPUT 자) — 띄운 적이 없으면 빈 글. **가리지 않은 원문이다** — 싣는 쪽(ctx.report)이 가린다 */
   outputTail(): string {
     return this.lastOutput?.text() ?? ''
+  }
+
+  /** 앱이 127.0.0.1 에 연 포트(엔진 서버·키 프록시) — 확장의 network.fetch 가 닿지 못하게 한다 (#536). 띄운 적이 없으면 빈 목록 */
+  localPorts(): number[] {
+    return [this.ports.server, this.ports.proxy].filter((port) => port !== undefined)
   }
 
   /** 떠 있나(띄우는 중 포함) — 묻기만 하고 띄우지 않는다. 엔진과 같이 사라지는 것(붙인 MCP)을 치우려고 죽은 엔진을 다시 띄우지 않게 (#126) */
@@ -437,6 +444,7 @@ export class EngineService extends Service {
     await this.purgeDeleted() // 다른 연결이 없을 때 — 지난 실행이 정리 전에 끝났어도 여기서 걷힌다
     const password = randomBytes(24).toString('base64url')
     const port = await freePort()
+    this.ports = { server: port, proxy: Number(new URL(proxy.url).port) }
     const env = engineEnv(base, {
       configDir: this.opts.configDir,
       db: this.opts.db,

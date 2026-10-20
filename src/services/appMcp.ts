@@ -98,6 +98,11 @@ export class AppMcpService extends Service {
     }
   }
 
+  /** 연 포트 — 확장의 network.fetch 가 닿지 못하게 한다 (#536). 서버가 안 떴으면 빈 목록 */
+  localPorts(): number[] {
+    return this.port === undefined ? [] : [this.port]
+  }
+
   /** 그 폴더에 붙일 정의 — 주소의 마지막 마디가 그 프로젝트의 키다. 서버가 안 떴으면 없다 */
   definition(workdir: string): EngineMcp | undefined {
     if (this.port === undefined) return undefined

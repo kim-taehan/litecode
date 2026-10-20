@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { ExtensionPreview, ExtensionResult, ExtensionStoreFailure, ExtensionSummary } from '../shared/extensions.ts'
 import { useFocusTrap } from './focusTrap.ts'
+import { PermissionIcon } from './PermissionIcon.tsx'
 import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT, type Translate } from './settingsStore.ts'
 import { cardKind, failedReasonText, failureLines, formatBytes, installKind, lineSummary, problemLine, type ProblemLine } from './extensionsView.ts'
@@ -99,8 +100,16 @@ export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { prev
     downgrade: t('extensions.confirm.downgrade', { from: preview.existing.version, to: manifest.version }),
     new: '',
   }[kind]
-  const installLabel = kind === 'new' ? 'extensions.confirm.install' : kind === 'upgrade' ? 'extensions.confirm.installUpgrade' : 'extensions.confirm.reinstall'
   const permissions = manifest?.permissions ?? []
+  // 권한이 있으면 설치가 곧 권한 동의다 (이슈 #536, 시안 Confirm) — 업그레이드여도 같은 버튼 글(바뀐 것은 "이미 설치됨" 줄이 알린다)
+  const installLabel =
+    permissions.length > 0
+      ? 'extensions.confirm.installWithPermissions'
+      : kind === 'new'
+        ? 'extensions.confirm.install'
+        : kind === 'upgrade'
+          ? 'extensions.confirm.installUpgrade'
+          : 'extensions.confirm.reinstall'
 
   return (
     <div className="confirm-mask" onMouseDown={(event) => event.target === event.currentTarget && cancel()}>
@@ -120,6 +129,24 @@ export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { prev
             <span className="feature-row__summary">{manifest?.description}</span>
           </span>
         </div>
+        {permissions.length > 0 && (
+          <section className="extension-permissions" aria-labelledby="extension-permissions-title">
+            <b id="extension-permissions-title" className="extension-permissions__title">
+              {t('extensions.confirm.permissionsTitle')}
+            </b>
+            <ul className="extension-permissions__list">
+              {permissions.map((permission) => (
+                <li key={permission} className="extension-permission" data-permission={permission}>
+                  <PermissionIcon permission={permission} className="extension-permission__icon" />
+                  <span className="extension-permission__text">
+                    <span className="extension-permission__name">{t(`extensions.permission.${permission}`)}</span>
+                    <span className="extension-permission__note">{t(`extensions.permission.${permission}.note`)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <dl className="extension-confirm__rows">
           <dt>{t('extensions.confirm.id')}</dt>
           <dd>
@@ -138,12 +165,12 @@ export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { prev
               t('extensions.confirm.appAny')
             )}
           </dd>
-          <dt>{t('extensions.confirm.permissions')}</dt>
-          <dd>
-            {permissions.length === 0
-              ? t('extensions.confirm.permissionsNone')
-              : permissions.flatMap((permission, index) => [index > 0 ? ', ' : '', <code key={permission}>{permission}</code>])}
-          </dd>
+          {permissions.length === 0 && (
+            <>
+              <dt>{t('extensions.confirm.permissions')}</dt>
+              <dd>{t('extensions.confirm.permissionsNone')}</dd>
+            </>
+          )}
           {existing && (
             <>
               <dt>{t('extensions.confirm.existing')}</dt>
@@ -153,7 +180,7 @@ export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { prev
             </>
           )}
         </dl>
-        <p className="settings-notice extension-confirm__warning">{t('extensions.confirm.warning')}</p>
+        <p className="settings-notice extension-confirm__warning">{t(permissions.length > 0 ? 'extensions.confirm.warningPermissions' : 'extensions.confirm.warning')}</p>
         {failure && (
           <div className="feature-row__failure" role="alert">
             <b>{t('extensions.confirm.failed')}</b>
@@ -439,6 +466,27 @@ export function ExtensionCard({ extension, initialExpanded = false }: { extensio
             <>
               <b>{t('extensions.info.problems')}</b>
               <ProblemList lines={invalidProblems.map(problemLine)} />
+            </>
+          )}
+          {/* 허용한 주소 (이슈 #536) — 확장 탭의 동의 띠에서 허용한 origin. 거두면 다음 요청 때 다시 묻는다 */}
+          {extension.origins && extension.origins.length > 0 && (
+            <>
+              <b>{t('extensions.info.origins')}</b>
+              <ul className="extension-origins">
+                {extension.origins.map((origin) => (
+                  <li key={origin} className="extension-origin">
+                    <code>{origin}</code>
+                    <button
+                      type="button"
+                      className="settings-button settings-button--compact"
+                      aria-label={t('extensions.origins.revokeLabel', { origin })}
+                      onClick={() => void run(() => window.litecode.revokeExtensionOrigin(extension.id, origin))}
+                    >
+                      {t('extensions.origins.revoke')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </>
           )}
         </div>

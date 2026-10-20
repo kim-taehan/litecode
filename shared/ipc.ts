@@ -22,7 +22,7 @@ import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 import type { UpdateStatus } from './updates.ts'
 import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
-import type { ExtensionEntryResult, ExtensionInstallResult, ExtensionLocaleResult, ExtensionPickResult, ExtensionResult, ExtensionSummary } from './extensions.ts'
+import type { ExtensionCallResult, ExtensionEntryResult, ExtensionInstallResult, ExtensionLocaleResult, ExtensionPickResult, ExtensionResult, ExtensionSummary } from './extensions.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Mode } from './modes.ts'
@@ -261,6 +261,13 @@ export const Channel = {
   EXTENSIONS_SET_ENABLED: 'extensions:set-enabled',
   /** 메인 → 화면 (ExtensionSummary[]) — 확장 목록이 바뀌었다 */
   EXTENSIONS_CHANGED: 'extensions:changed',
+  /** 화면 → 메인 (id, method, params, directory) → ExtensionCallResult — 확장 ↔ 앱 통로 (이슈 #536). id 는 화면이 iframe 출처로 정한다,
+   *  directory 는 그 탭이 있는 프로젝트(등록된 것만 메인이 받는다) */
+  EXTENSIONS_CALL: 'extensions:call',
+  /** 화면 → 메인 (id, origin) → ExtensionCallResult — 동의 띠의 [허용] (이슈 #536) */
+  EXTENSIONS_ALLOW_ORIGIN: 'extensions:allow-origin',
+  /** 화면 → 메인 (id, origin) → ExtensionResult — 카드 상세의 [거두기] (이슈 #536) */
+  EXTENSIONS_REVOKE_ORIGIN: 'extensions:revoke-origin',
 } as const
 
 export interface LitecodeBridge {
@@ -534,6 +541,10 @@ export interface LitecodeBridge {
   /** 언어 팩의 사전 (이슈 #525) — 그 언어의 켜진 정상 팩이 없거나 읽지 못하면 failure */
   readLocalePack(language: string): Promise<ExtensionLocaleResult>
   onExtensionsChanged(listener: (extensions: ExtensionSummary[]) => void): () => void
+  /** 확장 ↔ 앱 통로 (이슈 #536) — 던지지 않고 { ok, result | error } */
+  callExtension(id: string, method: string, params: unknown, directory: string | undefined): Promise<ExtensionCallResult>
+  allowExtensionOrigin(id: string, origin: string): Promise<ExtensionCallResult>
+  revokeExtensionOrigin(id: string, origin: string): Promise<ExtensionResult>
 }
 
 declare global {

@@ -9,7 +9,7 @@ const valid = { id: 'my-ext', name: '내 확장', description: '한 줄 설명',
 
 describe('checkManifest', () => {
   it('정상 manifest 는 사유 없이 manifest 를 돌려준다 (선택 필드 포함)', () => {
-    const full = { ...valid, litecode: '1.2.0', permissions: ['fs.read'] }
+    const full = { ...valid, litecode: '1.2.0', permissions: ['network', 'secrets', 'project'] }
     expect(checkManifest(full, APP)).toEqual({ manifest: full, problems: [] })
     expect(checkManifest(valid, APP)).toEqual({ manifest: valid, problems: [] })
   })
@@ -92,6 +92,20 @@ describe('checkManifest', () => {
       expect(checkManifest({ ...valid, permissions }, APP).problems).toEqual([{ code: 'permissions-invalid', params: {} }])
     }
     expect(checkManifest({ ...valid, permissions: [] }, APP).problems).toEqual([])
+  })
+
+  it('모르는 권한은 permission-unknown 으로 거절하고, 비슷한 이름이 있으면 suggestion (이슈 #536)', () => {
+    expect(checkManifest({ ...valid, permissions: ['network', 'netwrok', 'Secrets', 'fs.read'] }, APP).problems).toEqual([
+      { code: 'permission-unknown', params: { value: 'netwrok', suggestion: 'network' } },
+      { code: 'permission-unknown', params: { value: 'Secrets', suggestion: 'secrets' } },
+      { code: 'permission-unknown', params: { value: 'fs.read' } },
+    ])
+  })
+
+  it('언어 팩(type locale)이 권한을 선언하면 permissions-unexpected — 빈 배열은 통과 (이슈 #536)', () => {
+    const pack = { ...valid, type: 'locale', locale: { language: 'zh-CN', label: '中文' }, entry: 'locale.json' }
+    expect(checkManifest({ ...pack, permissions: ['network'] }, APP).problems).toEqual([{ code: 'permissions-unexpected', params: {} }])
+    expect(checkManifest({ ...pack, permissions: [] }, APP).problems).toEqual([])
   })
 
   it('모르는 필드는 거절하고, 비슷한 이름이 있으면 suggestion 을 싣는다', () => {
