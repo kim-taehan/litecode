@@ -2,7 +2,8 @@ import type { ExtensionCallError, ExtensionFetchResponse } from '../../../shared
 
 // 확장의 network.fetch (이슈 #536) — iframe 은 CSP 로 직접 네트워크를 못 쓰고, 메인이 대신 요청한다. 허용 목록(origin) 검사는 서비스가 하고,
 // 여기는 요청 하나의 규칙만: http/https 만, 기한(요청~본문 끝까지 한 번), 응답 크기 상한(넘으면 끊는다), 리다이렉트는 처음 주소와 같은 origin 만 따라간다
-// (다른 origin 으로 가면 허용하지 않은 주소에 닿는다). 쿠키·자격 증명은 싣지 않는다(Node fetch 는 쿠키 저장소가 없다).
+// (다른 origin 으로 가면 허용하지 않은 주소에 닿는다). 리다이렉트는 fetch 가 따라가지 않고 3xx 응답으로 줘야 한다(redirect 'manual').
+// 앱에서는 메인이 Chromium 네트워크로 보내는 fetch 를 확장마다 넣는다(electron/extensionFetch.ts — 사내 CA·시스템 프록시, 확장별 session, 쿠키 안 실음).
 
 export interface FetchRequest {
   url: URL
@@ -11,8 +12,11 @@ export interface FetchRequest {
   body?: string
 }
 
+/** 요청 하나를 보내는 fetch — globalThis.fetch 도 맞는다 */
+export type ExtensionFetch = (url: URL, init: { method: string; headers: Record<string, string>; body?: string; redirect?: 'manual'; signal?: AbortSignal }) => Promise<Response>
+
 export interface FetchOptions {
-  fetch: typeof globalThis.fetch
+  fetch: ExtensionFetch
   timeoutMs: number
   maxBytes: number
   maxRedirects: number
@@ -72,8 +76,10 @@ export async function fetchForExtension(request: FetchRequest, options: FetchOpt
       const type = response.headers.get('content-type')
       return { ok: true, result: { status: response.status, headers: type === null ? {} : { 'content-type': type }, body: text } }
     }
-  } catch {
-    return { ok: false, error: timedOut ? 'network-timeout' : 'network-failed' }
+  } catch (error) {
+    if (timedOut) return { ok: false, error: 'network-timeout' }
+    // Chromium 네트워크 오류 이름 (실측 Electron 33: 사내 CA 를 모르는 인증서 → net::ERR_CERT_AUTHORITY_INVALID) — 확장이 "인증서 문제" 를 따로 알릴 수 있게
+    return { ok: false, error: /^net::ERR_(CERT_|SSL_|BAD_SSL_)/.test((error as Error).message) ? 'tls-failed' : 'network-failed' }
   } finally {
     clearTimeout(timer)
   }

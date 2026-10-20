@@ -135,6 +135,21 @@ describe('fetchForExtension', () => {
     expect(seen).toEqual(['POST /form a=1', 'GET /done '])
   })
 
+  it('TLS 오류(인증서·SSL)는 tls-failed — 그 밖의 연결 실패(network-failed)와 따로 (메시지는 Electron 33 net 실측 2026-10-20: 자체 서명 → net::ERR_CERT_AUTHORITY_INVALID)', async () => {
+    const throwing = (message: string): FetchOptions => ({
+      ...options,
+      fetch: async () => {
+        throw new Error(message)
+      },
+    })
+    for (const message of ['net::ERR_CERT_AUTHORITY_INVALID', 'net::ERR_CERT_DATE_INVALID', 'net::ERR_SSL_PROTOCOL_ERROR', 'net::ERR_BAD_SSL_CLIENT_AUTH_CERT']) {
+      expect(await fetchForExtension(request({ url: 'https://sonar.corp.local/' }), throwing(message)), message).toEqual({ ok: false, error: 'tls-failed' })
+    }
+    for (const message of ['net::ERR_NAME_NOT_RESOLVED', 'net::ERR_CONNECTION_REFUSED', 'fetch failed']) {
+      expect(await fetchForExtension(request({ url: 'https://sonar.corp.local/' }), throwing(message)), message).toEqual({ ok: false, error: 'network-failed' })
+    }
+  })
+
   it('연결할 수 없으면 network-failed — 던지지 않는다', async () => {
     const base = await serve(() => {})
     const closed = servers.pop()!

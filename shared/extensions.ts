@@ -199,6 +199,8 @@ export type ExtensionCallError =
   | 'response-too-large'
   /** 다른 origin 으로의 리다이렉트, 또는 리다이렉트가 너무 많다 */
   | 'redirect-blocked'
+  /** 인증서·TLS 오류 (사내 CA 를 모르는 등) */
+  | 'tls-failed'
   | 'network-failed'
   /** 열린 프로젝트가 없다 */
   | 'no-project'

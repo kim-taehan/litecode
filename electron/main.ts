@@ -13,6 +13,7 @@ import { systemAttachmentsHost } from './attachmentsHost.ts'
 import { ReportService } from '../src/services/report.ts'
 import { systemReportHost } from './reportHost.ts'
 import { ExtensionsService } from '../src/services/extensions.ts'
+import { extensionFetch } from './extensionFetch.ts'
 import { systemExtensionsHost } from './extensionsHost.ts'
 import type { AttachmentKind } from '../shared/contract.ts'
 import type { ChatModel, QueuedSend } from '../shared/chat.ts'
@@ -387,7 +388,7 @@ function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_REVOKE_ORIGIN, async (_event, id: unknown, origin: unknown) => ctx.extensions.revokeOrigin(String(id), String(origin)))
 }
 extensionsBridge.inject = ['extensions', 'projects']
-mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher }))
+mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher, fetch: extensionFetch }))
 mounted.push(ctx.plugin(extensionsBridge))
 
 /** 모든 앱 창에 보낸다. 창 하나의 send 실패(못 옮기는 값·닫히는 창)는 로그만 — 나머지 창과, 이벤트를 낸 서비스 쪽(cordis emit 은 리스너 예외를 던진다)으로 번지지 않게 (QA 03_qa_ext_pr3) */
@@ -941,6 +942,10 @@ function createWindow(): BrowserWindow {
   win.webContents.on('will-frame-navigate', (event) => {
     if (!event.isMainFrame && !/^about:(srcdoc|blank)(#|$)/.test(event.url)) event.preventDefault()
   })
+  // WebRTC(STUN/ICE UDP)는 CSP 로 못 막는다 — 확장 iframe(secrets·프로젝트 파일이 들어온다, #536)이 허용하지 않은 호스트로 데이터를 실어 보낼 수 있다.
+  // 실측(2026-10-20, Electron 33.4.11): sandbox srcdoc iframe 의 RTCPeerConnection 이 기본 정책에선 STUN UDP 5개를 보냈고, 이 정책에선 0개(후보도 없음).
+  // 앱은 WebRTC 를 쓰지 않는다(음성 입력의 getUserMedia 는 마이크만 — 이 정책과 무관)
+  win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
 
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error('[preload-error]', preloadPath, error)

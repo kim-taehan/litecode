@@ -20,7 +20,7 @@ import { setMainLocalePack } from '../i18n.ts'
 import { ExtensionData } from './extensions/data.ts'
 import { EXTENSION_LIMITS } from './extensions/limits.ts'
 import { isExtensionId } from './extensions/manifest.ts'
-import { fetchForExtension, parseFetchRequest } from './extensions/network.ts'
+import { fetchForExtension, parseFetchRequest, type ExtensionFetch } from './extensions/network.ts'
 import { isEntryPath } from './extensions/paths.ts'
 import { ExtensionStore, readInsideFile } from './extensions/store.ts'
 import { failureReason } from './features.ts'
@@ -72,8 +72,8 @@ export interface ExtensionsOptions {
   mount?: (extension: MountedExtension) => (ctx: Context) => void | Promise<void>
   /** secrets 를 봉하는 safeStorage (provider 키와 같은 것, 이슈 #536). 없거나 못 쓰면 secrets-unavailable */
   cipher?: KeyCipher
-  /** network.fetch 가 쓰는 fetch — 테스트가 주입한다. 기본 globalThis.fetch */
-  fetch?: typeof globalThis.fetch
+  /** network.fetch 가 쓰는 fetch — 확장마다 하나(쿠키·캐시를 확장끼리 섞지 않는다). 앱은 메인의 Chromium 네트워크(electron/extensionFetch.ts), 테스트가 주입한다. 기본 globalThis.fetch */
+  fetch?: (id: string) => ExtensionFetch
 }
 
 /** 통로 요청을 부른 프로젝트 — 다리가 등록된 프로젝트인지 확인한 것만 온다 */
@@ -478,7 +478,7 @@ export class ExtensionsService extends Service {
     const origin = parsed.request.url.origin
     if (!this.origins.get(id)?.includes(origin)) return { ok: false, error: 'consent-required', origin }
     return fetchForExtension(parsed.request, {
-      fetch: this.options.fetch ?? globalThis.fetch,
+      fetch: this.options.fetch?.(id) ?? globalThis.fetch,
       timeoutMs: EXTENSION_LIMITS.fetchTimeoutMs,
       maxBytes: EXTENSION_LIMITS.fetchBytes,
       maxRedirects: EXTENSION_LIMITS.fetchRedirects,

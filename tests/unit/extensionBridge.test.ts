@@ -174,7 +174,7 @@ describe('network — 허용 목록', () => {
   it('허용 목록에 없는 origin → consent-required(요청하지 않는다). 허용하면 목록에 남아 다음엔 묻지 않는다, 재시작해도', async () => {
     await install('sonar-ext', ['network'])
     const seen: string[] = []
-    let ext = await boot({ fetch: okFetch(seen) })
+    let ext = await boot({ fetch: () => okFetch(seen) })
     expect(await ext.call('sonar-ext', 'network.fetch', { url: 'http://sonar.local:9000/api/x' })).toEqual({ ok: false, error: 'consent-required', origin: 'http://sonar.local:9000' })
     expect(seen).toEqual([])
 
@@ -186,15 +186,32 @@ describe('network — 허용 목록', () => {
     expect(seen).toEqual(['http://sonar.local:9000/api/x'])
     expect((await ext.list())[0]).toMatchObject({ id: 'sonar-ext', origins: ['http://sonar.local:9000'] })
 
-    ext = await boot({ fetch: okFetch(seen) })
+    ext = await boot({ fetch: () => okFetch(seen) })
     expect(await ext.call('sonar-ext', 'network.fetch', { url: 'http://sonar.local:9000/api/y' })).toMatchObject({ ok: true })
     // 다른 포트·scheme 은 다른 origin — 다시 묻는다
     expect(await ext.call('sonar-ext', 'network.fetch', { url: 'https://sonar.local:9000/' })).toEqual({ ok: false, error: 'consent-required', origin: 'https://sonar.local:9000' })
   })
 
+  it('fetch 는 확장마다 따로 받는다 — 쿠키·캐시가 확장끼리 섞이지 않게(메인은 확장별 session)', async () => {
+    await install('sonar-ext', ['network'])
+    await install('other-ext', ['network'])
+    const ids: string[] = []
+    const ext = await boot({
+      fetch: (id) => {
+        ids.push(id)
+        return okFetch([])
+      },
+    })
+    for (const id of ['sonar-ext', 'other-ext']) {
+      await ext.allowOrigin(id, 'http://sonar.local')
+      expect(await ext.call(id, 'network.fetch', { url: 'http://sonar.local/' })).toMatchObject({ ok: true })
+    }
+    expect(ids).toEqual(['sonar-ext', 'other-ext'])
+  })
+
   it('거두면 목록에서 빠지고 다시 묻는다 — 목록이 비면 origins 키도 없다', async () => {
     await install('sonar-ext', ['network'])
-    const ext = await boot({ fetch: okFetch([]) })
+    const ext = await boot({ fetch: () => okFetch([]) })
     await ext.allowOrigin('sonar-ext', 'http://sonar.local')
     expect(await ext.revokeOrigin('sonar-ext', 'http://sonar.local')).toEqual({ ok: true })
     expect(await ext.call('sonar-ext', 'network.fetch', { url: 'http://sonar.local/' })).toMatchObject({ ok: false, error: 'consent-required' })
