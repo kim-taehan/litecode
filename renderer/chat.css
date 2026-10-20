@@ -223,7 +223,7 @@ button.turn-row__line:disabled { cursor: default; }
   color: var(--text-caption);
 }
 
-/* 진행 중에 끼어 나오는 답 글 — 본문 글자 그대로 */
+/* 턴 안에서 답 밖 글줄(중간 글·요약) — 진행 중엔 채팅에 안 쌓이고(필터, 피드백 #8) 완성된 턴에서만 보인다 */
 .turn-row--text {
   color: var(--text);
   font-size: var(--chat-font-size, 14px);
@@ -251,10 +251,10 @@ button.turn-row__line:disabled { cursor: default; }
 
 /* 진행 중 한 줄의 내용 (이슈 #416) — 누르면 우측 "턴 작업" 탭이 열린다 */
 .turn-running__line {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  max-width: 100%;
+  width: 100%;
   min-width: 0;
   padding: 1px 6px 1px 2px;
   border: none;

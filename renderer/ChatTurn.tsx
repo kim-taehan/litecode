@@ -28,7 +28,8 @@ import './hooks.css'
 // 대화 한 턴의 모양 (dsh ui-chat 참조 — 모양·동작만 가져와 새로 썼다):
 // - 내 말: 오른쪽 연파랑 말풍선 + 아래 시각·복사 아이콘
 // - 답: 말풍선이 아니라 본문 폭 전체의 글. 위에 턴 머리 "완료 · 2초 ⌄" 와 얇은 구분선 — 펼치면 그 턴의 작업 줄(생각·도구·중간 글)
-// - 진행 중: 작업 줄이 실시간으로 쌓이고(답 글도 그 사이에 끼어 나온다) 맨 아래 파란 "작업 중 · N초 ···". 끝나면 머리 아래로 접힌다
+// - 진행 중: 생각·도구·중간 글 줄은 채팅에 안 쌓고(필터) 맨 아래 파란 "작업 중 · N초 ···" 한 줄만. 전문은 우측 "턴 작업" 탭.
+//   끝나면 머리 아래로 접힌다 (이슈 #416, 피드백 #8 — 중간 글도 진행 중엔 숨김)
 // 접기 규칙(dsh TurnProcessNodeView): 잘 끝난 턴만 접는다. 실패한 턴은 작업을 펼친 채로 두고 접기 버튼이 없다
 
 // 내 말·답은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도(초안이 App 의 state) 바뀌지 않은 턴은 다시 그리지 않는다
@@ -127,10 +128,10 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
   const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
   const { work, answer } = running ? { work: [] as TurnItem[], answer: [] } : splitTurn(rest)
-  // 진행 중(이슈 #416) — 생각·도구 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "턴 작업" 탭으로.
-  // 채팅에는 진행 중 답 글(글 줄)과 상태 알림인 요약 중(compaction)만 그대로
+  // 진행 중(이슈 #416) — 생각·도구·중간 글(text) 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "턴 작업" 탭으로.
+  // 채팅에는 상태 알림인 요약 중(compaction)만 그대로 (중간 글은 피드백 #8, 2026-10-20: "Let me…" 이 노이즈라 진행 중엔 숨김)
   const liveRows = running
-    ? items.filter((item): item is Extract<TurnItem, { kind: 'text' }> | Extract<TurnItem, { kind: 'compaction' }> => item.kind === 'compaction' || (item.kind === 'text' && item.text.trim() !== ''))
+    ? items.filter((item): item is Extract<TurnItem, { kind: 'compaction' }> => item.kind === 'compaction')
     : []
   // 진짜 실패만 작업 줄을 펼쳐 둔다. 중단(사용자 stop·엔진 재시작)은 failed 의 한 갈래지만 완료처럼 접힌다 (이슈 #516)
   const unfolded = failed && !interrupted
@@ -175,18 +176,12 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
           )}
         </div>
       )}
-      {/* 진행 중 — 답 글(글 줄)·요약 중은 채팅에, 생각·도구 줄은 아래 한 줄과 우측 탭으로 (이슈 #416) */}
+      {/* 진행 중 — 요약 중만 채팅에. 생각·도구·중간 글 줄은 아래 파란 한 줄과 우측 탭으로 (이슈 #416, 피드백 #8) */}
       {liveRows.length > 0 && (
         <div className="turn__work">
-          {liveRows.map((item) =>
-            item.kind === 'compaction' ? (
-              <CompactionMark key={item.id} item={item} />
-            ) : (
-              <div key={item.id} className="turn-row turn-row--text" data-kind="text">
-                <Markdown text={item.text.trim()} directory={directory} streaming />
-              </div>
-            ),
-          )}
+          {liveRows.map((item) => (
+            <CompactionMark key={item.id} item={item} />
+          ))}
         </div>
       )}
       {/* 답 — 기존 셀렉터(.bubble--assistant)를 그대로 쓴다. 모양은 말풍선이 아니다. 모델이 빈 줄로 답을 시작하기도 해서 앞뒤 공백은 뗀다 */}

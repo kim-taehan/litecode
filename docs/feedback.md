@@ -99,6 +99,14 @@
 - Status: done (2026-10-13)
 - Fix: 2026-10-13 — #339: `McpPopup` 의 [+ 서버 추가] 둘 · `ServerEditor` 신규 카드 제거(편집·삭제는 그대로), 추가 = LLM 대화 `litecode_create` · 프로젝트 `.mcp.json`
 
+## 2026-10-20 #8 — 진행 중 중간 글("Let me…")이 채팅에 너무 많이 보여
+
+- Where: 채팅 — 답이 도는 중(진행 중)에 AI 가 쓰는 중간 글(`kind: 'text'` 줄, 예: "Let me take a pragmatic approach…", "Let me read the handleEnvelope section…")이 실시간으로 채팅에 쌓이는 부분
+- What: "Let me … 같은 중간(생각·계획) 글이 진행 중 채팅에 너무 많이 뜨서 노이즈가 심함" — #416 이 생각·도구 줄은 채팅에 안 쌓고(한 줄 + 우측 '턴 작업' 탭) 처리했지만 **중간 글(text 줄)은 채팅에 그대로 표시**되어 있음
+- Expect: "litecode 하는 방식 참고해줘" → 시안 비교 후 **A 시안** 선택 — 진행 중 채팅에는 중간 글 안 보이고 파란 진행 줄(지금 하는 일 + 경과)만. 전문은 우측 '턴 작업' 탭. 끝난 턴의 최종 답은 그대로
+- Status: done (2026-10-20)
+- Fix: 2026-10-20 — `ChatTurn.tsx:132-134` `liveRows` 필터를 `kind: 'compaction'` 만으로 좁혀서 진행 중 채팅에 중간 글(text) 줄이 안 보이게 함. 채팅에는 파란 진행 줄(RunningLine) + compaction 알림만. 전문은 우측 "턴 작업" 탭(TurnTab.tsx) 그대로. 끝난 턴(`splitTurn`)은 영향 없음
+
 ### 조사
 - 위치:
   - (a) 파일 수정: `src/services/mcp.ts:720-727`(`projectServers` — `.mcp.json`→`opencode.json(c)`→`.opencode/opencode.json(c)` 겹쳐 읽기) → 매 턴 `prepare`(:428)→`attach`(:458, :464-466)→`ctx.llm.mcpAdd`(:488) = `POST /mcp?directory=`(`src/services/llm/service.ts:613-627`)로 그 폴더 인스턴스에 자동 붙음. 개인 설정 `~/.config/opencode`(`personalServers` :729-736)은 opencode 가 스스로 띄우고 앱은 보여 주기만(끄기/켜기 = disconnect/connect :498-507)
