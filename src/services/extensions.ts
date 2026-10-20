@@ -437,7 +437,8 @@ export class ExtensionsService extends Service {
   private async storage(id: string, method: string, params: unknown): Promise<ExtensionCallResult> {
     const key = keyOf(params)
     if (key === undefined) return fail('params-invalid')
-    if (method === 'storage.get') return done((await this.values(id, 'storage'))[key] ?? null)
+    // 자기 키만 읽는다 — 'constructor' 같은 상속 키는 함수가 나와 IPC 복제가 깨진다 (QA #536)
+    if (method === 'storage.get') return done(ownValue(await this.values(id, 'storage'), key) ?? null)
     const value = (params as { value?: unknown }).value
     if (method === 'storage.set' && value === undefined) return fail('params-invalid')
     return this.withData(async () => {
@@ -458,7 +459,7 @@ export class ExtensionsService extends Service {
     const cipher = this.options.cipher
     if (!cipher?.available()) return fail('secrets-unavailable')
     if (method === 'secrets.get') {
-      const sealed = (await this.values(id, 'secrets'))[key]
+      const sealed = ownValue(await this.values(id, 'secrets'), key)
       return done(typeof sealed === 'string' ? cipher.decrypt(Buffer.from(sealed, 'base64')) : null)
     }
     return this.withData(async () => {
@@ -631,4 +632,8 @@ function storeAccess(root: string, appVersion: string) {
       (await store.listInstalled(appVersion)).map(({ id, manifest, problems }) => ({ id, ...(manifest && { manifest }), problems })),
     installedDir: (id: string) => path.join(path.resolve(root), 'installed', id),
   }
+}
+
+function ownValue(values: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(values, key) ? values[key] : undefined
 }

@@ -101,6 +101,14 @@ describe('storage — 권한 없이, 확장별 JSON 값', () => {
     expect(await ext.call('a-ext', 'storage.get', { key: 'server' })).toEqual({ ok: true, result: null })
   })
 
+  it('저장하지 않은 상속 키(constructor·__proto__·toString)는 null — 함수·객체가 나가면 IPC 복제가 깨진다 (QA #536)', async () => {
+    await install('a-ext')
+    const ext = await boot()
+    for (const key of ['constructor', '__proto__', 'toString']) {
+      expect(await ext.call('a-ext', 'storage.get', { key })).toEqual({ ok: true, result: null })
+    }
+  })
+
   it('상한을 넘는 set 은 storage-full — 이전 값이 그대로', async () => {
     await install('a-ext')
     const ext = await boot()
