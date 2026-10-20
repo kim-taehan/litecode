@@ -50,11 +50,32 @@ label.check{display:flex;align-items:center;gap:8px;font-size:12.5px}
 .twist{width:20px;height:20px;padding:0;border:0;background:transparent;color:var(--sub);display:inline-grid;place-items:center;flex-shrink:0}
 .tree-name{font:12px ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tree-add{height:22px;padding:0 8px;font-size:11.5px}
+/* 로그 창 (이슈 #551) — 패널 아래쪽 작은 창, 숨길 수 있다. #app 을 다시 그려도 스크롤이 흔들리지 않게 따로 둔다 */
+.log{position:sticky;bottom:0;margin:0 12px 12px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 -4px 16px rgba(0,0,0,.06);display:flex;flex-direction:column}
+.log[hidden],.log-show[hidden]{display:none}
+.log-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--line)}
+.log-head button{height:24px;padding:0 10px;font-size:12px}
+.log-tabs{display:flex;gap:4px}
+.log-tabs button[aria-selected=true]{border:0;background:var(--btn);color:var(--btn-text)}
+#log-text{height:160px;overflow:auto;padding:8px 10px;max-height:none;font:11px/1.45 ui-monospace,Menlo,monospace;color:var(--sub);white-space:pre-wrap;word-break:break-all}
+.log-show{position:sticky;bottom:12px;margin:0 12px 12px auto;display:block;height:28px;font-size:12px}
 pre{margin:0;max-height:160px;overflow:auto;font:11px ui-monospace,Menlo,monospace}
 </style>
 </head>
 <body>
 <main id="app"><div class="card pad sub">불러오는 중…</div></main>
+<section id="log" class="log" hidden>
+  <div class="log-head">
+    <span class="log-tabs" role="tablist" aria-label="로그">
+      <button role="tab" id="log-server" aria-selected="true">서버</button>
+      <button role="tab" id="log-scanner" aria-selected="false">분석</button>
+    </span>
+    <span class="grow"></span>
+    <button id="log-hide" aria-label="로그 숨기기">숨기기</button>
+  </div>
+  <pre id="log-text" role="log" aria-live="off"></pre>
+</section>
+<button id="log-show" class="log-show" hidden>로그 보기</button>
 <script>
 // SonarQube 확장 패널 (이슈 #545) — 확장에 든 SonarQube 를 이 기기에서 띄우고, 지금 프로젝트를 분석해 결과를 본다.
 // 앱과는 통로로만 말한다: parent.postMessage({ litecode: 1, id, method, params }) → { litecode: 1, id, ok, result | error }.
@@ -134,6 +155,7 @@ async function refreshServer() {
 }
 
 async function serverAction(method) {
+  if (method === 'server.start') showLog('server')
   try {
     state.server = await call(method)
   } catch (error) {
@@ -276,6 +298,7 @@ function scopePaths() {
 
 async function analyze() {
   const paths = scopePaths()
+  showLog('scanner')
   state.analysis = { phase: 'scanning' }
   render()
   let result
@@ -455,6 +478,47 @@ function render() {
   app.replaceChildren(...parts)
 }
 
+// --- 로그 창 (이슈 #551) ---
+
+const log = { open: false, source: 'server', timer: undefined }
+const logBox = document.getElementById('log')
+const logText = document.getElementById('log-text')
+const logShow = document.getElementById('log-show')
+
+function showLog(source) {
+  log.source = source
+  setLogOpen(true)
+}
+
+function setLogOpen(open) {
+  log.open = open
+  logBox.hidden = !open
+  logShow.hidden = open
+  for (const name of ['server', 'scanner']) document.getElementById(`log-${name}`).setAttribute('aria-selected', String(log.source === name))
+  clearTimeout(log.timer)
+  if (open) pollLog()
+}
+
+async function pollLog() {
+  try {
+    const { text } = await call('server.log', { source: log.source })
+    // 맨 아래를 보고 있을 때만 따라 내려간다 — 위로 올려 읽는 중이면 그대로
+    const atBottom = logText.scrollHeight - logText.scrollTop - logText.clientHeight < 24
+    if (logText.textContent !== text) {
+      logText.textContent = text || (log.source === 'server' ? '아직 서버 로그가 없습니다' : '아직 분석 로그가 없습니다')
+      if (atBottom) logText.scrollTop = logText.scrollHeight
+    }
+  } catch {
+    // 다음 번에 다시
+  }
+  if (log.open) log.timer = setTimeout(pollLog, 1000)
+}
+
+document.getElementById('log-server').addEventListener('click', () => showLog('server'))
+document.getElementById('log-scanner').addEventListener('click', () => showLog('scanner'))
+document.getElementById('log-hide').addEventListener('click', () => setLogOpen(false))
+logShow.addEventListener('click', () => setLogOpen(true))
+
 async function start() {
   try {
     state.project = await call('server.project')
@@ -462,6 +526,10 @@ async function start() {
     state.error = error.message
   }
   await refreshServer()
+  // 서버가 뜨는 중이면 로그 창을 연다. 그 밖에는 [로그 보기] 만
+  const phase = state.server?.phase
+  if (phase && phase !== 'stopped' && phase !== 'running' && phase !== 'failed') showLog('server')
+  else if (state.server) logShow.hidden = false
   if (state.server?.phase === 'running') loadResults()
   schedule()
 }

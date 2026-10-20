@@ -77,6 +77,7 @@ export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { prev
   const kind = installKind(preview)
 
   function cancel(): void {
+    if (busy) return // 설치(압축 풀기) 중에는 닫지 않는다 — 큰 확장은 수십 초 걸린다 (이슈 #550)
     if (preview.token) void request(() => window.litecode.cancelExtension(preview.token!))
     onClose()
   }
@@ -188,11 +189,12 @@ export function ExtensionConfirmDialog({ preview, onClose, onInstalled }: { prev
           </div>
         )}
         <div className="confirm-dialog__actions">
-          <button type="button" className="settings-button" onClick={cancel}>
+          <button type="button" className="settings-button" disabled={busy} onClick={cancel}>
             {t('extensions.confirm.cancel')}
           </button>
-          <button type="button" className="settings-button settings-button--primary" disabled={busy || !preview.token} onClick={() => void install()}>
-            {t(installLabel)}
+          <button type="button" className="settings-button settings-button--primary" disabled={busy || !preview.token} aria-busy={busy || undefined} onClick={() => void install()}>
+            {busy && <ButtonSpinner />}
+            {t(busy ? 'extensions.installing' : installLabel)}
           </button>
         </div>
       </div>
@@ -259,11 +261,15 @@ export function ExtensionAddButton({ onInstalled }: { onInstalled?(note: Install
   const close = () => setDialog(undefined)
   return (
     <>
-      <button type="button" className="settings-button settings-button--compact settings-button--primary extensions-add" disabled={busy} onClick={() => void pick()}>
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-          <path d="M6 1.5v9M1.5 6h9" />
-        </svg>
-        {t('extensions.add')}
+      <button type="button" className="settings-button settings-button--compact settings-button--primary extensions-add" disabled={busy} aria-busy={busy || undefined} onClick={() => void pick()}>
+        {busy ? (
+          <ButtonSpinner />
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+            <path d="M6 1.5v9M1.5 6h9" />
+          </svg>
+        )}
+        {t(busy ? 'extensions.checking' : 'extensions.add')}
       </button>
       {dialog?.kind === 'confirm' && (
         <ExtensionConfirmDialog
@@ -510,5 +516,15 @@ export function ExtensionsSection({ extensions }: { extensions: readonly Extensi
         ))}
       </ul>
     </section>
+  )
+}
+
+/** 버튼 안의 도는 고리 — 큰 zip 의 검사·설치가 수십 초 걸린다 (이슈 #550) */
+function ButtonSpinner() {
+  return (
+    <svg className="button-spinner" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.5" />
+      <path d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   )
 }

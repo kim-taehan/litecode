@@ -297,6 +297,10 @@ describe('server.project · server.analyze (이슈 #545)', () => {
     const failed = await ext.call('srv-ext', 'server.analyze', { paths: ['fail'] }, project())
     expect(failed).toMatchObject({ ok: true, result: { ok: false, error: 'analysis-failed' } })
     expect(((failed as { result: { detail: string } }).result.detail)).toContain('분석 실패 사유')
+    // 로그 창 (이슈 #551) — 마지막 분석의 스캐너 출력, 서버 출력. source 가 틀리면 params-invalid
+    expect(await ext.call('srv-ext', 'server.log', { source: 'scanner' }, project())).toEqual({ ok: true, result: { source: 'scanner', text: 'ERROR: 분석 실패 사유\n' } })
+    expect(await ext.call('srv-ext', 'server.log', {}, project())).toMatchObject({ ok: true, result: { source: 'server' } })
+    expect(await ext.call('srv-ext', 'server.log', { source: 'x' }, project())).toEqual({ ok: false, error: 'params-invalid' })
   })
 
   it('server 권한이 없는 확장은 permission-missing', async () => {
@@ -306,7 +310,7 @@ describe('server.project · server.analyze (이슈 #545)', () => {
     await store.install((await store.stage(file, APP)).token!, APP)
     await store.applyPending()
     const { ext } = await boot()
-    for (const method of ['server.project', 'server.analyze']) expect(await ext.call('plain-ext', method, {}, project()), method).toEqual({ ok: false, error: 'permission-missing' })
+    for (const method of ['server.project', 'server.analyze', 'server.log']) expect(await ext.call('plain-ext', method, {}, project()), method).toEqual({ ok: false, error: 'permission-missing' })
   })
 })
 

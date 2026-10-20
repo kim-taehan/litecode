@@ -400,11 +400,23 @@ async function waitGone(pid: number, ms: number): Promise<boolean> {
 
 /** server.log 의 끝 MAX_OUTPUT 자 — 기동 실패 사유는 출력의 끝에 있다 */
 function logTail(file: string): string {
+  return tailText(file, MAX_OUTPUT).trim()
+}
+
+/** 로그 파일의 끝 chars 자 — 없으면 빈 글. 파일 전체를 읽지 않고 끝만 읽는다 (패널의 로그 창이 1초마다 부른다, 이슈 #551) */
+export function tailText(file: string, chars: number): string {
+  let fd: number | undefined
   try {
-    const bytes = fs.readFileSync(file)
-    return bytes.subarray(Math.max(0, bytes.length - MAX_OUTPUT * 4)).toString('utf8').slice(-MAX_OUTPUT).replace(/^\uFFFD+/, '').trim()
+    fd = fs.openSync(file, 'r')
+    const size = fs.fstatSync(fd).size
+    const length = Math.min(size, chars * 4)
+    const buffer = Buffer.alloc(length)
+    fs.readSync(fd, buffer, 0, length, size - length)
+    return buffer.toString('utf8').slice(-chars).replace(/^\uFFFD+/, '')
   } catch {
     return ''
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd)
   }
 }
 
