@@ -209,15 +209,6 @@ export function closeExtensionTabs(extensions: readonly { id: string; state: str
   }
 }
 
-/** 지금 보는 대화의 프로젝트 — 패널(FilePreviewPanel)이 알린다. 패널 밖(설정 화면의 확장 [열기])이 확장 탭을 열 자리 */
-let workspace: string | undefined
-export function setWorkspaceDirectory(directory: string | undefined): void {
-  workspace = directory
-}
-export function workspaceDirectory(): string | undefined {
-  return workspace
-}
-
 /** ⌘[·⌘] — 터미널 탭을 넘나든다 (이전·다음). 고른 것이 없으면 마지막 연 것으로. 하나 없으면 false */
 export function cycleTerminalTab(directory: string, delta: 1 | -1): boolean {
   if (!current || current.directory !== directory) return false
@@ -244,6 +235,22 @@ export function panelTakesFocus(state: PanelState): boolean {
 export function openFilesTab(directory: string): void {
   const state = base(directory)
   set({ ...state, open: true, active: undefined, focus: state.focus + 1, quiet: false })
+}
+
+// ── 파일 찾기 (이슈 #528) — ⌘P 신호 ──
+
+let filesSearchListeners = new Set<() => void>()
+
+/** 파일 찾기를 요청한다 — Files 탭을 열고, 검색 칸에 포커스를 준다 */
+export function requestFilesSearch(directory: string): void {
+  openFilesTab(directory)
+  for (const listener of filesSearchListeners) listener()
+}
+
+/** ⌘P 신호를 듣는다 */
+export function onFilesSearch(callback: () => void): () => void {
+  filesSearchListeners.add(callback)
+  return () => { filesSearchListeners.delete(callback) }
 }
 
 /** 닫았던 패널을 그대로 다시 연다 — 처음이면 Files 탭 */

@@ -67,11 +67,6 @@ export function installKind(preview: ExtensionPreview): InstallKind {
   return order > 0 ? 'upgrade' : order === 0 ? 'same' : 'downgrade'
 }
 
-/** 설치 직후 오른쪽 패널에 탭을 여나 — 패널 확장만. 언어 팩(이슈 #525)은 열 것이 없고 언어도 바꾸지 않는다(설정 > 일반에서 고른다. 안내는 팩의 details) */
-export function opensAfterInstall(preview: ExtensionPreview): boolean {
-  return preview.manifest?.type !== 'locale'
-}
-
 export type CardKind = 'on' | 'off' | 'mounting' | 'failed'
 
 /** 카드 모양 — 실패 · 올리는 중 · 켜짐/꺼짐 (설치·삭제는 곧바로 적용돼 보류 상태가 없다, 이슈 #511) */

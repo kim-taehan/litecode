@@ -16,7 +16,7 @@ import { ExtensionsService } from '../../src/services/extensions.ts'
 import { SettingsService } from '../../src/services/settings.ts'
 import { speechLanguage } from '../../shared/speech.ts'
 import type { ExtensionSummary } from '../../shared/extensions.ts'
-import { languageOptions, opensAfterInstall } from '../../renderer/extensionsView.ts'
+import { languageOptions } from '../../renderer/extensionsView.ts'
 import { menuExtensions } from '../../renderer/TabAddMenu.tsx'
 import { makeZip, type ZipItem } from './support/zipWriter.ts'
 
@@ -191,12 +191,6 @@ describe('화면 — 언어 선택지와 + 메뉴', () => {
     ]
     expect(languageOptions(list)).toEqual([...LANGUAGES, { id: 'zh-CN', label: '中文(简体)' }])
     expect(languageOptions([])).toEqual([...LANGUAGES])
-  })
-
-  it('설치 직후 패널 확장은 탭을 열지만 언어 팩은 아무것도 열지 않는다', () => {
-    const preview = (manifest: object) => ({ manifest, files: { count: 2, totalBytes: 10 }, problems: [] }) as unknown as Parameters<typeof opensAfterInstall>[0]
-    expect(opensAfterInstall(preview(panelManifest))).toBe(true)
-    expect(opensAfterInstall(preview(localeManifest))).toBe(false)
   })
 
   it('+ 메뉴의 확장 목록에는 언어 팩이 나오지 않는다 (열 것이 없다)', () => {

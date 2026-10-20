@@ -138,7 +138,7 @@
   "extensions.info.version": "版本",
   "extensions.info.description": "说明",
   "extensions.mounting": "加载中",
-  "extensions.installedOnly": "已安装 {name}。",
+  "extensions.installed": "已安装 {name}。",
   "extensions.confirm.title": "安装此扩展？",
   "extensions.confirm.files": "文件",
   "extensions.confirm.filesValue": "{count} 个文件 · {size}",

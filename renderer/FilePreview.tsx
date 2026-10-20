@@ -18,13 +18,13 @@ import {
   isTerminalTab,
   isTurnTab,
   openExtensionTab,
+  onFilesSearch,
   openFilePreview,
   panelTakesFocus,
   openFilesTab,
   openTerminalTab,
   revealPanel,
   selectTab,
-  setWorkspaceDirectory,
   startCompare,
   taskIdOf,
   terminalIdOf,
@@ -99,7 +99,6 @@ export function FilePreviewPanel({ directory, titleFor, activeConversationId, on
   useEffect(() => {
     if (stale) closeFilePreview()
   }, [stale])
-  useEffect(() => setWorkspaceDirectory(directory), [directory])
   // 바뀜 이벤트만 — 첫 읽기 전의 빈 목록으로 탭을 닫지 않게
   useEffect(() => window.litecode.onExtensionsChanged(closeExtensionTabs), [])
   return state?.open && !stale ? (
@@ -624,6 +623,8 @@ function FilesView({ directory, hidden }: { directory: string; hidden: boolean }
   const t = useT()
   const [levels, setLevels] = useState<Record<string, Level>>({})
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [filter, setFilter] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
   const epoch = useRef(0)
 
   function list(relative: string): void {
@@ -639,8 +640,20 @@ function FilesView({ directory, hidden }: { directory: string; hidden: boolean }
     epoch.current++
     setLevels({})
     setExpanded(new Set())
+    setFilter('')
     list('')
   }, [directory])
+
+  // ⌘P — 파일 찾기 신호 (이슈 #528)
+  useEffect(
+    () =>
+      onFilesSearch(() => {
+        setFilter('')
+        setExpanded(new Set())
+        requestAnimationFrame(() => searchRef.current?.focus())
+      }),
+    [],
+  )
 
   /** 다시 읽기 — 루트와 펼친 폴더를 보이는 목록은 둔 채 다시 묻는다 (dsh 처럼 나무를 비우지 않는다) */
   function reload(): void {
@@ -658,6 +671,7 @@ function FilesView({ directory, hidden }: { directory: string; hidden: boolean }
   }
 
   const rootLevel = levels['']
+  const query = filter.trim().toLowerCase()
   return (
     <div className="file-tree" hidden={hidden}>
       <div className="file-preview__bar">
@@ -666,9 +680,32 @@ function FilesView({ directory, hidden }: { directory: string; hidden: boolean }
           <ReloadButton onClick={reload} />
         </span>
       </div>
+      <div className="file-tree__search">
+        <input
+          ref={searchRef}
+          type="text"
+          className="file-tree__search-input"
+          placeholder={t('filePreview.searchPlaceholder')}
+          aria-label={t('filePreview.filesLabel')}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.stopPropagation()
+              setFilter('')
+              searchRef.current?.blur()
+            }
+          }}
+        />
+        {filter && (
+          <button type="button" className="file-tree__search-clear" aria-label={t('filePreview.searchClear')} onClick={() => { setFilter(''); searchRef.current?.focus() }}>
+            <CrossIcon size={10} />
+          </button>
+        )}
+      </div>
       <div className="file-tree__body">
         <ul className="file-tree__level" role="tree" aria-label={t('filePreview.filesLabel')}>
-          <TreeLevel relative="" levels={levels} expanded={expanded} onToggle={toggle} onOpen={(file) => openFilePreview(directory, file)} />
+          <TreeLevel relative="" levels={levels} expanded={expanded} onToggle={toggle} onOpen={(file) => openFilePreview(directory, file)} filter={query} />
         </ul>
       </div>
     </div>
@@ -681,21 +718,30 @@ function TreeLevel({
   expanded,
   onToggle,
   onOpen,
+  filter = '',
 }: {
   relative: string
   levels: Record<string, Level>
   expanded: ReadonlySet<string>
   onToggle(relative: string): void
   onOpen(relative: string): void
+  filter?: string
 }) {
   const t = useT()
   const level = levels[relative]
   if (level === undefined || level === 'loading') return <li className="file-tree__note">{t('filePreview.loading')}</li>
   if (level === 'failed') return <li className="file-tree__note" role="alert">{t('filePreview.folderUnavailable')}</li>
+
+  // 필터가 있으면 이름에 맞는 항목만 보인다
+  const visibleEntries = filter
+    ? level.entries.filter((entry) => entry.name.toLowerCase().includes(filter))
+    : level.entries
+
   return (
     <>
-      {level.entries.length === 0 && <li className="file-tree__note">{t('filePreview.emptyFolder')}</li>}
-      {level.entries.map((entry) => {
+      {visibleEntries.length === 0 && !filter && <li className="file-tree__note">{t('filePreview.emptyFolder')}</li>}
+      {filter && visibleEntries.length === 0 && relative === '' && <li className="file-tree__note">{t('filePreview.noMatches')}</li>}
+      {visibleEntries.map((entry) => {
         const child = relative ? `${relative}/${entry.name}` : entry.name
         if (entry.type === 'directory') {
           const open = expanded.has(child)
@@ -707,7 +753,7 @@ function TreeLevel({
               </button>
               {open && (
                 <ul className="file-tree__level" role="group">
-                  <TreeLevel relative={child} levels={levels} expanded={expanded} onToggle={onToggle} onOpen={onOpen} />
+                  <TreeLevel relative={child} levels={levels} expanded={expanded} onToggle={onToggle} onOpen={onOpen} filter={filter} />
                 </ul>
               )}
             </li>
@@ -731,7 +777,7 @@ function TreeLevel({
           </li>
         )
       })}
-      {level.truncated && <li className="file-tree__note">{t('filePreview.truncatedFolder')}</li>}
+      {level.truncated && !filter && <li className="file-tree__note">{t('filePreview.truncatedFolder')}</li>}
     </>
   )
 }
