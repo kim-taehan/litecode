@@ -392,11 +392,6 @@ export function ExtensionCard({ extension, initialExpanded = false }: { extensio
           </span>
         ) : (
           <>
-            {kind === 'on' && (
-              <button type="button" className="settings-button settings-button--compact extension-row__open" onClick={() => openExtensionTab(workspaceDirectory(), extension.id)}>
-                {t('extensions.open')}
-              </button>
-            )}
             <MoreMenu
               label={t('extensions.more', { name })}
               items={[

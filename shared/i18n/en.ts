@@ -425,7 +425,6 @@ export const en = {
   'extensions.info.description': 'Description',
   'extensions.info.problems': 'Why it could not load',
   'extensions.mounting': 'Loading',
-  'extensions.open': 'Open',
   'extensions.installed': '{name} was installed. It opened in the right panel.',
   'extensions.installedOnly': '{name} was installed.',
   'extensions.tab.failed': 'Could not open the extension — {reason}',
