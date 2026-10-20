@@ -1,9 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ExtensionServer, ExtensionServerOptions, ExtensionServerStatus } from '../../../shared/extensions.ts'
+import { execProgram } from '../exec.ts'
+import { keepTail } from '../outputBuffer.ts'
 import type { KeyCipher } from '../providers.ts'
 import { leftoverAlive, reapServerRecord, startServer, type ServerHandle, type ServerOptions, type ServerState } from './server.ts'
 import { prepareSonarAdmin, sonarPassword, type AdminSecrets } from './serverAdmin.ts'
+import { reportTaskId, sonarProjectKey, sonarScanArgs } from './sonarAnalysis.ts'
 
 // 확장마다의 내장 서버 (이슈 #537) — ctx.extensions 가 쥔다. 띄우기·내리기·상태는 server.ts 의 실행기, 관리자 준비는 serverAdmin.ts.
 // 데이터는 `<root>/data/<id>/server/` (SonarQube 의 data·logs·temp, server.log, server.pid.json, admin.json) — 확장을 지우면 자료 폴더째 지워진다.
@@ -12,6 +15,14 @@ import { prepareSonarAdmin, sonarPassword, type AdminSecrets } from './serverAdm
 
 const TOKEN_NAME = 'litecode'
 const ADMIN_FILE = 'admin.json'
+
+/** 분석(스캐너) 기한 — 이 저장소(340파일) 전체가 15초였다(실측 §11). 큰 저장소를 보고 넉넉히 */
+const ANALYZE_TIMEOUT_MS = 15 * 60_000
+const ANALYZE_OUTPUT = 4_000
+
+export type AnalyzeResult =
+  | { ok: true; projectKey: string; taskId?: string; skipped: string[] }
+  | { ok: false; error: 'analysis-unsupported' | 'server-not-running' | 'busy' | 'scope-empty' | 'analysis-failed'; detail?: string }
 
 export const DEFAULT_SERVER_OPTIONS: ExtensionServerOptions = { startWithApp: false, stopWithApp: true }
 
@@ -34,6 +45,8 @@ export class ExtensionServers {
   /** 앱이 꺼지는 중 — 서비스가 내려간 뒤라 바뀜을 알리지 않는다 */
   private released = false
   private tokens = new Map<string, string>()
+  /** 분석이 도는 확장 — 한 번에 하나 */
+  private analyzing = new Set<string>()
 
   constructor(private options: ExtensionServersOptions) {}
 
@@ -102,6 +115,43 @@ export class ExtensionServers {
     for (const [, handle] of leaving) void handle.stop()
   }
 
+  /** 그 프로젝트의 SonarQube 프로젝트 키 (이슈 #545) */
+  projectKey(project: { directory: string; name: string }): string {
+    return sonarProjectKey(project.directory, project.name)
+  }
+
+  /** [분석] (이슈 #545) — admin: sonarqube 서버만. 동봉 스캐너(server/scanner)를 동봉 런타임(server/runtime)으로 띄워 내장 서버에 올린다.
+   *  paths 가 있으면 범위 분석(`<키>__scope` — 전체 결과를 덮지 않는다). 토큰은 env(SONAR_TOKEN)로, 스캐너 캐시(330MB)는 데이터 폴더로(SONAR_USER_HOME).
+   *  올린 뒤 서버가 결과를 처리하는 작업 id(taskId)를 준다 — 끝났는지는 패널이 api/ce/task 로 본다 */
+  async analyze(id: string, server: ExtensionServer, extensionDir: string, project: { directory: string; name: string }, paths?: readonly string[]): Promise<AnalyzeResult> {
+    if (server.admin !== 'sonarqube') return { ok: false, error: 'analysis-unsupported' }
+    const token = this.tokens.get(id)
+    if (this.states.get(id)?.phase !== 'running' || token === undefined) return { ok: false, error: 'server-not-running' }
+    if (this.analyzing.has(id)) return { ok: false, error: 'busy' }
+    const projectDir = fs.realpathSync(project.directory)
+    const workDir = path.join(this.dataDir(id), 'scanner-work')
+    const scan = sonarScanArgs({ serverUrl: `http://127.0.0.1:${server.port}`, projectKey: this.projectKey(project), projectDir, workDir }, paths, (relative) => insideExisting(projectDir, relative))
+    if (!scan.ok) return scan
+    this.analyzing.add(id)
+    try {
+      fs.rmSync(path.join(workDir, 'report-task.txt'), { force: true })
+      const output = keepTail(ANALYZE_OUTPUT)
+      const end = await execProgram({
+        file: path.join(extensionDir, 'server', 'scanner', 'bin', 'sonar-scanner'),
+        args: scan.args,
+        cwd: projectDir,
+        timeoutMs: ANALYZE_TIMEOUT_MS,
+        env: { JAVA_HOME: path.join(extensionDir, 'server', 'runtime'), SONAR_TOKEN: token, SONAR_USER_HOME: path.join(this.dataDir(id), 'scanner-home') },
+        onOutput: (_stream, text) => output.push(text),
+      }).done
+      if (end.status !== 'done' || end.exitCode !== 0) return { ok: false, error: 'analysis-failed', detail: (end.error ?? output.text()).trim().slice(-ANALYZE_OUTPUT) }
+      const taskId = reportTaskId(workDir)
+      return { ok: true, projectKey: scan.projectKey, skipped: scan.skipped, ...(taskId !== undefined && { taskId }) }
+    } finally {
+      this.analyzing.delete(id)
+    }
+  }
+
   /** 내장 서버로 가는 요청에 붙일 토큰 — 관리자 준비가 끝났을 때만 */
   token(id: string): string | undefined {
     // 실행 중일 때만 — 서버가 스스로 끝난 뒤 그 포트를 잡은 다른 프로그램에 토큰을 보내지 않는다 (QA 03_qa_537)
@@ -146,4 +196,14 @@ function writeAdmin(file: string, cipher: KeyCipher, secrets: AdminSecrets): voi
   const temp = `${file}.${process.pid}.tmp`
   fs.writeFileSync(temp, JSON.stringify(value), { mode: 0o600 })
   fs.renameSync(temp, file)
+}
+
+/** 범위 경로가 지금 있고 실제 위치가 프로젝트 안인가 — 심볼릭 링크로 밖을 가리키는 것은 뺀다 */
+function insideExisting(projectDir: string, relative: string): boolean {
+  try {
+    const real = fs.realpathSync(path.join(projectDir, relative))
+    return real === projectDir || real.startsWith(projectDir + path.sep)
+  } catch {
+    return false
+  }
 }
