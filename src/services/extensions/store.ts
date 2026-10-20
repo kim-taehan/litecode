@@ -488,7 +488,7 @@ async function readInstalled(dir: string, expectedId: string, appVersion: string
 }
 
 /** 폴더 안의 파일을 읽는다 — 실제 경로(realpath)가 폴더 안, 일반 파일(lstat), 크기 상한(확인과 읽기 사이에 커졌을 때도). 던지지 않는다 */
-async function readInsideFile(dir: string, entry: string, limit: number): Promise<{ ok: true; bytes: Buffer } | { ok: false; failure: ExtensionStoreFailure }> {
+export async function readInsideFile(dir: string, entry: string, limit: number): Promise<{ ok: true; bytes: Buffer } | { ok: false; failure: ExtensionStoreFailure }> {
   const file = path.join(dir, entry)
   try {
     const [realDir, realFile, stat] = await Promise.all([fs.realpath(dir), fs.realpath(file), fs.lstat(file)])

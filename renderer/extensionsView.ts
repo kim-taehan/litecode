@@ -154,6 +154,12 @@ export function problemLine(problem: ExtensionProblem): ProblemLine {
       return { title: { key: 'extensions.problem.entry-invalid' }, mono: problem.params.value }
     case 'permissions-invalid':
       return { title: { key: 'extensions.problem.permissions-invalid' }, mono: 'permissions' }
+    case 'permission-unknown': {
+      const { value, suggestion } = problem.params
+      return { title: { key: 'extensions.problem.permission-unknown' }, mono: value, ...(suggestion ? { detail: { key: 'extensions.detail.suggestion', vars: { suggestion } } } : {}) }
+    }
+    case 'permissions-unexpected':
+      return { title: { key: 'extensions.problem.permissions-unexpected' }, mono: 'permissions' }
     case 'entry-missing':
       return { title: { key: 'extensions.problem.entry-missing' }, mono: problem.params.entry }
     case 'id-mismatch':

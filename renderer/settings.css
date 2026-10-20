@@ -1321,6 +1321,81 @@
   color: var(--ok);
 }
 
+/* 요청 권한 (이슈 #536, 시안 _workspace/mock-sonarqube-ext Confirm) — 권한마다 아이콘 · 이름 · 한 줄 설명, 테두리 친 목록 */
+.extension-permissions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.extension-permissions__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.extension-permissions__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+}
+
+.extension-permission {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.extension-permission:last-child {
+  border-bottom: none;
+}
+
+.extension-permission__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--text-secondary);
+}
+
+.extension-permission__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.extension-permission__name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.extension-permission__note {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+/* 카드 상세의 허용한 주소 (이슈 #536) — 주소마다 고정폭 + [거두기] */
+.extension-origins {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extension-origin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+
 .extension-reject__head {
   display: flex;
   align-items: center;
@@ -1368,7 +1443,8 @@
 
 .extension-reject__note code,
 .extension-confirm__rows code,
-.extension-row__info code {
+.extension-row__info code,
+.extension-origin code {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 12px;
 }

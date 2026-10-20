@@ -23,7 +23,20 @@ function bridgeBody(): string {
 describe('확장 IPC 채널', () => {
   it('설계의 채널이 다 있다', () => {
     expect(keys.map((key) => Channel[key]).sort()).toEqual(
-      ['extensions:cancel', 'extensions:changed', 'extensions:install', 'extensions:list', 'extensions:pick', 'extensions:read-entry', 'extensions:read-locale', 'extensions:remove', 'extensions:set-enabled'],
+      [
+        'extensions:allow-origin',
+        'extensions:call',
+        'extensions:cancel',
+        'extensions:changed',
+        'extensions:install',
+        'extensions:list',
+        'extensions:pick',
+        'extensions:read-entry',
+        'extensions:read-locale',
+        'extensions:remove',
+        'extensions:revoke-origin',
+        'extensions:set-enabled',
+      ],
     )
   })
 
@@ -35,6 +48,13 @@ describe('확장 IPC 채널', () => {
   it('read-locale (이슈 #525) — preload 는 language 를 넘기고, 브리지는 문자열로 바꿔 ctx.extensions.readLocale 에 맡긴다', () => {
     expect(preload).toMatch(/readLocalePack: \(language\) => ipcRenderer\.invoke\(Channel\.EXTENSIONS_READ_LOCALE, language\)/)
     expect(bridgeBody()).toMatch(/handle\(ctx, Channel\.EXTENSIONS_READ_LOCALE, async \(_event, language: unknown\) => ctx\.extensions\.readLocale\(String\(language\)\)\)/)
+  })
+
+  it('call (이슈 #536) — 프로젝트는 등록된 것만 이름과 함께 넘긴다(화면이 준 폴더를 그대로 믿지 않는다)', () => {
+    expect(preload).toMatch(/callExtension: \(id, method, params, directory\) => ipcRenderer\.invoke\(Channel\.EXTENSIONS_CALL, id, method, params, directory\)/)
+    const body = bridgeBody()
+    expect(body).toMatch(/\(await ctx\.projects\.list\(\)\)\.find\(\(project\) => project\.path === directory\)/)
+    expect(body).toMatch(/ctx\.extensions\.call\(String\(id\), String\(method\), params, found && \{ directory: found\.path, name: found\.name \}\)/)
   })
 
   it('요청 채널마다 preload 가 invoke 하고 main 의 브리지가 handle 한다', () => {
@@ -56,7 +76,7 @@ describe('확장 IPC 채널', () => {
   })
 
   it('브리지는 inject 로 extensions 를 기다리고, 기능 묶음이 아니라 바탕으로 올라간다 (부팅 진단 목록에도)', () => {
-    expect(main).toMatch(/^extensionsBridge\.inject = \['extensions'\]$/m)
+    expect(main).toMatch(/^extensionsBridge\.inject = \['extensions', 'projects'\]$/m)
     expect(main).toMatch(/^mounted\.push\(ctx\.plugin\(extensionsBridge\)\)$/m)
     expect(main).toMatch(/\.\.\.extensionsBridge\.inject/)
   })

@@ -1,5 +1,5 @@
 import { FEATURES } from '../../../shared/features.ts'
-import type { ExtensionManifest, ExtensionProblem, ExtensionType } from '../../../shared/extensions.ts'
+import { EXTENSION_PERMISSIONS, type ExtensionManifest, type ExtensionProblem, type ExtensionType } from '../../../shared/extensions.ts'
 import { isBuiltinLanguage, isLanguage } from '../../../shared/i18n/index.ts'
 import { EXTENSION_LIMITS, type ExtensionLimits } from './limits.ts'
 import { isEntryPath } from './paths.ts'
@@ -32,7 +32,7 @@ export function checkManifest(
 
   for (const field of Object.keys(raw)) {
     if (KNOWN.includes(field)) continue
-    const suggestion = similarField(field)
+    const suggestion = similar(field, KNOWN)
     problems.push({ code: 'field-unknown', params: suggestion ? { field, suggestion } : { field } })
   }
   const missing = (field: string) => problems.push({ code: 'field-missing', params: { field } })
@@ -71,8 +71,18 @@ export function checkManifest(
   else if (type === 'panel' && raw.locale !== undefined) problems.push({ code: 'locale-unexpected', params: {} })
 
   if (raw.permissions !== undefined) {
-    const ok = Array.isArray(raw.permissions) && raw.permissions.every((permission) => typeof permission === 'string' && permission !== '')
+    const list: unknown = raw.permissions
+    const ok = Array.isArray(list) && list.every((permission) => typeof permission === 'string' && permission !== '')
     if (!ok) problems.push({ code: 'permissions-invalid', params: {} })
+    // 권한의 의미 (이슈 #536) — 모르는 값은 거절(오타가 조용히 빠지면 확장이 쓰다가 permission-missing 으로 막힌다), 언어 팩은 코드를 실행하지 않으니 권한도 없다
+    else if (type === 'locale' && list.length > 0) problems.push({ code: 'permissions-unexpected', params: {} })
+    else {
+      for (const value of list as string[]) {
+        if ((EXTENSION_PERMISSIONS as readonly string[]).includes(value)) continue
+        const suggestion = similar(value, EXTENSION_PERMISSIONS)
+        problems.push({ code: 'permission-unknown', params: suggestion ? { value, suggestion } : { value } })
+      }
+    }
   }
 
   return problems.length > 0 ? { problems } : { manifest: raw as unknown as ExtensionManifest, problems }
@@ -130,10 +140,10 @@ export function compareVersions(a: string, b: string): number {
   return aParts.length - bParts.length
 }
 
-/** 오타로 보이는 알려진 필드 — 대소문자만 다르거나 편집 거리 2 이하 */
-function similarField(field: string): string | undefined {
-  const lower = field.toLowerCase()
-  return KNOWN.find((known) => known === lower) ?? KNOWN.find((known) => editDistance(lower, known) <= 2)
+/** 오타로 보이는 알려진 이름(필드·권한) — 대소문자만 다르거나 편집 거리 2 이하 */
+function similar(value: string, known: readonly string[]): string | undefined {
+  const lower = value.toLowerCase()
+  return known.find((name) => name === lower) ?? known.find((name) => editDistance(lower, name) <= 2)
 }
 
 function editDistance(a: string, b: string): number {

@@ -378,9 +378,16 @@ function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_READ_ENTRY, async (_event, id: unknown) => ctx.extensions.readEntry(String(id)))
   handle(ctx, Channel.EXTENSIONS_READ_LOCALE, async (_event, language: unknown) => ctx.extensions.readLocale(String(language)))
   ctx.on('extensions/changed', (extensions) => broadcast(Channel.EXTENSIONS_CHANGED, extensions))
+  // 확장 ↔ 앱 통로 (이슈 #536) — 화면이 준 폴더는 등록된 프로젝트일 때만 넘긴다(아니면 프로젝트 없음)
+  handle(ctx, Channel.EXTENSIONS_CALL, async (_event, id: unknown, method: unknown, params: unknown, directory: unknown) => {
+    const found = typeof directory === 'string' ? (await ctx.projects.list()).find((project) => project.path === directory) : undefined
+    return ctx.extensions.call(String(id), String(method), params, found && { directory: found.path, name: found.name })
+  })
+  handle(ctx, Channel.EXTENSIONS_ALLOW_ORIGIN, async (_event, id: unknown, origin: unknown) => ctx.extensions.allowOrigin(String(id), String(origin)))
+  handle(ctx, Channel.EXTENSIONS_REVOKE_ORIGIN, async (_event, id: unknown, origin: unknown) => ctx.extensions.revokeOrigin(String(id), String(origin)))
 }
-extensionsBridge.inject = ['extensions']
-mounted.push(ctx.plugin(ExtensionsService, systemExtensionsHost(userData)))
+extensionsBridge.inject = ['extensions', 'projects']
+mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher }))
 mounted.push(ctx.plugin(extensionsBridge))
 
 /** 모든 앱 창에 보낸다. 창 하나의 send 실패(못 옮기는 값·닫히는 창)는 로그만 — 나머지 창과, 이벤트를 낸 서비스 쪽(cordis emit 은 리스너 예외를 던진다)으로 번지지 않게 (QA 03_qa_ext_pr3) */

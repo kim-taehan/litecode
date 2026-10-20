@@ -12,6 +12,11 @@ export interface ExtensionLocale {
   label: string
 }
 
+/** 확장이 앱에 요청할 수 있는 권한 (이슈 #536) — network: 사용자가 허용한 주소에 메인이 대신 요청 · secrets: 비밀 값(safeStorage) ·
+ *  project: 지금 프로젝트의 이름·파일 읽기·파일 열기. storage(확장별 JSON 값)는 권한 없이 쓴다. 이 밖의 값은 설치 거절 */
+export const EXTENSION_PERMISSIONS = ['network', 'secrets', 'project'] as const
+export type ExtensionPermission = (typeof EXTENSION_PERMISSIONS)[number]
+
 /** extension.json — 설계 3절의 필드 표. 이 밖의 필드는 거절한다 */
 export interface ExtensionManifest {
   id: string
@@ -28,8 +33,8 @@ export interface ExtensionManifest {
   locale?: ExtensionLocale
   /** 진입 파일 — manifest 가 있는 폴더 기준 상대 경로. panel 은 .html·.htm, locale 은 번들 .json */
   entry: string
-  /** A 층은 모양(문자열 배열)만 본다 — 의미는 B 층 */
-  permissions?: string[]
+  /** EXTENSION_PERMISSIONS 의 값만 (이슈 #536). 언어 팩은 권한을 가질 수 없다 */
+  permissions?: ExtensionPermission[]
 }
 
 /** 위험한 항목 경로의 종류 — parent: `..` 마디 · absolute: `/` 로 시작 · drive: `C:` · backslash: `\` (윈도에서 `..` 우회) · nul: 널 문자 · empty: 빈 이름 */
@@ -62,6 +67,10 @@ export type ExtensionProblem =
   | { code: 'app-too-old'; params: { required: string; current: string } }
   | { code: 'entry-invalid'; params: { value: string } }
   | { code: 'permissions-invalid'; params: Record<string, never> }
+  /** 모르는 권한 (이슈 #536) — 오타로 보이면 suggestion */
+  | { code: 'permission-unknown'; params: { value: string; suggestion?: string } }
+  /** 언어 팩이 권한을 선언했다 (이슈 #536) */
+  | { code: 'permissions-unexpected'; params: Record<string, never> }
   | { code: 'entry-missing'; params: { entry: string } }
   // 언어 팩 (이슈 #525)
   | { code: 'type-invalid'; params: { value: string } }
@@ -146,6 +155,8 @@ export interface ExtensionSummary {
   enabled: boolean
   state: ExtensionState
   reason?: ExtensionFailedReason
+  /** 사용자가 허용한 주소(origin) — 있을 때만 (이슈 #536, 카드 상세의 "허용한 주소") */
+  origins?: string[]
 }
 
 /** 설치 확인 카드의 미리보기 — problems 가 비면 통과(token 이 있다), 아니면 거절 카드 */
@@ -164,3 +175,46 @@ export type ExtensionInstallResult = ExtensionResult<{ id: string; version: stri
 export type ExtensionEntryResult = ExtensionResult<{ html: string; version: string }>
 /** readLocale (이슈 #525) — 켜진 정상 언어 팩의 사전(내장 사전에 있는 키의 문자열만)과 그 버전 */
 export type ExtensionLocaleResult = ExtensionResult<{ messages: LocaleMessages; version: string }>
+
+// --- 확장 ↔ 앱 통로 (이슈 #536) ---
+// 패널 → parent.postMessage({ litecode: 1, id, method, params }) → 화면의 확장 탭 → IPC extensions:call → ctx.extensions 가 권한 검사 후 처리.
+// 확장 id 는 메시지 내용이 아니라 어느 iframe 에서 왔나로 화면이 정한다
+
+/** 통로 실패 코드 — 던지지 않고 { ok:false, error } 로 돌려준다.
+ *  consent-required 는 화면만 받는다(허용 목록에 없는 주소 — 화면이 동의 띠로 묻고, 거절하면 패널에는 network-denied) */
+export type ExtensionCallError =
+  | 'method-unknown'
+  | 'params-invalid'
+  /** 설치돼 있지 않거나 켜진 정상(on) 상태가 아니다 */
+  | 'not-on'
+  | 'permission-missing'
+  | 'storage-full'
+  /** 이 기기에서 비밀 값을 봉할 수 없다 (safeStorage 없음·거부) */
+  | 'secrets-unavailable'
+  | 'consent-required'
+  | 'network-denied'
+  /** 주소가 아니거나 http/https 가 아니다 */
+  | 'url-invalid'
+  | 'network-timeout'
+  | 'response-too-large'
+  /** 다른 origin 으로의 리다이렉트, 또는 리다이렉트가 너무 많다 */
+  | 'redirect-blocked'
+  | 'network-failed'
+  /** 열린 프로젝트가 없다 */
+  | 'no-project'
+  /** 프로젝트 밖(.. · 절대 경로 · 심볼릭 링크)이거나 일반 파일이 아니다 */
+  | 'path-unsafe'
+  | 'file-too-large'
+  | 'file-unreadable'
+  /** UTF-8 글이 아니다 */
+  | 'not-text'
+  | 'io-failed'
+
+export type ExtensionCallResult = { ok: true; result: unknown } | { ok: false; error: ExtensionCallError; origin?: string }
+
+/** network.fetch 의 결과 — headers 는 content-type 만 */
+export interface ExtensionFetchResponse {
+  status: number
+  headers: { 'content-type'?: string }
+  body: string
+}

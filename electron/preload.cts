@@ -149,6 +149,9 @@ const Channel = {
   EXTENSIONS_READ_LOCALE: 'extensions:read-locale',
   EXTENSIONS_SET_ENABLED: 'extensions:set-enabled',
   EXTENSIONS_CHANGED: 'extensions:changed',
+  EXTENSIONS_CALL: 'extensions:call',
+  EXTENSIONS_ALLOW_ORIGIN: 'extensions:allow-origin',
+  EXTENSIONS_REVOKE_ORIGIN: 'extensions:revoke-origin',
 } as const
 
 /** 경로 없는 이미지(붙여넣은 스크린숏)를 읽어 메인에 넘길 상한 — shared/attachments.ts 의 imageBytes 와 같아야 한다 (메인이 다시 본다) */
@@ -339,6 +342,9 @@ const bridge: LitecodeBridge = {
   readExtensionEntry: (id) => ipcRenderer.invoke(Channel.EXTENSIONS_READ_ENTRY, id),
   readLocalePack: (language) => ipcRenderer.invoke(Channel.EXTENSIONS_READ_LOCALE, language),
   onExtensionsChanged: (listener) => listen(Channel.EXTENSIONS_CHANGED, listener),
+  callExtension: (id, method, params, directory) => ipcRenderer.invoke(Channel.EXTENSIONS_CALL, id, method, params, directory),
+  allowExtensionOrigin: (id, origin) => ipcRenderer.invoke(Channel.EXTENSIONS_ALLOW_ORIGIN, id, origin),
+  revokeExtensionOrigin: (id, origin) => ipcRenderer.invoke(Channel.EXTENSIONS_REVOKE_ORIGIN, id, origin),
 }
 
 contextBridge.exposeInMainWorld('litecode', bridge)
