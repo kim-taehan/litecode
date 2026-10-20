@@ -193,6 +193,54 @@ async function api(pathAndQuery) {
 
 const resultKey = () => (state.scope === 'all' ? state.project.projectKey : `${state.project.projectKey}__scope`)
 
+// --- 마지막 결과 보관 (이슈 #553) — 서버가 꺼져 있거나 앱을 다시 켜도 보인다. 확장 저장소(storage)에 두어 확장을 지울 때 함께 지워진다.
+// 저장소는 확장당 64KB 라 결과 키 두 개(전체·범위)까지, 이슈는 필요한 필드만, 넘치면 이슈를 줄여 담는다
+
+const SAVED = 'results'
+const saved = {}
+
+function compact(r, issueCount) {
+  return {
+    key: r.key,
+    savedAt: new Date().toISOString(),
+    analysisDate: r.analysisDate,
+    gate: r.gate && { status: r.gate.status, conditions: (r.gate.conditions ?? []).filter((c) => c.status === 'ERROR').map(({ metricKey, actualValue, errorThreshold, status }) => ({ metricKey, actualValue, errorThreshold, status })) },
+    values: r.values,
+    total: r.total,
+    issues: r.issues.slice(0, issueCount).map(({ severity, type, message, component, line }) => ({ severity, type, message, component, line })),
+  }
+}
+
+async function keepResults(r) {
+  const keys = [r.key, ...Object.keys(saved).filter((k) => k !== r.key)].slice(0, 2)
+  for (const issueCount of [100, 50, 20, 0]) {
+    const next = Object.fromEntries(keys.map((k) => [k, k === r.key ? compact(r, issueCount) : saved[k]]))
+    if (JSON.stringify(next).length > 60 * 1024) continue
+    try {
+      await call('storage.set', { key: SAVED, value: next })
+      for (const k of Object.keys(saved)) delete saved[k]
+      Object.assign(saved, next)
+    } catch {
+      // 보관은 보조 — 못 해도 화면은 그대로
+    }
+    return
+  }
+}
+
+async function forgetResults(key) {
+  if (!saved[key]) return
+  delete saved[key]
+  await call('storage.set', { key: SAVED, value: saved }).catch(() => {})
+}
+
+async function loadSaved() {
+  try {
+    Object.assign(saved, (await call('storage.get', { key: SAVED })) ?? {})
+  } catch {
+    // 없다
+  }
+}
+
 async function loadResults() {
   if (!state.project || state.server?.phase !== 'running') return
   const key = resultKey()
@@ -201,6 +249,7 @@ async function loadResults() {
     const component = await api(`/api/components/show?component=${q}`)
     if (!component) {
       state.results = { key, missing: true }
+      forgetResults(key)
       return render()
     }
     const [gate, measures, issues] = await Promise.all([
@@ -210,6 +259,7 @@ async function loadResults() {
     ])
     const values = Object.fromEntries((measures?.component?.measures ?? []).map((m) => [m.metric, m.value]))
     state.results = { key, analysisDate: component.component?.analysisDate, gate: gate?.projectStatus, values, issues: issues?.issues ?? [], total: issues?.paging?.total ?? issues?.total ?? 0 }
+    keepResults(state.results)
   } catch (error) {
     state.results = { key, error: error.message }
   }
@@ -406,9 +456,11 @@ const SEVERITY = { BLOCKER: ['높음', 'high'], CRITICAL: ['높음', 'high'], MA
 const TYPE = { BUG: '버그', VULNERABILITY: '취약점', CODE_SMELL: '코드 냄새', SECURITY_HOTSPOT: '보안 검토' }
 const GATE_METRIC = { new_coverage: '새 코드 커버리지', coverage: '커버리지', new_bugs: '새 버그', new_vulnerabilities: '새 취약점', new_duplicated_lines_density: '새 코드 중복', new_security_hotspots_reviewed: '보안 검토율', new_reliability_rating: '새 코드 신뢰성', new_security_rating: '새 코드 보안', new_maintainability_rating: '새 코드 유지보수성', new_violations: '새 이슈' }
 
+const running = () => state.server?.phase === 'running'
+
 function results() {
-  const r = state.results
-  if (!r) return el('div', { class: 'sub pad' }, '결과를 불러오는 중…')
+  const r = running() ? state.results : saved[resultKey()]
+  if (!r) return el('div', { class: 'sub pad' }, running() ? '결과를 불러오는 중…' : '이 범위의 보관된 결과가 없습니다. 서버를 띄우면 읽거나 분석할 수 있습니다.')
   if (r.error) return el('div', { class: 'pad' }, el('div', { class: 'error' }, `결과를 읽지 못했습니다 — ${r.error}`))
   if (r.missing) return el('div', { class: 'pad sub' }, state.scope === 'all' ? '아직 분석하지 않았습니다. [분석] 을 누르세요.' : '이 범위로 아직 분석하지 않았습니다. [분석] 을 누르세요.')
   const failed = (r.gate?.conditions ?? []).filter((c) => c.status === 'ERROR')
@@ -455,9 +507,10 @@ function render() {
   const parts = []
   if (state.error) parts.push(el('div', { class: 'error' }, text(state.error)))
   if (state.server) parts.push(serverCard())
-  if (state.server?.phase === 'running' && state.project) {
+  if (state.project && (running() || saved[resultKey()] || Object.keys(saved).length)) {
     const analyzing = state.analysis?.phase === 'scanning' || state.analysis?.phase === 'processing'
-    const when = state.results?.analysisDate ? new Date(state.results.analysisDate).toLocaleString() : undefined
+    const shown = running() ? state.results : saved[resultKey()]
+    const when = shown?.analysisDate ? new Date(shown.analysisDate).toLocaleString() : undefined
     parts.push(
       el(
         'section',
@@ -465,8 +518,8 @@ function render() {
         el(
           'div',
           { class: 'row pad' },
-          el('div', { class: 'grow' }, el('h1', {}, state.project.projectKey), el('div', { class: 'sub' }, when ? `마지막 분석 ${when}` : state.project.name, state.scope !== 'all' ? ' · 범위 결과는 따로 보관합니다' : '')),
-          el('button', { class: 'primary', onclick: analyze, disabled: analyzing || (state.scope === 'paths' && state.paths.length === 0) || (state.scope === 'changes' && !(state.changes?.files?.length)) }, analyzing ? '분석 중…' : '분석'),
+          el('div', { class: 'grow' }, el('h1', {}, state.project.projectKey), el('div', { class: 'sub' }, when ? `마지막 분석 ${when}` : state.project.name, state.scope !== 'all' ? ' · 범위 결과는 따로 보관합니다' : '', running() ? '' : ' · 서버 꺼짐 — 마지막 결과')),
+          el('button', { class: 'primary', onclick: analyze, title: running() ? undefined : '서버를 띄우면 분석할 수 있습니다', disabled: !running() || analyzing || (state.scope === 'paths' && state.paths.length === 0) || (state.scope === 'changes' && !(state.changes?.files?.length)) }, analyzing ? '분석 중…' : '분석'),
           el('button', { 'aria-label': '다시 읽기', onclick: loadResults }, '↻'),
         ),
         scopeRow(),
@@ -522,6 +575,7 @@ logShow.addEventListener('click', () => setLogOpen(true))
 async function start() {
   try {
     state.project = await call('server.project')
+    await loadSaved()
   } catch (error) {
     state.error = error.message
   }
