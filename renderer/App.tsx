@@ -577,7 +577,8 @@ export function App() {
   useEffect(() => {
     if (!pendingSend.current || active?.id !== pendingSend.current || !draft.trim()) return
     pendingSend.current = undefined
-    send()
+    // Enter 와 같은 길 — 글이 `/스킬 …` 로 시작하면 앱이 그 SKILL.md 본문을 결정적으로 붙여 보낸다 (이슈 #561)
+    submit()
   })
 
   function updateSession(id: string, mutate: (session: Session) => Session): void {

@@ -56,6 +56,8 @@ export interface ExtensionManifest {
   permissions?: ExtensionPermission[]
   /** server 권한과 같이만 (이슈 #537) */
   server?: ExtensionServer
+  /** 확장이 담아 온 스킬 폴더(그 안의 SKILL.md) — 켜져 있는 동안 앱 스킬로 보인다 (이슈 #561). 폴더 이름이 스킬 이름 */
+  skills?: string[]
 }
 
 /** 위험한 항목 경로의 종류 — parent: `..` 마디 · absolute: `/` 로 시작 · drive: `C:` · backslash: `\` (윈도에서 `..` 우회) · nul: 널 문자 · empty: 빈 이름 */
@@ -109,6 +111,8 @@ export type ExtensionProblem =
   | { code: 'server-invalid'; params: { field: string } }
   /** server 선언과 server 권한은 같이 있어야 한다 */
   | { code: 'server-mismatch'; params: Record<string, never> }
+  /** skills 가 폴더 경로 목록이 아니거나, 폴더 이름이 스킬 이름 규칙(소문자·숫자·-)이 아니거나, 언어 팩이 스킬을 담았다 (이슈 #561) */
+  | { code: 'skills-invalid'; params: { value: string } }
   // 설치된 폴더 (이슈 #480) — 폴더 이름과 extension.json 의 id 가 다르다
   | { code: 'id-mismatch'; params: { folder: string; id: string } }
 

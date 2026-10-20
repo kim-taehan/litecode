@@ -27,6 +27,7 @@ import { fetchForExtension, isAppAddress, parseFetchRequest, selfAddresses, type
 import { isEntryPath } from './extensions/paths.ts'
 import { projectRelativePaths } from './extensions/pick.ts'
 import { DEFAULT_SERVER_OPTIONS, ExtensionServers, type ExtensionServersOptions } from './extensions/servers.ts'
+import { syncExtensionSkills, type WantedSkill } from './extensions/skills.ts'
 import { ExtensionStore, readInsideFile } from './extensions/store.ts'
 import { failureReason } from './features.ts'
 import type { KeyCipher } from './providers.ts'
@@ -86,6 +87,8 @@ export interface ExtensionsOptions {
   fetch?: (id: string) => ExtensionFetch
   /** 앱 자신의 로컬 서버 포트 — network.fetch 가 동의와 상관없이 거절한다(address-reserved). 포트는 런타임에 정해지므로 부를 때마다 읽는다 */
   reservedPorts?: () => number[]
+  /** 확장이 담아 온 스킬을 둘 앱 스킬 폴더와, 바뀌었을 때 엔진에 다시 읽게 하는 것 (이슈 #561). 없으면 스킬을 다루지 않는다 */
+  skills?: { dir: string; reload(): void }
   /** project.pickPath 의 고르기 창 (이슈 #538) — 요청한 창(owner)에 붙이고 directory 에서 시작한다. 취소면 undefined. 없으면 io-failed */
   pickPaths?: (owner: unknown, request: { directory: string; multiple: boolean }) => Promise<string[] | undefined>
   /** project.changedFiles 가 띄우는 git 실행 파일 (기본: PATH 의 git — ctx.git 과 같다) */
@@ -454,6 +457,7 @@ export class ExtensionsService extends Service {
       }
     }
     await this.syncServers()
+    await this.syncSkills()
     await this.followLanguage()
     this.publish()
   }
@@ -688,6 +692,24 @@ export class ExtensionsService extends Service {
   private serverOptions(id: string): ExtensionServerOptions {
     const stored = this.ctx.settings.get().extensionServers
     return { ...DEFAULT_SERVER_OPTIONS, ...(stored && Object.hasOwn(stored, id) ? stored[id] : {}) }
+  }
+
+  /** 켜진 정상 확장의 스킬만 앱 스킬 폴더에 둔다 — 끄거나 지우면 빠진다 (이슈 #561) */
+  private async syncSkills(): Promise<void> {
+    const host = this.options.skills
+    if (!host) return
+    const wanted: WantedSkill[] = []
+    for (const entry of this.entries) {
+      const skills = entry.manifest?.skills
+      if (!skills?.length || this.state(entry, this.enabled(entry.id)).state !== 'on') continue
+      const dir = this.files.installedDir(entry.id)
+      for (const folder of skills) {
+        const clean = folder.replace(/\/+$/, '')
+        wanted.push({ id: entry.id, name: clean.split('/').pop()!, file: path.join(dir, clean, 'SKILL.md') })
+      }
+    }
+    const changed = await syncExtensionSkills(host.dir, wanted).catch((error: unknown) => (console.warn('[extensions] 스킬 맞추기 실패', error), false))
+    if (changed) host.reload()
   }
 
   /** 켜진 정상 서버 확장이 아니면 내리고(지난 실행이 남긴 것도 거둔다), 이번 실행에서 처음 보는 것이면:

@@ -535,6 +535,7 @@ export const ko = {
   'extensions.problem.locale-unreadable': '언어 팩 번들을 읽지 못했습니다',
   'extensions.problem.server-invalid': '서버 선언(server)이 올바르지 않습니다',
   'extensions.problem.server-mismatch': '서버 선언(server)과 server 권한은 같이 있어야 합니다',
+  'extensions.problem.skills-invalid': '스킬(skills)은 확장 안의 폴더 경로여야 하고, 폴더 이름은 소문자·숫자·- 만 씁니다',
   'extensions.problem.unknown': '알 수 없는 사유',
   'extensions.unsafePath.empty': '빈 이름이 있습니다',
   'extensions.unsafePath.nul': '널 문자가 들어 있습니다',

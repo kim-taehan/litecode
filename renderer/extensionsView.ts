@@ -180,6 +180,8 @@ export function problemLine(problem: ExtensionProblem): ProblemLine {
       return { title: { key: 'extensions.problem.server-invalid' }, mono: `server.${problem.params.field}`, detail: { key: 'extensions.detail.serverRule' } }
     case 'server-mismatch':
       return { title: { key: 'extensions.problem.server-mismatch' }, mono: 'server' }
+    case 'skills-invalid':
+      return { title: { key: 'extensions.problem.skills-invalid' }, mono: problem.params.value }
     default:
       return { title: { key: 'extensions.problem.unknown' }, mono: String((problem as { code?: unknown }).code) }
   }

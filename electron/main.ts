@@ -394,7 +394,9 @@ const reservedPorts = (): number[] => [
   ...(ctx.get('appMcp')?.localPorts() ?? []),
   ...(ctx.get('remote')?.status().addresses.map((address) => Number(address.slice(address.lastIndexOf(':') + 1))) ?? []),
 ]
-mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher, fetch: extensionFetch, reservedPorts }))
+// 확장이 담아 온 스킬은 앱 스킬 폴더로 (#561) — 내장 디자인 스킬과 같은 자리, 바뀌면 엔진이 턴이 끝난 뒤 다시 읽는다
+const extensionSkills = { dir: path.join(userData, 'opencode', 'skills'), reload: () => ctx.get('llm')?.reloadWhenIdle() }
+mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher, fetch: extensionFetch, reservedPorts, skills: extensionSkills }))
 mounted.push(ctx.plugin(extensionsBridge))
 
 /** 모든 앱 창에 보낸다. 창 하나의 send 실패(못 옮기는 값·닫히는 창)는 로그만 — 나머지 창과, 이벤트를 낸 서비스 쪽(cordis emit 은 리스너 예외를 던진다)으로 번지지 않게 (QA 03_qa_ext_pr3) */

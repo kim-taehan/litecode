@@ -52,6 +52,7 @@ const PROBLEMS: { [C in ExtensionProblem['code']]: Extract<ExtensionProblem, { c
   'locale-unreadable': { code: 'locale-unreadable', params: { message: 'not a JSON object' } },
   'server-invalid': { code: 'server-invalid', params: { field: 'command' } },
   'server-mismatch': { code: 'server-mismatch', params: {} },
+  'skills-invalid': { code: 'skills-invalid', params: { value: 'x' } },
 }
 
 const FAILURES: { [C in ExtensionStoreFailure['code']]: Extract<ExtensionStoreFailure, { code: C }> } = {
