@@ -237,6 +237,22 @@ export function openFilesTab(directory: string): void {
   set({ ...state, open: true, active: undefined, focus: state.focus + 1, quiet: false })
 }
 
+// ── 파일 찾기 (이슈 #528) — ⌘P 신호 ──
+
+let filesSearchListeners = new Set<() => void>()
+
+/** 파일 찾기를 요청한다 — Files 탭을 열고, 검색 칸에 포커스를 준다 */
+export function requestFilesSearch(directory: string): void {
+  openFilesTab(directory)
+  for (const listener of filesSearchListeners) listener()
+}
+
+/** ⌘P 신호를 듣는다 */
+export function onFilesSearch(callback: () => void): () => void {
+  filesSearchListeners.add(callback)
+  return () => { filesSearchListeners.delete(callback) }
+}
+
 /** 닫았던 패널을 그대로 다시 연다 — 처음이면 Files 탭 */
 export function revealPanel(directory: string): void {
   const state = base(directory)

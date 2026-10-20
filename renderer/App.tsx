@@ -8,7 +8,7 @@ import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
 import { RemotePairPrompt } from './MobileSettings.tsx'
 import { useTriggers } from './useTriggers.ts'
-import { closeFilePreview, getPanelState, openTerminalTab, revealPanel, terminalIdOf } from './filePreviewStore.ts'
+import { closeFilePreview, getPanelState, openTerminalTab, requestFilesSearch, revealPanel, terminalIdOf } from './filePreviewStore.ts'
 import { useAppMcp } from './useAppMcp.ts'
 import { useGitWatch } from './gitStore.ts'
 import type { ShellCardView } from './ShellCard.tsx'
@@ -480,6 +480,20 @@ export function App() {
       if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
       event.preventDefault()
       startNewChatRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // ⌘P / Ctrl+P — 파일 찾기 (이슈 #528). 오른쪽 패널 Files 탭의 검색 칸에 포커스.
+  const projectPathRef = useRef(project?.path)
+  projectPathRef.current = project?.path
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'p') return
+      event.preventDefault()
+      const dir = projectPathRef.current
+      if (dir) requestFilesSearch(dir)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
