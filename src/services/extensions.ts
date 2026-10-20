@@ -12,6 +12,7 @@ import type {
   ExtensionPickResult,
   ExtensionProblem,
   ExtensionResult,
+  ExtensionServerOptions,
   ExtensionStoreFailure,
   ExtensionSummary,
 } from '../../shared/extensions.ts'
@@ -24,6 +25,7 @@ import { isExtensionId } from './extensions/manifest.ts'
 import { fetchForExtension, isAppAddress, parseFetchRequest, selfAddresses, type ExtensionFetch } from './extensions/network.ts'
 import { isEntryPath } from './extensions/paths.ts'
 import { projectRelativePaths } from './extensions/pick.ts'
+import { DEFAULT_SERVER_OPTIONS, ExtensionServers, type ExtensionServersOptions } from './extensions/servers.ts'
 import { ExtensionStore, readInsideFile } from './extensions/store.ts'
 import { failureReason } from './features.ts'
 import type { KeyCipher } from './providers.ts'
@@ -45,6 +47,10 @@ import './settings.ts'
 // 처리한다. 확장이 남기는 값·허용한 주소는 data/<id>/ (extensions/data.ts), 지우면 같이 지운다. 허용 목록에 없는 주소는 요청하지 않고 consent-required —
 // 화면이 동의 띠로 묻고 허용하면 allowOrigin 뒤에 다시 부른다(메인은 묻는 동안의 상태를 쥐지 않는다). 통로 일은 큰 줄에 서지 않는다(15초 요청이
 // 설치·켜고 끄기를 막지 않게) — 자료 파일 쓰기만 자기 줄(dataQueue)에 서고, 삭제의 자료 지우기도 그 줄에 서서 쓰는 중인 값이 되살아나지 않는다.
+// 내장 서버(#537, server 권한): manifest 의 server 선언대로 앱이 띄우고 내린다(extensions/servers.ts). 통로 메서드 server.status·start·stop·setOptions.
+// 앱을 켤 때 — 켜진 서버 확장 중 설정 startWithApp 이거나 지난 실행의 서버가 남은 것(stopWithApp 끔·강제 종료)을 한 번 띄운다(남은 서버는 다시 잡는다).
+// 끄거나 깨지거나 지우거나 업그레이드하면 내린다. 앱이 꺼질 때는 stopWithApp 인 서버에 정상 종료 신호를 보낸다(dispose).
+// network.fetch 가 그 확장의 내장 서버 주소(http://127.0.0.1:<port>)로 가면 동의를 묻지 않고, 패널이 준 authorization 을 버리고 관리자 토큰을 붙인다.
 // Electron 을 import 하지 않는다 — 단위 테스트가 임시 폴더 root 로 돈다.
 
 declare module 'cordis' {
@@ -82,6 +88,10 @@ export interface ExtensionsOptions {
   pickPaths?: (owner: unknown, request: { directory: string; multiple: boolean }) => Promise<string[] | undefined>
   /** project.changedFiles 가 띄우는 git 실행 파일 (기본: PATH 의 git — ctx.git 과 같다) */
   git?: string
+  /** 내장 서버의 상태 주소·관리자 API 를 부르는 fetch (기본 globalThis.fetch) — 시험용 */
+  serverFetch?: typeof globalThis.fetch
+  /** 내장 서버 기한 — 시험용 */
+  serverTiming?: ExtensionServersOptions['timing']
 }
 
 /** 통로 요청을 부른 프로젝트 — 다리가 등록된 프로젝트인지 확인한 것만 온다 */
@@ -104,6 +114,10 @@ const METHODS = new Map<string, ExtensionPermission | null>([
   ['project.openFile', 'project'],
   ['project.pickPath', 'project'],
   ['project.changedFiles', 'project'],
+  ['server.status', 'server'],
+  ['server.start', 'server'],
+  ['server.stop', 'server'],
+  ['server.setOptions', 'server'],
 ])
 
 type CallFailure = { ok: false; error: ExtensionCallError; origin?: string }
@@ -139,6 +153,9 @@ export class ExtensionsService extends Service {
   /** mount 가 던진 사유 — 끄면 지운다 */
   private failures = new Map<string, string>()
   private published = ''
+  private readonly servers: ExtensionServers
+  /** 앱을 켤 때 같이 띄우기를 이번 실행에서 이미 본 확장 — 사용자가 내린 뒤 sync 가 다시 띄우지 않게 */
+  private autoStarted = new Set<string>()
 
   constructor(
     ctx: Context,
@@ -147,6 +164,15 @@ export class ExtensionsService extends Service {
     super(ctx, 'extensions')
     this.files = storeAccess(options.root, options.appVersion)
     this.data = new ExtensionData(options.root)
+    this.servers = new ExtensionServers({
+      root: options.root,
+      ...(options.cipher && { cipher: options.cipher }),
+      ...(options.serverFetch && { fetch: options.serverFetch }),
+      ...(options.serverTiming && { timing: options.serverTiming }),
+      onChange: () => this.publish(),
+    })
+    // 앱 종료 — stopWithApp 인 서버에 정상 종료 신호 (기다리지 않는다, servers.release)
+    ctx.effect(() => () => this.servers.release((id) => !this.serverOptions(id).stopWithApp))
     this.booted = this.enqueue(() => this.boot())
     // 올리기는 따로 세운다 — 목록(list)은 읽기까지만 기다리고, 오래 걸리는 mount 는 mounting 으로 보인다
     void this.enqueue(() => this.sync())
@@ -184,6 +210,7 @@ export class ExtensionsService extends Service {
     return this.enqueue(async () => {
       const result = await this.files.install(token).catch(ioFailed)
       if (!result.ok) return result
+      await this.servers.stop(result.id) // 업그레이드 — 옛 파일로 도는 서버를 먼저 내린다
       const failed = await this.applyNow(result.id)
       await this.refresh()
       return failed ?? result
@@ -207,6 +234,7 @@ export class ExtensionsService extends Service {
     return this.enqueue(async () => {
       const result = await this.files.remove(id).catch(ioFailed)
       if (!result.ok) return result
+      await this.servers.stop(id) // 자료 폴더(서버 데이터)를 지우기 전에
       const failed = await this.applyNow(id)
       await this.refresh()
       return failed ?? result
@@ -275,6 +303,11 @@ export class ExtensionsService extends Service {
           return await this.pickPath(id, params, project, owner)
         case 'project.changedFiles':
           return await this.changedFiles(project)
+        case 'server.status':
+        case 'server.start':
+        case 'server.stop':
+        case 'server.setOptions':
+          return await this.server(id, manifest, method, params)
         default:
           return await this.project(method, params, project)
       }
@@ -396,6 +429,7 @@ export class ExtensionsService extends Service {
         }
       }
     }
+    await this.syncServers()
     await this.followLanguage()
     this.publish()
   }
@@ -498,7 +532,13 @@ export class ExtensionsService extends Service {
     const origin = parsed.request.url.origin
     // 리다이렉트는 같은 origin 만 따라가므로 처음 주소만 보면 된다
     if (this.reserved(parsed.request.url)) return fail('address-reserved')
-    if (!this.origins.get(id)?.includes(origin)) return { ok: false, error: 'consent-required', origin }
+    const server = this.onManifest(id)?.server
+    if (server && origin === `http://127.0.0.1:${server.port}`) {
+      // 자기 내장 서버 (이슈 #537) — 앱이 띄운 127.0.0.1 서버라 묻지 않는다. 인증은 앱이 붙인다: 패널이 준 authorization 은 버리고 관리자 토큰을
+      const headers = Object.fromEntries(Object.entries(parsed.request.headers).filter(([name]) => name.toLowerCase() !== 'authorization'))
+      const token = this.servers.token(id)
+      parsed.request.headers = token === undefined ? headers : { ...headers, authorization: `Bearer ${token}` }
+    } else if (!this.origins.get(id)?.includes(origin)) return { ok: false, error: 'consent-required', origin }
     return fetchForExtension(parsed.request, {
       fetch: this.options.fetch?.(id) ?? globalThis.fetch,
       timeoutMs: EXTENSION_LIMITS.fetchTimeoutMs,
@@ -570,6 +610,43 @@ export class ExtensionsService extends Service {
     return changed.ok ? done({ base: changed.base, files: changed.files }) : changed
   }
 
+  // --- 내장 서버 (이슈 #537) ---
+
+  /** server.* — status: 상태 · start: 띄우기 시작(기다리지 않는다 — 1분 남짓, 패널이 status 로 본다) · stop: 내림이 끝날 때까지 · setOptions: 앱 쪽 설정 */
+  private async server(id: string, manifest: ExtensionManifest, method: string, params: unknown): Promise<ExtensionCallResult> {
+    const server = manifest.server
+    if (!server) return fail('permission-missing') // manifest 검사가 server 권한과 선언을 같이만 통과시킨다 — 여기 오지 않는다
+    if (method === 'server.start') this.servers.start(id, server, this.files.installedDir(id))
+    else if (method === 'server.stop') await this.servers.stop(id)
+    else if (method === 'server.setOptions') {
+      const patch = serverOptionsPatch(params)
+      if (!patch) return fail('params-invalid')
+      const { [id]: previous, ...others } = this.ctx.settings.get().extensionServers ?? {}
+      this.ctx.settings.set({ extensionServers: { ...others, [id]: { ...previous, ...patch } } })
+    }
+    return done(this.servers.status(id, server, this.serverOptions(id)))
+  }
+
+  private serverOptions(id: string): ExtensionServerOptions {
+    const stored = this.ctx.settings.get().extensionServers
+    return { ...DEFAULT_SERVER_OPTIONS, ...(stored && Object.hasOwn(stored, id) ? stored[id] : {}) }
+  }
+
+  /** 켜진 정상 서버 확장이 아니면 내리고, 이번 실행에서 처음 보는 것이면 startWithApp 이거나 지난 서버가 남았을 때 띄운다(남은 것은 다시 잡는다) */
+  private async syncServers(): Promise<void> {
+    for (const entry of this.entries) {
+      const server = entry.manifest?.server
+      if (!server) continue
+      if (this.state(entry, this.enabled(entry.id)).state !== 'on') {
+        await this.servers.stop(entry.id)
+        continue
+      }
+      if (this.autoStarted.has(entry.id)) continue
+      this.autoStarted.add(entry.id)
+      if (this.serverOptions(entry.id).startWithApp || this.servers.hasLeftover(entry.id)) this.servers.start(entry.id, server, this.files.installedDir(entry.id))
+    }
+  }
+
   /** storage·secrets 파일의 값 — 없거나 모양이 틀리면 빈 객체 */
   private async values(id: string, kind: 'storage' | 'secrets'): Promise<Record<string, unknown>> {
     const value = await this.data.read(id, kind)
@@ -610,6 +687,7 @@ export class ExtensionsService extends Service {
         enabled,
         ...this.state(entry, enabled),
         ...(this.origins.get(entry.id)?.length && { origins: this.origins.get(entry.id) }),
+        ...(manifest?.server && { server: this.servers.status(entry.id, manifest.server, this.serverOptions(entry.id)) }),
       }
     })
   }
@@ -646,6 +724,14 @@ export class ExtensionsService extends Service {
       console.warn(`[extensions] ${id} 의 켜짐 값을 지우지 못했다`, error)
     }
   }
+}
+
+/** server.setOptions 의 params — startWithApp·stopWithApp 중 하나 이상, boolean 만 */
+function serverOptionsPatch(params: unknown): Partial<ExtensionServerOptions> | undefined {
+  if (typeof params !== 'object' || params === null || Array.isArray(params)) return undefined
+  const entries = Object.entries(params)
+  if (entries.length === 0 || !entries.every(([key, value]) => (key === 'startWithApp' || key === 'stopWithApp') && typeof value === 'boolean')) return undefined
+  return Object.fromEntries(entries) as Partial<ExtensionServerOptions>
 }
 
 /** storage·secrets 의 키 — 비지 않은 글 */

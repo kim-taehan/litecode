@@ -10,8 +10,10 @@ import { unsafePathReason } from './paths.ts'
 // 크기는 선언값이 아니라 실제로 흘러나온 바이트로 다시 센다 — 상한(limits)과, 선언 해제 크기와의 불일치(크든 작든)를 여기서 직접 거절한다.
 // 압축 해제와 선언 크기 대조는 pipeEntry(zipInspect.ts)가 한다 — yauzl 의 압축 해제 스트림을 쓰지 않는 이유도 거기 적었다(이슈 #480 QA 차단).
 // 실패하면 던진다 — dest 정리는 부르는 쪽(store.install)이 한다
+// 실행 비트(이슈 #537): 기본은 살리지 않는다(쓰기 기본 모드). executable 이면 zip 의 유닉스 모드에 실행 비트가 있는 파일을 0o755 로 — server 권한
+// 확장이 동봉한 Java 런타임(bin/java, lib/jspawnhelper — Java 가 자식 프로세스를 띄울 때 쓴다)을 실행해야 한다
 
-export async function unpackZip(file: string, dest: string, limits: ExtensionLimits = EXTENSION_LIMITS): Promise<void> {
+export async function unpackZip(file: string, dest: string, limits: ExtensionLimits = EXTENSION_LIMITS, options: { executable?: boolean } = {}): Promise<void> {
   const zip = await openZip(file)
   try {
     const items = (await listItems(zip)).filter((item) => !isFinderJunk(item.name))
@@ -52,6 +54,7 @@ export async function unpackZip(file: string, dest: string, limits: ExtensionLim
         // wx — 이미 있는 이름(중복 항목)은 덮지 않고 실패한다
         fs.createWriteStream(target, { flags: 'wx' }),
       )
+      if (options.executable && (item.entry.externalFileAttributes >>> 16) & 0o111) await fs.promises.chmod(target, 0o755)
     }
   } finally {
     zip.close()

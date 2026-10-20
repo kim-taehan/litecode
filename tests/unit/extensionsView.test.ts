@@ -50,6 +50,8 @@ const PROBLEMS: { [C in ExtensionProblem['code']]: Extract<ExtensionProblem, { c
   'locale-unexpected': { code: 'locale-unexpected', params: {} },
   'locale-too-large': { code: 'locale-too-large', params: { bytes: 2 * 1024 * 1024, limit: 1024 * 1024 } },
   'locale-unreadable': { code: 'locale-unreadable', params: { message: 'not a JSON object' } },
+  'server-invalid': { code: 'server-invalid', params: { field: 'command' } },
+  'server-mismatch': { code: 'server-mismatch', params: {} },
 }
 
 const FAILURES: { [C in ExtensionStoreFailure['code']]: Extract<ExtensionStoreFailure, { code: C }> } = {

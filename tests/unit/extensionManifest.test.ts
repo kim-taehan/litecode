@@ -118,6 +118,29 @@ describe('checkManifest', () => {
     expect(checkManifest({ ...valid, homepage: 'x' }, APP).problems).toEqual([{ code: 'field-unknown', params: { field: 'homepage' } }])
   })
 
+  // 내장 서버 (이슈 #537) — 선언 검사 자체는 extensionServer.test.ts, 여기는 manifest 와의 연결만
+  describe('server', () => {
+    const server = { command: 'server/bin/java', args: ['-jar', 'x.jar'], port: 9000, health: { path: '/api/system/status', field: 'status', ready: 'UP' } }
+
+    it('server 권한과 같이 있으면 통과하고 정규화된 선언(env 기본 {})을 싣는다', () => {
+      const result = checkManifest({ ...valid, permissions: ['server'], server }, APP)
+      expect(result.problems).toEqual([])
+      expect(result.manifest?.server).toEqual({ ...server, env: {} })
+    })
+
+    it('선언만 있거나 권한만 있으면 server-mismatch', () => {
+      expect(checkManifest({ ...valid, server }, APP).problems).toEqual([{ code: 'server-mismatch', params: {} }])
+      expect(checkManifest({ ...valid, permissions: ['server'] }, APP).problems).toEqual([{ code: 'server-mismatch', params: {} }])
+    })
+
+    it('선언이 틀리면 server-invalid{field}', () => {
+      expect(checkManifest({ ...valid, permissions: ['server'], server: { ...server, command: '../java' } }, APP).problems).toEqual([
+        { code: 'server-invalid', params: { field: 'command' } },
+      ])
+      expect(checkManifest({ ...valid, permissions: ['server'], server: 'java -jar x.jar' }, APP).problems).toEqual([{ code: 'server-invalid', params: { field: 'shape' } }])
+    })
+  })
+
   it('여러 사유를 한 번에 모은다', () => {
     const result = checkManifest({ id: 'Bad', name: '', version: '1', entry: '../x', permisions: [] }, APP)
     expect(result.manifest).toBeUndefined()

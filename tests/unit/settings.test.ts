@@ -173,6 +173,18 @@ describe('확장 켜기 (settings.extensions, 이슈 #482)', () => {
     expect(() => settings.set({ extensions: { ab: false } })).toThrow() // 3자 미만
   })
 
+  it('내장 서버 설정 (settings.extensionServers, 이슈 #537) — 확장 id → startWithApp·stopWithApp boolean 만', async () => {
+    const { settings } = await service({ file })
+    expect(settings.get().extensionServers).toBeUndefined()
+    settings.set({ extensionServers: { sonarqube: { startWithApp: true, stopWithApp: false } } })
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).extensionServers).toEqual({ sonarqube: { startWithApp: true, stopWithApp: false } })
+    settings.set({ extensionServers: { sonarqube: {} } })
+    expect(() => settings.set({ extensionServers: { sonarqube: { startWithApp: 'yes' } } as never })).toThrow()
+    expect(() => settings.set({ extensionServers: { sonarqube: { port: 1 } } as never })).toThrow()
+    expect(() => settings.set({ extensionServers: { 'Bad Id': {} } })).toThrow()
+    expect(() => settings.set({ extensionServers: { sonarqube: null } as never })).toThrow()
+  })
+
   it('파일을 손으로 고쳐 잘못된 값이면 그 값만 기본값으로 — 나머지 설정은 그대로', async () => {
     await fs.writeFile(file, JSON.stringify({ language: 'ko', extensions: { 'my-ext': false, 'Bad Id': false } }))
     const { settings } = await service({ file })

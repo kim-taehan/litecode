@@ -13,9 +13,27 @@ export interface ExtensionLocale {
 }
 
 /** 확장이 앱에 요청할 수 있는 권한 (이슈 #536) — network: 사용자가 허용한 주소에 메인이 대신 요청 · secrets: 비밀 값(safeStorage) ·
- *  project: 지금 프로젝트의 이름·파일 읽기·파일 열기. storage(확장별 JSON 값)는 권한 없이 쓴다. 이 밖의 값은 설치 거절 */
-export const EXTENSION_PERMISSIONS = ['network', 'secrets', 'project'] as const
+ *  project: 지금 프로젝트의 이름·파일 읽기·파일 열기 · server: manifest 의 server 선언대로 앱이 내장 서버를 띄우고 내림(이슈 #537).
+ *  storage(확장별 JSON 값)는 권한 없이 쓴다. 이 밖의 값은 설치 거절 */
+export const EXTENSION_PERMISSIONS = ['network', 'secrets', 'project', 'server'] as const
 export type ExtensionPermission = (typeof EXTENSION_PERMISSIONS)[number]
+
+/** 내장 서버 선언 (이슈 #537) — 앱이 이 선언대로만 띄운다(확장의 JS 는 메인에서 실행하지 않는다). 검사는 src/services/extensions/server.ts.
+ *  args·env 값의 자리표시: ${extensionDir} · ${dataDir} · ${port} · ${freePort:이름} */
+export interface ExtensionServer {
+  /** 확장 폴더 기준 실행 파일 — 셸 없이 띄운다 */
+  command: string
+  args: string[]
+  env: Record<string, string>
+  /** 확장 폴더 기준 작업 폴더 — 없으면 확장 폴더 */
+  cwd?: string
+  /** 127.0.0.1 의 고정 포트 */
+  port: number
+  /** 준비 판정 — GET path 의 JSON 에서 field 가 ready 면 준비됨 */
+  health: { path: string; field: string; ready: string }
+  /** 앱이 아는 관리자 준비 — sonarqube: 기본 비밀번호를 바꾸고 토큰을 만들어 앱이 보관한다 */
+  admin?: 'sonarqube'
+}
 
 /** extension.json — 설계 3절의 필드 표. 이 밖의 필드는 거절한다 */
 export interface ExtensionManifest {
@@ -35,6 +53,8 @@ export interface ExtensionManifest {
   entry: string
   /** EXTENSION_PERMISSIONS 의 값만 (이슈 #536). 언어 팩은 권한을 가질 수 없다 */
   permissions?: ExtensionPermission[]
+  /** server 권한과 같이만 (이슈 #537) */
+  server?: ExtensionServer
 }
 
 /** 위험한 항목 경로의 종류 — parent: `..` 마디 · absolute: `/` 로 시작 · drive: `C:` · backslash: `\` (윈도에서 `..` 우회) · nul: 널 문자 · empty: 빈 이름 */
@@ -83,6 +103,11 @@ export type ExtensionProblem =
   | { code: 'locale-too-large'; params: { bytes: number; limit: number } }
   /** 번들이 JSON 객체가 아니거나 키가 너무 많다 — message 는 원문 */
   | { code: 'locale-unreadable'; params: { message: string } }
+  // 내장 서버 (이슈 #537)
+  /** server 선언의 field 가 틀렸다 (shape: 객체가 아니다) */
+  | { code: 'server-invalid'; params: { field: string } }
+  /** server 선언과 server 권한은 같이 있어야 한다 */
+  | { code: 'server-mismatch'; params: Record<string, never> }
   // 설치된 폴더 (이슈 #480) — 폴더 이름과 extension.json 의 id 가 다르다
   | { code: 'id-mismatch'; params: { folder: string; id: string } }
 
@@ -157,6 +182,36 @@ export interface ExtensionSummary {
   reason?: ExtensionFailedReason
   /** 사용자가 허용한 주소(origin) — 있을 때만 (이슈 #536, 카드 상세의 "허용한 주소") */
   origins?: string[]
+  /** 내장 서버의 상태 — server 를 선언한 확장만 (이슈 #537) */
+  server?: ExtensionServerStatus
+}
+
+// --- 내장 서버 (이슈 #537) ---
+
+/** stopped: 안 떠 있음 · port: 포트 확인 · launching: 띄움(상태 주소 무응답) · starting: 상태 주소가 준비 아닌 값(detail) · admin: 관리자 준비 · running · stopping · failed(error) */
+export type ExtensionServerPhase = 'stopped' | 'port' | 'launching' | 'starting' | 'admin' | 'running' | 'stopping' | 'failed'
+/** port-in-use: 포트를 누가 쓴다 · spawn-failed: 실행 파일을 못 띄움 · exited: 서버가 스스로 끝남 · not-ready: 기한 안에 준비가 안 됨 · admin-failed: 관리자 준비 실패(detail 에 사유) */
+export type ExtensionServerFailure = 'port-in-use' | 'spawn-failed' | 'exited' | 'not-ready' | 'admin-failed'
+
+/** 앱 쪽 설정 settings.extensionServers 의 한 확장 — 확장 storage 가 아니다(확장이 못 고치는 곳에 둔다) */
+export interface ExtensionServerOptions {
+  /** 앱을 켤 때 같이 띄운다 (기본 꺼짐 — 내장 서버를 고르기 전에는 띄우지 않는다) */
+  startWithApp: boolean
+  /** 앱을 끌 때 같이 내린다 (기본 켜짐). 끄면 서버가 앱 밖에서 계속 돌고, 다음 실행이 그 서버를 다시 잡는다 */
+  stopWithApp: boolean
+}
+
+/** settings.extensionServers — 확장 id → 내장 서버 설정. 기본과 다른 값만 남긴다 */
+export type ExtensionServerSettings = Record<string, Partial<ExtensionServerOptions>>
+
+export interface ExtensionServerStatus {
+  phase: ExtensionServerPhase
+  detail?: string
+  error?: ExtensionServerFailure
+  port: number
+  /** http://127.0.0.1:<port> — 패널은 이 주소로 network.fetch 하면 동의 없이 닿고, 인증은 앱이 붙인다 */
+  url: string
+  options: ExtensionServerOptions
 }
 
 /** 설치 확인 카드의 미리보기 — problems 가 비면 통과(token 이 있다), 아니면 거절 카드 */

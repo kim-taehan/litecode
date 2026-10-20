@@ -52,6 +52,15 @@ export const EXTENSION_LIMITS = {
    *  되풀이를 알아채고 설정 > 기능에서 끄기에는 30초면 넉넉하다 */
   pickCancelWindowMs: 10_000,
   pickBlockMs: 30_000,
+  /** server 권한 확장만 (이슈 #537) — 서버 본체(SonarQube CE + Java 런타임 + 스캐너, 언어 분석기 전부 — 사용자 2026-10-20 "전부 넣기")를 zip 에 싣는다.
+   *  근거(2026-10-20, 실물 extensions/sonarqube-0.1.0-mac-arm64.zip): zip 697MB · 풀었을 때 832MB · 가장 큰 파일 126MB(sonar-javascript-plugin) · 항목 1296.
+   *  버전이 오르며 커질 여지로 zip 은 약 1.5배, 총량은 약 1.4배, 파일 하나는 2배. 항목 수(entries 2000)는 그대로 둔다 — 서버 확장이 아니면 위 상한 그대로다 */
+  server: { zipBytes: 1024 * MB, totalBytes: 1200 * MB, fileBytes: 256 * MB },
 }
 
 export type ExtensionLimits = typeof EXTENSION_LIMITS
+
+/** manifest 의 permissions 에 server 가 있으면 zip·총량·파일 하나 상한을 server 쪽으로 (이슈 #537). permissions 는 검사 전 값이어도 된다 */
+export function limitsFor(limits: ExtensionLimits, permissions: unknown): ExtensionLimits {
+  return Array.isArray(permissions) && permissions.includes('server') ? { ...limits, ...limits.server } : limits
+}

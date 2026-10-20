@@ -1,9 +1,10 @@
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseServerDeclaration, resolveLaunch, startServer, type ServerDeclaration, type ServerHandle, type ServerState } from '../../src/services/extensions/server.ts'
+import { hasServerRecord, parseServerDeclaration, resolveLaunch, SERVER_LOG, SERVER_RECORD, startServer, type ServerDeclaration, type ServerHandle, type ServerState } from '../../src/services/extensions/server.ts'
 
 // 확장의 내장 서버 (이슈 #537 1단계) — manifest 의 선언형 `server` 검사와, 그 선언대로 띄우고(포트 확인 → 기동 → 준비 → 관리자 준비) 내리는 실행기.
 // SonarQube 는 띄우지 않는다 — 확장 폴더의 `bin/node`(이 node 로 가는 링크)가 상태 주소를 흉내 내는 스크립트를 돌린다 (engineLaunch.test.ts 와 같은 방식)
@@ -324,5 +325,94 @@ describe('startServer — 내리기', () => {
     await until(() => fs.existsSync(record))
     await handle.stop()
     expect(await handle.ready).toMatchObject({ phase: 'stopped' })
+  })
+})
+
+// 앱이 강제로 꺼지면 서버 그룹 전체가 남는다 (실측 §6) — 띄운 PID 를 데이터 폴더에 적고, 다음 띄우기가 먼저 그 기록을 본다
+describe('startServer — PID 기록·다시 잡기', () => {
+  /** 지난 실행이 남긴 서버를 흉내 낸다 — 앱의 자식이 아니다(따로 띄우고 놓는다) */
+  async function leftover(port: number, mode: string, dir = extensionDir): Promise<number> {
+    const orphan = spawn(path.join(extensionDir, 'bin', 'node'), ['fake.mjs', String(port), mode, `${record}.orphan`], { cwd: extensionDir, detached: true, stdio: 'ignore' })
+    orphan.unref()
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(path.join(dataDir, SERVER_RECORD), JSON.stringify({ pid: orphan.pid, dir }))
+    await until(() => fs.existsSync(`${record}.orphan`))
+    return orphan.pid!
+  }
+  const orphans: number[] = []
+  afterEach(() => {
+    for (const pid of orphans.splice(0)) {
+      try {
+        process.kill(-pid, 'SIGKILL')
+      } catch {
+        // 이미 끝났다
+      }
+    }
+  })
+
+  it('띄우면 PID 를 적고 출력은 server.log 로, 내리면 기록을 지운다', async () => {
+    const { handle } = start(fakeServer(await freePort(), 'normal'))
+    await handle.ready
+    const { pid } = JSON.parse(fs.readFileSync(record, 'utf8')) as { pid: number }
+    expect(JSON.parse(fs.readFileSync(path.join(dataDir, SERVER_RECORD), 'utf8'))).toEqual({ pid, dir: extensionDir })
+    expect(hasServerRecord(dataDir)).toBe(true)
+    expect(fs.existsSync(path.join(dataDir, SERVER_LOG))).toBe(true)
+    await handle.stop()
+    await until(() => !hasServerRecord(dataDir))
+  })
+
+  it('지난 서버가 준비된 채 살아 있으면 띄우지 않고 다시 잡는다 — 관리자 준비는 다시 하고, 내리면 그 서버를 끈다', async () => {
+    const port = await freePort()
+    const pid = await leftover(port, 'normal')
+    orphans.push(pid)
+    await new Promise((resolve) => setTimeout(resolve, 400)) // UP 이 되게
+    const prepared: string[] = []
+    const { handle, states } = start(fakeServer(port, 'normal'), { prepare: async (baseUrl) => void prepared.push(baseUrl) })
+    expect(await handle.ready).toMatchObject({ phase: 'running' })
+    expect(states.map((state) => state.phase)).toEqual(['port', 'admin', 'running'])
+    expect(fs.existsSync(record)).toBe(false) // 새로 띄우지 않았다
+    expect(prepared).toEqual([`http://127.0.0.1:${port}`])
+    await handle.stop()
+    expect(alive(pid)).toBe(false)
+  })
+
+  it('다시 잡은 서버가 스스로 끝나도 알아챈다 (exited)', async () => {
+    const port = await freePort()
+    const pid = await leftover(port, 'normal')
+    orphans.push(pid)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    const { handle, states } = start(fakeServer(port, 'normal'))
+    await handle.ready
+    process.kill(pid, 'SIGKILL')
+    await until(() => states.at(-1)?.phase === 'failed', 5_000)
+    expect(handle.state()).toMatchObject({ error: 'exited' })
+  })
+
+  it('지난 서버가 준비되지 않았으면 그룹째 내리고 새로 띄운다', async () => {
+    const port = await freePort()
+    const pid = await leftover(port, 'never')
+    orphans.push(pid)
+    const { handle } = start(fakeServer(port, 'normal'))
+    expect(await handle.ready).toMatchObject({ phase: 'running' })
+    expect(alive(pid)).toBe(false)
+    expect(fs.existsSync(record)).toBe(true) // 새로 띄웠다
+  })
+
+  it('기록의 PID 가 그 확장 폴더의 것이 아니면(다른 프로그램이 이어받음) 건드리지 않는다', async () => {
+    const port = await freePort()
+    const pid = await leftover(port, 'never', '/somewhere/else')
+    orphans.push(pid)
+    const { handle } = start(fakeServer(port, 'normal'))
+    // 그 프로그램이 포트를 쥐고 있으니 띄우지 못한다 — 그래도 죽이지 않는다
+    expect(await handle.ready).toMatchObject({ phase: 'failed', error: 'port-in-use' })
+    expect(alive(pid)).toBe(true)
+    expect(hasServerRecord(dataDir)).toBe(false)
+  })
+
+  it('기록의 PID 가 이미 없으면 기록만 지우고 띄운다', async () => {
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(path.join(dataDir, SERVER_RECORD), JSON.stringify({ pid: 2 ** 22 - 7, dir: extensionDir }))
+    const { handle } = start(fakeServer(await freePort(), 'normal'))
+    expect(await handle.ready).toMatchObject({ phase: 'running' })
   })
 })

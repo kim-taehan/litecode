@@ -1,8 +1,8 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
-import { keepTail, streamText } from '../outputBuffer.ts'
+import type { ExtensionServer, ExtensionServerFailure, ExtensionServerPhase } from '../../../shared/extensions.ts'
 import { isEntryPath } from './paths.ts'
 
 // 확장의 내장 서버 (이슈 #537) — 확장의 JS 는 메인에서 돌리지 않는다. 대신 manifest 의 선언형 `server` 를 앱이 읽고 그대로만 띄운다.
@@ -15,24 +15,17 @@ import { isEntryPath } from './paths.ts'
 // - 내리기: 프로세스 그룹째 SIGTERM → 기한 → SIGKILL. SonarQube 는 자식 셋(검색 엔진·웹·계산 엔진)을 따로 띄우고, 부모만 죽이면 자식이 포트를 쥔 채
 //   남는다 (실측 §6). 정상 종료는 8~12초였다. Windows 는 프로세스 그룹이 없어 taskkill /T /F 로 곧장 끈다 — **Windows 는 미검증**
 // - 던지지 않는다: 실패는 상태(failed + 실패 코드)로 낸다
+// - 출력은 파이프가 아니라 데이터 폴더의 server.log 로 — 앱이 꺼진 뒤에도 서버가 돌 수 있다(stopWithApp 끔). 파이프면 앱이 꺼질 때 끊긴다
+// - 띄운 PID 를 데이터 폴더의 server.pid.json 에 적는다 (engine.ts 의 PID 기록과 같은 까닭 — 앱이 강제로 꺼지면 그룹 전체가 남는다).
+//   다음 띄우기는 먼저 기록을 본다: 그 PID 가 살아 있고 명령줄(ps)에 그 확장 폴더 경로가 있으면 우리 서버다 — 준비됐으면 다시 잡고(adopt), 아니면 그룹째 내린다.
+//   (실행 파일 경로가 아니라 폴더로 보는 것은 셸 스크립트가 exec 로 바꿔 띄우는 서버도 있어서다 — 그래도 인자에 확장 폴더 안 경로가 남는다)
+//   다른 프로그램이 그 PID 를 이어받았으면 건드리지 않는다. **Windows 는 기록을 지우기만 한다(미검증 — ps 가 없다)**
 
 /** 앱이 아는 관리자 준비 — 이름마다 앱 안의 순수 로직이 있다 (serverAdmin.ts) */
 const ADMIN_KINDS = ['sonarqube'] as const
 
-export interface ServerDeclaration {
-  /** 확장 폴더 기준 실행 파일 */
-  command: string
-  args: string[]
-  /** 앱 env 에 더할 값 */
-  env: Record<string, string>
-  /** 확장 폴더 기준 작업 폴더 — 없으면 확장 폴더 */
-  cwd?: string
-  /** 127.0.0.1 의 고정 포트 */
-  port: number
-  /** 준비 판정 — GET path 의 JSON 에서 field 가 ready 면 준비됨 */
-  health: { path: string; field: string; ready: string }
-  admin?: (typeof ADMIN_KINDS)[number]
-}
+/** 선언의 모양은 화면과 같이 쓴다 (shared/extensions.ts) */
+export type ServerDeclaration = ExtensionServer
 
 export type ServerDeclarationField = 'shape' | 'command' | 'cwd' | 'args' | 'env' | 'port' | 'health' | 'admin'
 
@@ -109,31 +102,30 @@ export function resolveLaunch(declaration: ServerDeclaration, where: { extension
   }
 }
 
-export type ServerPhase = 'port' | 'launching' | 'starting' | 'admin' | 'running' | 'stopping' | 'stopped' | 'failed'
-/** port-in-use: 포트를 누가 쓴다 · spawn-failed: 실행 파일을 못 띄움 · exited: 서버가 스스로 끝남 · not-ready: 기한 안에 준비가 안 됨 · admin-failed: 관리자 준비 실패 */
-export type ServerFailure = 'port-in-use' | 'spawn-failed' | 'exited' | 'not-ready' | 'admin-failed'
+export type ServerPhase = ExtensionServerPhase
+export type ServerFailure = ExtensionServerFailure
 
 export interface ServerState {
   phase: ServerPhase
   /** starting: 상태 주소가 준 값(STARTING 등) · failed: 덧붙일 사유(관리자 준비의 실패 코드, 띄우기 오류) */
   detail?: string
   error?: ServerFailure
-  /** failed 때 서버 출력의 끝 — 기동 실패 사유는 출력의 끝에 있다 */
+  /** failed 때 서버 출력(server.log)의 끝 — 기동 실패 사유는 출력의 끝에 있다 */
   output?: string
 }
 
 export interface ServerOptions {
   extensionDir: string
-  /** 확장별 데이터 폴더 — 없으면 띄우기 전에 만든다 */
+  /** 확장별 데이터 폴더 — 없으면 띄우기 전에 만든다. server.log·server.pid.json 도 여기 */
   dataDir: string
   onState(state: ServerState): void
-  /** 준비된 뒤 한 번 — 던지면 서버를 내리고 admin-failed (Error.message 가 detail) */
+  /** 준비된 뒤 한 번(다시 잡았을 때도) — 던지면 서버를 내리고 admin-failed (Error.message 가 detail) */
   prepare?(baseUrl: string): Promise<void>
   fetch?: typeof globalThis.fetch
-  /** 준비 기한 — SonarQube 첫 기동은 이 기계에서 49초, 데이터가 있으면 21초였다 (실측 §3). 느린 PC 를 보고 넉넉히 */
+  /** 준비 기한 — SonarQube 첫 기동은 이 기계에서 45~50초, 데이터가 있으면 21~24초였다 (실측 §3). 느린 PC 를 보고 넉넉히 */
   readyTimeoutMs?: number
   pollMs?: number
-  /** SIGTERM 뒤 SIGKILL 까지 — 정상 종료 8~12초 실측의 약 세 배 */
+  /** SIGTERM 뒤 SIGKILL 까지 — 정상 종료 7~12초 실측의 약 세 배 */
   killGraceMs?: number
 }
 
@@ -150,13 +142,37 @@ const POLL_MS = 1_000
 const KILL_GRACE_MS = 30_000
 const MAX_OUTPUT = 4_000
 const PROBE_TIMEOUT_MS = 2_000
+/** 다시 잡은 서버(우리 자식이 아니라 exit 이벤트가 없다)가 살아 있는지 보는 간격 */
+const WATCH_MS = 1_000
+
+export const SERVER_LOG = 'server.log'
+export const SERVER_RECORD = 'server.pid.json'
+
+/** 띄운 서버의 기록 — pid 는 프로세스 그룹 id 와 같다(detached). dir 은 확장 폴더 — 다시 잡을 때 그 PID 가 우리 것인지 명령줄로 본다 */
+interface ServerRecord {
+  pid: number
+  dir: string
+}
+
+/** 데이터 폴더에 기록이 있나 — 앱이 켜질 때 "지난번 서버가 남았나" 를 보는 데 쓴다 */
+export function hasServerRecord(dataDir: string): boolean {
+  return fs.existsSync(path.join(dataDir, SERVER_RECORD))
+}
+
+/** 띄운 서버(또는 다시 잡은 서버) 하나 — 우리 자식이면 이벤트로, 다시 잡은 것이면 주기적으로 살아 있나를 본다 */
+interface Running {
+  pid: number
+  /** 그룹의 우두머리가 끝나면 풀린다 */
+  exited: Promise<void>
+}
 
 export function startServer(declaration: ServerDeclaration, opts: ServerOptions): ServerHandle {
   const doFetch = opts.fetch ?? globalThis.fetch
-  const output = keepTail(MAX_OUTPUT)
+  const logFile = path.join(opts.dataDir, SERVER_LOG)
+  const recordFile = path.join(opts.dataDir, SERVER_RECORD)
+  const grace = opts.killGraceMs ?? KILL_GRACE_MS
   let current: ServerState = { phase: 'port' }
-  let child: ChildProcess | undefined
-  let exited: Promise<void> = Promise.resolve()
+  let running: Running | undefined
   let stopping: Promise<void> | undefined
 
   const set = (state: ServerState): void => {
@@ -164,7 +180,7 @@ export function startServer(declaration: ServerDeclaration, opts: ServerOptions)
     opts.onState(state)
   }
   const settled = (): boolean => current.phase === 'stopping' || current.phase === 'stopped'
-  /** 서버가 스스로 끝나면 close 처리기가 그 사이에 failed 로 바꾼다 — 기다린 뒤에는 이것으로 다시 읽는다 */
+  /** 서버가 스스로 끝나면 exit 처리기가 그 사이에 failed 로 바꾼다 — 기다린 뒤에는 이것으로 다시 읽는다 */
   const failed = (): boolean => current.phase === 'failed'
   /** 멈춤이 끼어들었다 — 멈춤이 끝난 상태(stopped)로 풀린다 */
   const halted = async (): Promise<ServerState> => {
@@ -172,79 +188,111 @@ export function startServer(declaration: ServerDeclaration, opts: ServerOptions)
     return current
   }
   const fail = (error: ServerFailure, detail?: string): ServerState => {
-    const state: ServerState = { phase: 'failed', error, ...(detail !== undefined && { detail }), output: output.text().trim() }
+    const output = logTail(logFile)
+    const state: ServerState = { phase: 'failed', error, ...(detail !== undefined && { detail }), ...(output !== '' && { output }) }
     set(state)
     return state
   }
 
-  const signal = (name: NodeJS.Signals): void => {
-    if (!child?.pid) return
-    try {
-      if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => child?.kill())
-      else process.kill(-child.pid, name)
-    } catch {
-      // 이미 끝났다
-    }
-  }
   const kill = async (): Promise<void> => {
-    if (child === undefined || child.exitCode !== null || child.signalCode !== null) return
-    signal('SIGTERM')
-    const timer = setTimeout(() => signal('SIGKILL'), opts.killGraceMs ?? KILL_GRACE_MS)
+    if (running === undefined) return
+    const { pid, exited } = running
+    if (!alive(pid)) return
+    signalGroup(pid, 'SIGTERM')
+    const timer = setTimeout(() => signalGroup(pid, 'SIGKILL'), grace)
     await exited
     clearTimeout(timer)
   }
 
-  const run = async (): Promise<ServerState> => {
-    set({ phase: 'port' })
-    if (await portInUse(declaration.port)) return fail('port-in-use')
-    const freePorts: Record<string, number> = {}
-    for (const name of freePortNames(declaration)) freePorts[name] = await freePort()
-    const launch = resolveLaunch(declaration, { extensionDir: opts.extensionDir, dataDir: opts.dataDir, freePorts })
-    fs.mkdirSync(opts.dataDir, { recursive: true })
-    if (settled()) return halted()
-
-    set({ phase: 'launching' })
-    const env = { ...process.env, ...launch.env }
-    delete env['OPENCODE_SERVER_PASSWORD']
-    const spawned = spawn(launch.file, launch.args, { cwd: launch.cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-    for (const stream of [spawned.stdout, spawned.stderr]) {
-      const decoded = streamText()
-      stream?.on('data', (part: Buffer) => output.push(decoded.push(part)))
-    }
-    const started = await new Promise<string | undefined>((resolve) => {
-      spawned.once('spawn', () => resolve(undefined))
-      spawned.once('error', (error) => resolve(error.message))
-    })
-    if (started !== undefined) return fail('spawn-failed', started)
-    child = spawned
-    // 부모가 끝나면(스스로든 멈춤이든) 그룹에 남은 자식을 쓸어 낸다 — SonarQube 는 부모만 죽으면 자식이 포트를 쥔 채 남는다 (실측 §6).
-    // 남은 자식이 출력 파이프를 쥐고 있으면 close 가 안 온다 — 이것이 그 파이프도 닫는다
-    if (process.platform !== 'win32') spawned.once('exit', () => signal('SIGKILL'))
-    // close — 출력까지 다 흘러나온 뒤다 (exit 은 파이프에 남은 사유보다 먼저 올 수 있다)
-    exited = new Promise((resolve) => spawned.once('close', () => resolve()))
+  /** 우두머리가 끝나면 — 그룹에 남은 자식을 쓸어 내고(SonarQube 는 부모만 죽으면 자식이 포트를 쥔 채 남는다, 실측 §6) 기록을 지운다 */
+  const watchExit = (pid: number, exited: Promise<void>): Running => {
     void exited.then(() => {
+      signalGroup(pid, 'SIGKILL')
+      fs.rmSync(recordFile, { force: true })
       if (!settled() && !failed()) fail('exited')
     })
+    return { pid, exited }
+  }
 
-    const deadline = Date.now() + (opts.readyTimeoutMs ?? READY_TIMEOUT_MS)
-    while (true) {
-      if (settled()) return halted()
-      if (failed()) return current
-      const value = await probe(doFetch, launch.healthUrl, declaration.health.field)
-      if (value === declaration.health.ready) break
-      if (value !== undefined && (current.phase !== 'starting' || current.detail !== value)) set({ phase: 'starting', detail: value })
-      if (Date.now() > deadline) {
-        const last = current.detail
-        await kill()
-        return fail('not-ready', last)
+  /** 지난 기록 — 우리 서버가 준비된 채 살아 있으면 다시 잡는다(true). 아니면 내리고 기록을 지운다 */
+  const reclaim = async (healthUrl: string): Promise<boolean> => {
+    const record = readRecord(recordFile)
+    if (record === undefined) return false
+    if (process.platform !== 'win32' && alive(record.pid) && owned(record)) {
+      if ((await probe(doFetch, healthUrl, declaration.health.field)) === declaration.health.ready) {
+        running = watchExit(record.pid, pollUntilGone(record.pid))
+        return true
       }
-      await new Promise((resolve) => setTimeout(resolve, opts.pollMs ?? POLL_MS))
+      signalGroup(record.pid, 'SIGTERM')
+      if (!(await waitGone(record.pid, grace))) signalGroup(record.pid, 'SIGKILL')
+      await waitGone(record.pid, grace)
+    }
+    fs.rmSync(recordFile, { force: true })
+    return false
+  }
+
+  const launch = async (file: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<string | undefined> => {
+    const out = fs.openSync(logFile, 'w')
+    const spawned = (() => {
+      try {
+        return spawn(file, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', out, out], windowsHide: true })
+      } finally {
+        fs.closeSync(out) // 자식이 제 사본을 쥐었다
+      }
+    })()
+    const error = await new Promise<string | undefined>((resolve) => {
+      spawned.once('spawn', () => resolve(undefined))
+      spawned.once('error', (failure) => resolve(failure.message))
+    })
+    if (error !== undefined) return error
+    const pid = spawned.pid!
+    // 띄운 직후 앱이 죽어도 PID 는 파일에 있어야 한다 — 동기로 쓴다
+    fs.writeFileSync(recordFile, JSON.stringify({ pid, dir: opts.extensionDir } satisfies ServerRecord))
+    running = watchExit(pid, new Promise((resolve) => spawned.once('exit', () => resolve())))
+    return undefined
+  }
+
+  const run = async (): Promise<ServerState> => {
+    set({ phase: 'port' })
+    fs.mkdirSync(opts.dataDir, { recursive: true })
+    const healthUrl = `http://127.0.0.1:${declaration.port}${declaration.health.path}`
+    const adopted = await reclaim(healthUrl)
+    if (settled()) return halted()
+    let baseUrl = `http://127.0.0.1:${declaration.port}`
+    if (!adopted) {
+      if (await portInUse(declaration.port)) return fail('port-in-use')
+      const freePorts: Record<string, number> = {}
+      for (const name of freePortNames(declaration)) freePorts[name] = await freePort()
+      const resolved = resolveLaunch(declaration, { extensionDir: opts.extensionDir, dataDir: opts.dataDir, freePorts })
+      baseUrl = resolved.baseUrl
+      if (settled()) return halted()
+
+      set({ phase: 'launching' })
+      const env = { ...process.env, ...resolved.env }
+      delete env['OPENCODE_SERVER_PASSWORD']
+      const error = await launch(resolved.file, resolved.args, env, resolved.cwd)
+      if (error !== undefined) return fail('spawn-failed', error)
+
+      const deadline = Date.now() + (opts.readyTimeoutMs ?? READY_TIMEOUT_MS)
+      while (true) {
+        if (settled()) return halted()
+        if (failed()) return current
+        const value = await probe(doFetch, healthUrl, declaration.health.field)
+        if (value === declaration.health.ready) break
+        if (value !== undefined && (current.phase !== 'starting' || current.detail !== value)) set({ phase: 'starting', detail: value })
+        if (Date.now() > deadline) {
+          const last = current.detail
+          await kill()
+          return fail('not-ready', last)
+        }
+        await new Promise((resolve) => setTimeout(resolve, opts.pollMs ?? POLL_MS))
+      }
     }
 
     if (opts.prepare) {
       set({ phase: 'admin' })
       try {
-        await opts.prepare(launch.baseUrl)
+        await opts.prepare(baseUrl)
       } catch (error) {
         if (settled()) return halted()
         if (failed()) return current
@@ -271,6 +319,73 @@ export function startServer(declaration: ServerDeclaration, opts: ServerOptions)
       })()
       return stopping
     },
+  }
+}
+
+/** 그룹째 신호 — Windows 는 그룹이 없어 taskkill /T /F (신호 종류와 상관없이 곧장 끈다) */
+function signalGroup(pid: number, name: NodeJS.Signals): void {
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {})
+    else process.kill(-pid, name)
+  } catch {
+    // 이미 끝났다
+  }
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** 그 PID 의 명령줄에 그 확장 폴더 경로가 있나 — PID 를 다른 프로그램이 이어받았으면 건드리지 않는다 */
+function owned(record: ServerRecord): boolean {
+  try {
+    return execFileSync('ps', ['-o', 'command=', '-p', String(record.pid)], { encoding: 'utf8', timeout: 5_000 }).includes(record.dir + path.sep)
+  } catch {
+    return false
+  }
+}
+
+function readRecord(file: string): ServerRecord | undefined {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<ServerRecord>
+    return Number.isInteger(value.pid) && (value.pid as number) > 0 && typeof value.dir === 'string' && value.dir !== '' ? { pid: value.pid!, dir: value.dir } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 우리 자식이 아닌 프로세스가 끝나기를 — exit 이벤트가 없어 주기적으로 본다 */
+function pollUntilGone(pid: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (alive(pid)) return
+      clearInterval(timer)
+      resolve()
+    }, WATCH_MS)
+  })
+}
+
+async function waitGone(pid: number, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms
+  while (alive(pid)) {
+    if (Date.now() > deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  return true
+}
+
+/** server.log 의 끝 MAX_OUTPUT 자 — 기동 실패 사유는 출력의 끝에 있다 */
+function logTail(file: string): string {
+  try {
+    const bytes = fs.readFileSync(file)
+    return bytes.subarray(Math.max(0, bytes.length - MAX_OUTPUT * 4)).toString('utf8').slice(-MAX_OUTPUT).replace(/^\uFFFD+/, '').trim()
+  } catch {
+    return ''
   }
 }
 
