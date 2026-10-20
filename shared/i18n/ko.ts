@@ -447,8 +447,7 @@ export const ko = {
   'extensions.info.problems': '올리지 못한 사유',
   'extensions.mounting': '올리는 중',
   // 패널 확장 (이슈 #511, 시안 _workspace/mock-extension-panel)
-  'extensions.installed': '{name} 를 설치했습니다. 오른쪽 패널에서 열렸습니다.',
-  'extensions.installedOnly': '{name} 를 설치했습니다.',
+  'extensions.installed': '{name} 를 설치했습니다.',
   'extensions.tab.failed': '확장을 열지 못했습니다 — {reason}',
   'extensions.failed.invalid': '설치 폴더가 올바르지 않음 — {problem}',
   'extensions.failed.invalidBare': '설치 폴더가 올바르지 않음',

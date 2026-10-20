@@ -209,15 +209,6 @@ export function closeExtensionTabs(extensions: readonly { id: string; state: str
   }
 }
 
-/** 지금 보는 대화의 프로젝트 — 패널(FilePreviewPanel)이 알린다. 패널 밖(설정 화면의 확장 [열기])이 확장 탭을 열 자리 */
-let workspace: string | undefined
-export function setWorkspaceDirectory(directory: string | undefined): void {
-  workspace = directory
-}
-export function workspaceDirectory(): string | undefined {
-  return workspace
-}
-
 /** ⌘[·⌘] — 터미널 탭을 넘나든다 (이전·다음). 고른 것이 없으면 마지막 연 것으로. 하나 없으면 false */
 export function cycleTerminalTab(directory: string, delta: 1 | -1): boolean {
   if (!current || current.directory !== directory) return false

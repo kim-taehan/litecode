@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { ExtensionPreview, ExtensionResult, ExtensionStoreFailure, ExtensionSummary } from '../shared/extensions.ts'
-import { openExtensionTab, workspaceDirectory } from './filePreviewStore.ts'
 import { useFocusTrap } from './focusTrap.ts'
 import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT, type Translate } from './settingsStore.ts'
@@ -11,7 +10,6 @@ import { cardKind, failedReasonText, failureLines, formatBytes, installKind, lin
 // 카드는 기능 줄(.feature-row)의 모양을 그대로 쓰고 퍼즐 타일 · 보라 "확장" 뱃지 · 버전 · [열기] · ⋯ 메뉴를 더한다.
 // 패널 확장 (이슈 #511, 시안 _workspace/mock-extension-panel Installed): 설치·삭제는 곧바로 적용된다(보류·재시작 안내가 없어졌다).
 // 설치가 끝나면 대화상자를 닫고 초록 안내 한 줄 + 그 확장 탭을 오른쪽 패널에 연다(설치 직후 한 번). 정상(on) 카드에 [열기] — 탭을 열고 패널을 연다.
-// 탭을 여는 자리는 지금 보는 대화의 프로젝트(filePreviewStore.workspaceDirectory) — 대화가 없으면 열지 못하고 안내는 앞 문장만.
 // 삭제 확인은 모델 카드(Settings.tsx ModelsPage)처럼 카드 안 [삭제 확인][취소] 두 버튼. 대화상자 틀은 전체 권한 확인(ModeChip ConfirmFullAccess)과 같다.
 // 요청 결과는 던지지 않고 { ok, failure } 로 온다 — 그래도 IPC 자체가 실패할 수 있어 거부도 받는다.
 
@@ -208,14 +206,13 @@ export function ExtensionRejectDialog({ lines, onClose }: { lines: readonly Prob
 
 type Dialog = { kind: 'confirm'; preview: ExtensionPreview } | { kind: 'reject'; lines: ProblemLine[] }
 
-/** 설치가 끝났다 — 안내에 쓸 이름과 탭을 열었는지 */
+/** 설치가 끝났다 — 안내에 쓸 이름 */
 export interface InstalledNote {
   name: string
-  opened: boolean
 }
 
 /** [확장 추가 (zip)] — zip 고르기 → 통과면 설치 확인, 사유가 있으면 거절. 대화상자를 취소하면 아무것도 안 한다.
- *  설치가 끝나면 그 확장 탭을 오른쪽 패널에 열고(설치 직후 한 번) onInstalled 로 알린다 — 안내 줄은 기능 페이지가 그린다 */
+ *  설치가 끝나면 onInstalled 로 알린다(탭을 자동으로 열지 않는다 — 쓰는 법은 확장 상세의 details) — 안내 줄은 기능 페이지가 그린다 */
 export function ExtensionAddButton({ onInstalled }: { onInstalled?(note: InstalledNote): void }) {
   const t = useT()
   const [busy, setBusy] = useState(false)
@@ -247,7 +244,7 @@ export function ExtensionAddButton({ onInstalled }: { onInstalled?(note: Install
           onClose={close}
           onInstalled={(id) => {
             const name = dialog.preview.manifest?.name ?? id
-            onInstalled?.({ name, opened: openExtensionTab(workspaceDirectory(), id) })
+            onInstalled?.({ name })
           }}
         />
       )}
@@ -256,12 +253,12 @@ export function ExtensionAddButton({ onInstalled }: { onInstalled?(note: Install
   )
 }
 
-/** 설치 직후 초록 안내 한 줄 (시안 Installed) — 탭을 열지 못했으면(대화 없음) 앞 문장만 */
-export function ExtensionInstalledNotice({ name, opened }: InstalledNote) {
+/** 설치 직후 초록 안내 한 줄 (시안 Installed) */
+export function ExtensionInstalledNotice({ name }: InstalledNote) {
   const t = useT()
   return (
     <p className="extensions-installed" role="status">
-      {t(opened ? 'extensions.installed' : 'extensions.installedOnly', { name })}
+      {t('extensions.installed', { name })}
     </p>
   )
 }
