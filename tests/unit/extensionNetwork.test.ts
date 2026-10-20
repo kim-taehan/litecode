@@ -1,7 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fetchForExtension, parseFetchRequest, type FetchOptions } from '../../src/services/extensions/network.ts'
+import { fetchForExtension, isAppAddress, parseFetchRequest, type FetchOptions } from '../../src/services/extensions/network.ts'
 
 // 확장의 network.fetch (이슈 #536) — 요청 하나의 규칙: http/https 만, 기한, 응답 크기 상한, 같은 origin 리다이렉트만.
 // 가짜 서버 둘(127.0.0.1 의 서로 다른 포트 = 서로 다른 origin)에 실제 fetch 로 요청한다
@@ -156,5 +156,24 @@ describe('fetchForExtension', () => {
     closed.closeAllConnections()
     await new Promise((resolve) => closed.close(resolve))
     expect(await fetchForExtension(request({ url: base }), options)).toEqual({ ok: false, error: 'network-failed' })
+  })
+})
+
+describe('isAppAddress — 앱 자신의 로컬 서버(키 프록시·엔진·데스크탑 MCP·모바일 연결)', () => {
+  const ports = [4096, 47600]
+  const self = ['192.168.0.7', 'fe80::1']
+  const reserved = (url: string) => isAppAddress(new URL(url), ports, self)
+
+  it('루프백·이 기기 주소에서 앱 포트면 예약 — 이름·표기가 달라도', () => {
+    for (const url of ['http://127.0.0.1:4096/', 'http://localhost:4096/x', 'http://LOCALHOST:4096/', 'http://a.localhost:4096/', 'http://[::1]:4096/', 'http://127.1.2.3:4096/', 'http://2130706433:4096/', 'http://0.0.0.0:4096/', 'http://[::]:4096/', 'http://[::ffff:127.0.0.1]:4096/', 'https://192.168.0.7:47600/', 'http://[fe80::1]:47600/']) {
+      expect(reserved(url), url).toBe(true)
+    }
+  })
+
+  it('일반 localhost(내장 SonarQube 9000)·다른 호스트의 같은 포트·기본 포트는 막지 않는다', () => {
+    for (const url of ['http://127.0.0.1:9000/', 'http://localhost/', 'https://localhost/', 'http://sonar.corp.local:4096/', 'http://192.168.0.8:47600/']) {
+      expect(reserved(url), url).toBe(false)
+    }
+    expect(isAppAddress(new URL('http://localhost/'), [80], [])).toBe(true) // 기본 포트도 포트로 본다
   })
 })

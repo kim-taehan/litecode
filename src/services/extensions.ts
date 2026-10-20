@@ -20,7 +20,7 @@ import { setMainLocalePack } from '../i18n.ts'
 import { ExtensionData } from './extensions/data.ts'
 import { EXTENSION_LIMITS } from './extensions/limits.ts'
 import { isExtensionId } from './extensions/manifest.ts'
-import { fetchForExtension, parseFetchRequest, type ExtensionFetch } from './extensions/network.ts'
+import { fetchForExtension, isAppAddress, parseFetchRequest, selfAddresses, type ExtensionFetch } from './extensions/network.ts'
 import { isEntryPath } from './extensions/paths.ts'
 import { ExtensionStore, readInsideFile } from './extensions/store.ts'
 import { failureReason } from './features.ts'
@@ -74,6 +74,8 @@ export interface ExtensionsOptions {
   cipher?: KeyCipher
   /** network.fetch 가 쓰는 fetch — 확장마다 하나(쿠키·캐시를 확장끼리 섞지 않는다). 앱은 메인의 Chromium 네트워크(electron/extensionFetch.ts), 테스트가 주입한다. 기본 globalThis.fetch */
   fetch?: (id: string) => ExtensionFetch
+  /** 앱 자신의 로컬 서버 포트 — network.fetch 가 동의와 상관없이 거절한다(address-reserved). 포트는 런타임에 정해지므로 부를 때마다 읽는다 */
+  reservedPorts?: () => number[]
 }
 
 /** 통로 요청을 부른 프로젝트 — 다리가 등록된 프로젝트인지 확인한 것만 온다 */
@@ -272,6 +274,7 @@ export class ExtensionsService extends Service {
     if (!manifest) return fail('not-on')
     if (!manifest.permissions?.includes('network')) return fail('permission-missing')
     if (!isOrigin(origin)) return fail('url-invalid')
+    if (this.reserved(new URL(origin))) return fail('address-reserved')
     return this.withData(async () => {
       if (!this.onManifest(id)) return fail('not-on')
       const list = this.origins.get(id) ?? []
@@ -476,6 +479,8 @@ export class ExtensionsService extends Service {
     const parsed = parseFetchRequest(params)
     if (!parsed.ok) return parsed
     const origin = parsed.request.url.origin
+    // 리다이렉트는 같은 origin 만 따라가므로 처음 주소만 보면 된다
+    if (this.reserved(parsed.request.url)) return fail('address-reserved')
     if (!this.origins.get(id)?.includes(origin)) return { ok: false, error: 'consent-required', origin }
     return fetchForExtension(parsed.request, {
       fetch: this.options.fetch?.(id) ?? globalThis.fetch,
@@ -483,6 +488,10 @@ export class ExtensionsService extends Service {
       maxBytes: EXTENSION_LIMITS.fetchBytes,
       maxRedirects: EXTENSION_LIMITS.fetchRedirects,
     })
+  }
+
+  private reserved(url: URL): boolean {
+    return isAppAddress(url, this.options.reservedPorts?.() ?? [], selfAddresses())
   }
 
   /** project.* — info 는 이름만(경로는 주지 않는다: 확장에 필요 없고 홈 폴더·사용자 이름이 드러난다). 파일 경로는 프로젝트 기준 상대 경로만 */

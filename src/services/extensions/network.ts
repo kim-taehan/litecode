@@ -1,3 +1,4 @@
+import os from 'node:os'
 import type { ExtensionCallError, ExtensionFetchResponse } from '../../../shared/extensions.ts'
 
 // 확장의 network.fetch (이슈 #536) — iframe 은 CSP 로 직접 네트워크를 못 쓰고, 메인이 대신 요청한다. 허용 목록(origin) 검사는 서비스가 하고,
@@ -39,6 +40,19 @@ export function parseFetchRequest(params: unknown): { ok: true; request: FetchRe
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { ok: false, error: 'url-invalid' }
   return { ok: true, request: { url: parsed, method, headers: headers as Record<string, string>, ...(body !== undefined && { body }) } }
+}
+
+/** 앱 자신의 로컬 서버(키 프록시·엔진·데스크탑 MCP·모바일 연결) 주소인가 — 포트가 ports 에 있고 호스트가 루프백이거나 이 기기 주소(self, 모바일 연결은
+ *  사설 IP 에서 듣는다). 허용하면 확장이 사용자의 LLM 키로 요청하거나 엔진을 조종할 수 있다. 같은 기기를 가리키는 다른 이름(DNS·mDNS)은 못 가린다 */
+export function isAppAddress(url: URL, ports: readonly number[], self: readonly string[]): boolean {
+  if (!ports.includes(Number(url.port || (url.protocol === 'https:' ? 443 : 80)))) return false
+  const host = url.hostname.replace(/^\[|\]$/g, '') // URL 이 소문자·IPv4 숫자 표기(2130706433 → 127.0.0.1)를 정규화한다
+  return host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '0.0.0.0' || host === '::' || host === '::1' || /^::ffff:7f/.test(host) || self.includes(host)
+}
+
+/** 이 기기의 네트워크 주소 (isAppAddress 의 self) */
+export function selfAddresses(): string[] {
+  return Object.values(os.networkInterfaces()).flatMap((entries) => (entries ?? []).map((entry) => entry.address.toLowerCase()))
 }
 
 /** 요청 하나 — 던지지 않는다 */

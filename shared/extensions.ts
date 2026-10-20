@@ -193,6 +193,8 @@ export type ExtensionCallError =
   | 'secrets-unavailable'
   | 'consent-required'
   | 'network-denied'
+  /** 앱 자신의 로컬 서버(키 프록시·엔진 등) — 동의와 상관없이 거절 */
+  | 'address-reserved'
   /** 주소가 아니거나 http/https 가 아니다 */
   | 'url-invalid'
   | 'network-timeout'

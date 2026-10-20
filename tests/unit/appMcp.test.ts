@@ -202,6 +202,11 @@ describe('서버의 경계', () => {
     expect(def.url).not.toContain(path.basename(project))
   })
 
+  it('localPorts — 연 포트 (확장 network.fetch 가 앱 자신의 서버에 못 닿게, #536)', async () => {
+    const { appMcp, def } = await start()
+    expect(appMcp.localPorts()).toEqual([Number(new URL(def.url).port)])
+  })
+
   it('토큰이 없거나 틀리면 401 — 메서드·경로보다 먼저', async () => {
     const { def, post } = await start()
     const request = { jsonrpc: '2.0', id: 1, method: 'tools/list' }

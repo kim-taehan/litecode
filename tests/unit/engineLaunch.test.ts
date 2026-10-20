@@ -112,6 +112,13 @@ describe('EngineService — 뜨는 중에 온 설정 변경', () => {
     expect(await engine.connection()).toBe(conn)
   })
 
+  it('localPorts — 엔진 서버·키 프록시 포트 (확장 network.fetch 가 앱 자신의 서버에 못 닿게, #536). 띄우기 전엔 비었다', async () => {
+    const { engine } = await start(0)
+    expect(engine.localPorts()).toEqual([])
+    const conn = await engine.connection()
+    expect(engine.localPorts().sort()).toEqual([Number(new URL(conn.url).port), Number(new URL(conn.providerBaseURL('gw')).port)].sort())
+  })
+
   it('떠 있나(up) — 띄우기 전·죽은 뒤에는 아니다. 묻는 것만으로는 띄우지 않는다 (#126 오류 13)', async () => {
     const { engine } = await start(0)
     expect(engine.up).toBe(false)

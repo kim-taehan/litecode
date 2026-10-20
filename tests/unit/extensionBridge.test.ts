@@ -209,6 +209,25 @@ describe('network — 허용 목록', () => {
     expect(ids).toEqual(['sonar-ext', 'other-ext'])
   })
 
+  it('앱 자신의 로컬 서버 포트는 동의와 상관없이 address-reserved — 묻지도 요청하지도 않고, 허용도 안 된다. 포트는 부를 때마다 읽는다', async () => {
+    await install('sonar-ext', ['network'])
+    const seen: string[] = []
+    let reserved = [4096]
+    const ext = await boot({ fetch: () => okFetch(seen), reservedPorts: () => reserved })
+    for (const url of ['http://127.0.0.1:4096/session', 'http://localhost:4096/']) {
+      expect(await ext.call('sonar-ext', 'network.fetch', { url }), url).toEqual({ ok: false, error: 'address-reserved' })
+    }
+    expect(await ext.allowOrigin('sonar-ext', 'http://127.0.0.1:4096')).toEqual({ ok: false, error: 'address-reserved' })
+    // 일반 localhost(내장 SonarQube)는 그대로 동의를 묻는다
+    expect(await ext.call('sonar-ext', 'network.fetch', { url: 'http://127.0.0.1:9000/' })).toEqual({ ok: false, error: 'consent-required', origin: 'http://127.0.0.1:9000' })
+    // 먼저 허용한 주소라도 그 포트를 앱이 열면(엔진 재시작 등) 막힌다
+    await ext.allowOrigin('sonar-ext', 'http://127.0.0.1:9000')
+    expect(await ext.call('sonar-ext', 'network.fetch', { url: 'http://127.0.0.1:9000/' })).toMatchObject({ ok: true })
+    reserved = [9000]
+    expect(await ext.call('sonar-ext', 'network.fetch', { url: 'http://127.0.0.1:9000/' })).toEqual({ ok: false, error: 'address-reserved' })
+    expect(seen).toEqual(['http://127.0.0.1:9000/'])
+  })
+
   it('거두면 목록에서 빠지고 다시 묻는다 — 목록이 비면 origins 키도 없다', async () => {
     await install('sonar-ext', ['network'])
     const ext = await boot({ fetch: () => okFetch([]) })

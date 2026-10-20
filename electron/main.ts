@@ -388,7 +388,13 @@ function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_REVOKE_ORIGIN, async (_event, id: unknown, origin: unknown) => ctx.extensions.revokeOrigin(String(id), String(origin)))
 }
 extensionsBridge.inject = ['extensions', 'projects']
-mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher, fetch: extensionFetch }))
+// 확장의 network.fetch 는 앱 자신의 로컬 서버(엔진·키 프록시·데스크탑 MCP·모바일 연결)에 닿지 못한다 — 포트는 런타임에 정해져 부를 때마다 읽는다 (#536)
+const reservedPorts = (): number[] => [
+  ...(ctx.get('engine')?.localPorts() ?? []),
+  ...(ctx.get('appMcp')?.localPorts() ?? []),
+  ...(ctx.get('remote')?.status().addresses.map((address) => Number(address.slice(address.lastIndexOf(':') + 1))) ?? []),
+]
+mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher, fetch: extensionFetch, reservedPorts }))
 mounted.push(ctx.plugin(extensionsBridge))
 
 /** 모든 앱 창에 보낸다. 창 하나의 send 실패(못 옮기는 값·닫히는 창)는 로그만 — 나머지 창과, 이벤트를 낸 서비스 쪽(cordis emit 은 리스너 예외를 던진다)으로 번지지 않게 (QA 03_qa_ext_pr3) */
