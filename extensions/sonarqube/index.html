@@ -44,6 +44,12 @@ button:disabled{opacity:.5;cursor:default}
 .error{padding:8px 10px;border-radius:8px;background:var(--bad-bg);color:var(--bad);font-size:12.5px;white-space:pre-wrap;word-break:break-word}
 .note{padding:8px 10px;border-radius:8px;background:var(--soft);color:var(--sub);font-size:12.5px}
 label.check{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.tree{margin-left:40px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 0}
+.tree-row{display:flex;align-items:center;gap:4px;height:28px;padding-right:6px}
+.tree-row:hover{background:var(--soft)}
+.twist{width:20px;height:20px;padding:0;border:0;background:transparent;color:var(--sub);display:inline-grid;place-items:center;flex-shrink:0}
+.tree-name{font:12px ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-add{height:22px;padding:0 8px;font-size:11.5px}
 pre{margin:0;max-height:160px;overflow:auto;font:11px ui-monospace,Menlo,monospace}
 </style>
 </head>
@@ -204,14 +210,62 @@ async function setScope(scope) {
   loadResults()
 }
 
-async function pickPaths() {
+// 폴더·파일 고르기 — 패널 안의 프로젝트 트리(project.listDir). OS 고르기 창은 프로젝트 밖으로 나갈 수 있어 쓰지 않는다 (이슈 #548)
+const tree = { open: false, dirs: new Map(), expanded: new Set() }
+
+async function loadDir(dir) {
   try {
-    const picked = await call('project.pickPath', { multiple: true })
-    for (const p of picked.paths ?? []) if (p !== './' && !state.paths.includes(p)) state.paths.push(p)
+    tree.dirs.set(dir, await call('project.listDir', { path: dir }))
   } catch (error) {
-    state.error = error.message
+    tree.dirs.set(dir, { error: error.message, entries: [] })
   }
   render()
+}
+
+function toggleTree() {
+  tree.open = !tree.open
+  if (tree.open && !tree.dirs.has('')) loadDir('')
+  render()
+}
+
+function toggleDir(dir) {
+  if (tree.expanded.has(dir)) tree.expanded.delete(dir)
+  else {
+    tree.expanded.add(dir)
+    if (!tree.dirs.has(dir)) loadDir(dir)
+  }
+  render()
+}
+
+function addPath(p) {
+  if (!state.paths.includes(p)) state.paths.push(p)
+  render()
+}
+
+function treeRows(dir, depth) {
+  const listing = tree.dirs.get(dir)
+  if (!listing) return [el('div', { class: 'sub', style: `padding-left:${depth * 16 + 8}px` }, '불러오는 중…')]
+  if (listing.error) return [el('div', { class: 'sub', style: `padding-left:${depth * 16 + 8}px` }, text(listing.error))]
+  const rows = []
+  for (const entry of listing.entries) {
+    const full = dir === '' ? entry.name : `${dir}/${entry.name}`
+    const key = entry.dir ? `${full}/` : full
+    const added = state.paths.includes(key)
+    rows.push(
+      el(
+        'div',
+        { class: 'tree-row', style: `padding-left:${depth * 16 + 4}px` },
+        entry.dir
+          ? el('button', { class: 'twist', 'aria-label': `${entry.name} 펼치기`, 'aria-expanded': String(tree.expanded.has(full)), onclick: () => toggleDir(full) }, tree.expanded.has(full) ? '▾' : '▸')
+          : el('span', { class: 'twist' }),
+        el('span', { class: 'grow tree-name' }, entry.dir ? `${entry.name}/` : entry.name),
+        el('button', { class: 'tree-add', disabled: added, onclick: () => addPath(key) }, added ? '추가됨' : '추가'),
+      ),
+    )
+    if (entry.dir && tree.expanded.has(full)) rows.push(...treeRows(full, depth + 1))
+  }
+  if (listing.truncated) rows.push(el('div', { class: 'sub', style: `padding-left:${depth * 16 + 8}px` }, '항목이 많아 일부만 보입니다'))
+  return rows
 }
 
 function scopePaths() {
@@ -303,9 +357,10 @@ function scopeRow() {
         'div',
         { class: 'row', style: 'flex-wrap:wrap;padding-left:40px' },
         state.paths.map((p) => el('span', { class: 'path' }, p, el('button', { 'aria-label': `${p} 빼기`, onclick: () => ((state.paths = state.paths.filter((x) => x !== p)), render()) }, '×'))),
-        el('button', { style: 'height:26px;border-style:dashed;font-size:12px', onclick: pickPaths }, '+ 폴더·파일 고르기'),
+        el('button', { style: 'height:26px;border-style:dashed;font-size:12px', 'aria-expanded': String(tree.open), onclick: toggleTree }, tree.open ? '닫기' : '+ 폴더·파일 고르기'),
       ),
     )
+    if (tree.open) rows.push(el('div', { class: 'tree', role: 'tree', 'aria-label': `${state.project?.name ?? ''} 폴더` }, el('div', { class: 'sub', style: 'padding:4px 8px' }, `${state.project?.name ?? '프로젝트'} 안에서만 고를 수 있습니다`), treeRows('', 0)))
   }
   if (state.scope === 'changes') {
     const c = state.changes

@@ -6,7 +6,7 @@ import { keepTail } from '../outputBuffer.ts'
 import type { KeyCipher } from '../providers.ts'
 import { leftoverAlive, reapServerRecord, startServer, type ServerHandle, type ServerOptions, type ServerState } from './server.ts'
 import { prepareSonarAdmin, sonarPassword, type AdminSecrets } from './serverAdmin.ts'
-import { reportTaskId, sonarProjectKey, sonarScanArgs } from './sonarAnalysis.ts'
+import { projectTsconfigs, reportTaskId, sonarProjectKey, sonarScanArgs } from './sonarAnalysis.ts'
 
 // 확장마다의 내장 서버 (이슈 #537) — ctx.extensions 가 쥔다. 띄우기·내리기·상태는 server.ts 의 실행기, 관리자 준비는 serverAdmin.ts.
 // 데이터는 `<root>/data/<id>/server/` (SonarQube 의 data·logs·temp, server.log, server.pid.json, admin.json) — 확장을 지우면 자료 폴더째 지워진다.
@@ -130,7 +130,7 @@ export class ExtensionServers {
     if (this.analyzing.has(id)) return { ok: false, error: 'busy' }
     const projectDir = fs.realpathSync(project.directory)
     const workDir = path.join(this.dataDir(id), 'scanner-work')
-    const scan = sonarScanArgs({ serverUrl: `http://127.0.0.1:${server.port}`, projectKey: this.projectKey(project), projectDir, workDir }, paths, (relative) => insideExisting(projectDir, relative))
+    const scan = sonarScanArgs({ serverUrl: `http://127.0.0.1:${server.port}`, projectKey: this.projectKey(project), projectDir, workDir, tsconfigs: projectTsconfigs(projectDir) }, paths, (relative) => insideExisting(projectDir, relative))
     if (!scan.ok) return scan
     this.analyzing.add(id)
     try {
