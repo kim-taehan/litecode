@@ -23,8 +23,18 @@ function bridgeBody(): string {
 describe('확장 IPC 채널', () => {
   it('설계의 채널이 다 있다', () => {
     expect(keys.map((key) => Channel[key]).sort()).toEqual(
-      ['extensions:cancel', 'extensions:changed', 'extensions:install', 'extensions:list', 'extensions:pick', 'extensions:remove', 'extensions:set-enabled'],
+      ['extensions:cancel', 'extensions:changed', 'extensions:install', 'extensions:list', 'extensions:pick', 'extensions:read-entry', 'extensions:read-locale', 'extensions:remove', 'extensions:set-enabled'],
     )
+  })
+
+  it('read-entry (이슈 #511) — preload 는 id 를 넘기고, 브리지는 문자열로 바꿔 ctx.extensions.readEntry 에 맡긴다', () => {
+    expect(preload).toMatch(/readExtensionEntry: \(id\) => ipcRenderer\.invoke\(Channel\.EXTENSIONS_READ_ENTRY, id\)/)
+    expect(bridgeBody()).toMatch(/handle\(ctx, Channel\.EXTENSIONS_READ_ENTRY, async \(_event, id: unknown\) => ctx\.extensions\.readEntry\(String\(id\)\)\)/)
+  })
+
+  it('read-locale (이슈 #525) — preload 는 language 를 넘기고, 브리지는 문자열로 바꿔 ctx.extensions.readLocale 에 맡긴다', () => {
+    expect(preload).toMatch(/readLocalePack: \(language\) => ipcRenderer\.invoke\(Channel\.EXTENSIONS_READ_LOCALE, language\)/)
+    expect(bridgeBody()).toMatch(/handle\(ctx, Channel\.EXTENSIONS_READ_LOCALE, async \(_event, language: unknown\) => ctx\.extensions\.readLocale\(String\(language\)\)\)/)
   })
 
   it('요청 채널마다 preload 가 invoke 하고 main 의 브리지가 handle 한다', () => {

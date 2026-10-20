@@ -482,19 +482,53 @@ describe('REST', () => {
     expect(answer.body).toEqual([
       { providerId: 'gw', providerName: 'Gateway', modelId: 'm1', displayName: 'Model One' },
       { providerId: 'gw', providerName: 'Gateway', modelId: 'm2', displayName: 'm2' },
-      // 같은 id 의 사고 끔 항목은 내부 키로 (#497) — 폰은 키를 그대로 돌려준다
-      { providerId: 'gw', providerName: 'Gateway', modelId: engineModelId({ id: 'm1', thinkingOff: true }), displayName: 'Model One off' },
     ])
     expect(JSON.stringify(answer.body)).not.toContain('secret.example')
   })
 
-  it('새 대화 — 사고 끔 항목은 내부 키로 고른다 (#497)', async () => {
+  // 이슈 #500: 목록은 항목당 한 줄(디폴트 키)이지만, Thinking 모델의 켬·끔 키도 받는다 (데스크탑 대화의 키를 폰이 그대로 돌려줄 때). 미선언 항목의 접미 키는 거절
+  it('새 대화 — Thinking 모델은 켬·끔 키로도 고른다, 미선언 항목의 접미 키는 거절 (#500)', async () => {
     const { api, pair } = await start()
     const { token } = await pair()
-    const model = { providerId: 'gw', modelId: engineModelId({ id: 'm1', thinkingOff: true }) }
+    const model = { providerId: 'gw', modelId: engineModelId({ id: 'm1' }, 'off') }
     const created = await api<RemoteConversation>('POST', '/v1/conversations', { token, body: { project, model } })
     expect(created.status).toBe(200)
-    expect(created.body).toMatchObject({ model })
+    expect(created.body).toMatchObject({ model: MODEL }) // 요약에는 목록의 그 줄 키 (#503) — 대화에는 끔 키 그대로
+    const undeclared = { providerId: 'gw', modelId: engineModelId({ id: 'm2' }, 'on') }
+    expect((await api('POST', '/v1/conversations', { token, body: { project, model: undeclared } })).status).toBe(400)
+  })
+
+  // 이슈 #503 (#502-1): 데스크탑에서 Thinking 켬·끔으로 둔 대화 — 폰은 Thinking 을 고를 수 없다. 대화 요약의 모델은 목록(GET /v1/models)의 그 항목 키라
+  // 폰 머리에 표시 이름이 보이고(내부 키가 아니라), 폰이 같은 모델을 보내도 대화의 키(Thinking 값)는 그대로다. 다른 모델이면 그 모델로
+  it('Thinking 켬·끔 대화 — 요약의 모델은 목록의 그 항목, 같은 모델을 보내면 키를 유지한다 (#503)', async () => {
+    const { ctx, api, pair, save, turn, llm } = await start()
+    const { token } = await pair()
+    const on = { providerId: 'gw', modelId: engineModelId({ id: 'm1' }, 'on') }
+    await save('c1', { model: on })
+    const listed = (await api<RemoteConversation[]>('GET', `/v1/conversations?project=${encodeURIComponent(project)}`, { token })).body
+    expect(listed[0]!.model).toEqual(MODEL)
+    const models = (await api<RemoteModel[]>('GET', '/v1/models', { token })).body
+    expect(models.find((entry) => entry.providerId === listed[0]!.model!.providerId && entry.modelId === listed[0]!.model!.modelId)?.displayName).toBe('Model One')
+
+    const send = (clientMessageId: string, model: unknown) => api('POST', '/v1/conversations/c1/messages', { token, body: { text: 'hi', clientMessageId, model } })
+    expect((await send('a', MODEL)).status).toBe(202)
+    await turn(1)
+    expect((await ctx.sessions.list())[0]!.model).toEqual(on)
+    llm.calls[0]!.finish()
+    await until(() => ctx.chat.snapshot().c1 === undefined, '턴 끝')
+    expect((await send('b', { providerId: 'gw', modelId: 'm2' })).status).toBe(202)
+    await turn(2)
+    expect((await ctx.sessions.list())[0]!.model).toEqual({ providerId: 'gw', modelId: 'm2' })
+  })
+
+  it('폰이 만든 새 대화에 끔 키를 주면 그 키로 저장된다 — 요약만 항목 키 (#503)', async () => {
+    const { ctx, api, pair, turn } = await start()
+    const { token } = await pair()
+    const off = { providerId: 'gw', modelId: engineModelId({ id: 'm1' }, 'off') }
+    const created = await api<RemoteConversation>('POST', '/v1/conversations', { token, body: { project, model: off } })
+    expect((await api('POST', `/v1/conversations/${created.body.id}/messages`, { token, body: { text: 'hi', clientMessageId: 'a' } })).status).toBe(202)
+    await turn(1)
+    expect((await ctx.sessions.list())[0]!.model).toEqual(off)
   })
 
   it('새 대화 — 등록된 프로젝트에만, full 모드는 거절. 첫 메시지를 보내기 전에는 저장하지 않는다', async () => {

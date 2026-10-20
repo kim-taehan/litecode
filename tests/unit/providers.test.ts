@@ -199,80 +199,95 @@ describe('ProviderRegistry', () => {
     expect((await registry(files)).get('gw')!.models).toEqual([{ id: 'm1', displayName: 'M', imageInput: true }, { id: 'm2', displayName: 'N' }])
   })
 
-  // 사고 끄기(이슈 #477) — 켠 모델만 키 프록시가 chat_template_kwargs.enable_thinking=false 를 싣는다. 기본 없음, 불(boolean)이 아니면 거절
-  it('모델의 사고 끄기는 켰을 때만 남고, 불이 아닌 값은 저장을 거절한다', async () => {
+  // Thinking 모델 선언(이슈 #500) — 켠 것만 남는다. 불(boolean)이 아니면 거절. 옛 thinkingOff·upstreamId 는 저장 스키마에 없다
+  it('모델의 Thinking 모델 선언은 켰을 때만 남고, 불이 아닌 값은 저장을 거절한다', async () => {
     const providers = await registry(files)
-    providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', thinkingOff: true }, { id: 'm2', displayName: 'N', thinkingOff: false }] })
-    expect((await registry(files)).get('gw')!.models).toEqual([{ id: 'm1', displayName: 'M', thinkingOff: true }, { id: 'm2', displayName: 'N' }])
-    const bad = { id: 'm1', displayName: 'M', thinkingOff: 'yes' } as unknown as ModelCatalogEntry
-    expect(() => providers.save({ ...config, models: [bad] })).toThrow(tr('error.thinkingOff'))
-    expect(providers.get('gw')!.models[0]).toEqual({ id: 'm1', displayName: 'M', thinkingOff: true })
+    providers.save({ ...config, models: [{ id: 'm1', displayName: 'M', thinking: true }, { id: 'm2', displayName: 'N', thinking: false }] })
+    expect((await registry(files)).get('gw')!.models).toEqual([{ id: 'm1', displayName: 'M', thinking: true }, { id: 'm2', displayName: 'N' }])
+    const bad = { id: 'm1', displayName: 'M', thinking: 'yes' } as unknown as ModelCatalogEntry
+    expect(() => providers.save({ ...config, models: [bad] })).toThrow(tr('error.thinking'))
+    expect(providers.get('gw')!.models[0]).toEqual({ id: 'm1', displayName: 'M', thinking: true })
   })
 
-  // 이슈 #497 (시안 E): id 는 게이트웨이의 실제 모델 이름 — 같은 id 를 두 항목에 쓸 수 있되 사고 끄기가 달라야 한다.
-  // 겹침은 내부 키(engineModelId) 기준이다 — 엔진·대화가 모델을 그 키로 가리키므로
-  it('같은 id 라도 사고 끄기가 다르면 저장한다 (#491 처럼 항목을 만들거나 id 를 바꾸지 않는다)', async () => {
+  it('id 겹침은 평범한 id 기준으로 다시 거절한다 — 문구는 #497 이전의 "모델 id 가 겹칩니다"', async () => {
     const providers = await registry(files)
-    providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: ' qwen ', displayName: 'QT', thinkingOff: true }] })
-    expect((await registry(files)).get('gw')!.models).toEqual([
-      { id: 'qwen', displayName: 'Q' },
-      { id: 'qwen', displayName: 'QT', thinkingOff: true },
-    ])
-  })
-
-  it('같은 id·같은 사고 끄기는 거절한다 — 문구는 사고 끄기 설정을 달리하라고 알린다', async () => {
-    const providers = await registry(files)
-    expect(tr('error.modelIdDuplicate')).toContain('사고 끄기')
-    expect(() => providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen', displayName: 'Q2', thinkingOff: false }] })).toThrow(
-      tr('error.modelIdDuplicate'),
-    )
-    expect(() =>
-      providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q', thinkingOff: true }, { id: 'qwen', displayName: 'Q2', thinkingOff: true }] }),
-    ).toThrow(tr('error.modelIdDuplicate'))
-  })
-
-  it('내부 키끼리 겹치면 거절한다 — 접미 키 모양의 진짜 id 와 그 id 의 사고 끔 항목', async () => {
-    const providers = await registry(files)
-    const key = engineModelId({ id: 'x', thinkingOff: true })
-    expect(() => providers.save({ ...config, models: [{ id: key, displayName: 'Real' }, { id: 'x', displayName: 'X', thinkingOff: true }] })).toThrow(
+    expect(tr('error.modelIdDuplicate')).toBe('모델 id 가 겹칩니다')
+    expect(() => providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: ' qwen ', displayName: 'Q2', thinking: true }] })).toThrow(
       tr('error.modelIdDuplicate'),
     )
   })
 
-  // #491 이주 — #491 은 사고 끄기를 켜면 `X-off` + upstreamId `X` 항목을 만들었다. 이제 id 가 실제 이름이므로 id=upstreamId, upstreamId 는 지운다
-  it('파일의 #491 형태는 읽을 때 id=upstreamId 로 바꾸고 upstreamId 를 지운다 (다른 필드는 그대로)', async () => {
+  it('Thinking 모델의 파생 키(id--think·id--nothink)가 다른 항목의 id 와 겹치면 거절한다', async () => {
+    const providers = await registry(files)
+    for (const key of [engineModelId({ id: 'x' }, 'on'), engineModelId({ id: 'x' }, 'off')]) {
+      expect(() => providers.save({ ...config, models: [{ id: key, displayName: 'Real' }, { id: 'x', displayName: 'X', thinking: true }] })).toThrow(
+        tr('error.modelIdDuplicate'),
+      )
+    }
+    // 선언하지 않았으면 겹치지 않는다
+    providers.save({ ...config, models: [{ id: 'x--think', displayName: 'Real' }, { id: 'x', displayName: 'X' }] })
+    expect(providers.get('gw')!.models).toHaveLength(2)
+  })
+
+  // 이주(이슈 #500) — #491 은 `X-off` + upstreamId, #497 은 같은 id 의 thinkingOff 항목으로 사고 끔을 두었다. 읽을 때·저장 입력 모두
+  it('이주 a — #491 형태는 id=upstreamId, upstreamId 를 지운 뒤 아래 규칙(같은 id 짝이면 하나로 합친다)', async () => {
     const stored = [
       {
         ...config,
         models: [
-          { id: 'qwen', displayName: 'Q' },
+          { id: 'qwen', displayName: 'Q', contextLength: 65_536 },
           { id: 'qwen-off', displayName: 'Q (사고 끔)', upstreamId: 'qwen', thinkingOff: true, contextLength: 32_768 },
-          { id: 'old', displayName: 'Old', thinkingOff: true },
         ],
       },
     ]
     await fs.writeFile(files.file!, JSON.stringify(stored))
-    const providers = await registry(files)
-    expect(providers.get('gw')!.models).toEqual([
-      { id: 'qwen', displayName: 'Q' },
-      { id: 'qwen', displayName: 'Q (사고 끔)', thinkingOff: true, contextLength: 32_768 },
-      // 구버전 단일 사고 끔 항목(upstreamId 없음)은 그대로 — 키만 접미 키가 된다
-      { id: 'old', displayName: 'Old', thinkingOff: true },
-    ])
+    expect((await registry(files)).get('gw')!.models).toEqual([{ id: 'qwen', displayName: 'Q', contextLength: 65_536, thinking: true }])
   })
 
-  it('저장 입력의 #491 형태도 같은 이주를 거친다', async () => {
-    const providers = await registry(files)
-    const legacy = { id: 'qwen-off', displayName: 'QT', upstreamId: ' qwen ', thinkingOff: true } as ModelCatalogEntry
-    providers.save({ ...config, models: [{ id: 'qwen', displayName: 'Q' }, legacy] })
+  it('이주 b — 같은 id 의 사고 켬·끔 두 항목(#497)은 켬 항목 하나에 thinking:true, 끔 항목은 버린다 (이름·한도는 켬 항목 것)', async () => {
+    const stored = [
+      {
+        ...config,
+        models: [
+          { id: 'qwen', displayName: 'Q off', thinkingOff: true, imageInput: true },
+          { id: 'llama', displayName: 'L' },
+          { id: 'qwen', displayName: 'Q', maxOutput: 4_000 },
+        ],
+      },
+    ]
+    await fs.writeFile(files.file!, JSON.stringify(stored))
     expect((await registry(files)).get('gw')!.models).toEqual([
-      { id: 'qwen', displayName: 'Q' },
-      { id: 'qwen', displayName: 'QT', thinkingOff: true },
+      { id: 'llama', displayName: 'L' },
+      { id: 'qwen', displayName: 'Q', maxOutput: 4_000, thinking: true },
     ])
   })
 
-  it('이주 뒤 키가 겹치면 읽을 때는 던지지 않고 그대로 두고(CLAUDE.md 함정 4), 저장 때만 거절한다', async () => {
-    // #491 에서 사고 끄기를 다시 끈 항목은 upstreamId 만 남았다 — 이주하면 원래 항목과 같은 id·같은 사고 끄기
+  it('이주 c — 짝 없이 혼자 thinkingOff 인 항목은 thinking:true 로 (저장된 대화의 id--nothink 키는 그대로 끔)', async () => {
+    const stored = [{ ...config, models: [{ id: 'old', displayName: 'Old', thinkingOff: true }, { id: 'plain', displayName: 'P', thinkingOff: false }] }]
+    await fs.writeFile(files.file!, JSON.stringify(stored))
+    expect((await registry(files)).get('gw')!.models).toEqual([
+      { id: 'old', displayName: 'Old', thinking: true },
+      { id: 'plain', displayName: 'P' },
+    ])
+  })
+
+  it('저장 입력도 같은 이주를 거친다 — 파일에 thinkingOff·upstreamId 가 남지 않는다', async () => {
+    const providers = await registry(files)
+    const legacy = [
+      { id: 'qwen', displayName: 'Q' },
+      { id: 'qwen-off', displayName: 'QT', upstreamId: ' qwen ', thinkingOff: true },
+      { id: 'solo', displayName: 'S', thinkingOff: true },
+    ] as unknown as ModelCatalogEntry[]
+    providers.save({ ...config, models: legacy })
+    expect((await registry(files)).get('gw')!.models).toEqual([
+      { id: 'qwen', displayName: 'Q', thinking: true },
+      { id: 'solo', displayName: 'S', thinking: true },
+    ])
+    expect(await fs.readFile(files.file!, 'utf8')).not.toMatch(/thinkingOff|upstreamId/)
+  })
+
+  it('이주 뒤 id 가 겹치면 읽을 때는 던지지 않고 그대로 두고(CLAUDE.md 함정 4), 저장 때만 거절한다', async () => {
+    // #491 에서 사고 끄기를 다시 끈 항목은 upstreamId 만 남았다 — 이주하면 원래 항목과 같은 id
     const stored = [{ ...config, models: [{ id: 'qwen', displayName: 'Q' }, { id: 'qwen-off', displayName: 'Q2', upstreamId: 'qwen' }] }]
     await fs.writeFile(files.file!, JSON.stringify(stored))
     const providers = await registry(files)

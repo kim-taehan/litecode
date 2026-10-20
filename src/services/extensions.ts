@@ -1,9 +1,10 @@
 import { Context, Service, type Fiber } from 'cordis'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import type {
+  ExtensionEntryResult,
   ExtensionFailedReason,
   ExtensionInstallResult,
+  ExtensionLocaleResult,
   ExtensionManifest,
   ExtensionPickResult,
   ExtensionProblem,
@@ -11,7 +12,9 @@ import type {
   ExtensionStoreFailure,
   ExtensionSummary,
 } from '../../shared/extensions.ts'
-import { checkManifest, MANIFEST_FILE } from './extensions/manifest.ts'
+import { DEFAULT_LANGUAGE, isBuiltinLanguage } from '../../shared/i18n/index.ts'
+import { setMainLocalePack } from '../i18n.ts'
+import { isExtensionId } from './extensions/manifest.ts'
 import { ExtensionStore } from './extensions/store.ts'
 import { failureReason } from './features.ts'
 import './settings.ts'
@@ -20,10 +23,14 @@ import './settings.ts'
 // 부팅: (1) 보류 작업 적용 (2) installed/ 를 읽어 manifest 재검증 (3) 켜진 확장마다 올림. 생성자는 던지지 않는다(CLAUDE.md 함정 4) —
 // 폴더 하나가 깨져도 그 확장만 failed 로 남고 앱은 뜬다. 삭제는 폴더 이름이 id 형식일 때만 된다 — 손으로 만든 다른 이름의 깨진 폴더는
 // 목록에 failed 로 보이지만 앱에서 지울 수 없다(후속, QA 03_qa_ext_pr3 경고 3).
-// 켜짐 값은 settings.extensions (기본 켜짐 — false 만 남긴다). 켜고 끄기는 곧바로 올리고 내린다(설치·업데이트·삭제만 재시작).
+// 켜짐 값은 settings.extensions (기본 켜짐 — false 만 남긴다). 켜고 끄기는 곧바로 올리고 내린다. 설치·업데이트·삭제도 그 호출 안에서 곧바로
+// 적용한다(이슈 #511 — 저장소의 보류를 쌓은 직후 applyPending. 부팅 때 적용은 비정상 종료 복구용으로 남는다).
+// 패널 확장(#511): 진입 HTML 을 readEntry 로 화면에 넘길 뿐 메인에서 실행하지 않는다 — 화면이 격리된 iframe(sandbox="allow-scripts", CSP)에서 돌린다.
 // 올리기는 주입된 mount(B 층 자리 — features 의 definitions 와 같은 패턴)로 한다. mount 가 없으면(A 층 단독) 아무것도 실행하지 않고 상태만 on.
 // 부팅·설치·삭제·켜고 끄기는 한 줄(큐)로 선다 — features.ts 처럼, 끄자마자 켜도 앞의 올리기가 끝난 뒤 내린다.
 // 대화상자는 host(pick), 파일 작업은 저장소(ExtensionStore — 2/4). 저장소 호출은 아래 `files` 한 곳에만 모았다(저장소의 공개 모양이 바뀌면 거기만 고친다).
+// 언어 팩(#525, type 'locale'): 실행할 것이 없는 JSON 번들이다. readLocale 로 사전을 화면에 넘기고, 고른 언어(settings.language)가 팩 언어면
+// 메인 문구(tr)에도 넣는다. 고른 팩이 지워지거나 꺼지거나 깨지면 언어를 기본(en)으로 되돌린다 — sync 끝의 followLanguage. 설치만으로는 언어를 바꾸지 않는다.
 // Electron 을 import 하지 않는다 — 단위 테스트가 임시 폴더 root 로 돈다.
 
 declare module 'cordis' {
@@ -31,7 +38,7 @@ declare module 'cordis' {
     extensions: ExtensionsService
   }
   interface Events {
-    /** 확장 목록(ExtensionSummary[])이 바뀌었다 — 설치·삭제 예약·켜기/끄기·상태. 같은 값이면 다시 내지 않는다 */
+    /** 확장 목록(ExtensionSummary[])이 바뀌었다 — 설치·업그레이드·삭제·켜기/끄기·상태. 같은 값이면 다시 내지 않는다 */
     'extensions/changed'(extensions: ExtensionSummary[]): void
   }
 }
@@ -53,13 +60,11 @@ export interface ExtensionsOptions {
   mount?: (extension: MountedExtension) => (ctx: Context) => void | Promise<void>
 }
 
-/** 한 확장의 파일 쪽 사실 — 설치 폴더(installed)와 보류 설치 폴더 중 읽은 것 */
+/** 한 확장의 파일 쪽 사실 — 설치 폴더(installed/<id>)에서 읽은 것 */
 interface Entry {
   id: string
-  installed: boolean
   manifest?: ExtensionManifest
   problems: ExtensionProblem[]
-  pending?: 'install' | 'remove'
 }
 
 export class ExtensionsService extends Service {
@@ -114,12 +119,14 @@ export class ExtensionsService extends Service {
     })
   }
 
-  /** 확인 카드의 [설치] — 보류 설치로 쌓는다 (다음 부팅에 적용) */
+  /** 확인 카드의 [설치] — 보류 설치로 쌓고 곧바로 적용한다 (이슈 #511). 적용이 실패하면 apply-failed (이전 버전이 그대로) */
   install(token: string): Promise<ExtensionInstallResult> {
     return this.enqueue(async () => {
       const result = await this.files.install(token).catch(ioFailed)
-      if (result.ok) await this.refresh()
-      return result
+      if (!result.ok) return result
+      const failed = await this.applyNow(result.id)
+      await this.refresh()
+      return failed ?? result
     })
   }
 
@@ -135,15 +142,36 @@ export class ExtensionsService extends Service {
     })
   }
 
-  /** 삭제 예약 (다음 부팅에 적용). 보류 설치만 있던 확장은 보류가 취소돼 곧바로 목록에서 빠진다 — 그때는 켜짐 값도 지금 지운다 */
+  /** 삭제 — 곧바로 적용하고(이슈 #511) 켜짐 값도 지운다. 적용이 실패하면 apply-failed (확장이 그대로) */
   remove(id: string): Promise<ExtensionResult> {
     return this.enqueue(async () => {
-      const wasInstalled = this.entries.find((entry) => entry.id === id)?.installed
       const result = await this.files.remove(id).catch(ioFailed)
       if (!result.ok) return result
-      if (!wasInstalled) this.forget(id)
+      const failed = await this.applyNow(id)
       await this.refresh()
-      return result
+      return failed ?? result
+    })
+  }
+
+  /** 켜진 정상(on) 확장의 진입 HTML (이슈 #511) — 화면이 격리된 iframe 에서 돌린다. 메인은 실행하지 않는다. 던지지 않는다 */
+  readEntry(id: string): Promise<ExtensionEntryResult> {
+    return this.enqueue(async (): Promise<ExtensionEntryResult> => {
+      if (!isExtensionId(id)) return { ok: false, failure: { code: 'id-invalid', params: { value: id } } }
+      const entry = this.entries.find((item) => item.id === id)
+      if (!entry) return { ok: false, failure: { code: 'not-installed', params: { id } } }
+      if (!entry.manifest || this.state(entry, this.enabled(id)).state !== 'on') return { ok: false, failure: { code: 'not-on', params: { id } } }
+      const read = await this.files.readEntry(id, entry.manifest.entry).catch(ioFailed)
+      return read.ok ? { ok: true, html: read.html, version: entry.manifest.version } : read
+    })
+  }
+
+  /** 켜진 정상(on) 언어 팩의 사전 (이슈 #525) — 같은 언어의 팩이 여럿이면 id 순 첫 팩. 던지지 않는다 */
+  readLocale(language: string): Promise<ExtensionLocaleResult> {
+    return this.enqueue(async (): Promise<ExtensionLocaleResult> => {
+      const entry = this.localeEntry(language)
+      if (!entry?.manifest) return { ok: false, failure: { code: 'locale-unavailable', params: { language } } }
+      const read = await this.files.readLocale(entry.id, entry.manifest.entry).catch(ioFailed)
+      return read.ok ? { ok: true, messages: read.messages, version: entry.manifest.version } : read
     })
   }
 
@@ -178,13 +206,21 @@ export class ExtensionsService extends Service {
   }
 
   private async boot(): Promise<void> {
+    await this.applyNow()
+    await this.read()
+  }
+
+  /** 보류 작업을 적용하고 삭제된 id 의 켜짐 값을 지운다 (부팅·설치·삭제). id 를 주면 그 확장의 적용 실패를 apply-failed 로 돌려준다 */
+  private async applyNow(id?: string): Promise<{ ok: false; failure: ExtensionStoreFailure } | undefined> {
     try {
-      const { removed } = await this.files.applyPending()
-      for (const id of removed) this.forget(id)
+      const { removed, failed } = await this.files.applyPending()
+      for (const removedId of removed) this.forget(removedId)
+      const reason = failed.find((item) => item.id === id)?.reason
+      return reason === undefined ? undefined : { ok: false, failure: { code: 'apply-failed', params: { message: reason } } }
     } catch (error) {
       console.warn('[extensions] 보류 작업 적용 실패', error)
+      return id === undefined ? undefined : { ok: false, failure: { code: 'apply-failed', params: { message: error instanceof Error ? error.message : String(error) } } }
     }
-    await this.read()
   }
 
   /** 파일 쪽 사실을 다시 읽는다 */
@@ -207,7 +243,7 @@ export class ExtensionsService extends Service {
     const mount = this.options.mount
     for (const id of new Set([...this.fibers.keys(), ...this.entries.map((entry) => entry.id), ...this.failures.keys()])) {
       const entry = this.entries.find((item) => item.id === id)
-      const wanted = !!mount && !!entry?.installed && !!entry.manifest && entry.problems.length === 0 && this.enabled(id)
+      const wanted = !!mount && !!entry?.manifest && entry.problems.length === 0 && this.enabled(id)
       const fiber = this.fibers.get(id)
       if (wanted && !fiber && !this.failures.has(id)) {
         await this.mountOne(mount, { manifest: entry.manifest!, dir: this.files.installedDir(id) })
@@ -219,7 +255,38 @@ export class ExtensionsService extends Service {
         }
       }
     }
+    await this.followLanguage()
     this.publish()
+  }
+
+  /** 고른 언어가 팩 언어면 그 팩의 사전을 메인 문구에 넣고, 그런 팩이 없거나(지움·꺼짐·깨짐) 읽지 못하면 기본 언어로 되돌린다 (이슈 #525).
+   *  publish 보다 먼저 한다 — 화면은 extensions:changed 를 받으면 설정을 다시 읽는다. 언어를 되돌리면 settings/changed 로 sync 가 한 번 더 돈다(내장 언어라 여기서 멈춘다) */
+  private async followLanguage(): Promise<void> {
+    const language = this.ctx.settings.get().language
+    if (isBuiltinLanguage(language)) {
+      setMainLocalePack(undefined)
+      return
+    }
+    const entry = this.localeEntry(language)
+    const read = entry?.manifest ? await this.files.readLocale(entry.id, entry.manifest.entry).catch(ioFailed) : undefined
+    if (read?.ok) {
+      setMainLocalePack({ language, messages: read.messages })
+      return
+    }
+    setMainLocalePack(undefined)
+    console.warn(`[extensions] 언어 ${language} 의 팩을 쓸 수 없어 기본 언어로 돌아간다${read ? ` (${read.failure.code})` : ''}`)
+    try {
+      this.ctx.settings.set({ language: DEFAULT_LANGUAGE })
+    } catch (error) {
+      console.warn('[extensions] 언어를 되돌리지 못했다', error)
+    }
+  }
+
+  /** 그 언어의 켜진 정상(on) 언어 팩 — id 순 첫 팩 */
+  private localeEntry(language: string): Entry | undefined {
+    return this.entries.find(
+      (entry) => entry.manifest?.type === 'locale' && entry.manifest.locale?.language === language && this.state(entry, this.enabled(entry.id)).state === 'on',
+    )
   }
 
   private async mountOne(mount: NonNullable<ExtensionsOptions['mount']>, extension: MountedExtension): Promise<void> {
@@ -249,20 +316,21 @@ export class ExtensionsService extends Service {
   private summaries(): ExtensionSummary[] {
     return this.entries.map((entry) => {
       const enabled = this.enabled(entry.id)
-      const { manifest, pending } = entry
+      const { manifest } = entry
       return {
         id: entry.id,
         ...(manifest && { name: manifest.name, description: manifest.description, version: manifest.version }),
+        ...(manifest?.details !== undefined && { details: manifest.details }),
+        ...(manifest?.type === 'locale' && manifest.locale && { type: 'locale' as const, locale: { language: manifest.locale.language, label: manifest.locale.label } }),
         enabled,
         ...this.state(entry, enabled),
-        ...(pending && { pending }),
       }
     })
   }
 
   private state(entry: Entry, enabled: boolean): Pick<ExtensionSummary, 'state' | 'reason'> {
-    if (entry.installed && entry.problems.length > 0) return failed({ code: 'invalid', params: { problems: entry.problems } })
-    if (!entry.installed || !enabled) return { state: 'off' }
+    if (entry.problems.length > 0) return failed({ code: 'invalid', params: { problems: entry.problems } })
+    if (!enabled) return { state: 'off' }
     const failure = this.failures.get(entry.id)
     if (failure !== undefined) return failed({ code: 'mount-failed', params: { message: failure } })
     return { state: this.mounting.has(entry.id) ? 'mounting' : 'on' }
@@ -313,33 +381,16 @@ function storeAccess(root: string, appVersion: string) {
     install: (token: string): Promise<ExtensionInstallResult> => store.install(token, appVersion),
     cancel: (token: string) => store.cancel(token),
     remove: (id: string): Promise<ExtensionResult> => store.remove(id),
-    /** 보류 적용 — 삭제가 적용된 id 를 돌려준다. 실패한 보류는 로그로만 (저장소가 남긴다) */
+    /** 보류 적용 — 삭제가 적용된 id 와 적용하지 못한 작업(저장소가 로그로도 남긴다) */
     applyPending: async () => {
-      const { applied } = await store.applyPending()
-      return { removed: applied.flatMap((op) => (op.op === 'remove' ? [op.id] : [])) }
+      const { applied, failed } = await store.applyPending()
+      return { removed: applied.flatMap((op) => (op.op === 'remove' ? [op.id] : [])), failed }
     },
-    /** 설치된 것 + 보류 설치만 있는 것 (id 순) */
-    read: async (): Promise<Entry[]> => {
-      const pending = store.pendingState()
-      const installed = await store.listInstalled(appVersion)
-      const entries: Entry[] = installed.map(({ id, manifest, problems }) => ({ id, installed: true, ...(manifest && { manifest }), problems, ...(Object.hasOwn(pending, id) && { pending: pending[id] }) }))
-      for (const [id, op] of Object.entries(pending)) {
-        if (op !== 'install' || installed.some((item) => item.id === id)) continue
-        entries.push({ id, installed: false, ...(await pendingManifest(root, id, appVersion)), problems: [], pending: 'install' })
-      }
-      return entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    },
+    readEntry: (id: string, entry: string) => store.readEntry(id, entry),
+    readLocale: (id: string, entry: string) => store.readLocale(id, entry),
+    /** 설치된 것 (id 순 — 저장소가 정렬한다). 보류는 설치·삭제 호출 안에서 곧바로 적용되므로 목록에 없다 (이슈 #511) */
+    read: async (): Promise<Entry[]> =>
+      (await store.listInstalled(appVersion)).map(({ id, manifest, problems }) => ({ id, ...(manifest && { manifest }), problems })),
     installedDir: (id: string) => path.join(path.resolve(root), 'installed', id),
-  }
-}
-
-/** 보류 설치 폴더의 extension.json — 저장소가 읽는 함수를 내놓지 않아 자리(pending/install/<id>)를 여기서 안다. 못 읽으면 manifest 없이 */
-async function pendingManifest(root: string, id: string, appVersion: string): Promise<{ manifest?: ExtensionManifest }> {
-  try {
-    const value: unknown = JSON.parse(await fs.readFile(path.join(path.resolve(root), 'pending', 'install', id, MANIFEST_FILE), 'utf8'))
-    const { manifest } = checkManifest(value, appVersion)
-    return manifest ? { manifest } : {}
-  } catch {
-    return {}
   }
 }

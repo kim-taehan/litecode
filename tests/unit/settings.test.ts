@@ -56,7 +56,7 @@ describe('SettingsService', () => {
     expect(() => settings.set({ fontSize: 18 })).toThrow()
     expect(() => settings.set({ fontSize: 11 })).toThrow()
     expect(() => settings.set({ fontSize: 13.5 })).toThrow()
-    expect(() => settings.set({ language: 'fr' as never })).toThrow()
+    expect(() => settings.set({ language: 'French' })).toThrow() // 언어 태그 모양이 아니다 — 팩 언어(zh-CN 등)는 받고, 그 팩이 없으면 ctx.extensions 가 되돌린다 (이슈 #525)
     expect(() => settings.set({ appearance: 'blue' as never })).toThrow()
     expect(() => settings.set({ defaultMode: 'yolo' as never })).toThrow()
     expect(settings.get()).toEqual({ language: 'en', appearance: 'light', fontSize: 14, defaultMode: 'build' })

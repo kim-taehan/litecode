@@ -65,7 +65,7 @@ describe('ProviderEditor — 편집 안 버튼', () => {
   })
 })
 
-// 이슈 #477: 모델마다 카드 하나 — 윗줄 id·표시 이름·삭제, 아랫줄 컨텍스트 길이·최대 출력·알약 토글(이미지 입력·사고 끄기).
+// 이슈 #477: 모델마다 카드 하나 — 윗줄 id·표시 이름·삭제, 아랫줄 컨텍스트 길이·최대 출력·알약 토글(이미지 입력·Thinking 모델).
 // 체크 둘이 한 줄에 늘어 id·이름 칸이 잘려 보였다 (시안 A "카드형 두 줄", _workspace/mock-model-row/OptionA.dc.html).
 // 토글은 <button aria-pressed> — 저장된 값이 눌림 상태로 보이고, 두 토글은 서로 독립이다
 describe('ProviderEditor — 모델 카드 두 줄', () => {
@@ -86,19 +86,19 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
     expect(rows(html, 1)).toHaveLength(2)
   })
 
-  it('윗줄은 id → 표시 이름 → 삭제, 아랫줄은 컨텍스트 길이 → 최대 출력 → 이미지 입력 → 사고 끄기', () => {
+  it('윗줄은 id → 표시 이름 → 삭제, 아랫줄은 컨텍스트 길이 → 최대 출력 → 이미지 입력 → Thinking 모델', () => {
     const [top, bottom] = rows(render([{ id: 'm1', displayName: 'M1' }]), 1)
     const order = (part: string, keys: MessageKey[]) => keys.map((key) => part.indexOf(`aria-label="${ko(key, 1)}"`))
     const topAt = order(top!, ['models.modelId', 'models.modelName', 'models.removeModel'])
-    const bottomAt = order(bottom!, ['models.contextLength', 'models.maxOutput', 'models.imageInput', 'models.thinkingOff'])
+    const bottomAt = order(bottom!, ['models.contextLength', 'models.maxOutput', 'models.imageInput', 'models.thinking'])
     for (const at of [...topAt, ...bottomAt]) expect(at).toBeGreaterThan(-1)
     expect(topAt).toEqual([...topAt].sort((a, b) => a - b))
     expect(bottomAt).toEqual([...bottomAt].sort((a, b) => a - b))
   })
 
-  it('이미지 입력·사고 끄기는 알약 버튼(aria-pressed) — 켠 모델만 눌려 있고, 둘은 독립', () => {
+  it('이미지 입력·Thinking 모델은 알약 버튼(aria-pressed) — 켠 모델만 눌려 있고, 둘은 독립', () => {
     const html = render([
-      { id: 'm1', displayName: 'M1', thinkingOff: true },
+      { id: 'm1', displayName: 'M1', thinking: true },
       { id: 'm2', displayName: 'M2', imageInput: true },
       { id: 'm3', displayName: 'M3' },
     ])
@@ -108,39 +108,32 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
       expect(found).toContain('class="model-card__toggle"')
       return found!.match(/aria-pressed="(true|false)"/)?.[1]
     }
-    expect([pressed('models.imageInput', 1), pressed('models.thinkingOff', 1)]).toEqual(['false', 'true'])
-    expect([pressed('models.imageInput', 2), pressed('models.thinkingOff', 2)]).toEqual(['true', 'false'])
-    expect([pressed('models.imageInput', 3), pressed('models.thinkingOff', 3)]).toEqual(['false', 'false'])
+    expect([pressed('models.imageInput', 1), pressed('models.thinking', 1)]).toEqual(['false', 'true'])
+    expect([pressed('models.imageInput', 2), pressed('models.thinking', 2)]).toEqual(['true', 'false'])
+    expect([pressed('models.imageInput', 3), pressed('models.thinking', 3)]).toEqual(['false', 'false'])
   })
 
-  // 이슈 #497 (시안 E·F): 같은 id 를 두 항목에 쓸 수 있다 — 알약은 thinkingOff 만 따른다. (id, 사고 끄기) 가 겹치는 항목은 id 칸이 빨간 테두리
-  it('같은 id 두 항목 — 사고 끄기 알약은 각자의 thinkingOff 를 따른다', () => {
-    const html = render([
-      { id: 'qwen', displayName: 'Q', thinkingOff: true },
-      { id: 'qwen', displayName: 'thinking Q' },
-    ])
-    const pressed = (n: number) => tag(html, ko('models.thinkingOff', n))!.match(/aria-pressed="(true|false)"/)?.[1]
-    expect([1, 2].map(pressed)).toEqual(['true', 'false'])
-    expect([1, 2].map((n) => tag(html, ko('models.modelId', n)))).toEqual([expect.stringContaining('value="qwen"'), expect.stringContaining('value="qwen"')])
-  })
-
-  it('(id, 사고 끄기) 가 겹치는 항목만 id 칸이 빨간 테두리(model-card__id--clash, aria-invalid) — 사고 끄기가 다르면 아니다', () => {
+  // 이슈 #500: 겹침은 저장 검증과 같은 키 기준 — 같은 id, 그리고 Thinking 모델 x 의 파생 키(x--think·x--nothink)와 같은 진짜 id
+  it('키가 겹치는 항목만 id 칸이 빨간 테두리(model-card__id--clash, aria-invalid)', () => {
     const html = render([
       { id: 'qwen', displayName: 'Q' },
-      { id: ' qwen ', displayName: 'Q2' },
-      { id: 'qwen', displayName: 'QT', thinkingOff: true },
+      { id: ' qwen ', displayName: 'Q2', thinking: true },
+      { id: 'x', displayName: 'X', thinking: true },
+      { id: 'x--nothink', displayName: 'Real' },
+      { id: 'y--think', displayName: 'Y real' },
+      { id: 'y', displayName: 'Y' },
       { id: '', displayName: '' },
       { id: '', displayName: '' },
     ])
     const clash = (n: number) => /model-card__id--clash/.test(tag(html, ko('models.modelId', n))!) && /aria-invalid="true"/.test(tag(html, ko('models.modelId', n))!)
-    expect([1, 2, 3, 4, 5].map(clash)).toEqual([true, true, false, false, false])
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map(clash)).toEqual([true, true, true, true, false, false, false, false])
   })
 
-  it('알약 글자는 기존 라벨 키, 체크박스는 더 없다', () => {
+  it('알약 글자는 라벨 키, 체크박스는 더 없다', () => {
     const html = render([{ id: 'm1', displayName: 'M1' }])
     expect(html).not.toContain('type="checkbox"')
     expect(html).toContain(`>${translate('ko', 'models.imageInputLabel')}</button>`)
-    expect(html).toContain(`>${translate('ko', 'models.thinkingOffLabel')}</button>`)
+    expect(html).toContain(`>${translate('ko', 'models.thinkingLabel')}</button>`)
   })
 
   it('켠 알약에만 체크 아이콘', () => {
@@ -151,26 +144,29 @@ describe('ProviderEditor — 모델 카드 두 줄', () => {
     expect(buttons[1]).not.toContain('<svg')
   })
 
-  // 시안 E: 같은 모델 두 항목 안내 → 사고 끄기 설명 → 컨텍스트 길이·최대 출력 안내 순서
-  it('안내문 — 같은 id 두 항목 한 줄, 사고 끄기 한 줄이 컨텍스트 길이·최대 출력 안내 앞에 있다', () => {
+  // 시안 H: Thinking 모델 안내 한 줄 → 컨텍스트 길이·최대 출력 안내 순서. #497 의 같은 id 두 항목 안내는 없다
+  it('안내문 — Thinking 모델 한 줄이 컨텍스트 길이·최대 출력 안내 앞에 있다', () => {
     const html = render([{ id: 'm1', displayName: 'M1' }])
-    const escaped = (text: string) => text.replace(/"/g, '&quot;')
-    const twin = html.indexOf(escaped(translate('ko', 'models.twinHint')))
-    const hint = html.indexOf(translate('ko', 'models.thinkingOffHint'))
-    expect(html).toContain(`>${translate('ko', 'models.twinHintTerm')}</strong>`)
-    expect(twin).toBeGreaterThan(-1)
-    expect(hint).toBeGreaterThan(twin)
+    const hint = html.indexOf(translate('ko', 'models.thinkingHint'))
+    expect(html).toContain(`>${translate('ko', 'models.thinkingLabel')}</strong>`)
+    expect(hint).toBeGreaterThan(-1)
     expect(hint).toBeLessThan(html.indexOf(translate('ko', 'models.contextLengthHint')))
     expect(html).toContain(translate('ko', 'models.maxOutputHint'))
+    expect(html).not.toContain('사고 켬·끔 두 항목')
   })
 
-  it('안내 문구는 시안 E 그대로 (ko·en), 사고 끄기 설명은 항목을 만든다는 말이 없다', () => {
-    expect(translate('ko', 'models.twinHintTerm')).toBe('같은 모델을 사고 켬·끔 두 항목으로')
-    expect(translate('ko', 'models.twinHint')).toBe('id 는 같게 두고 "사고 끄기" 설정만 다르게 하면 됩니다. 앱이 내부에서 알아서 구분해서 보냅니다.')
-    expect(translate('ko', 'models.thinkingOffHint')).toBe('답하기 전에 생각하는 과정을 건너뛰어 더 빨리 답합니다. 어려운 작업은 정확도가 내려갈 수 있습니다.')
-    expect(translate('ko', 'error.modelIdDuplicate')).toBe('모델 id 가 겹칩니다 — 같은 id 는 "사고 끄기" 설정이 서로 달라야 합니다.')
-    expect(translate('en', 'models.thinkingOffHint')).not.toMatch(/adds/)
-    expect(translate('en', 'error.modelIdDuplicate')).toMatch(/Thinking off/)
+  it('안내 문구는 시안 H 그대로 (ko), 겹침 문구는 #497 이전으로', () => {
+    expect(translate('ko', 'models.thinkingLabel')).toBe('Thinking 모델')
+    expect(translate('en', 'models.thinkingLabel')).toBe('Thinking model')
+    expect(translate('ko', 'models.thinkingHint')).toBe(
+      '답하기 전에 생각하는 과정이 있는 모델이면 켜 두세요. 켜면 입력창에서 대화마다 Thinking 을 Default·On·Off 중에서 고를 수 있습니다. 서버가 이 설정을 따르지 않는 모델에는 켜지 마세요.',
+    )
+    // #503 (#502-2): 선언을 끄면 켬·끔으로 쓰던 대화의 키가 풀리지 않는다 — 다시 고르라는 안내 한 줄이 힌트 바로 뒤에
+    expect(translate('ko', 'models.thinkingOffHint')).toBe('끄면 이 모델을 Thinking On·Off 로 쓰던 대화는 입력창에서 모델을 다시 골라야 합니다.')
+    expect(translate('en', 'models.thinkingOffHint')).toBe('If you turn it off, chats that used this model with Thinking On or Off need the model picked again in the input box.')
+    expect(render([{ id: 'm1', displayName: 'M1' }])).toContain(`${translate('ko', 'models.thinkingHint')} ${translate('ko', 'models.thinkingOffHint')}`)
+    expect(translate('ko', 'error.modelIdDuplicate')).toBe('모델 id 가 겹칩니다')
+    expect(translate('en', 'error.modelIdDuplicate')).toBe('Model ids overlap')
   })
 })
 

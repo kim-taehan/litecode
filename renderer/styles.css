@@ -948,13 +948,95 @@ button {
   color: var(--accent);
 }
 
-/* 사고 끄기 항목의 접미사 — 표시 이름은 그대로, 접미사가 접근성 이름에 "사고 끄기" 를 더한다 */
-.model-menu__item-hint {
+/* Thinking 모델(이슈 #500 시안) — 닫힌 칩은 켬=채운 전구, 끔=윤곽선 전구 + 위험색 사선, 디폴트=아이콘 없음(#505·#507),
+   메뉴의 루트 패널(Model / Thinking 두 줄)과 Thinking 패널(머리줄 + 제목·설명 세 줄) */
+.model-select__bulb {
   flex: none;
-  font-size: 11px;
+  color: var(--text);
+}
+
+.model-select__bulb-slash {
+  stroke: var(--danger);
+}
+
+.model-menu__cell {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 8px;
+}
+
+.model-menu__cell:hover,
+.model-menu__cell:focus-visible {
+  outline: none;
+  background: var(--fill-hover);
+}
+
+.model-menu__cell-label {
+  flex: none;
+  width: 64px;
+  font-size: 12px;
   color: var(--text-tertiary);
-  margin-left: auto;
-  margin-right: 14px; /* 체크(✓) 와 겹치지 않게 */
+}
+
+.model-menu__cell-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-menu__cell-chevron {
+  flex: none;
+  color: var(--text-caption);
+}
+
+.model-menu__back {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+}
+
+.model-menu__back:hover,
+.model-menu__back:focus-visible {
+  outline: none;
+  background: var(--fill-hover);
+}
+
+.model-menu__option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.model-menu__option-title {
+  font-weight: 600;
+}
+
+.model-menu__option-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
 }
 
 /* 보내기 — dsh 34px 파란 원, 흰 화살표. 빈 입력이면 0.4 로 옅어진다. 다른 칩보다 2px 위에 앉는다 */

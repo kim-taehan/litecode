@@ -610,7 +610,7 @@
   font-size: 13px;
 }
 
-/* (id, 사고 끄기) 가 겹치는 항목의 id 칸 (이슈 #497 시안 F) */
+/* 키가 겹치는 항목의 id 칸 (이슈 #497 시안 F, #500 부터 같은 id·Thinking 모델의 파생 키 기준) */
 .model-card__id--clash,
 .model-card__id--clash:focus {
   border-color: var(--danger);
@@ -1156,8 +1156,16 @@
   flex-shrink: 0;
 }
 
-.extensions-notice {
+/* 설치 직후 초록 안내 한 줄 (이슈 #511, 시안 mock-extension-panel Installed) — 색은 --ok 토큰을 섞어서 (보고서 결과 카드와 같은 방식) */
+.extensions-installed {
   margin: 0;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text);
 }
 
 .extensions-section {
@@ -1184,8 +1192,17 @@
   background: var(--border);
 }
 
-.extension-row__body {
-  cursor: default;
+/* ⋯ 메뉴(.settings-menu, absolute)가 카드 밖으로 나와야 한다 — .feature-row 의 overflow: hidden 이 자르던 것(이슈 #515).
+   모델 카드(.provider-card)처럼 overflow 를 두지 않는다. 카드 안에 모서리 밖으로 칠할 바탕이 없어 둥근 모서리는 그대로다 */
+.extension-row {
+  overflow: visible;
+}
+
+.extension-row__details {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  color: var(--text);
 }
 
 .extension-row .extension-row__tile,
@@ -1219,19 +1236,6 @@
 
 .extension-row[data-kind='failed'] {
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
-}
-
-.extension-row[data-kind='pending-install'] {
-  border-style: dashed;
-  background: var(--fill-hover);
-}
-
-.extension-row[data-kind='pending-install'] .extension-row__tile {
-  opacity: 0.6;
-}
-
-.extension-row[data-kind='pending-remove'] .feature-row__toggle {
-  opacity: 0.5;
 }
 
 .extension-row__more {

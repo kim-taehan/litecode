@@ -165,9 +165,35 @@
   color: var(--text-secondary);
 }
 
+.file-preview__add-wrap {
+  position: relative;
+  flex: none;
+}
+
 .file-preview__add-menu {
-  position: fixed;
+  left: 0;
   right: auto;
+  min-width: 200px;
+}
+
+/* `+` 메뉴의 "확장" 구분 (이슈 #511, 시안 mock-extension-panel Panel) — 구분선 + 작은 소제목, 항목은 퍼즐(보라 --extension, settings.css) + 이름 */
+.file-preview__add-divider {
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--border-light);
+}
+
+.file-preview__add-heading {
+  padding: 2px 8px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+.file-preview__add-extension svg,
+.file-preview__tab-icon--extension {
+  flex: none;
+  color: var(--extension);
 }
 
 .file-preview__add:hover {
@@ -424,8 +450,58 @@
   flex-direction: column;
 }
 
-.file-tree[hidden] {
+.file-tree[hidden],
+.file-preview__extension[hidden] {
   display: none;
+}
+
+/* 파일 찾기 (이슈 #528) — 경로 줄 아래, 나무 위 */
+.file-tree__search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 8px 0;
+}
+
+.file-tree__search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--text);
+  background: var(--fill-selector);
+  border: 1px solid var(--stroke-soft);
+  border-radius: 6px;
+  outline: none;
+}
+
+.file-tree__search-input:focus {
+  border-color: var(--accent);
+}
+
+.file-tree__search-input::placeholder {
+  color: var(--text-faint);
+}
+
+.file-tree__search-clear {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.file-tree__search-clear:hover {
+  background: var(--fill-soft);
+  color: var(--text);
 }
 
 /* 파일 나무 — dsh FilesBody: 줄 5px 10px, 단계마다 18px 들여쓰기, 폴더 먼저 */

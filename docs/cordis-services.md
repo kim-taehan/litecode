@@ -34,7 +34,7 @@ opencode 쪽은 `docs/opencode-protocol.md` 가 정본이다 — 여기에는 �
 | `chat` | `chat.ts` | **대화별 턴 소유** — 보내기·대기열·턴 끝 처리(제목·저장·통계)·중지. 화면은 손님이다 | `llm`, `sessions`, `providers` |
 | `attachments` | `attachmentsService.ts` | 첨부(붙인 이미지·파일 읽기) | `chat` |
 | (플러그인) | `autoTitle.ts` | 자동 대화 제목(#215, 설정 `autoTitle` 기본 꺼짐) — `chat/turn-*` 만 듣고 첫 턴 뒤 `ctx.llm.askOnce`(임시 세션, 끝나면 지운다)로 제목을 받아 `ctx.sessions.autoTitle`(사용자가 바꾼 이름은 안 덮는다), `chat/conversations-changed` 를 낸다. 키 없음 | `llm`, `sessions`, `settings` |
-| `extensions` | `extensions.ts` (+ 저장소 `extensions/*`, 모양 `shared/extensions.ts`) | 설치한 확장(zip, #482) — 부팅 때 보류 설치·삭제 적용 → `installed/` 재검증 → 켜진 확장 올림(`mount` 주입 자리 — B 층 전이라 비어 있고 상태만 on). 켜짐 값 `settings.extensions`, 켜고 끄기는 곧바로(큐). 설치·삭제는 다음 부팅에. 대화상자는 host(`electron/extensionsHost.ts`). 생성자는 던지지 않는다 | `settings` |
+| `extensions` | `extensions.ts` (+ 저장소 `extensions/*`, 모양 `shared/extensions.ts`) | 설치한 확장(zip, #482) — 부팅 때 남은 보류 적용(비정상 종료 복구) → `installed/` 재검증 → 켜진 확장 올림(`mount` 주입 자리 — 비어 있고 상태만 on). 켜짐 값 `settings.extensions`, 켜고 끄기는 곧바로(큐). 설치·업그레이드·삭제도 그 호출 안에서 곧바로 적용(#511). 목록 `ExtensionSummary` 에 manifest 의 선택 필드 `details`(여러 줄 긴 설명, #519)도 싣는다. 패널 확장(#511): `readEntry(id)` 가 켜진 정상 확장의 진입 HTML 을 돌려주고 화면이 격리된 iframe 에서 돌린다(메인은 실행하지 않는다). 언어 팩(#525, manifest `type: 'locale'`): `readLocale(language)` 가 켜진 정상 팩의 사전(내장 키의 문자열만)을 돌려주고, 고른 언어가 팩 언어면 메인 `tr()` 에도 넣는다(`setMainLocalePack`). 고른 팩이 지워지거나 꺼지거나 깨지면 `settings.language` 를 기본(en)으로 되돌린다. 대화상자는 host(`electron/extensionsHost.ts`). 생성자는 던지지 않는다 | `settings` |
 | `features` | `features.ts` | **기능 레지스트리** — 켜진 기능 묶음을 올리고 내린다 (4절) | `settings` |
 | `quit` | `quit.ts` | 종료 확인(도는 턴·붙은 폰이 있으면 한 번 묻는다)·창 닫기 = 숨기기(Windows·Linux 는 트레이). `remote` 는 선택 의존 | `chat`, `settings` |
 | `report` | `report.ts` | 대화 내보내기(엔진 기록 → Trajectory 중립 레코드 → JSON 파일 하나)·문제 신고 묶음(고른 폴더에 `litecode-report-<시각>/`, 허용 목록 파일만, 글은 알려진 비밀 값 + `redactSecrets` 로 가림). 로컬 저장만. 대화상자·폴더 열기는 host. `mcp` 는 선택 의존(`ctx.get`) | `llm`, `sessions`, `settings`, `features`, `providers`, `engine` |
@@ -136,7 +136,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 | `providers` | `providers/changed` | provider 변경 → 엔진 설정 갱신 |
 | `features` | `features/changed` | 켜진 묶음을 다 올리고 내린 **뒤** — 엔진이 듣고 재시작 |
 | | `features/status` | 기능 상태(`FeatureStatuses` — 켜진 기능만)가 바뀌었다(#224) — 화면(설정 > 기능)이 `features:statuses-changed` 로 받는다 |
-| `extensions` | `extensions/changed` | 확장 목록(`ExtensionSummary[]`)이 바뀌었다 — 설치·삭제 예약·켜기/끄기·상태. 같은 값이면 다시 내지 않는다. 화면이 `extensions:changed` 로 받는다 |
+| `extensions` | `extensions/changed` | 확장 목록(`ExtensionSummary[]`)이 바뀌었다 — 설치·업그레이드·삭제·켜기/끄기·상태. 같은 값이면 다시 내지 않는다. 화면이 `extensions:changed` 로 받는다 |
 | `git` | `git/changed` | 그 폴더의 저장소가 바뀌었을 수 있다(화면·AI 의 작업 뒤) — 화면이 `git:changed` 로 받아 다시 읽는다 |
 | `remote` | `remote/changed` | 모바일 연결 상태 |
 | `speech` · `notifications` | `speech/changed` · `notifications/changed` `toast` `open` | 상태·토스트 |

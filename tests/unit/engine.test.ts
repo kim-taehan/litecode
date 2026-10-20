@@ -597,34 +597,36 @@ describe('engineConfig — 이미지 입력 (이슈 #44)', () => {
   })
 })
 
-// 이슈 #497 (시안 E): 같은 게이트웨이 id 를 사고 켬·끔 두 항목으로 — opencode.json 의 모델 키·기본 모델은 내부 키(engineModelId)다.
-// 사용자는 키를 보지 않는다(이름은 표시 이름). 게이트웨이 이름으로 바꾸는 것은 키 프록시
-describe('engineConfig — 내부 키 (이슈 #497)', () => {
+// 이슈 #500: Thinking 모델로 선언한 항목은 opencode.json 에 키 셋(id, id--think, id--nothink)으로 — opencode 가 대화에 저장된 어느 키든 받는다.
+// 정의는 셋 다 같다(표시 이름·한도·modalities). 선언 안 된 항목은 id 하나. 게이트웨이 이름으로 되돌리는 것은 키 프록시
+describe('engineConfig — Thinking 모델 키 (이슈 #500)', () => {
   const proxy = { token: 't', baseURLFor: (id: string) => `http://127.0.0.1:9/${id}` }
-  const off = engineModelId({ id: 'qwen', thinkingOff: true })
 
-  it('같은 id 의 사고 켬·끔 두 항목은 키가 달라 모델 정의 둘로 싣는다 (설정은 항목마다)', () => {
+  it('선언 항목은 같은 정의를 키 셋으로, 미선언 항목은 id 하나로 싣는다', () => {
     const config = engineConfig(
       [
         {
           ...provider('a'),
           models: [
-            { id: 'qwen', displayName: 'Q', contextLength: 32_768 },
-            { id: 'qwen', displayName: 'QT', thinkingOff: true, imageInput: true },
+            { id: 'qwen', displayName: 'Q', contextLength: 32_768, imageInput: true, thinking: true },
+            { id: 'llama', displayName: 'L' },
           ],
         },
       ],
       proxy,
     )
+    const q = { name: 'Q', limit: { context: 32_768, output: 8_192 }, modalities: { input: ['text', 'image'], output: ['text'] } }
     expect((config.provider as Record<string, { models: unknown }>)['a']!.models).toEqual({
-      qwen: { name: 'Q', limit: { context: 32_768, output: 8_192 } },
-      [off]: { name: 'QT', modalities: { input: ['text', 'image'], output: ['text'] } },
+      qwen: q,
+      [engineModelId({ id: 'qwen' }, 'on')]: q,
+      [engineModelId({ id: 'qwen' }, 'off')]: q,
+      llama: { name: 'L' },
     })
   })
 
-  it('기본 모델도 키 — 첫 모델이 사고 끔이면 접미 키', () => {
-    const config = engineConfig([{ ...provider('a'), models: [{ id: 'qwen', displayName: 'QT', thinkingOff: true }] }], proxy)
-    expect(config.model).toBe(`a/${off}`)
+  it('기본 모델은 첫 항목의 디폴트 키(id)', () => {
+    const config = engineConfig([{ ...provider('a'), models: [{ id: 'qwen', displayName: 'QT', thinking: true }] }], proxy)
+    expect(config.model).toBe('a/qwen')
   })
 
   it('읽기에서 남은 키 중복(저장은 거절)은 첫 항목 하나만 싣는다', () => {
@@ -633,30 +635,27 @@ describe('engineConfig — 내부 키 (이슈 #497)', () => {
   })
 })
 
-// 이슈 #477·#497: 사고 끄기는 opencode.json 이 아니라 키 프록시 본문에서. 엔진은 내부 키를 보내고, 프록시가 그 키의 항목을 찾아
-// 게이트웨이 이름(id)으로 바꾸고 사고 끔 항목이면 enable_thinking=false 를 싣는다. 사고 끔 항목이 없으면 본문을 모으지 않는다
-describe('proxyTarget — 내부 키 → 게이트웨이 id + 사고 끄기 (이슈 #477·#497)', () => {
-  const off = engineModelId({ id: 'qwen', thinkingOff: true })
+// 이슈 #477·#500: Thinking 은 opencode.json 이 아니라 키 프록시 본문에서. 엔진은 키를 보내고, 프록시가 그 키를 (항목, 값)으로 풀어(resolveModelKey)
+// 켬·끔이면 model 을 게이트웨이 이름(id)으로 바꾸고 enable_thinking 을 싣는다. 디폴트는 손대지 않는다. 선언 항목이 없으면 본문을 모으지 않는다
+describe('proxyTarget — Thinking 키 → 게이트웨이 id + enable_thinking (이슈 #477·#500)', () => {
+  const models = [
+    { id: 'qwen', displayName: 'Q', thinking: true },
+    { id: 'llama', displayName: 'L' },
+  ]
 
-  it('사고 끔 키는 id 로 바꾸고 사고 끄기를 싣는다, 사고 켬 키(=id)는 그대로', () => {
-    const models = [
-      { id: 'qwen', displayName: 'Q on' },
-      { id: 'qwen', displayName: 'Q off', thinkingOff: true },
-      { id: 'llama', displayName: 'L' },
-    ]
+  it('켬 키는 id + enable_thinking=true, 끔 키는 id + false, 디폴트·미선언은 그대로', () => {
     const target = proxyTarget({ ...provider('a'), models }, 'sk')
     expect(target).toMatchObject({ baseURL: provider('a').baseURL, apiKey: 'sk' })
-    expect(target.renameModel!(off)).toBe('qwen')
-    expect(target.addToBody!(off)).toEqual({ chat_template_kwargs: { enable_thinking: false } })
-    expect(target.renameModel!('qwen')).toBe('qwen')
-    expect(target.addToBody!('qwen')).toBeUndefined()
-    expect(target.addToBody!('llama')).toBeUndefined()
+    expect(target.rewrite!(engineModelId({ id: 'qwen' }, 'on'))).toEqual({ model: 'qwen', add: { chat_template_kwargs: { enable_thinking: true } } })
+    expect(target.rewrite!(engineModelId({ id: 'qwen' }, 'off'))).toEqual({ model: 'qwen', add: { chat_template_kwargs: { enable_thinking: false } } })
+    expect(target.rewrite!('qwen')).toBeUndefined()
+    expect(target.rewrite!('llama')).toBeUndefined()
+    expect(target.rewrite!('llama--nothink')).toBeUndefined()
   })
 
-  it('사고 끔 항목이 없으면 addToBody·renameModel 둘 다 없다 (본문을 모으지 않는다)', () => {
-    const none = proxyTarget({ ...provider('a'), models: [{ id: 'llama', displayName: 'L', thinkingOff: false }] }, undefined)
-    expect(none).not.toHaveProperty('addToBody')
-    expect(none).not.toHaveProperty('renameModel')
+  it('선언 항목이 없으면 rewrite 가 없다 (본문을 모으지 않는다)', () => {
+    const none = proxyTarget({ ...provider('a'), models: [{ id: 'llama', displayName: 'L' }] }, undefined)
+    expect(none).not.toHaveProperty('rewrite')
   })
 })
 

@@ -1,5 +1,5 @@
 import type { Context } from 'cordis'
-import { engineModelId } from '../../../shared/engineModelId.ts'
+import { engineModelId, resolveModelKey } from '../../../shared/engineModelId.ts'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import { tr } from '../../i18n.ts'
@@ -87,7 +87,7 @@ export function remoteRoutes(host: RouteHost): Record<string, Route> {
       const list = [...drafts, ...stored].sort((a, b) => b.updatedAt - a.updatedAt)
       // 진행 중·답 필요는 ctx.chat 의 도는 턴에서 (알림 기능과 무관 — emitNotices), 안 본 끝남만 알림 기능에서
       const live = host.ctx.chat.snapshot()
-      return [200, list.map((entry) => toRemote(entry, liveStatus(live[entry.id]) ?? notices[entry.id]?.status))]
+      return [200, list.map((entry) => toRemote({ ...entry, model: listedModel(host, entry.model) }, liveStatus(live[entry.id]) ?? notices[entry.id]?.status))]
     },
 
     // 새 대화 — 등록된 프로젝트에만. 첫 메시지를 보낼 때 ctx.chat 이 저장한다 (그 전엔 폰에만 보인다)
@@ -105,7 +105,7 @@ export function remoteRoutes(host: RouteHost): Record<string, Route> {
       host.drafts.set(draft.id, draft)
       for (const id of [...host.drafts.keys()].slice(0, Math.max(0, host.drafts.size - DRAFT_LIMIT))) host.drafts.delete(id)
       host.emitEvent('conversations.changed', { project: draft.project })
-      return [200, toRemote(draft)]
+      return [200, toRemote({ ...draft, model: listedModel(host, draft.model) })]
     },
 
     // 스냅샷 + 그 시점 seq. 기록을 읽는 사이 이 대화의 이벤트가 지나갔으면 다시 읽는다 — 스냅샷과 스트림 사이에 틈·겹침이 없게
@@ -155,8 +155,9 @@ export function remoteRoutes(host: RouteHost): Record<string, Route> {
       // 전체 권한(묻지 않고 다 실행)은 폰에 열지 않는다 — 그 모드로 바꾸지도, 그 모드의 대화에 보내지도 못한다
       if (input?.mode === 'full' || conversation.mode === 'full') return [403, { error: 'conversations in full access mode are desktop-only' }]
       if (input?.mode !== undefined && !isMode(input.mode)) return [400, { error: 'unknown mode' }]
-      const model = input?.model === undefined ? undefined : modelOf(host, input.model)
-      if (input?.model !== undefined && !model) return [400, { error: 'unknown model' }]
+      const picked = input?.model === undefined ? undefined : modelOf(host, input.model)
+      if (input?.model !== undefined && !picked) return [400, { error: 'unknown model' }]
+      const model = picked && keepThinking(host, conversation.model, picked)
       const draft = host.drafts.get(cid)
       const origin: ChatOrigin = `device:${device.id}`
       const sending = host.ctx.chat
@@ -229,11 +230,31 @@ function models(host: RouteHost): RemoteModel[] {
     .flatMap((provider) => provider.models.map((model) => ({ providerId: provider.id, providerName: provider.displayName, modelId: engineModelId(model), displayName: model.displayName || model.id })))
 }
 
-/** 폰이 고른 모델 — 데스크탑에 설정된 것만 */
+/** 폰이 고른 모델 — 데스크탑에 설정된 것만. 목록(models)은 항목당 디폴트 키 하나지만, Thinking 모델의 켬·끔 키(데스크탑 대화의 키를 폰이 그대로 돌려줄 때)도 받는다 (이슈 #500) */
 function modelOf(host: RouteHost, value: unknown): ModelChoice | undefined {
   const choice = value as Partial<ModelChoice> | null
-  const found = models(host).find((model) => model.providerId === choice?.providerId && model.modelId === choice?.modelId)
-  return found && { providerId: found.providerId, modelId: found.modelId }
+  if (typeof choice?.providerId !== 'string' || typeof choice.modelId !== 'string') return undefined
+  const provider = host.ctx.providers.list().find((entry) => entry.id === choice.providerId)
+  return provider && resolveModelKey(provider.models, choice.modelId) ? { providerId: provider.id, modelId: choice.modelId } : undefined
+}
+
+/** 키 → (provider 의) 항목. 못 풀면 undefined */
+function itemOf(host: RouteHost, choice: ModelChoice | undefined) {
+  const provider = choice && host.ctx.providers.list().find((entry) => entry.id === choice.providerId)
+  return provider && resolveModelKey(provider.models, choice.modelId)?.model
+}
+
+/** 폰에 보이는 대화의 모델 — 목록(models)의 그 항목 키(디폴트 키). 폰은 Thinking 을 모르고 목록에서 키로 이름을 찾으니, 켬·끔 키를 그대로 주면
+ *  머리에 내부 키가 보인다 (이슈 #503). 대화에는 키 그대로 남고 폰은 대화 모델을 되돌려 보내지 않는다(고른 것만 보낸다). 못 풀면 그대로 */
+function listedModel(host: RouteHost, model: ModelChoice | undefined): ModelChoice | undefined {
+  const item = itemOf(host, model)
+  return model && item ? { providerId: model.providerId, modelId: engineModelId(item) } : model
+}
+
+/** 폰은 Thinking 을 고를 수 없다 — 고른 모델이 대화의 지금 모델과 같은 항목이면 지금 키(켬·끔)를 그대로 둔다 (이슈 #503) */
+function keepThinking(host: RouteHost, current: ModelChoice | undefined, picked: ModelChoice): ModelChoice {
+  const item = itemOf(host, current)
+  return current && item && current.providerId === picked.providerId && itemOf(host, picked)?.id === item.id ? current : picked
 }
 
 async function registered(host: RouteHost, project: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import type { MessageKey } from '../shared/i18n/index.ts'
+import { LANGUAGES, type MessageKey } from '../shared/i18n/index.ts'
 import type { ExtensionFailedReason, ExtensionPreview, ExtensionProblem, ExtensionStoreFailure, ExtensionSummary, UnsafePathReason } from '../shared/extensions.ts'
 import { filterByQuery } from './featuresView.ts'
 import type { Translate } from './settingsStore.ts'
@@ -67,12 +67,10 @@ export function installKind(preview: ExtensionPreview): InstallKind {
   return order > 0 ? 'upgrade' : order === 0 ? 'same' : 'downgrade'
 }
 
-export type CardKind = 'on' | 'off' | 'mounting' | 'failed' | 'pending-install' | 'pending-remove'
+export type CardKind = 'on' | 'off' | 'mounting' | 'failed'
 
-/** 카드 모양 — 보류(삭제 > 설치)가 무엇보다 앞서고, 그다음 실패 · 올리는 중 · 켜짐/꺼짐 */
+/** 카드 모양 — 실패 · 올리는 중 · 켜짐/꺼짐 (설치·삭제는 곧바로 적용돼 보류 상태가 없다, 이슈 #511) */
 export function cardKind(extension: ExtensionSummary): CardKind {
-  if (extension.pending === 'remove') return 'pending-remove'
-  if (extension.pending === 'install') return 'pending-install'
   if (extension.state === 'failed') return 'failed'
   if (extension.state === 'mounting') return 'mounting'
   return extension.state === 'on' ? 'on' : 'off'
@@ -82,6 +80,16 @@ export function cardKind(extension: ExtensionSummary): CardKind {
 export function filterExtensions(extensions: readonly ExtensionSummary[], query: string): ExtensionSummary[] {
   const sorted = [...extensions].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return filterByQuery(sorted, query, (extension) => [extension.id, extension.name ?? '', extension.description ?? ''])
+}
+
+/** 설정 > 일반 언어 선택지 (이슈 #525) — 내장(ko·en) 뒤에 켜 둔 정상(on) 언어 팩의 자기 이름. 같은 언어의 팩이 여럿이면 id 순 첫 팩(메인 readLocale 과 같은 규칙) */
+export function languageOptions(extensions: readonly ExtensionSummary[]): { id: string; label: string }[] {
+  const options: { id: string; label: string }[] = [...LANGUAGES]
+  const packs = [...extensions].filter((extension) => extension.type === 'locale' && extension.state === 'on' && extension.locale).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  for (const { locale } of packs) {
+    if (!options.some((option) => option.id === locale!.language)) options.push({ id: locale!.language, label: locale!.label })
+  }
+  return options
 }
 
 const UNSAFE_PATH: Record<UnsafePathReason, MessageKey> = {
@@ -150,6 +158,18 @@ export function problemLine(problem: ExtensionProblem): ProblemLine {
       return { title: { key: 'extensions.problem.entry-missing' }, mono: problem.params.entry }
     case 'id-mismatch':
       return { title: { key: 'extensions.problem.id-mismatch' }, detail: { key: 'extensions.detail.idMismatch', vars: { folder: problem.params.folder, id: problem.params.id } } }
+    case 'type-invalid':
+      return { title: { key: 'extensions.problem.type-invalid' }, mono: problem.params.value, detail: { key: 'extensions.detail.typeRule' } }
+    case 'locale-invalid':
+      return { title: { key: 'extensions.problem.locale-invalid' }, mono: `${problem.params.field}: ${problem.params.value}`, detail: { key: 'extensions.detail.localeRule' } }
+    case 'locale-reserved':
+      return { title: { key: 'extensions.problem.locale-reserved' }, mono: problem.params.value }
+    case 'locale-unexpected':
+      return { title: { key: 'extensions.problem.locale-unexpected' }, mono: 'locale' }
+    case 'locale-too-large':
+      return { title: { key: 'extensions.problem.locale-too-large' }, detail: sizeDetail(problem.params.bytes, problem.params.limit) }
+    case 'locale-unreadable':
+      return { title: { key: 'extensions.problem.locale-unreadable' }, plain: problem.params.message }
     default:
       return { title: { key: 'extensions.problem.unknown' }, mono: String((problem as { code?: unknown }).code) }
   }
@@ -174,6 +194,22 @@ export function failureLines(failure: ExtensionStoreFailure): ProblemLine[] {
       return [{ title: { key: 'extensions.failure.not-installed' }, mono: failure.params.id }]
     case 'io-failed':
       return [{ title: { key: 'extensions.failure.io-failed' }, plain: failure.params.message }]
+    case 'apply-failed':
+      return [{ title: { key: 'extensions.failure.apply-failed' }, plain: failure.params.message }]
+    case 'not-on':
+      return [{ title: { key: 'extensions.failure.not-on' }, mono: failure.params.id }]
+    case 'entry-not-html':
+      return [{ title: { key: 'extensions.failure.entry-not-html' }, mono: failure.params.entry }]
+    case 'entry-unsafe':
+      return [{ title: { key: 'extensions.failure.entry-unsafe' }, mono: failure.params.entry }]
+    case 'entry-too-large':
+      return [{ title: { key: 'extensions.failure.entry-too-large' }, detail: sizeDetail(failure.params.bytes, failure.params.limit) }]
+    case 'entry-unreadable':
+      return [{ title: { key: 'extensions.failure.entry-unreadable' }, plain: failure.params.message }]
+    case 'locale-unavailable':
+      return [{ title: { key: 'extensions.failure.locale-unavailable' }, mono: failure.params.language }]
+    case 'locale-unreadable':
+      return [{ title: { key: 'extensions.failure.locale-unreadable' }, plain: failure.params.message }]
     default:
       return [{ title: { key: 'extensions.failure.unknown' } }]
   }

@@ -1,15 +1,18 @@
 import { FEATURES } from '../../../shared/features.ts'
-import type { ExtensionManifest, ExtensionProblem } from '../../../shared/extensions.ts'
+import type { ExtensionManifest, ExtensionProblem, ExtensionType } from '../../../shared/extensions.ts'
+import { isBuiltinLanguage, isLanguage } from '../../../shared/i18n/index.ts'
 import { EXTENSION_LIMITS, type ExtensionLimits } from './limits.ts'
 import { isEntryPath } from './paths.ts'
 
 // extension.json 검증 (이슈 #478, 설계 3절 필드 표). 사유를 모두 모아 돌려준다 — 첫 사유에서 멈추지 않는다.
 // 모르는 필드는 무시하지 않고 거절한다 (`permisions` 같은 오타가 조용히 넘어가면 권한 선언이 빠진 채 설치된다)
+// 종류(type, 이슈 #525): 생략하면 panel(지금까지의 확장). locale 은 언어 팩 — locale: { language, label } 이 필수이고 entry 는 번들 .json
 
 export const MANIFEST_FILE = 'extension.json'
 
 const REQUIRED = ['id', 'name', 'description', 'version', 'entry'] as const
-const KNOWN: readonly string[] = [...REQUIRED, 'litecode', 'permissions']
+const KNOWN: readonly string[] = [...REQUIRED, 'details', 'litecode', 'permissions', 'type', 'locale']
+const LOCALE_KNOWN: readonly string[] = ['language', 'label']
 /** 폴더 이름과 설정 키로 쓰이므로 엄격하게 */
 const ID = /^[a-z0-9-]{3,40}$/
 /** semver 2.0.0 (semver.org 의 권장 정규식) */
@@ -41,8 +44,10 @@ export function checkManifest(
   for (const [field, max] of [['name', limits.nameLength], ['description', limits.descriptionLength]] as const) {
     const text = raw[field]
     if (text === undefined) missing(field)
-    else if (typeof text !== 'string' || text.trim() === '' || text.length > max) problems.push({ code: 'text-invalid', params: { field, max } })
+    else if (!isText(text, max)) problems.push({ code: 'text-invalid', params: { field, max } })
   }
+  // details 는 선택 (이슈 #519) — 있으면 name·description 과 같은 규칙(비지 않은 문자열, 상한)
+  if (raw.details !== undefined && !isText(raw.details, limits.detailsLength)) problems.push({ code: 'text-invalid', params: { field: 'details', max: limits.detailsLength } })
 
   if (raw.version === undefined) missing('version')
   else if (!isSemver(raw.version)) problems.push({ code: 'version-invalid', params: { field: 'version', value: shown(raw.version) } })
@@ -52,8 +57,18 @@ export function checkManifest(
     else if (compareVersions(appVersion, raw.litecode) < 0) problems.push({ code: 'app-too-old', params: { required: raw.litecode, current: appVersion } })
   }
 
+  let type: ExtensionType | undefined = 'panel'
+  if (raw.type !== undefined && raw.type !== 'panel' && raw.type !== 'locale') {
+    problems.push({ code: 'type-invalid', params: { value: shown(raw.type) } })
+    type = undefined
+  } else if (raw.type === 'locale') type = 'locale'
+
   if (raw.entry === undefined) missing('entry')
   else if (typeof raw.entry !== 'string' || !isEntryPath(raw.entry)) problems.push({ code: 'entry-invalid', params: { value: shown(raw.entry) } })
+  else if (type === 'locale' && !/\.json$/i.test(raw.entry)) problems.push({ code: 'locale-invalid', params: { field: 'entry', value: raw.entry } })
+
+  if (type === 'locale') problems.push(...checkLocale(raw.locale, limits))
+  else if (type === 'panel' && raw.locale !== undefined) problems.push({ code: 'locale-unexpected', params: {} })
 
   if (raw.permissions !== undefined) {
     const ok = Array.isArray(raw.permissions) && raw.permissions.every((permission) => typeof permission === 'string' && permission !== '')
@@ -61,6 +76,27 @@ export function checkManifest(
   }
 
   return problems.length > 0 ? { problems } : { manifest: raw as unknown as ExtensionManifest, problems }
+}
+
+/** 언어 팩의 locale 선언 — { language, label }. 내장 언어(ko·en)는 대소문자와 상관없이 거절한다 */
+function checkLocale(value: unknown, limits: ExtensionLimits): ExtensionProblem[] {
+  if (value === undefined) return [{ code: 'field-missing', params: { field: 'locale' } }]
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [{ code: 'locale-invalid', params: { field: 'locale', value: shown(value) } }]
+  const locale = value as Record<string, unknown>
+  const problems: ExtensionProblem[] = Object.keys(locale)
+    .filter((field) => !LOCALE_KNOWN.includes(field))
+    .map((field) => ({ code: 'field-unknown', params: { field: `locale.${field}` } }))
+  const { language, label } = locale
+  if (language === undefined) problems.push({ code: 'field-missing', params: { field: 'locale.language' } })
+  else if (typeof language === 'string' && isBuiltinLanguage(language.toLowerCase())) problems.push({ code: 'locale-reserved', params: { value: language } })
+  else if (!isLanguage(language)) problems.push({ code: 'locale-invalid', params: { field: 'locale.language', value: shown(language) } })
+  if (label === undefined) problems.push({ code: 'field-missing', params: { field: 'locale.label' } })
+  else if (!isText(label, limits.localeLabelLength)) problems.push({ code: 'text-invalid', params: { field: 'locale.label', max: limits.localeLabelLength } })
+  return problems
+}
+
+function isText(value: unknown, max: number): boolean {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= max
 }
 
 /** 확장 id 형식 — 폴더 이름·설정 키로 써도 안전하다 (예약어 검사는 하지 않는다) */

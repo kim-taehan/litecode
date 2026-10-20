@@ -42,9 +42,9 @@ function base(directory: string): PanelState {
   return current?.directory === directory ? current : { directory, open: false, tabs: [], fullscreen: false, focus: 0 }
 }
 
-/** 파일 탭인가 — 터미널·작업·턴 탭과 Git 은 아님 (비교 보기는 파일 탭만) */
+/** 파일 탭인가 — 터미널·작업·턴·확장 탭과 Git 은 아님 (비교 보기는 파일 탭만) */
 export function isFileTab(key: string): boolean {
-  return key !== GIT_TAB && !isTerminalTab(key) && !isTaskTab(key) && !isTurnTab(key)
+  return key !== GIT_TAB && !isTerminalTab(key) && !isTaskTab(key) && !isTurnTab(key) && !isExtensionTab(key)
 }
 
 /** 비교 보기 후보 — 같은 패널의 다른 연 파일 탭 (현재 탭 제외) */
@@ -174,6 +174,41 @@ export function openTurnTab(directory: string, conversationId: string, startedAt
   set({ ...state, open: true, tabs, active: key, focus: state.focus + 1, quiet: false })
 }
 
+/** 확장 탭의 열쇠 (이슈 #511) — `\0ext/<확장 id>`. 본문은 그 확장의 진입 HTML 을 격리된 iframe 에서 (FilePreview.tsx ExtensionTab) */
+export const EXT_PREFIX = '\0ext/'
+export function extensionTabKey(id: string): string {
+  return EXT_PREFIX + id
+}
+export function extensionIdOf(key: string | undefined): string | undefined {
+  return key?.startsWith(EXT_PREFIX) && key.length > EXT_PREFIX.length ? key.slice(EXT_PREFIX.length) : undefined
+}
+export function isExtensionTab(key: string | undefined): key is string {
+  return extensionIdOf(key) !== undefined
+}
+
+/** 확장 탭 본문의 재마운트 열쇠 — 버전이 바뀌면(업그레이드) 새 HTML 을 읽어 iframe 을 새로 그린다 */
+export function extensionFrameKey(id: string, version: string | undefined): string {
+  return `${id}@${version ?? ''}`
+}
+
+/** 확장 탭을 연다 — 이미 있으면 그 탭을 고른다. 패널이 닫혀 있으면 연다(파일 칩과 같은 길). 프로젝트가 없으면(대화 없음) 열지 못한다 → false */
+export function openExtensionTab(directory: string | undefined, id: string): boolean {
+  if (directory === undefined) return false
+  const state = base(directory)
+  const key = extensionTabKey(id)
+  set({ ...state, open: true, tabs: state.tabs.includes(key) ? state.tabs : [...state.tabs, key], active: key, focus: state.focus + 1, quiet: false })
+  return true
+}
+
+/** 확장 목록이 바뀌었다(extensions:changed) — 꺼졌거나·삭제됐거나·상태가 정상(on)이 아닌 확장의 탭을 닫는다. 고른 탭이면 closeTab 처럼 이웃으로 */
+export function closeExtensionTabs(extensions: readonly { id: string; state: string }[]): void {
+  const on = new Set(extensions.filter((extension) => extension.state === 'on').map((extension) => extension.id))
+  for (const key of current?.tabs ?? []) {
+    const id = extensionIdOf(key)
+    if (id !== undefined && !on.has(id)) closeTab(key)
+  }
+}
+
 /** ⌘[·⌘] — 터미널 탭을 넘나든다 (이전·다음). 고른 것이 없으면 마지막 연 것으로. 하나 없으면 false */
 export function cycleTerminalTab(directory: string, delta: 1 | -1): boolean {
   if (!current || current.directory !== directory) return false
@@ -200,6 +235,22 @@ export function panelTakesFocus(state: PanelState): boolean {
 export function openFilesTab(directory: string): void {
   const state = base(directory)
   set({ ...state, open: true, active: undefined, focus: state.focus + 1, quiet: false })
+}
+
+// ── 파일 찾기 (이슈 #528) — ⌘P 신호 ──
+
+let filesSearchListeners = new Set<() => void>()
+
+/** 파일 찾기를 요청한다 — Files 탭을 열고, 검색 칸에 포커스를 준다 */
+export function requestFilesSearch(directory: string): void {
+  openFilesTab(directory)
+  for (const listener of filesSearchListeners) listener()
+}
+
+/** ⌘P 신호를 듣는다 */
+export function onFilesSearch(callback: () => void): () => void {
+  filesSearchListeners.add(callback)
+  return () => { filesSearchListeners.delete(callback) }
 }
 
 /** 닫았던 패널을 그대로 다시 연다 — 처음이면 Files 탭 */

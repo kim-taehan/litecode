@@ -1,5 +1,5 @@
 import type { Context } from 'cordis'
-import { engineModelId } from '../../../../shared/engineModelId.ts'
+import { resolveModelKey } from '../../../../shared/engineModelId.ts'
 import { randomUUID } from 'node:crypto'
 import { realDirectory } from '../../projectPath.ts'
 import { APP_MCP_NAME } from '../../mcp.ts'
@@ -59,7 +59,7 @@ export function ConversationTools(ctx: Context): void {
 
   /** 쓸 수 있는 모델이 있는가 (설정에서 모델이 사라진 대화는 아니다) */
   function usable(entry: Conversation): entry is Conversation & { model: { providerId: string; modelId: string } } {
-    return !!entry.model && !!ctx.providers.get(entry.model.providerId)?.models.some((model) => engineModelId(model) === entry.model!.modelId)
+    return !!entry.model && !!resolveModelKey(ctx.providers.get(entry.model.providerId)?.models ?? [], entry.model.modelId)
   }
 
   const start: AppMcpTool = {

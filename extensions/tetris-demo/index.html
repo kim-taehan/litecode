@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>테트리스</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 24px;
+         background: #14161b; color: #e8eaf0; font-family: -apple-system, "Apple SD Gothic Neo", system-ui, sans-serif; }
+  canvas { background: #0c0d11; border: 2px solid #2a2e38; border-radius: 8px; }
+  aside { width: 160px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { margin: 0; font-size: 18px; }
+  .box { background: #1d2028; border-radius: 10px; padding: 10px 12px; }
+  .box small { display: block; color: #8a909c; font-size: 12px; }
+  .box b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  p { margin: 0; font-size: 12.5px; line-height: 1.7; color: #8a909c; }
+  button { height: 36px; border: 0; border-radius: 10px; background: #e8eaf0; color: #14161b; font-size: 14px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="board" width="240" height="480" aria-label="테트리스 판"></canvas>
+<aside>
+  <h1>테트리스</h1>
+  <div class="box"><small>점수</small><b id="score">0</b></div>
+  <div class="box"><small>줄</small><b id="lines">0</b></div>
+  <div class="box"><small>레벨</small><b id="level">1</b></div>
+  <canvas id="next" width="96" height="96" aria-label="다음 블록"></canvas>
+  <button id="restart" type="button">다시 시작</button>
+  <p>← → 이동<br>↑ 회전<br>↓ 한 칸 내리기<br>Space 바로 내리기<br>P 일시정지</p>
+</aside>
+<script>
+(() => {
+  const COLS = 10, ROWS = 20, SIZE = 24
+  const COLORS = [null, '#4dd0e1', '#5c6bc0', '#ffa726', '#ffee58', '#66bb6a', '#ab47bc', '#ef5350']
+  // I J L O S T Z (회전 0 기준 모양)
+  const SHAPES = [
+    null,
+    [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]],
+    [[2, 0, 0], [2, 2, 2], [0, 0, 0]],
+    [[0, 0, 3], [3, 3, 3], [0, 0, 0]],
+    [[4, 4], [4, 4]],
+    [[0, 5, 5], [5, 5, 0], [0, 0, 0]],
+    [[0, 6, 0], [6, 6, 6], [0, 0, 0]],
+    [[7, 7, 0], [0, 7, 7], [0, 0, 0]],
+  ]
+  const ctx = document.getElementById('board').getContext('2d')
+  const nextCtx = document.getElementById('next').getContext('2d')
+  const $ = (id) => document.getElementById(id)
+
+  let grid, piece, next, score, lines, level, dropMs, last, acc, over, paused, bag = []
+
+  const rotate = (m) => m[0].map((_, x) => m.map((row) => row[x]).reverse())
+  const take = () => {
+    if (bag.length === 0) bag = [1, 2, 3, 4, 5, 6, 7].sort(() => Math.random() - 0.5)
+    const type = bag.pop()
+    return { type, m: SHAPES[type].map((r) => [...r]), x: 0, y: 0 }
+  }
+  const spawn = () => {
+    piece = next || take()
+    next = take()
+    piece.x = Math.floor((COLS - piece.m[0].length) / 2)
+    piece.y = 0
+    if (collides(piece.m, piece.x, piece.y)) over = true
+    drawNext()
+  }
+  const collides = (m, px, py) => m.some((row, y) => row.some((v, x) => {
+    if (!v) return false
+    const gx = px + x, gy = py + y
+    return gx < 0 || gx >= COLS || gy >= ROWS || (gy >= 0 && grid[gy][gx])
+  }))
+  const merge = () => piece.m.forEach((row, y) => row.forEach((v, x) => { if (v && piece.y + y >= 0) grid[piece.y + y][piece.x + x] = v }))
+  const clearLines = () => {
+    let cleared = 0
+    for (let y = ROWS - 1; y >= 0; y--) {
+      if (grid[y].every(Boolean)) { grid.splice(y, 1); grid.unshift(Array(COLS).fill(0)); cleared++; y++ }
+    }
+    if (!cleared) return
+    lines += cleared
+    score += [0, 100, 300, 500, 800][cleared] * level
+    level = Math.floor(lines / 10) + 1
+    dropMs = Math.max(80, 800 - (level - 1) * 70)
+  }
+  const lock = () => { merge(); clearLines(); spawn() }
+  const move = (dx) => { if (!collides(piece.m, piece.x + dx, piece.y)) piece.x += dx }
+  const turn = () => {
+    const m = rotate(piece.m)
+    for (const kick of [0, -1, 1, -2, 2]) {
+      if (!collides(m, piece.x + kick, piece.y)) { piece.m = m; piece.x += kick; return }
+    }
+  }
+  const softDrop = () => {
+    if (!collides(piece.m, piece.x, piece.y + 1)) { piece.y++; score += 1 } else lock()
+    acc = 0
+  }
+  const hardDrop = () => {
+    let n = 0
+    while (!collides(piece.m, piece.x, piece.y + 1)) { piece.y++; n++ }
+    score += n * 2
+    lock()
+    acc = 0
+  }
+
+  const cell = (c, x, y, v, s = SIZE) => {
+    c.fillStyle = COLORS[v]
+    c.fillRect(x * s + 1, y * s + 1, s - 2, s - 2)
+  }
+  const drawNext = () => {
+    nextCtx.clearRect(0, 0, 96, 96)
+    const m = next.m, s = 20, ox = (96 - m[0].length * s) / 2, oy = (96 - m.length * s) / 2
+    nextCtx.save(); nextCtx.translate(ox, oy)
+    m.forEach((row, y) => row.forEach((v, x) => { if (v) cell(nextCtx, x, y, v, s) }))
+    nextCtx.restore()
+  }
+  const draw = () => {
+    ctx.clearRect(0, 0, COLS * SIZE, ROWS * SIZE)
+    grid.forEach((row, y) => row.forEach((v, x) => { if (v) cell(ctx, x, y, v) }))
+    if (!over) piece.m.forEach((row, y) => row.forEach((v, x) => { if (v) cell(ctx, piece.x + x, piece.y + y, v) }))
+    $('score').textContent = score; $('lines').textContent = lines; $('level').textContent = level
+    if (over || paused) {
+      ctx.fillStyle = 'rgba(12,13,17,.72)'; ctx.fillRect(0, 0, COLS * SIZE, ROWS * SIZE)
+      ctx.fillStyle = '#e8eaf0'; ctx.font = '600 22px system-ui'; ctx.textAlign = 'center'
+      ctx.fillText(over ? '게임 오버' : '일시정지', COLS * SIZE / 2, ROWS * SIZE / 2)
+    }
+  }
+  const frame = (t) => {
+    if (!over && !paused) {
+      acc += t - last
+      if (acc >= dropMs) softDropTick()
+    }
+    last = t
+    draw()
+    requestAnimationFrame(frame)
+  }
+  // 시간이 흘러 내려가는 건 점수를 주지 않는다
+  const softDropTick = () => {
+    if (!collides(piece.m, piece.x, piece.y + 1)) piece.y++; else lock()
+    acc = 0
+  }
+
+  const start = () => {
+    grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0))
+    score = 0; lines = 0; level = 1; dropMs = 800; acc = 0; over = false; paused = false; next = null
+    spawn()
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'p' || e.key === 'P') { paused = !paused; return }
+    if (over || paused) return
+    const handled = { ArrowLeft: () => move(-1), ArrowRight: () => move(1), ArrowUp: turn, ArrowDown: softDrop, ' ': hardDrop }[e.key]
+    if (handled) { e.preventDefault(); handled() }
+  })
+  $('restart').addEventListener('click', start)
+
+  start()
+  last = performance.now()
+  requestAnimationFrame(frame)
+})()
+</script>
+</body>
+</html>

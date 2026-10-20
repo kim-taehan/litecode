@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import type { Appearance, Mode, Settings } from '../shared/ipc.ts'
-import { LANGUAGES } from '../shared/i18n/index.ts'
 import { MODES } from '../shared/modes.ts'
 import { ConfirmFullAccess } from './ModeChip.tsx'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../shared/fontSize.ts'
 import { useFeatures } from './featuresStore.ts'
+import { useExtensions } from './extensionsStore.ts'
+import { languageOptions } from './extensionsView.ts'
 import { updateSettings, useSettings, useT } from './settingsStore.ts'
 import { DEFAULT_UPDATE_URL } from '../shared/updates.ts'
 import { RUNNING_TASKS_MAX, RUNNING_TASKS_MIN, runningTaskLimit } from '../shared/tasks.ts'
@@ -70,6 +71,8 @@ export function GeneralPage() {
   const features = useFeatures()
   const updatesOn = features.has('updates')
   const tasksOn = features.has('appMcp') // 하위 작업 도구(litecode_task_start)는 데스크탑 MCP 에 붙는다
+  /** 내장 언어 + 켜 둔 언어 팩 (이슈 #525) — 팩은 설치만으로 적용되지 않고 여기서 고를 때 적용된다 */
+  const languages = languageOptions(useExtensions())
   useEffect(() => void window.litecode.getAppVersion().then(setVersion, () => {}), [])
   const save = (patch: Partial<Settings>): void =>
     void updateSettings(patch).then(
@@ -110,7 +113,7 @@ export function GeneralPage() {
         <div className="settings-row__text">
           <div className="settings-row__title">{t('settings.language')}</div>
         </div>
-        <OptionSelect value={settings.language} options={LANGUAGES} onChange={(language) => save({ language })} />
+        <OptionSelect value={settings.language} options={languages} onChange={(language) => save({ language })} />
       </div>
 
       <div className="settings-row settings-row--stacked">

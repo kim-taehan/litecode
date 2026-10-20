@@ -22,7 +22,7 @@ import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 import type { UpdateStatus } from './updates.ts'
 import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
-import type { ExtensionInstallResult, ExtensionPickResult, ExtensionResult, ExtensionSummary } from './extensions.ts'
+import type { ExtensionEntryResult, ExtensionInstallResult, ExtensionLocaleResult, ExtensionPickResult, ExtensionResult, ExtensionSummary } from './extensions.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Mode } from './modes.ts'
@@ -45,7 +45,7 @@ export type { McpToolSelection } from './mcpTools.ts'
 export type { HookCandidate, HookDraft, HookEvent, HookRecent, HookRow, HookScope, HookTestResult } from './hooks.ts'
 export type { RemoteDeviceInfo, RemotePairRequest, RemoteStatus } from '../src/services/remote.ts'
 export type { UpdateState, UpdateStatus } from './updates.ts'
-export type { ExtensionFailedReason, ExtensionInstallResult, ExtensionPickResult, ExtensionPreview, ExtensionResult, ExtensionState, ExtensionSummary } from './extensions.ts'
+export type { ExtensionEntryResult, ExtensionFailedReason, ExtensionInstallResult, ExtensionPickResult, ExtensionPreview, ExtensionResult, ExtensionState, ExtensionSummary } from './extensions.ts'
 export type { SpeechErrorCode, SpeechLanguage, SpeechPartial, SpeechReply, SpeechState, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened, SpeechTranscript, SpeechUnavailable } from './speech.ts'
 
 export const Channel = {
@@ -247,12 +247,16 @@ export const Channel = {
   EXTENSIONS_LIST: 'extensions:list',
   /** 화면 → 메인 → ExtensionPickResult — zip 고르기 대화상자(요청한 창에 붙는다) + 검사 미리보기 */
   EXTENSIONS_PICK: 'extensions:pick',
-  /** 화면 → 메인 (token) → ExtensionInstallResult — 보류 설치 (다음 부팅에 적용) */
+  /** 화면 → 메인 (token) → ExtensionInstallResult — 설치·업그레이드 (곧바로 적용, 이슈 #511) */
   EXTENSIONS_INSTALL: 'extensions:install',
   /** 화면 → 메인 (token) → ExtensionResult — 확인 카드 취소 */
   EXTENSIONS_CANCEL: 'extensions:cancel',
-  /** 화면 → 메인 (id) → ExtensionResult — 삭제 예약 (다음 부팅에 적용) */
+  /** 화면 → 메인 (id) → ExtensionResult — 삭제 (곧바로 적용, 이슈 #511) */
   EXTENSIONS_REMOVE: 'extensions:remove',
+  /** 화면 → 메인 (id) → ExtensionEntryResult — 켜진 정상 확장의 진입 HTML (이슈 #511, 오른쪽 패널의 격리된 iframe 에서 돌린다) */
+  EXTENSIONS_READ_ENTRY: 'extensions:read-entry',
+  /** 화면 → 메인 (language) → ExtensionLocaleResult — 켜진 정상 언어 팩의 사전 (이슈 #525, 설정 언어가 팩 언어일 때 화면이 병합한다) */
+  EXTENSIONS_READ_LOCALE: 'extensions:read-locale',
   /** 화면 → 메인 (id, on) → ExtensionResult — 곧바로 올리고 내린다 */
   EXTENSIONS_SET_ENABLED: 'extensions:set-enabled',
   /** 메인 → 화면 (ExtensionSummary[]) — 확장 목록이 바뀌었다 */
@@ -525,6 +529,10 @@ export interface LitecodeBridge {
   cancelExtension(token: string): Promise<ExtensionResult>
   removeExtension(id: string): Promise<ExtensionResult>
   setExtensionEnabled(id: string, on: boolean): Promise<ExtensionResult>
+  /** 확장 탭의 본문 (이슈 #511) — 켜져 있지 않거나 읽지 못하면 failure */
+  readExtensionEntry(id: string): Promise<ExtensionEntryResult>
+  /** 언어 팩의 사전 (이슈 #525) — 그 언어의 켜진 정상 팩이 없거나 읽지 못하면 failure */
+  readLocalePack(language: string): Promise<ExtensionLocaleResult>
   onExtensionsChanged(listener: (extensions: ExtensionSummary[]) => void): () => void
 }
 

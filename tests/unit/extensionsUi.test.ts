@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
+import { ko as koDict } from '../../shared/i18n/ko.ts'
 import type { ExtensionPreview, ExtensionSummary } from '../../shared/extensions.ts'
-import { ExtensionCard, ExtensionConfirmDialog, ExtensionRejectDialog, ExtensionsNotice, ExtensionsSection } from '../../renderer/ExtensionsSettings.tsx'
+import { ExtensionCard, ExtensionConfirmDialog, ExtensionRejectDialog, ExtensionsSection } from '../../renderer/ExtensionsSettings.tsx'
 import { FeaturesPage } from '../../renderer/FeaturesSettings.tsx'
 import { problemLine } from '../../renderer/extensionsView.ts'
 
@@ -26,12 +28,11 @@ const ON: ExtensionSummary = { id: 'code-review', name: '코드 리뷰 도우미
 const OFF: ExtensionSummary = { ...ON, id: 'off-one', name: '꺼진 확장', enabled: false, state: 'off' }
 const FAILED: ExtensionSummary = { ...ON, id: 'log-tool', name: '로그 분석기', state: 'failed', reason: { code: 'mount-failed', params: { message: 'index.js 오류' } } }
 const MOUNTING: ExtensionSummary = { ...ON, id: 'slow', name: '느린 확장', state: 'mounting' }
-const PENDING_INSTALL: ExtensionSummary = { ...ON, id: 'approval', name: '사내 결재 도구', version: '1.0.0', state: 'off', pending: 'install' }
-const PENDING_REMOVE: ExtensionSummary = { ...ON, id: 'old', name: '옛 확장', pending: 'remove' }
+const APPROVAL: ExtensionSummary = { ...ON, id: 'approval', name: '사내 결재 도구', version: '1.0.0' }
 
-const card = (extension: ExtensionSummary, initialInfo = false) => html(createElement(ExtensionCard, { extension, initialInfo }))
+const card = (extension: ExtensionSummary, initialExpanded = false) => html(createElement(ExtensionCard, { extension, initialExpanded }))
 
-describe('ExtensionCard — 다섯 상태', () => {
+describe('ExtensionCard — 네 상태 (보류 상태는 이슈 #511 에서 없어졌다)', () => {
   it('켜짐: 퍼즐 타일 + 이름 + "확장" 뱃지 + 버전 + 설명 + ⋯ + 켜진 스위치', () => {
     const out = card(ON)
     expect(out).toContain('data-extension="code-review"')
@@ -69,21 +70,6 @@ describe('ExtensionCard — 다섯 상태', () => {
     expect(out).toContain(`>${ko('extensions.mounting')}</span>`)
   })
 
-  it('보류 설치: 점선 카드(data-kind) · 스위치 비활성 · "앱을 다시 시작하면 올라옵니다"', () => {
-    const out = card(PENDING_INSTALL)
-    expect(out).toContain('data-kind="pending-install"')
-    expect(out).toContain(ko('extensions.pending.install'))
-    expect(out).toMatch(/role="switch"[^>]*disabled=""/)
-    expect(out).toContain(`title="${ko('extensions.locked')}"`)
-  })
-
-  it('삭제 예정: 스위치 비활성 · "삭제 예정 — 앱을 다시 시작하면 사라집니다"', () => {
-    const out = card(PENDING_REMOVE)
-    expect(out).toContain('data-kind="pending-remove"')
-    expect(out).toContain(ko('extensions.pending.remove'))
-    expect(out).toMatch(/role="switch"[^>]*disabled=""/)
-  })
-
   it('이름이 없는(깨진) 확장은 id 를 이름 자리에, 버전 없음', () => {
     const out = card({ id: 'broken-dir', enabled: true, state: 'failed', reason: { code: 'invalid', params: { problems: [problemSample] } } })
     expect(out).toContain('broken-dir')
@@ -91,12 +77,32 @@ describe('ExtensionCard — 다섯 상태', () => {
     expect(out).toContain('설치 폴더가 올바르지 않음 — 진입 파일이 없습니다 (index.js)')
   })
 
-  it('정보 보기 패널: id · 버전 · 설명', () => {
+  it('본문(아이콘·이름·설명)이 펼침 버튼 — 기능 카드(feature-row__toggle)와 같다, 접혀 있으면 상세 없음 (이슈 #519)', () => {
+    const out = card(ON)
+    expect(out).toMatch(/<button type="button" class="feature-row__toggle extension-row__body" aria-expanded="false" aria-controls="extension-detail-code-review">/)
+    expect(out).not.toContain('extension-row__info')
+  })
+
+  it('펼친 상세: id · 버전 · 설명 (details 가 없으면 그것뿐)', () => {
     const out = card(ON, true)
-    expect(out).toContain('class="feature-row__detail extension-row__info"')
+    expect(out).toContain('aria-expanded="true"')
+    expect(out).toContain('data-expanded="true"')
+    expect(out).toContain('class="feature-row__detail extension-row__info" id="extension-detail-code-review"')
     expect(out).toContain(`<dt>${ko('extensions.info.id')}</dt><dd><code>code-review</code></dd>`)
     expect(out).toContain(`<dt>${ko('extensions.info.version')}</dt><dd>1.2.0</dd>`)
     expect(out).toContain(`<dt>${ko('extensions.info.description')}</dt><dd>PR 변경분을 훑습니다</dd>`)
+    expect(out).not.toContain('extension-row__details')
+  })
+
+  it('펼친 상세에 details — 줄바꿈을 살린 글(HTML 로 해석하지 않는다) (이슈 #519)', () => {
+    const out = card({ ...ON, details: '조작법\n← → 이동\n<b>굵게</b>' }, true)
+    expect(out).toContain('<p class="extension-row__details">조작법\n← → 이동\n&lt;b&gt;굵게&lt;/b&gt;</p>')
+    expect(card({ ...ON, details: '숨은 글' })).not.toContain('숨은 글')
+  })
+
+  it('⋯ 메뉴에 "정보 보기" 가 없다 — 삭제만 (본문 펼침과 중복, 이슈 #519)', () => {
+    expect(Object.keys(koDict)).not.toContain('extensions.menu.info')
+    expect(readFileSync(new URL('../../renderer/ExtensionsSettings.tsx', import.meta.url), 'utf8')).not.toContain('extensions.menu.info')
   })
 })
 const problemSample = { code: 'entry-missing' as const, params: { entry: 'index.js' } }
@@ -110,18 +116,6 @@ describe('ExtensionsSection — "설치한 확장" 구분선 + 카드들', () =>
     expect(out).toContain(ko('extensions.section'))
     expect(out.indexOf('data-extension="code-review"')).toBeLessThan(out.indexOf('data-extension="log-tool"'))
     expect(count(out, 'role="switch"')).toBe(2)
-  })
-})
-
-describe('ExtensionsNotice — 보류가 있으면 노란 배너(버튼 없음)', () => {
-  it('보류가 없으면 없다', () => {
-    expect(html(createElement(ExtensionsNotice, { extensions: [ON, FAILED] }))).toBe('')
-  })
-  it('보류 설치·삭제 중 하나라도 있으면 문구만', () => {
-    const out = html(createElement(ExtensionsNotice, { extensions: [ON, PENDING_REMOVE] }))
-    expect(out).toContain('class="settings-notice extensions-notice"')
-    expect(out).toContain(ko('extensions.notice'))
-    expect(out).not.toContain('<button')
   })
 })
 
@@ -205,18 +199,16 @@ describe('ExtensionRejectDialog — 설치 거절', () => {
 })
 
 describe('FeaturesPage 에 끼운 것', () => {
-  it('검색창 옆 "확장 추가 (zip)" 버튼 — 확장이 없으면 구분선·배너 없음', () => {
+  it('검색창 옆 "확장 추가 (zip)" 버튼 — 확장이 없으면 구분선 없음', () => {
     store.extensions = []
     const out = html(createElement(FeaturesPage, {}))
     expect(out).toContain(`>${ko('extensions.add')}</button>`)
     expect(out).not.toContain(ko('extensions.section'))
-    expect(out).not.toContain(ko('extensions.notice'))
   })
 
-  it('확장이 있으면 기능 카드 아래 구분선 + id 순 카드, 보류가 있으면 배너', () => {
-    store.extensions = [PENDING_INSTALL, ON]
+  it('확장이 있으면 기능 카드 아래 구분선 + id 순 카드', () => {
+    store.extensions = [ON, APPROVAL]
     const out = html(createElement(FeaturesPage, {}))
-    expect(out).toContain(ko('extensions.notice'))
     expect(out.indexOf('data-feature=')).toBeLessThan(out.indexOf(ko('extensions.section')))
     expect(out.indexOf('data-extension="approval"')).toBeLessThan(out.indexOf('data-extension="code-review"'))
   })
@@ -235,5 +227,30 @@ describe('FeaturesPage 에 끼운 것', () => {
     const out = html(createElement(FeaturesPage, { initialQuery: 'zzzz-없는-말' }))
     expect(out).toContain(ko('settings.features.noMatch'))
     expect(out).not.toContain('data-extension=')
+  })
+})
+
+describe('⋯ 메뉴가 카드에 잘리지 않는다 (이슈 #515)', () => {
+  const css = readFileSync(new URL('../../renderer/settings.css', import.meta.url), 'utf8')
+  const rule = (selector: string): string => {
+    const at = css.indexOf(`\n${selector} {`)
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
+  }
+
+  it('확장 카드는 overflow 를 풀어 메뉴가 카드 밖으로 나온다 — 모델 카드(.provider-card)처럼', () => {
+    expect(rule('.feature-row')).toMatch(/overflow: hidden/) // 기능 카드는 그대로
+    expect(rule('.extension-row')).toMatch(/overflow: visible/)
+  })
+
+  it('메뉴는 ⋯ 버튼 바로 아래에 붙는다 — fixed 좌표가 아니라 버튼 틀 기준 absolute (#513)', () => {
+    expect(rule('.settings-select')).toMatch(/position: relative/)
+    expect(rule('.settings-menu')).toMatch(/position: absolute/)
+    expect(rule('.settings-menu')).toMatch(/top: calc\(100% \+ 4px\)/)
+    expect(html(createElement(ExtensionCard, { extension: ON }))).toMatch(/<div class="settings-select"><button[^>]*class="extension-row__more"/)
+  })
+
+  it('details 는 줄바꿈을 살린다(pre-line), 본문은 펼침 버튼이라 default 커서를 두지 않는다 (이슈 #519)', () => {
+    expect(rule('.extension-row__details')).toMatch(/white-space: pre-line/)
+    expect(rule('.extension-row__body')).not.toMatch(/cursor: default/)
   })
 })

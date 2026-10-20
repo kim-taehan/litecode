@@ -145,6 +145,8 @@ const Channel = {
   EXTENSIONS_INSTALL: 'extensions:install',
   EXTENSIONS_CANCEL: 'extensions:cancel',
   EXTENSIONS_REMOVE: 'extensions:remove',
+  EXTENSIONS_READ_ENTRY: 'extensions:read-entry',
+  EXTENSIONS_READ_LOCALE: 'extensions:read-locale',
   EXTENSIONS_SET_ENABLED: 'extensions:set-enabled',
   EXTENSIONS_CHANGED: 'extensions:changed',
 } as const
@@ -334,6 +336,8 @@ const bridge: LitecodeBridge = {
   cancelExtension: (token) => ipcRenderer.invoke(Channel.EXTENSIONS_CANCEL, token),
   removeExtension: (id) => ipcRenderer.invoke(Channel.EXTENSIONS_REMOVE, id),
   setExtensionEnabled: (id, on) => ipcRenderer.invoke(Channel.EXTENSIONS_SET_ENABLED, id, on),
+  readExtensionEntry: (id) => ipcRenderer.invoke(Channel.EXTENSIONS_READ_ENTRY, id),
+  readLocalePack: (language) => ipcRenderer.invoke(Channel.EXTENSIONS_READ_LOCALE, language),
   onExtensionsChanged: (listener) => listen(Channel.EXTENSIONS_CHANGED, listener),
 }
 

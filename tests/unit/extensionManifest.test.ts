@@ -49,6 +49,15 @@ describe('checkManifest', () => {
     expect(checkManifest({ ...valid, name: 3 }, APP).problems.map((p) => p.code)).toEqual(['text-invalid'])
   })
 
+  it('details(선택, 이슈 #519): 여러 줄 문자열은 그대로 통과 — 문자열이 아니거나 비었거나 2000자를 넘으면 text-invalid', () => {
+    const withDetails = { ...valid, details: '첫 줄\n둘째 줄\n\n셋째 줄' }
+    expect(checkManifest(withDetails, APP)).toEqual({ manifest: withDetails, problems: [] })
+    expect(checkManifest({ ...valid, details: 'x'.repeat(2000) }, APP).problems).toEqual([])
+    for (const details of [3, ['a'], { a: 1 }, null, '  ', 'x'.repeat(2001)]) {
+      expect(checkManifest({ ...valid, details }, APP).problems).toEqual([{ code: 'text-invalid', params: { field: 'details', max: 2000 } }])
+    }
+  })
+
   it.each(['1.0', 'v1.0.0', '01.0.0', '1.0.0-', '1.0.0.0', 'latest'])('잘못된 semver: %s', (version) => {
     expect(checkManifest({ ...valid, version }, APP).problems).toEqual([{ code: 'version-invalid', params: { field: 'version', value: version } }])
   })

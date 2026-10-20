@@ -13,7 +13,7 @@ import { engineConfig, engineMcpConfig, hiddenEnvNames, isGated, toolGate, withB
 import { tr } from '../i18n.ts'
 import { removeAppPluginDirs } from './enginePlugins.ts'
 import type { ProviderConfig } from './providers.ts'
-import { engineModelId } from '../../shared/engineModelId.ts'
+import { resolveModelKey } from '../../shared/engineModelId.ts'
 import './providers.ts'
 import type {} from './features.ts' // ctx.features·'features/changed' 타입
 import type {} from './settings.ts' // ctx.settings·'settings/changed' 타입
@@ -567,17 +567,19 @@ function forgetRecord(file: string, pid: number | undefined): void {
   }
 }
 
-/** 키 프록시가 요청마다 쓰는 provider 의 행선지. 사고 끄기(이슈 #477, 사내망 실측: vLLM 게이트웨이의 Qwen 은 chat_template_kwargs.enable_thinking=false 면
- *  reasoning 이 비고 reasoning_tokens 0) — 켠 모델이 있는 provider 만 chat/completions 본문을 모으고, 켠 모델의 요청에만 싣는다.
- *  엔진은 내부 키(engineModelId, 이슈 #497)를 보낸다 — 사고 끔 항목의 키는 게이트웨이 이름(id)으로 되돌린다. 사고 켬 항목의 키는 id 그대로라 바꿀 것이 없다 */
+/** 키 프록시가 요청마다 쓰는 provider 의 행선지. Thinking(이슈 #477 사내망 실측: vLLM 게이트웨이의 Qwen 은 chat_template_kwargs.enable_thinking=false 면
+ *  reasoning 이 비고 reasoning_tokens 0) — Thinking 모델이 있는 provider 만 chat/completions 본문을 모은다. 엔진은 모델 키(이슈 #500)를 보낸다 —
+ *  켬·끔 키는 게이트웨이 이름(id)으로 되돌리고 enable_thinking=true/false 를 싣는다. 디폴트 키(=id)·미선언 모델은 손대지 않는다 */
 export function proxyTarget(provider: ProviderConfig, apiKey: string | undefined): ProxyTarget {
-  const off = new Map(provider.models.filter((model) => model.thinkingOff === true).map((model) => [engineModelId(model), model.id] as const))
   return {
     baseURL: provider.baseURL,
     apiKey,
-    ...(off.size > 0 && {
-      addToBody: (model) => (off.has(model) ? { chat_template_kwargs: { enable_thinking: false } } : undefined),
-      renameModel: (model) => off.get(model) ?? model,
+    ...(provider.models.some((model) => model.thinking === true) && {
+      rewrite: (key: string) => {
+        const found = resolveModelKey(provider.models, key)
+        if (!found || found.thinking === 'default') return undefined
+        return { model: found.model.id, add: { chat_template_kwargs: { enable_thinking: found.thinking === 'on' } } }
+      },
     }),
   }
 }
