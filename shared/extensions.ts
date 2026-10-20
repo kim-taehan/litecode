@@ -6,6 +6,8 @@ export interface ExtensionManifest {
   id: string
   name: string
   description: string
+  /** 카드를 펼친 상세에 보이는 긴 설명 — 여러 줄 가능, 글로만 보인다(HTML 아님) (이슈 #519) */
+  details?: string
   version: string
   /** 필요한 최소 앱 버전 (semver) */
   litecode?: string
@@ -40,7 +42,7 @@ export type ExtensionProblem =
   | { code: 'field-unknown'; params: { field: string; suggestion?: string } }
   | { code: 'id-invalid'; params: { value: string } }
   | { code: 'id-reserved'; params: { value: string } }
-  | { code: 'text-invalid'; params: { field: 'name' | 'description'; max: number } }
+  | { code: 'text-invalid'; params: { field: 'name' | 'description' | 'details'; max: number } }
   | { code: 'version-invalid'; params: { field: 'version' | 'litecode'; value: string } }
   | { code: 'app-too-old'; params: { required: string; current: string } }
   | { code: 'entry-invalid'; params: { value: string } }
@@ -103,6 +105,8 @@ export interface ExtensionSummary {
   id: string
   name?: string
   description?: string
+  /** manifest 의 details (이슈 #519) — 있을 때만 */
+  details?: string
   version?: string
   /** settings.extensions 의 값 (없으면 켜짐) */
   enabled: boolean

@@ -11,4 +11,6 @@ zip 은 폴더 안의 `extension.json`·`index.html` 을 폴더 없이 묶은 �
 cd extensions/ladder-demo && zip -q ../ladder-demo.zip extension.json index.html
 ```
 
+`extension.json` 의 선택 필드 `details` 는 여러 줄 긴 설명(2000자 이하, 글로만 보인다) — 설정 > 기능 에서 확장 카드를 누르면 펼쳐진 상세에 줄바꿈 그대로 보인다.
+
 만드는 법·manifest 규칙은 `docs/` 의 확장 문서를 본다.

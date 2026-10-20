@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
+import { ko as koDict } from '../../shared/i18n/ko.ts'
 import type { ExtensionPreview, ExtensionSummary } from '../../shared/extensions.ts'
 import { ExtensionCard, ExtensionConfirmDialog, ExtensionRejectDialog, ExtensionsSection } from '../../renderer/ExtensionsSettings.tsx'
 import { FeaturesPage } from '../../renderer/FeaturesSettings.tsx'
@@ -29,7 +30,7 @@ const FAILED: ExtensionSummary = { ...ON, id: 'log-tool', name: '로그 분석�
 const MOUNTING: ExtensionSummary = { ...ON, id: 'slow', name: '느린 확장', state: 'mounting' }
 const APPROVAL: ExtensionSummary = { ...ON, id: 'approval', name: '사내 결재 도구', version: '1.0.0' }
 
-const card = (extension: ExtensionSummary, initialInfo = false) => html(createElement(ExtensionCard, { extension, initialInfo }))
+const card = (extension: ExtensionSummary, initialExpanded = false) => html(createElement(ExtensionCard, { extension, initialExpanded }))
 
 describe('ExtensionCard — 네 상태 (보류 상태는 이슈 #511 에서 없어졌다)', () => {
   it('켜짐: 퍼즐 타일 + 이름 + "확장" 뱃지 + 버전 + 설명 + ⋯ + 켜진 스위치', () => {
@@ -76,12 +77,32 @@ describe('ExtensionCard — 네 상태 (보류 상태는 이슈 #511 에서 없�
     expect(out).toContain('설치 폴더가 올바르지 않음 — 진입 파일이 없습니다 (index.js)')
   })
 
-  it('정보 보기 패널: id · 버전 · 설명', () => {
+  it('본문(아이콘·이름·설명)이 펼침 버튼 — 기능 카드(feature-row__toggle)와 같다, 접혀 있으면 상세 없음 (이슈 #519)', () => {
+    const out = card(ON)
+    expect(out).toMatch(/<button type="button" class="feature-row__toggle extension-row__body" aria-expanded="false" aria-controls="extension-detail-code-review">/)
+    expect(out).not.toContain('extension-row__info')
+  })
+
+  it('펼친 상세: id · 버전 · 설명 (details 가 없으면 그것뿐)', () => {
     const out = card(ON, true)
-    expect(out).toContain('class="feature-row__detail extension-row__info"')
+    expect(out).toContain('aria-expanded="true"')
+    expect(out).toContain('data-expanded="true"')
+    expect(out).toContain('class="feature-row__detail extension-row__info" id="extension-detail-code-review"')
     expect(out).toContain(`<dt>${ko('extensions.info.id')}</dt><dd><code>code-review</code></dd>`)
     expect(out).toContain(`<dt>${ko('extensions.info.version')}</dt><dd>1.2.0</dd>`)
     expect(out).toContain(`<dt>${ko('extensions.info.description')}</dt><dd>PR 변경분을 훑습니다</dd>`)
+    expect(out).not.toContain('extension-row__details')
+  })
+
+  it('펼친 상세에 details — 줄바꿈을 살린 글(HTML 로 해석하지 않는다) (이슈 #519)', () => {
+    const out = card({ ...ON, details: '조작법\n← → 이동\n<b>굵게</b>' }, true)
+    expect(out).toContain('<p class="extension-row__details">조작법\n← → 이동\n&lt;b&gt;굵게&lt;/b&gt;</p>')
+    expect(card({ ...ON, details: '숨은 글' })).not.toContain('숨은 글')
+  })
+
+  it('⋯ 메뉴에 "정보 보기" 가 없다 — 삭제만 (본문 펼침과 중복, 이슈 #519)', () => {
+    expect(Object.keys(koDict)).not.toContain('extensions.menu.info')
+    expect(readFileSync(new URL('../../renderer/ExtensionsSettings.tsx', import.meta.url), 'utf8')).not.toContain('extensions.menu.info')
   })
 })
 const problemSample = { code: 'entry-missing' as const, params: { entry: 'index.js' } }
@@ -226,5 +247,10 @@ describe('⋯ 메뉴가 카드에 잘리지 않는다 (이슈 #515)', () => {
     expect(rule('.settings-menu')).toMatch(/position: absolute/)
     expect(rule('.settings-menu')).toMatch(/top: calc\(100% \+ 4px\)/)
     expect(html(createElement(ExtensionCard, { extension: ON }))).toMatch(/<div class="settings-select"><button[^>]*class="extension-row__more"/)
+  })
+
+  it('details 는 줄바꿈을 살린다(pre-line), 본문은 펼침 버튼이라 default 커서를 두지 않는다 (이슈 #519)', () => {
+    expect(rule('.extension-row__details')).toMatch(/white-space: pre-line/)
+    expect(rule('.extension-row__body')).not.toMatch(/cursor: default/)
   })
 })

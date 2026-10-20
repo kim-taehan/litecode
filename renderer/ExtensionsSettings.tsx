@@ -334,10 +334,11 @@ function MoreMenu({ label, items }: { label: string; items: readonly { label: st
   )
 }
 
-/** 확장 카드 한 장 — 상태(cardKind)에 따라 설명 자리·스위치가 바뀐다. initialInfo 는 테스트가 정보 패널을 열어 그릴 때 */
-export function ExtensionCard({ extension, initialInfo = false }: { extension: ExtensionSummary; initialInfo?: boolean }) {
+/** 확장 카드 한 장 — 상태(cardKind)에 따라 설명 자리·스위치가 바뀐다. 본문(아이콘·이름·설명)을 누르면 상세가 펼쳐진다 — 기능 카드의
+ *  feature-row__toggle 과 같은 모양 (이슈 #519). initialExpanded 는 테스트가 펼친 상세를 그릴 때 */
+export function ExtensionCard({ extension, initialExpanded = false }: { extension: ExtensionSummary; initialExpanded?: boolean }) {
   const t = useT()
-  const [info, setInfo] = useState(initialInfo)
+  const [expanded, setExpanded] = useState(initialExpanded)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   const [error, setError] = useState<string>()
   const kind = cardKind(extension)
@@ -354,11 +355,12 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
   }
 
   const invalidProblems = extension.state === 'failed' && extension.reason?.code === 'invalid' ? extension.reason.params.problems : []
+  const detailId = `extension-detail-${extension.id}`
 
   return (
-    <li className="feature-row extension-row" data-extension={extension.id} data-kind={kind} data-on={extension.state === 'on' || undefined}>
+    <li className="feature-row extension-row" data-extension={extension.id} data-kind={kind} data-expanded={expanded || undefined} data-on={extension.state === 'on' || undefined}>
       <div className="feature-row__head">
-        <div className="feature-row__toggle extension-row__body">
+        <button type="button" className="feature-row__toggle extension-row__body" aria-expanded={expanded} aria-controls={detailId} onClick={() => setExpanded((now) => !now)}>
           <span className="feature-row__tile extension-row__tile">
             <PuzzleIcon />
           </span>
@@ -371,7 +373,7 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
             </span>
             {summary()}
           </span>
-        </div>
+        </button>
         {confirmingRemove ? (
           <span className="provider-card__actions">
             <button
@@ -398,7 +400,6 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
             <MoreMenu
               label={t('extensions.more', { name })}
               items={[
-                { label: t('extensions.menu.info'), onSelect: () => setInfo((now) => !now) },
                 { label: t('extensions.menu.remove'), danger: true, onSelect: () => setConfirmingRemove(true) },
               ]}
             />
@@ -420,8 +421,8 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
           {error}
         </p>
       )}
-      {info && (
-        <div className="feature-row__detail extension-row__info">
+      {expanded && (
+        <div className="feature-row__detail extension-row__info" id={detailId}>
           <dl className="extension-confirm__rows">
             <dt>{t('extensions.info.id')}</dt>
             <dd>
@@ -440,6 +441,8 @@ export function ExtensionCard({ extension, initialInfo = false }: { extension: E
               </>
             )}
           </dl>
+          {/* details 는 글로만 — 줄바꿈은 CSS pre-line 으로 살린다 (이슈 #519) */}
+          {extension.details && <p className="extension-row__details">{extension.details}</p>}
           {invalidProblems.length > 0 && (
             <>
               <b>{t('extensions.info.problems')}</b>

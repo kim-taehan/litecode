@@ -17,6 +17,9 @@ export const EXTENSION_LIMITS = {
   /** manifest 의 name·description 글자 수 — 카드 제목·설명 한 줄 */
   nameLength: 80,
   descriptionLength: 300,
+  /** manifest 의 details(선택, 이슈 #519) — 카드를 펼친 상세에 여러 줄로 보이는 긴 설명. 근거: 게임 규칙·조작법 같은 몇 문단이면 충분하고,
+   *  목록(ExtensionSummary)에 실려 확장마다 IPC 로 오가므로 manifestBytes(64KB) 보다 훨씬 작게 둔다 */
+  detailsLength: 2000,
   /** 진입 HTML 을 읽어 화면에 보내는 크기 (이슈 #511, readEntry). 근거: 한 파일짜리 HTML(인라인 스크립트·스타일)은 보통 수백 KB 다 — 이 글은 IPC 로 한 번,
    *  iframe srcdoc 에 base64(약 1.33배)로 한 번 더 실리므로 파일 미리보기의 HTML 상한(1MB)의 두 배에서 멈춘다 */
   entryBytes: 2 * MB,
