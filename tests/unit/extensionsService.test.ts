@@ -100,6 +100,19 @@ describe('부팅', () => {
     ])
   })
 
+  it('manifest 의 details 를 목록에 싣는다 (이슈 #519) — 없으면 키도 없다', async () => {
+    await pendInstallItems([
+      { name: 'extension.json', data: JSON.stringify({ id: 'det-ext', name: '상세', description: '한 줄', details: '첫 줄\n둘째 줄', version: '1.0.0', entry: 'index.html' }) },
+      { name: 'index.html', data: htmlOf('det-ext', '1.0.0') },
+    ])
+    await installed('plain-ext')
+    const { ext } = await boot()
+    expect(await ext.list()).toEqual([
+      { id: 'det-ext', name: '상세', description: '한 줄', details: '첫 줄\n둘째 줄', version: '1.0.0', enabled: true, state: 'on' },
+      { id: 'plain-ext', name: 'plain-ext 이름', description: 'plain-ext 설명', version: '1.0.0', enabled: true, state: 'on' },
+    ])
+  })
+
   it('깨진 설치 폴더가 있어도 뜬다 — 그 확장만 폴더 이름 id 로 failed(invalid), 나머지는 정상', async () => {
     await installed('good-ext')
     await fs.mkdir(path.join(root, 'installed', 'broken-ext'), { recursive: true })

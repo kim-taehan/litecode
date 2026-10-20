@@ -274,6 +274,7 @@ export class ExtensionsService extends Service {
       return {
         id: entry.id,
         ...(manifest && { name: manifest.name, description: manifest.description, version: manifest.version }),
+        ...(manifest?.details !== undefined && { details: manifest.details }),
         enabled,
         ...this.state(entry, enabled),
       }

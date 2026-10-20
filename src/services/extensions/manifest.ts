@@ -9,7 +9,7 @@ import { isEntryPath } from './paths.ts'
 export const MANIFEST_FILE = 'extension.json'
 
 const REQUIRED = ['id', 'name', 'description', 'version', 'entry'] as const
-const KNOWN: readonly string[] = [...REQUIRED, 'litecode', 'permissions']
+const KNOWN: readonly string[] = [...REQUIRED, 'details', 'litecode', 'permissions']
 /** 폴더 이름과 설정 키로 쓰이므로 엄격하게 */
 const ID = /^[a-z0-9-]{3,40}$/
 /** semver 2.0.0 (semver.org 의 권장 정규식) */
@@ -41,8 +41,10 @@ export function checkManifest(
   for (const [field, max] of [['name', limits.nameLength], ['description', limits.descriptionLength]] as const) {
     const text = raw[field]
     if (text === undefined) missing(field)
-    else if (typeof text !== 'string' || text.trim() === '' || text.length > max) problems.push({ code: 'text-invalid', params: { field, max } })
+    else if (!isText(text, max)) problems.push({ code: 'text-invalid', params: { field, max } })
   }
+  // details 는 선택 (이슈 #519) — 있으면 name·description 과 같은 규칙(비지 않은 문자열, 상한)
+  if (raw.details !== undefined && !isText(raw.details, limits.detailsLength)) problems.push({ code: 'text-invalid', params: { field: 'details', max: limits.detailsLength } })
 
   if (raw.version === undefined) missing('version')
   else if (!isSemver(raw.version)) problems.push({ code: 'version-invalid', params: { field: 'version', value: shown(raw.version) } })
@@ -61,6 +63,10 @@ export function checkManifest(
   }
 
   return problems.length > 0 ? { problems } : { manifest: raw as unknown as ExtensionManifest, problems }
+}
+
+function isText(value: unknown, max: number): boolean {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= max
 }
 
 /** 확장 id 형식 — 폴더 이름·설정 키로 써도 안전하다 (예약어 검사는 하지 않는다) */

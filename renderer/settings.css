@@ -1198,8 +1198,11 @@
   overflow: visible;
 }
 
-.extension-row__body {
-  cursor: default;
+.extension-row__details {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  color: var(--text);
 }
 
 .extension-row .extension-row__tile,
