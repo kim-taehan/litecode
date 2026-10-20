@@ -128,6 +128,8 @@ export class ExtensionsService extends Service {
   private origins = new Map<string, string[]>()
   /** 고르기 창이 떠 있는 확장 (project.pickPath — 확장마다 하나) */
   private picking = new Set<string>()
+  /** 확장마다 마지막 취소 시각과 막힘이 풀리는 시각 (project.pickPath — 되풀이해 띄우기 막기) */
+  private pickCancels = new Map<string, { canceledAt: number; blockedUntil: number }>()
   private entries: Entry[] = []
   private queue: Promise<unknown> = Promise.resolve()
   private readonly booted: Promise<void>
@@ -538,14 +540,27 @@ export class ExtensionsService extends Service {
     if (!project) return fail('no-project')
     if (!this.options.pickPaths) return fail('io-failed')
     if (this.picking.has(id)) return fail('busy')
+    if (Date.now() < (this.pickCancels.get(id)?.blockedUntil ?? 0)) return fail('pick-blocked')
     this.picking.add(id)
     try {
       const chosen = await this.options.pickPaths(owner, { directory: project.directory, multiple: multiple ?? false })
-      if (!chosen) return done({ paths: [], canceled: true })
+      if (!chosen) {
+        this.noteCancel(id)
+        return done({ paths: [], canceled: true })
+      }
+      this.pickCancels.delete(id)
       return done(await projectRelativePaths(project.directory, chosen))
     } finally {
       this.picking.delete(id)
     }
+  }
+
+  /** 취소 하나를 적는다 — 앞 취소에서 pickCancelWindowMs 안이면 pickBlockMs 동안 막는다 (QA 03_qa_538) */
+  private noteCancel(id: string): void {
+    const now = Date.now()
+    const previous = this.pickCancels.get(id)
+    const repeated = previous !== undefined && now - previous.canceledAt <= EXTENSION_LIMITS.pickCancelWindowMs
+    this.pickCancels.set(id, { canceledAt: now, blockedUntil: repeated ? now + EXTENSION_LIMITS.pickBlockMs : 0 })
   }
 
   /** project.changedFiles (이슈 #538) — 기준 브랜치 대비 내 변경. git 기능(ctx.git)이 꺼져 있어도 돈다 (extensions/changes.ts) */

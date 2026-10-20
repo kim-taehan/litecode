@@ -3,10 +3,11 @@ import { Context } from 'cordis'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsService } from '../../src/services/settings.ts'
 import { ExtensionsService, type ExtensionsOptions } from '../../src/services/extensions.ts'
 import { changedFiles, pickBase } from '../../src/services/extensions/changes.ts'
+import { EXTENSION_LIMITS } from '../../src/services/extensions/limits.ts'
 import { projectRelativePaths } from '../../src/services/extensions/pick.ts'
 import { ExtensionStore } from '../../src/services/extensions/store.ts'
 import { makeZip } from './support/zipWriter.ts'
@@ -23,6 +24,7 @@ beforeEach(async () => {
   await fs.mkdir(project)
 })
 afterEach(async () => {
+  vi.restoreAllMocks()
   await fs.rm(dir, { recursive: true, force: true })
 })
 
@@ -34,6 +36,12 @@ describe('projectRelativePaths — 고른 경로 → 프로젝트 기준', () =>
       paths: ['src/한글 폴더/My Class.java', 'src/', './'],
       outside: 0,
     })
+  })
+
+  it('`..` 으로 시작하는 안쪽 이름(`..cache/`·`..notes.md`)은 안이다 (QA 03_qa_538 차단 1)', async () => {
+    await fs.mkdir(path.join(project, '..cache'))
+    await fs.writeFile(path.join(project, '..notes.md'), '')
+    expect(await projectRelativePaths(project, [path.join(project, '..cache'), path.join(project, '..notes.md')])).toEqual({ paths: ['..cache/', '..notes.md'], outside: 0 })
   })
 
   it('프로젝트 밖·밖을 가리키는 심볼릭 링크·없는 경로는 빼고 outside 로 센다. 안을 가리키는 링크는 실제 경로로', async () => {
@@ -124,6 +132,13 @@ describe('changedFiles — 임시 저장소', () => {
     expect(await changedFiles('git', project)).toEqual({ ok: true, base: null, files: ['new.txt', 'staged.txt'] })
   })
 
+  it('출력이 상한을 넘으면 반토막 목록 대신 too-many-changes (QA 03_qa_538 차단 2)', async () => {
+    git(project, 'init', '-q', '-b', 'main')
+    for (let i = 0; i < 40; i++) await write(`gen/${'f'.repeat(40)}-${i}.txt`)
+    expect(await changedFiles('git', project, 1024)).toEqual({ ok: false, error: 'too-many-changes' })
+    expect(await changedFiles('git', project)).toMatchObject({ ok: true, files: expect.arrayContaining([`gen/${'f'.repeat(40)}-39.txt`]) })
+  })
+
   it('저장소가 아니면 not-a-repo, git 이 없으면 git-unavailable', async () => {
     expect(await changedFiles('git', project)).toEqual({ ok: false, error: 'not-a-repo' })
     expect(await changedFiles(path.join(dir, 'no-git-here'), project)).toEqual({ ok: false, error: 'git-unavailable' })
@@ -199,6 +214,36 @@ describe('서비스 — ctx.extensions.call', () => {
     await tick()
     open[2]!([project])
     expect(await again).toEqual({ ok: true, result: { paths: ['./'], outside: 0 } })
+  })
+
+  it('pickPath — 짧은 사이에 두 번 연달아 취소하면 한동안 pick-blocked (창을 되풀이해 띄워 앱을 묶지 못하게, QA 03_qa_538 경고). 고르면 풀린다', async () => {
+    await install('p-ext', ['project'])
+    await install('q-ext', ['project'])
+    let now = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    let answer: string[] | undefined
+    const ext = await boot({ pickPaths: async () => answer })
+    const pick = (id = 'p-ext') => ext.call(id, 'project.pickPath', {}, here())
+
+    expect(await pick()).toMatchObject({ ok: true, result: { canceled: true } })
+    now += EXTENSION_LIMITS.pickCancelWindowMs + 1
+    // 첫 취소에서 오래 지났으면 다시 한 번은 열린다
+    expect(await pick()).toMatchObject({ ok: true, result: { canceled: true } })
+    now += 1000
+    expect(await pick()).toMatchObject({ ok: true, result: { canceled: true } })
+    // 이 취소는 앞 취소의 창 안 — 막힌다
+    expect(await pick()).toEqual({ ok: false, error: 'pick-blocked' })
+    expect(await pick('q-ext')).toMatchObject({ ok: true }) // 다른 확장은 막지 않는다
+    now += EXTENSION_LIMITS.pickBlockMs - 1
+    expect(await pick()).toEqual({ ok: false, error: 'pick-blocked' })
+    now += 2
+    answer = [project]
+    expect(await pick()).toEqual({ ok: true, result: { paths: ['./'], outside: 0 } })
+    // 고르면 취소 기록이 지워진다 — 다음 취소 한 번은 막지 않는다
+    answer = undefined
+    expect(await pick()).toMatchObject({ ok: true, result: { canceled: true } })
+    expect(await pick()).toMatchObject({ ok: true, result: { canceled: true } })
+    expect(await pick()).toEqual({ ok: false, error: 'pick-blocked' })
   })
 
   it('pickPath — 대화상자가 없거나 던지면 io-failed, multiple 이 불이 아니면 params-invalid, 프로젝트가 없으면 no-project', async () => {

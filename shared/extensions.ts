@@ -218,6 +218,10 @@ export type ExtensionCallError =
   | 'git-unavailable'
   | 'not-a-repo'
   | 'git-failed'
+  /** 바뀐 파일 목록이 너무 길어 잘렸다 — 일부만 주지 않는다 (QA 03_qa_538) */
+  | 'too-many-changes'
+  /** 같은 확장의 고르기 창을 짧은 사이에 연달아 취소했다 — 한동안 열지 않는다 (QA 03_qa_538) */
+  | 'pick-blocked'
   | 'io-failed'
 
 export type ExtensionCallResult = { ok: true; result: unknown } | { ok: false; error: ExtensionCallError; origin?: string }

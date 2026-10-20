@@ -13,7 +13,8 @@ export async function projectRelativePaths(directory: string, chosen: readonly s
     try {
       const real = await fs.realpath(item)
       const relative = path.relative(root, real)
-      if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      // `..` 마디만 밖이다 — `..cache`·`..notes.md` 같은 안쪽 이름은 안 (QA 03_qa_538)
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
         outside++
         continue
       }

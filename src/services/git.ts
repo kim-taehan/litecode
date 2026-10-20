@@ -53,6 +53,8 @@ export interface Run {
   /** git 을 띄우지 못했다 (없다) */
   missing: boolean
   timeout: boolean
+  /** 출력이 상한(maxOutput)을 넘어 뒤를 버렸다 — 읽은 글의 끝이 반토막일 수 있다 */
+  truncated: boolean
 }
 
 class GitError extends Error {
@@ -206,9 +208,11 @@ export function parseRefs(decorate: string, remotes: ReadonlySet<string>): GitLo
 
 /** git 하나를 띄운다 — 안전 env(물음·창 없음, 선택적 잠금 없음, C 로케일)·기한·출력 상한. 던지지 않는다.
  *  ctx.git 과 확장 통로(project.changedFiles, 이슈 #536·#538 — git 기능이 꺼져 있어도 돈다)가 같이 쓴다 */
-export function runGit(binary: string, cwd: string, args: readonly string[], opts: { timeoutMs?: number; stdin?: string } = {}): Promise<Run> {
+export function runGit(binary: string, cwd: string, args: readonly string[], opts: { timeoutMs?: number; stdin?: string; maxOutput?: number } = {}): Promise<Run> {
+  const maxOutput = opts.maxOutput ?? MAX_OUTPUT
   let stdout = ''
   let stderr = ''
+  let truncated = false
   const handle = execProgram({
     file: binary,
     args,
@@ -218,8 +222,9 @@ export function runGit(binary: string, cwd: string, args: readonly string[], opt
     stdin: opts.stdin,
     onOutput(stream, text) {
       if (stream === 'stdout') {
-        if (stdout.length < MAX_OUTPUT) stdout += text
-      } else if (stderr.length < MAX_OUTPUT) stderr += text
+        if (stdout.length < maxOutput) stdout += text
+        else truncated = true
+      } else if (stderr.length < maxOutput) stderr += text
     },
   })
   return handle.done.then((end) => ({
@@ -228,6 +233,7 @@ export function runGit(binary: string, cwd: string, args: readonly string[], opt
     stderr,
     missing: end.status === 'error' && /ENOENT|EACCES/.test(end.error ?? ''),
     timeout: end.status === 'timeout',
+    truncated,
   }))
 }
 

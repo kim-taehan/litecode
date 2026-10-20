@@ -22,11 +22,14 @@ export async function pickBase(probe: { originHead(): Promise<string | undefined
   return undefined
 }
 
+/** maxOutput — git 한 번의 출력 상한(기본은 runGit 의 4MB, 테스트가 줄인다). 넘으면 반토막 목록을 주지 않고 too-many-changes (QA 03_qa_538) —
+ *  범위로 쓰는 목록이라 일부만 주면 조용히 틀린 범위가 된다. 4MB 는 경로 수만 개(무시하지 않은 빌드 산출물 폴더 등)다 */
 export async function changedFiles(
   binary: string,
   directory: string,
+  maxOutput?: number,
 ): Promise<{ ok: true; base: string | null; files: string[] } | { ok: false; error: ExtensionCallError }> {
-  const git = (args: readonly string[]) => runGit(binary, directory, args)
+  const git = (args: readonly string[]) => runGit(binary, directory, args, { maxOutput })
   const inside = await git(['rev-parse', '--is-inside-work-tree'])
   if (inside.missing) return { ok: false, error: 'git-unavailable' }
   if (inside.code !== 0 || inside.stdout.trim() !== 'true') return { ok: false, error: 'not-a-repo' }
@@ -52,6 +55,7 @@ export async function changedFiles(
   ])
   if (diff.missing || untracked.missing) return { ok: false, error: 'git-unavailable' }
   if (diff.code !== 0 || untracked.code !== 0) return { ok: false, error: 'git-failed' }
+  if (diff.truncated || untracked.truncated) return { ok: false, error: 'too-many-changes' }
   const files = [...new Set([...diff.stdout.split('\0'), ...untracked.stdout.split('\0')].filter(Boolean))].sort()
   return { ok: true, base: base ?? null, files }
 }
