@@ -291,7 +291,7 @@ export function ExtensionInstalledNotice({ name }: InstalledNote) {
 }
 
 /** ⋯ 메뉴 — 설정 드롭다운(OptionSelect)과 같은 동작: 열면 첫 줄에 포커스, ↑/↓, Esc 는 메뉴만 닫고, 바깥 누르면 닫는다 */
-export function MoreMenu({ label, items }: { label: string; items: readonly { label: string; danger?: boolean; onSelect(): void }[] }) {
+function MoreMenu({ label, items }: { label: string; items: readonly { label: string; danger?: boolean; onSelect(): void }[] }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
