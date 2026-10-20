@@ -1,0 +1,34 @@
+{
+  "id": "sonarqube",
+  "name": "SonarQube",
+  "description": "SonarQube 분석 결과(품질 게이트·이슈)를 봅니다 — 사내 서버에 연결하거나 이 기기에서 띄웁니다",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "permissions": ["server"],
+  "server": {
+    "command": "server/runtime/bin/java",
+    "cwd": "server/sonarqube",
+    "args": [
+      "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang=ALL-UNNAMED",
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.management/sun.management=ALL-UNNAMED",
+      "--add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED",
+      "-jar",
+      "lib/sonar-application-26.10.0.133078.jar",
+      "-Dsonar.web.host=127.0.0.1",
+      "-Dsonar.web.port=${port}",
+      "-Dsonar.search.port=0",
+      "-Dsonar.embeddedDatabase.port=${freePort:db}",
+      "-Dsonar.path.data=${dataDir}/data",
+      "-Dsonar.path.logs=${dataDir}/logs",
+      "-Dsonar.path.temp=${dataDir}/temp",
+      "-Dsonar.telemetry.enable=false",
+      "-Dsonar.updatecenter.activate=false",
+      "-Dsonar.search.javaAdditionalOpts=-Dcluster.routing.allocation.disk.threshold_enabled=false"
+    ],
+    "port": 9000,
+    "health": { "path": "/api/system/status", "field": "status", "ready": "UP" },
+    "admin": "sonarqube"
+  }
+}
