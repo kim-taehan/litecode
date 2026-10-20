@@ -40,6 +40,7 @@ button:disabled{opacity:.5;cursor:default}
 .sev.high{background:var(--bad-bg);color:var(--bad)}
 .sev.mid{background:var(--warn-bg);color:var(--warn)}
 .sev.low{background:var(--soft);color:var(--sub)}
+.fix{height:24px;padding:0 8px;font-size:11.5px}
 .file{border:0;background:none;padding:0;height:auto;color:var(--accent);font:12px ui-monospace,Menlo,monospace;text-align:left;cursor:pointer}
 .error{padding:8px 10px;border-radius:8px;background:var(--bad-bg);color:var(--bad);font-size:12.5px;white-space:pre-wrap;word-break:break-word}
 .note{padding:8px 10px;border-radius:8px;background:var(--soft);color:var(--sub);font-size:12.5px}
@@ -207,7 +208,7 @@ function compact(r, issueCount) {
     gate: r.gate && { status: r.gate.status, conditions: (r.gate.conditions ?? []).filter((c) => c.status === 'ERROR').map(({ metricKey, actualValue, errorThreshold, status }) => ({ metricKey, actualValue, errorThreshold, status })) },
     values: r.values,
     total: r.total,
-    issues: r.issues.slice(0, issueCount).map(({ severity, type, message, component, line }) => ({ severity, type, message, component, line })),
+    issues: r.issues.slice(0, issueCount).map(({ key, rule, severity, type, message, component, line }) => ({ key, rule, severity, type, message, component, line })),
   }
 }
 
@@ -458,6 +459,30 @@ const GATE_METRIC = { new_coverage: '새 코드 커버리지', coverage: '커버
 
 const running = () => state.server?.phase === 'running'
 
+// --- 수정 요청 (이슈 #557) — 지금 프로젝트에 새 대화를 열고 입력창에 요청 글을 채운다(chat.compose). 보내기는 사용자가 누른다
+const picked = new Set()
+
+function fixPrompt(issues, prefix) {
+  const lines = issues.map((issue) => {
+    const file = issue.component.startsWith(prefix) ? issue.component.slice(prefix.length) : issue.component
+    const [label] = SEVERITY[issue.severity] || ['낮음']
+    return `- \`${file}${issue.line ? `:${issue.line}` : ''}\` — [${TYPE[issue.type] || '이슈'} · ${label}]${issue.rule ? ` (규칙 ${issue.rule})` : ''} ${issue.message}`
+  })
+  return [`SonarQube 가 찾은 이슈${issues.length > 1 ? ` ${issues.length}개` : ''}를 고쳐 주세요.`, '', ...lines, '', '고친 뒤 같은 규칙에 걸리는 곳이 더 있는지도 봐 주세요.'].join('\n')
+}
+
+async function askFix(issues, prefix) {
+  if (!issues.length) return
+  try {
+    await call('chat.compose', { text: fixPrompt(issues, prefix) })
+    picked.clear()
+    render()
+  } catch (error) {
+    state.error = text(error.message)
+    render()
+  }
+}
+
 function results() {
   const r = running() ? state.results : saved[resultKey()]
   if (!r) return el('div', { class: 'sub pad' }, running() ? '결과를 불러오는 중…' : '이 범위의 보관된 결과가 없습니다. 서버를 띄우면 읽거나 분석할 수 있습니다.')
@@ -481,7 +506,13 @@ function results() {
         el('div', { class: 'metric' }, el('span', {}, '커버리지'), el('b', {}, fmt(v.coverage, '%'))),
         el('div', { class: 'metric' }, el('span', {}, '중복'), el('b', {}, fmt(v.duplicated_lines_density, '%'))),
       ]),
-      el('div', { class: 'row' }, el('b', { class: 'grow' }, `열린 이슈 ${r.total}`), r.total > r.issues.length ? el('span', { class: 'sub' }, `위 ${r.issues.length}개만`) : null),
+      el(
+        'div',
+        { class: 'row' },
+        el('b', { class: 'grow' }, `열린 이슈 ${r.total}`),
+        r.total > r.issues.length ? el('span', { class: 'sub' }, `위 ${r.issues.length}개만`) : null,
+        picked.size ? el('button', { class: 'primary', onclick: () => askFix(r.issues.filter((issue) => picked.has(issue.key)), prefix) }, `선택한 이슈 수정 요청 (${picked.size})`) : null,
+      ),
     ),
     r.issues.map((issue) => {
       const [label, tone] = SEVERITY[issue.severity] || ['낮음', 'low']
@@ -489,6 +520,7 @@ function results() {
       return el(
         'div',
         { class: 'issue' },
+        el('input', { type: 'checkbox', 'aria-label': `${issue.message} 고르기`, checked: picked.has(issue.key), onchange: (e) => (e.target.checked ? picked.add(issue.key) : picked.delete(issue.key), render()), style: 'margin-top:3px' }),
         el('span', { class: `sev ${tone}` }, label),
         el(
           'span',
@@ -496,7 +528,7 @@ function results() {
           el('span', {}, issue.message),
           el('button', { class: 'file', onclick: () => call('project.openFile', { path: file, ...(issue.line ? { line: issue.line } : {}) }).catch(() => {}) }, `${file}${issue.line ? `:${issue.line}` : ''}`),
         ),
-        el('span', { class: 'sub', style: 'flex-shrink:0' }, TYPE[issue.type] || ''),
+        el('span', { style: 'flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px' }, el('span', { class: 'sub' }, TYPE[issue.type] || ''), el('button', { class: 'fix', onclick: () => askFix([issue], prefix) }, '수정 요청')),
       )
     }),
   ]

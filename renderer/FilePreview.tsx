@@ -36,6 +36,7 @@ import {
 } from './filePreviewStore.ts'
 import { Tokens, useHighlight } from './Highlighted.tsx'
 import { languageOfPath } from './highlight.ts'
+import { requestCompose } from './composeRequest.ts'
 import { bridgeReply, bridgeRequestOf, ConsentQueue, runBridgeCall } from './extensionBridge.ts'
 import { buildHtmlDocument, collectReferences } from './htmlPreview.ts'
 import { useExtensions } from './extensionsStore.ts'
@@ -996,6 +997,7 @@ function ExtensionTab({ id, name, hidden, directory }: { id: string; name: strin
         ask: (origin) => consent.ask(origin),
         allow: (origin) => window.litecode.allowExtensionOrigin(id, origin),
         open: (path, line) => openFilePreview(directory, path, line),
+        compose: (text) => requestCompose(directory, text),
       }).then((reply) => frame.postMessage(bridgeReply(request.id, reply), '*'))
     }
     window.addEventListener('message', onMessage)

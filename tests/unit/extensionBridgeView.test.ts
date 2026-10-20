@@ -62,6 +62,7 @@ function deps(over: Partial<BridgeDeps> & { results?: ExtensionCallResult[] } = 
       return { ok: true, result: null }
     },
     open: (path, line) => log.push(`open ${path} ${line}`),
+    compose: (text) => log.push(`compose ${text}`),
   }
   return { deps: { ...base, ...over }, log }
 }
@@ -147,5 +148,19 @@ describe('ExtensionConsentBar — 동의 띠 (시안 Ask, iframe 바깥에 앱�
     expect(out).toContain(`>${ko('extensions.consent.deny')}</button>`)
     expect(out).toContain(`>${ko('extensions.consent.allow')}</button>`)
     expect(out.indexOf(`>${ko('extensions.consent.deny')}</button>`)).toBeLessThan(out.indexOf(`>${ko('extensions.consent.allow')}</button>`))
+  })
+})
+
+describe('runBridgeCall — chat.compose (이슈 #557)', () => {
+  it('메인이 통과시키면 새 대화를 열고 입력창을 채우게 알리고(보내지 않는다) 패널에는 null', async () => {
+    const { deps: d, log } = deps({ results: [{ ok: true, result: { text: '고쳐 주세요' } }] })
+    expect(await runBridgeCall({ id: 1, method: 'chat.compose', params: { text: '고쳐 주세요' } }, d)).toEqual({ ok: true, result: null })
+    expect(log).toEqual(['call chat.compose {"text":"고쳐 주세요"}', 'compose 고쳐 주세요'])
+  })
+
+  it('메인이 거절하면(권한 없음 등) 열지 않는다', async () => {
+    const { deps: d, log } = deps({ results: [{ ok: false, error: 'permission-missing' }] })
+    expect(await runBridgeCall({ id: 1, method: 'chat.compose', params: { text: 'x' } }, d)).toEqual({ ok: false, error: 'permission-missing' })
+    expect(log).toEqual(['call chat.compose {"text":"x"}'])
   })
 })
