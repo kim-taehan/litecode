@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ExtensionServer, ExtensionServerOptions, ExtensionServerStatus } from '../../../shared/extensions.ts'
 import type { KeyCipher } from '../providers.ts'
-import { hasServerRecord, startServer, type ServerHandle, type ServerOptions, type ServerState } from './server.ts'
+import { leftoverAlive, reapServerRecord, startServer, type ServerHandle, type ServerOptions, type ServerState } from './server.ts'
 import { prepareSonarAdmin, sonarPassword, type AdminSecrets } from './serverAdmin.ts'
 
 // 확장마다의 내장 서버 (이슈 #537) — ctx.extensions 가 쥔다. 띄우기·내리기·상태는 server.ts 의 실행기, 관리자 준비는 serverAdmin.ts.
@@ -41,9 +41,15 @@ export class ExtensionServers {
     return path.join(path.resolve(this.options.root), 'data', id, 'server')
   }
 
-  /** 지난 실행이 남긴 서버 기록이 있나 — 앱이 켜질 때 다시 잡으러 간다 */
-  hasLeftover(id: string): boolean {
-    return hasServerRecord(this.dataDir(id))
+  /** 지난 실행이 남긴 우리 서버가 살아 있나 — stopWithApp 을 끈 확장이면 앱이 켜질 때 다시 잡는다 */
+  leftoverAlive(id: string, extensionDir: string): boolean {
+    return leftoverAlive(this.dataDir(id), extensionDir)
+  }
+
+  /** 지난 실행이 남긴 서버를 거둔다(살아 있으면 내리고 기록을 지운다) — 지금 이 앱이 쥔 서버가 있으면 건드리지 않는다 */
+  async reap(id: string, extensionDir: string): Promise<void> {
+    if (this.active(id)) return
+    await reapServerRecord(this.dataDir(id), extensionDir, this.options.timing?.killGraceMs)
   }
 
   /** 떠 있거나 뜨는 중·내리는 중 */
@@ -98,7 +104,8 @@ export class ExtensionServers {
 
   /** 내장 서버로 가는 요청에 붙일 토큰 — 관리자 준비가 끝났을 때만 */
   token(id: string): string | undefined {
-    return this.tokens.get(id)
+    // 실행 중일 때만 — 서버가 스스로 끝난 뒤 그 포트를 잡은 다른 프로그램에 토큰을 보내지 않는다 (QA 03_qa_537)
+    return this.states.get(id)?.phase === 'running' ? this.tokens.get(id) : undefined
   }
 
   private async prepareSonar(id: string, baseUrl: string): Promise<void> {

@@ -51,7 +51,7 @@ export interface Settings {
   maxRunningTasks?: number
   /** 설치한 확장별 켜기 (이슈 #482) — false 로 적힌 확장만 꺼진다. 없으면 모두 켜짐 (ctx.extensions 가 쓴다). 키는 확장 id 형식만 */
   extensions?: ExtensionSwitches
-  /** 확장의 내장 서버 설정 (이슈 #537) — 앱을 켤 때 같이 띄우기·끌 때 같이 내리기. 확장 storage 가 아니라 여기 둔다(값을 정하는 것은 사용자). 키는 확장 id 형식만 */
+  /** 확장의 내장 서버 설정 (이슈 #537) — 앱을 켤 때 같이 띄우기·끌 때 같이 내리기. 확장 storage 가 아니라 여기 둔다(사용자가 패널에서 고르고 패널이 server.setOptions 로 쓴다). 키는 확장 id 형식만 */
   extensionServers?: ExtensionServerSettings
 }
 

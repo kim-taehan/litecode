@@ -466,7 +466,7 @@ export const en = {
   'extensions.permission.project': 'Know the current project · open files',
   'extensions.permission.project.note': 'Reads the open project name and its files, and opens files in the right panel.',
   'extensions.permission.server': 'Run a server',
-  'extensions.permission.server.note': 'Starts and stops the server bundled with the extension on this device. Reachable only from this device (127.0.0.1:{port}).',
+  'extensions.permission.server.note': 'Starts and stops a program bundled with the extension on this device, with your account\'s permissions. The app checks it at 127.0.0.1:{port}.',
   'extensions.confirm.cancel': 'Cancel',
   'extensions.confirm.install': 'Install',
   'extensions.confirm.installUpgrade': 'Install upgrade',

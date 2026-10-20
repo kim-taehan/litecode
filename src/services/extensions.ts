@@ -632,18 +632,24 @@ export class ExtensionsService extends Service {
     return { ...DEFAULT_SERVER_OPTIONS, ...(stored && Object.hasOwn(stored, id) ? stored[id] : {}) }
   }
 
-  /** 켜진 정상 서버 확장이 아니면 내리고, 이번 실행에서 처음 보는 것이면 startWithApp 이거나 지난 서버가 남았을 때 띄운다(남은 것은 다시 잡는다) */
+  /** 켜진 정상 서버 확장이 아니면 내리고(지난 실행이 남긴 것도 거둔다), 이번 실행에서 처음 보는 것이면:
+   *  startWithApp 이면 띄운다(남은 서버는 다시 잡는다) · 지난 서버가 살아 남았고 stopWithApp 을 껐으면 다시 잡는다 · 그 밖에는 남은 것을 거둔다.
+   *  기록이 남았다는 것만으로 새로 띄우지 않는다 — 정상 종료는 앱이 먼저 꺼져 기록이 남는다 (QA 03_qa_537 차단) */
   private async syncServers(): Promise<void> {
     for (const entry of this.entries) {
       const server = entry.manifest?.server
       if (!server) continue
+      const dir = this.files.installedDir(entry.id)
       if (this.state(entry, this.enabled(entry.id)).state !== 'on') {
         await this.servers.stop(entry.id)
+        await this.servers.reap(entry.id, dir)
         continue
       }
       if (this.autoStarted.has(entry.id)) continue
       this.autoStarted.add(entry.id)
-      if (this.serverOptions(entry.id).startWithApp || this.servers.hasLeftover(entry.id)) this.servers.start(entry.id, server, this.files.installedDir(entry.id))
+      const options = this.serverOptions(entry.id)
+      if (options.startWithApp || (!options.stopWithApp && this.servers.leftoverAlive(entry.id, dir))) this.servers.start(entry.id, server, dir)
+      else await this.servers.reap(entry.id, dir)
     }
   }
 

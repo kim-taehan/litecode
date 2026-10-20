@@ -193,7 +193,8 @@ export type ExtensionServerPhase = 'stopped' | 'port' | 'launching' | 'starting'
 /** port-in-use: 포트를 누가 쓴다 · spawn-failed: 실행 파일을 못 띄움 · exited: 서버가 스스로 끝남 · not-ready: 기한 안에 준비가 안 됨 · admin-failed: 관리자 준비 실패(detail 에 사유) */
 export type ExtensionServerFailure = 'port-in-use' | 'spawn-failed' | 'exited' | 'not-ready' | 'admin-failed'
 
-/** 앱 쪽 설정 settings.extensionServers 의 한 확장 — 확장 storage 가 아니다(확장이 못 고치는 곳에 둔다) */
+/** 앱 쪽 설정 settings.extensionServers 의 한 확장 — 확장 storage 가 아니라 앱 설정에 둔다. 사용자가 패널의 체크칸으로 고르고, 패널이 server.setOptions 로 쓴다
+ *  (server 권한 확장은 이미 이 기기에서 자기 프로그램을 띄우는 확장이라 이 값을 쓰게 둔다 — QA 03_qa_537 경고, 리더 판단) */
 export interface ExtensionServerOptions {
   /** 앱을 켤 때 같이 띄운다 (기본 꺼짐 — 내장 서버를 고르기 전에는 띄우지 않는다) */
   startWithApp: boolean

@@ -154,9 +154,28 @@ interface ServerRecord {
   dir: string
 }
 
-/** 데이터 폴더에 기록이 있나 — 앱이 켜질 때 "지난번 서버가 남았나" 를 보는 데 쓴다 */
+/** 데이터 폴더에 기록이 있나 */
 export function hasServerRecord(dataDir: string): boolean {
   return fs.existsSync(path.join(dataDir, SERVER_RECORD))
+}
+
+/** 지난 실행이 남긴 우리 서버가 아직 살아 있나 — 기록의 PID 가 살아 있고, 기록의 폴더가 이 확장 폴더이며, 그 PID 의 명령줄에 그 폴더가 있을 때만 (QA 03_qa_537) */
+export function leftoverAlive(dataDir: string, extensionDir: string): boolean {
+  const record = readRecord(path.join(dataDir, SERVER_RECORD))
+  return record !== undefined && record.dir === extensionDir && process.platform !== 'win32' && alive(record.pid) && owned(record)
+}
+
+/** 지난 실행이 남긴 기록을 정리한다 — 우리 서버가 살아 있으면 그룹째 내리고(SIGTERM → 기한 → SIGKILL), 죽었거나 남의 PID 면 기록만 지운다.
+ *  앱을 켤 때 "같이 띄우기" 가 아닌 확장에 쓴다 — 기록이 남았다고 새로 띄우지 않는다 (QA 03_qa_537 차단) */
+export async function reapServerRecord(dataDir: string, extensionDir: string, graceMs = KILL_GRACE_MS): Promise<void> {
+  const file = path.join(dataDir, SERVER_RECORD)
+  const record = readRecord(file)
+  if (record !== undefined && leftoverAlive(dataDir, extensionDir)) {
+    signalGroup(record.pid, 'SIGTERM')
+    if (!(await waitGone(record.pid, graceMs))) signalGroup(record.pid, 'SIGKILL')
+    await waitGone(record.pid, graceMs)
+  }
+  fs.rmSync(file, { force: true })
 }
 
 /** 띄운 서버(또는 다시 잡은 서버) 하나 — 우리 자식이면 이벤트로, 다시 잡은 것이면 주기적으로 살아 있나를 본다 */
@@ -218,7 +237,7 @@ export function startServer(declaration: ServerDeclaration, opts: ServerOptions)
   const reclaim = async (healthUrl: string): Promise<boolean> => {
     const record = readRecord(recordFile)
     if (record === undefined) return false
-    if (process.platform !== 'win32' && alive(record.pid) && owned(record)) {
+    if (record.dir === opts.extensionDir && process.platform !== 'win32' && alive(record.pid) && owned(record)) {
       if ((await probe(doFetch, healthUrl, declaration.health.field)) === declaration.health.ready) {
         running = watchExit(record.pid, pollUntilGone(record.pid))
         return true

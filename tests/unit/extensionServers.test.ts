@@ -1,5 +1,7 @@
 import { Context } from 'cordis'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs/promises'
+import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -234,6 +236,45 @@ describe('server.* 통로', () => {
 })
 
 describe('앱·확장의 생애와 같이', () => {
+  it('정상 종료 뒤 남은 기록(끝난 PID)만으로는 다음 실행이 띄우지 않고 기록을 지운다 (QA 03_qa_537 차단)', async () => {
+    await install()
+    // 앱 종료(release)는 SIGTERM 만 보내고 기다리지 않는다 → 앱이 먼저 꺼지면 exit 처리기(기록 지우기)가 돌지 않는다.
+    // 그 결과(서버는 정상 종료됨, 기록만 남음)를 그대로 만든다: 끝난 PID + 확장 폴더
+    const dead = spawnSync('true').pid
+    const data = path.join(root, 'data', 'srv-ext', 'server')
+    await fs.mkdir(data, { recursive: true })
+    await fs.writeFile(path.join(data, SERVER_RECORD), JSON.stringify({ pid: dead, dir: path.join(root, 'installed', 'srv-ext') }))
+    const { ext } = await boot()
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const s = await status(ext)
+    expect(s.options.startWithApp).toBe(false)
+    expect(s.phase).toBe('stopped')
+    expect(await recordPid()).toBeUndefined()
+  })
+
+  it('서버가 스스로 끝난 뒤 그 포트를 남이 잡아도 관리자 토큰을 보내지 않는다 (QA 03_qa_537 경고)', async () => {
+    await install()
+    const { ext } = await boot()
+    await ext.call('srv-ext', 'server.start', undefined)
+    await until(async () => (await status(ext)).phase === 'running')
+    const pid = (await recordPid())!
+    process.kill(-pid, 'SIGKILL')
+    await until(async () => (await status(ext)).phase === 'failed')
+    // 같은 포트를 다른 프로그램이 잡는다
+    let seen: string | undefined
+    const impostor = http.createServer((req, res) => {
+      seen = req.headers.authorization
+      res.end('{}')
+    })
+    await new Promise<void>((resolve) => impostor.listen(port, '127.0.0.1', resolve))
+    try {
+      await ext.call('srv-ext', 'network.fetch', { url: `http://127.0.0.1:${port}/api/issues/search` })
+      expect(seen).toBeUndefined()
+    } finally {
+      await new Promise((resolve) => impostor.close(resolve))
+    }
+  })
+
   it('startWithApp 이면 앱이 켜질 때 띄운다 (아니면 안 띄운다)', async () => {
     await install()
     let { ext } = await boot()
