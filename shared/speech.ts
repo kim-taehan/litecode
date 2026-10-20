@@ -1,4 +1,4 @@
-import type { Language } from './i18n/index.ts'
+import { isBuiltinLanguage, type Language } from './i18n/index.ts'
 
 // 음성 입력(받아쓰기, 기능 `voice`)의 화면 ↔ 메인 계약 — 화면이 녹음을 16kHz mono PCM16 으로 줄여 보내고 메인(ctx.speech)이 글로 돌려준다.
 // 실측·설계: _workspace/01ag_voice_input.md. 여기에 Node·Electron 을 아는 코드를 넣지 않는다 (화면도 읽는다).
@@ -12,17 +12,22 @@ export const SPEECH_CHUNK_SAMPLES = SPEECH_SAMPLE_RATE / 10
 /** 조각 하나의 상한 (1초) — 메인이 다시 본다 */
 export const SPEECH_CHUNK_MAX_SAMPLES = SPEECH_SAMPLE_RATE
 
-/** 받아쓰기 언어 힌트. auto 는 한국어를 일본어로 볼 때가 있어(실측 합성 음성 1/5) 기본으로 쓰지 않는다 */
-export const SPEECH_LANGUAGES = ['auto', 'ko', 'en'] as const
+/** 받아쓰기 언어 힌트. auto 는 한국어를 일본어로 볼 때가 있어(실측 합성 음성 1/5) 기본으로 쓰지 않는다.
+ *  zh 는 중국어 언어 팩(이슈 #525) 화면용 — 동봉 모델(SenseVoice zh-en-ja-ko-yue)이 받는 값이지만 이 앱에서 정확도는 실측하지 않았다 */
+export const SPEECH_LANGUAGES = ['auto', 'ko', 'en', 'zh'] as const
 export type SpeechLanguage = (typeof SPEECH_LANGUAGES)[number]
 
 export function isSpeechLanguage(value: unknown): value is SpeechLanguage {
   return (SPEECH_LANGUAGES as readonly unknown[]).includes(value)
 }
 
-/** 쓸 언어 힌트 — 설정에 고른 값이 없으면 화면 언어 (힌트가 ko 여도 영어 말은 영어로 적힌다 — 실측 2/2) */
+/** 쓸 언어 힌트 — 설정에 고른 값이 없으면 화면 언어 (힌트가 ko 여도 영어 말은 영어로 적힌다 — 실측 2/2).
+ *  화면 언어가 언어 팩이면(이슈 #525) zh 계열(zh-CN·zh-TW…)은 zh, 모르는 언어는 auto */
 export function speechLanguage(settings: { speechLanguage?: SpeechLanguage; language: Language }): SpeechLanguage {
-  return settings.speechLanguage ?? settings.language
+  if (settings.speechLanguage) return settings.speechLanguage
+  const { language } = settings
+  if (isBuiltinLanguage(language)) return language
+  return /^zh(?:-|$)/.test(language) ? 'zh' : 'auto'
 }
 
 /** unavailable: 엔진·모델 파일을 못 쓴다 (reason) · ready: 받아쓸 수 있다 (엔진은 처음 쓸 때 뜬다) · starting: 엔진이 뜨는 중.

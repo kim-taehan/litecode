@@ -147,7 +147,7 @@ export function FeaturesPage({ initialExpanded = undefined, initialQuery = '' }:
             </div>
             <OptionSelect<SpeechLanguage>
               value={speechLanguage(settings)}
-              options={[{ id: 'auto', label: t('settings.speechLanguage.auto') }, ...LANGUAGES]}
+              options={[{ id: 'auto', label: t('settings.speechLanguage.auto') }, ...LANGUAGES, { id: 'zh', label: '中文' }]}
               onChange={(next) => void updateSettings({ speechLanguage: next }).then(() => setError(undefined), () => setError(t('settings.saveError')))}
             />
           </div>

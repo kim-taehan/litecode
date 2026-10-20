@@ -23,6 +23,16 @@ export const EXTENSION_LIMITS = {
   /** 진입 HTML 을 읽어 화면에 보내는 크기 (이슈 #511, readEntry). 근거: 한 파일짜리 HTML(인라인 스크립트·스타일)은 보통 수백 KB 다 — 이 글은 IPC 로 한 번,
    *  iframe srcdoc 에 base64(약 1.33배)로 한 번 더 실리므로 파일 미리보기의 HTML 상한(1MB)의 두 배에서 멈춘다 */
   entryBytes: 2 * MB,
+  // 언어 팩 (이슈 #525) — 번들(JSON)은 부팅·설치 검사·언어 전환 때 메모리로 읽고, 화면에 IPC 로 한 번 보낸다.
+  // 근거(2026-10-20 실측): 내장 사전은 1309키, JSON 으로 ko 85KB·en 77KB, 가장 긴 값 745자(en). 한자는 UTF-8 3바이트라 같은 키 수의 중국어도 수백 KB 안이다
+  /** 번들 파일 크기 — 내장 사전 JSON 의 약 12배 */
+  localeBytes: 1 * MB,
+  /** 번들 맨 위 키 수 — 지금 키 수의 약 4배(키가 늘어날 여지). 넘으면 번들을 통째로 거절한다 */
+  localeKeys: 5000,
+  /** 값 하나의 글자 수 — 가장 긴 문구의 약 2.7배. 넘는 값은 버린다(그 키는 en 으로 보인다) */
+  localeValueLength: 2000,
+  /** manifest 의 locale.label — 설정 > 일반 언어 드롭다운의 한 줄 */
+  localeLabelLength: 40,
 }
 
 export type ExtensionLimits = typeof EXTENSION_LIMITS

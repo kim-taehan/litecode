@@ -9,9 +9,9 @@ import { useT } from './settingsStore.ts'
 // 패널 확장 (이슈 #511, 시안 _workspace/mock-extension-panel Panel) — 켜 둔 정상 확장이 있으면 구분선 + 소제목 "확장" 아래에 퍼즐 아이콘 + 이름.
 // 누르면 그 확장 탭(이미 있으면 그 탭). 터미널이 꺼져 있어도 켜 둔 확장이 있으면 메뉴를 보인다.
 
-/** `+` 메뉴에 나열할 확장 — 켜 둔 정상(on) 확장만, id 순 */
+/** `+` 메뉴에 나열할 확장 — 켜 둔 정상(on) 패널 확장만, id 순. 언어 팩(이슈 #525)은 열 것이 없어 빠진다 */
 export function menuExtensions(extensions: readonly ExtensionSummary[]): ExtensionSummary[] {
-  return extensions.filter((extension) => extension.state === 'on').sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return extensions.filter((extension) => extension.state === 'on' && extension.type !== 'locale').sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 }
 
 export function TabAddMenu({

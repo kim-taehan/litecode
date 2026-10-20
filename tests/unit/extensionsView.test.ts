@@ -42,6 +42,12 @@ const PROBLEMS: { [C in ExtensionProblem['code']]: Extract<ExtensionProblem, { c
   'permissions-invalid': { code: 'permissions-invalid', params: {} },
   'entry-missing': { code: 'entry-missing', params: { entry: 'index.js' } },
   'id-mismatch': { code: 'id-mismatch', params: { folder: 'old-name', id: 'new-name' } },
+  'type-invalid': { code: 'type-invalid', params: { value: 'theme' } },
+  'locale-invalid': { code: 'locale-invalid', params: { field: 'locale.language', value: 'zh_CN' } },
+  'locale-reserved': { code: 'locale-reserved', params: { value: 'ko' } },
+  'locale-unexpected': { code: 'locale-unexpected', params: {} },
+  'locale-too-large': { code: 'locale-too-large', params: { bytes: 2 * 1024 * 1024, limit: 1024 * 1024 } },
+  'locale-unreadable': { code: 'locale-unreadable', params: { message: 'not a JSON object' } },
 }
 
 const FAILURES: { [C in ExtensionStoreFailure['code']]: Extract<ExtensionStoreFailure, { code: C }> } = {
@@ -59,6 +65,8 @@ const FAILURES: { [C in ExtensionStoreFailure['code']]: Extract<ExtensionStoreFa
   'entry-unsafe': { code: 'entry-unsafe', params: { entry: 'index.html' } },
   'entry-too-large': { code: 'entry-too-large', params: { bytes: 3 * 1024 * 1024, limit: 2 * 1024 * 1024 } },
   'entry-unreadable': { code: 'entry-unreadable', params: { message: 'ENOENT' } },
+  'locale-unavailable': { code: 'locale-unavailable', params: { language: 'zh-CN' } },
+  'locale-unreadable': { code: 'locale-unreadable', params: { message: 'not a JSON object' } },
 }
 
 const UNSAFE: Record<UnsafePathReason, true> = { empty: true, nul: true, absolute: true, drive: true, backslash: true, parent: true }
