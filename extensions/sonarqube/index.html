@@ -31,7 +31,7 @@ button:disabled{opacity:.5;cursor:default}
 .gate.ok{background:var(--ok-bg);color:var(--ok)}
 .gate.bad{background:var(--bad-bg);color:var(--bad)}
 .gate b{font-size:14px}
-.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px}
 .metric{padding:10px;border:1px solid var(--line);border-radius:10px}
 .metric span{display:block;font-size:11.5px;color:var(--sub)}
 .metric b{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
@@ -255,7 +255,7 @@ async function loadResults() {
     }
     const [gate, measures, issues] = await Promise.all([
       api(`/api/qualitygates/project_status?projectKey=${q}`),
-      api(`/api/measures/component?component=${q}&metricKeys=bugs,vulnerabilities,coverage,duplicated_lines_density`),
+      api(`/api/measures/component?component=${q}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density`),
       api(`/api/issues/search?componentKeys=${q}&resolved=false&ps=100&s=SEVERITY&asc=false`),
     ])
     const values = Object.fromEntries((measures?.component?.measures ?? []).map((m) => [m.metric, m.value]))
@@ -468,7 +468,9 @@ function fixPrompt(issues, prefix) {
     const [label] = SEVERITY[issue.severity] || ['낮음']
     return `- \`${file}${issue.line ? `:${issue.line}` : ''}\` — [${TYPE[issue.type] || '이슈'} · ${label}]${issue.rule ? ` (규칙 ${issue.rule})` : ''} ${issue.message}`
   })
-  return [`SonarQube 가 찾은 이슈${issues.length > 1 ? ` ${issues.length}개` : ''}를 고쳐 주세요.`, '', ...lines, '', '고친 뒤 같은 규칙에 걸리는 곳이 더 있는지도 봐 주세요.'].join('\n')
+  // 고치는 방법(해당 부분만·동작 그대로 — YAGNI)은 확장이 함께 설치하는 sonarqube-fix 스킬에 있다 (이슈 #561).
+  // `/sonarqube-fix` 로 시작하면 앱이 스킬 본문을 결정적으로 붙여 보낸다 — 모델이 스킬을 고를지에 기대지 않는다
+  return [`/sonarqube-fix SonarQube 가 찾은 이슈${issues.length > 1 ? ` ${issues.length}개` : ''}를 고쳐 주세요.`, '', ...lines].join('\n')
 }
 
 async function askFix(issues, prefix) {
@@ -503,6 +505,8 @@ function results() {
       el('div', { class: 'metrics' }, [
         el('div', { class: 'metric' }, el('span', {}, '버그'), el('b', {}, fmt(v.bugs))),
         el('div', { class: 'metric' }, el('span', {}, '취약점'), el('b', {}, fmt(v.vulnerabilities))),
+        // 열린 이슈 = 버그 + 취약점 + 코드 냄새 — 코드 냄새가 없으면 낮음 이슈들이 어디에도 안 세어진 것처럼 보였다
+        el('div', { class: 'metric' }, el('span', {}, '코드 냄새'), el('b', {}, fmt(v.code_smells))),
         el('div', { class: 'metric' }, el('span', {}, '커버리지'), el('b', {}, fmt(v.coverage, '%'))),
         el('div', { class: 'metric' }, el('span', {}, '중복'), el('b', {}, fmt(v.duplicated_lines_density, '%'))),
       ]),

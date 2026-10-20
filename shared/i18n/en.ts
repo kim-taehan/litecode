@@ -513,6 +513,7 @@ export const en = {
   'extensions.problem.locale-unreadable': 'Could not read the language pack bundle',
   'extensions.problem.server-invalid': 'The server declaration (server) is invalid',
   'extensions.problem.server-mismatch': 'The server declaration (server) and the server permission must come together',
+  'extensions.problem.skills-invalid': 'Skills (skills) must be folder paths inside the extension, named with lowercase letters, digits and -',
   'extensions.problem.unknown': 'Unknown reason',
   'extensions.unsafePath.empty': 'Contains an empty name',
   'extensions.unsafePath.nul': 'Contains a NUL character',

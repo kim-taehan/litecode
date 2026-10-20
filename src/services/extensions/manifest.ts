@@ -4,6 +4,7 @@ import { isBuiltinLanguage, isLanguage } from '../../../shared/i18n/index.ts'
 import { EXTENSION_LIMITS, type ExtensionLimits } from './limits.ts'
 import { isEntryPath } from './paths.ts'
 import { parseServerDeclaration } from './server.ts'
+import { SKILL_NAME } from './skills.ts'
 
 // extension.json 검증 (이슈 #478, 설계 3절 필드 표). 사유를 모두 모아 돌려준다 — 첫 사유에서 멈추지 않는다.
 // 모르는 필드는 무시하지 않고 거절한다 (`permisions` 같은 오타가 조용히 넘어가면 권한 선언이 빠진 채 설치된다)
@@ -12,7 +13,7 @@ import { parseServerDeclaration } from './server.ts'
 export const MANIFEST_FILE = 'extension.json'
 
 const REQUIRED = ['id', 'name', 'description', 'version', 'entry'] as const
-const KNOWN: readonly string[] = [...REQUIRED, 'details', 'litecode', 'permissions', 'type', 'locale', 'server']
+const KNOWN: readonly string[] = [...REQUIRED, 'details', 'litecode', 'permissions', 'type', 'locale', 'server', 'skills']
 const LOCALE_KNOWN: readonly string[] = ['language', 'label']
 /** 폴더 이름과 설정 키로 쓰이므로 엄격하게 */
 const ID = /^[a-z0-9-]{3,40}$/
@@ -84,6 +85,17 @@ export function checkManifest(
         problems.push({ code: 'permission-unknown', params: suggestion ? { value, suggestion } : { value } })
       }
     }
+  }
+
+  // 스킬 (이슈 #561) — 확장 폴더 안의 폴더 경로 목록, 폴더 이름이 스킬 이름. 언어 팩은 담지 못한다
+  if (raw.skills !== undefined) {
+    const list: unknown = raw.skills
+    if (!Array.isArray(list) || type === 'locale') problems.push({ code: 'skills-invalid', params: { value: shown(list) } })
+    else
+      for (const value of list) {
+        const dir = typeof value === 'string' ? value.replace(/\/+$/, '') : ''
+        if (!isEntryPath(dir) || !SKILL_NAME.test(dir.split('/').pop() ?? '')) problems.push({ code: 'skills-invalid', params: { value: shown(value) } })
+      }
   }
 
   // 내장 서버 (이슈 #537) — 선언과 server 권한은 같이만. 선언은 앱이 그대로 띄우는 것이라 검사 결과(정규화된 값)를 manifest 에 싣는다
