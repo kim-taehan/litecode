@@ -22,7 +22,7 @@ import type { RemoteStatus } from '../src/services/remote.ts'
 import type { SpeechLanguage, SpeechReply, SpeechStatus, SpeechStreamEvent, SpeechStreamOpened } from './speech.ts'
 import type { UpdateStatus } from './updates.ts'
 import type { GitAction, GitBranch, GitCommit, GitIgnored, GitLastCommit, GitLogPage, GitLogPageQuery, GitResult, GitStash, GitView } from './git.ts'
-import type { ExtensionCallResult, ExtensionEntryResult, ExtensionInstallResult, ExtensionLocaleResult, ExtensionPickResult, ExtensionResult, ExtensionSummary } from './extensions.ts'
+import type { ExtensionCallResult, ExtensionEntryResult, ExtensionInstallResult, ExtensionLocaleResult, ExtensionPickResult, ExtensionResult, ExtensionServerOptions, ExtensionSummary } from './extensions.ts'
 
 export type { ProviderConfig, ProviderSummary, ProviderInput, ModelCatalogEntry } from '../src/services/providers.ts'
 export type { Mode } from './modes.ts'
@@ -259,6 +259,8 @@ export const Channel = {
   EXTENSIONS_READ_LOCALE: 'extensions:read-locale',
   /** 화면 → 메인 (id, on) → ExtensionResult — 곧바로 올리고 내린다 */
   EXTENSIONS_SET_ENABLED: 'extensions:set-enabled',
+  /** 화면 → 메인 (id, options) → ExtensionResult — 내장 서버 옵션 (이슈 #565) */
+  EXTENSIONS_SET_SERVER_OPTIONS: 'extensions:set-server-options',
   /** 메인 → 화면 (ExtensionSummary[]) — 확장 목록이 바뀌었다 */
   EXTENSIONS_CHANGED: 'extensions:changed',
   /** 화면 → 메인 (id, method, params, directory) → ExtensionCallResult — 확장 ↔ 앱 통로 (이슈 #536). id 는 화면이 iframe 출처로 정한다,
@@ -536,6 +538,8 @@ export interface LitecodeBridge {
   cancelExtension(token: string): Promise<ExtensionResult>
   removeExtension(id: string): Promise<ExtensionResult>
   setExtensionEnabled(id: string, on: boolean): Promise<ExtensionResult>
+  /** 서버 옵션 (앱 켤 때 같이 띄우기 · 끌 때 같이 내리기 — 이슈 #565) */
+  setExtensionServerOptions(id: string, options: ExtensionServerOptions): Promise<ExtensionResult>
   /** 확장 탭의 본문 (이슈 #511) — 켜져 있지 않거나 읽지 못하면 failure */
   readExtensionEntry(id: string): Promise<ExtensionEntryResult>
   /** 언어 팩의 사전 (이슈 #525) — 그 언어의 켜진 정상 팩이 없거나 읽지 못하면 failure */

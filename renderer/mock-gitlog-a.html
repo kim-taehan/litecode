@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>기록 시안 A — 다른 브랜치 선 제거 (단일 레인)</title>
+<style>
+  :root {
+    --bg: #ffffff; --bg-sidebar: #f5f6f7;
+    --text: #0f1115; --text-secondary: #61666b; --text-tertiary: #81858c; --text-caption: #adb2b8;
+    --border: rgba(0,0,0,.1); --border-light: rgba(0,0,0,.06); --border-strong: rgba(0,0,0,.16);
+    --fill-hover: rgba(38,49,72,.06); --fill-active: rgba(38,49,72,.1);
+    --accent: #4176e6; --accent-soft: #e4edfd;
+    --module: #f5f6f7; --surface: #ffffff;
+    --lane0: #4d9e45;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: #eceef0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+    color: var(--text); padding: 14px;
+  }
+  .caption {
+    max-width: 787px; margin: 0 auto 10px; font-size: 12px; color: var(--text-secondary);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .caption b { color: var(--text); font-size: 13px; }
+  .window {
+    max-width: 787px; margin: 0 auto; background: var(--bg); border-radius: 10px;
+    box-shadow: 0 0 0 0.5px var(--border), 0 8px 24px rgba(0,0,0,.08); overflow: hidden;
+  }
+  /* 패널 상단 툴바 (파일 | Git | +) */
+  .chrome {
+    display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: .5px solid var(--border-light);
+  }
+  .chrome .tab {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 7px;
+    font-size: 13px; color: var(--text-secondary);
+  }
+  .chrome .tab.on { background: var(--bg-sidebar); color: var(--text); }
+  .chrome .tab .cnt {
+    background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600;
+    border-radius: 999px; padding: 0 6px; line-height: 16px;
+  }
+  .chrome .plus { color: var(--text-caption); font-size: 16px; padding: 0 8px; }
+  .chrome .right { margin-left: auto; display: flex; gap: 10px; color: var(--text-caption); }
+  svg { display: block; }
+  /* 브랜치 줄 */
+  .branch-row {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+  }
+  .branch-row .name { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+  .branch-row .name svg { color: var(--text-secondary); }
+  .branch-row .actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .btn {
+    border: .5px solid var(--border); border-radius: 999px; background: var(--surface);
+    font: inherit; font-size: 12px; color: var(--text); padding: 4px 12px; cursor: pointer;
+  }
+  .icon-btn {
+    border: 0; background: none; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 6px;
+  }
+  .icon-btn:hover { background: var(--fill-hover); }
+  /* 탭 줄 (변경 | 기록) */
+  .tabs-row { display: flex; align-items: center; padding: 2px 12px 8px; }
+  .seg { display: inline-flex; background: var(--bg-sidebar); border-radius: 8px; padding: 2px; }
+  .seg button {
+    border: 0; background: none; font: inherit; font-size: 13px; color: var(--text-secondary);
+    padding: 3px 14px; border-radius: 6px; cursor: pointer;
+  }
+  .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 0 0 .5px var(--border); }
+  .tabs-row .icon-btn { margin-left: auto; }
+  /* 검색 */
+  .search {
+    margin: 0 12px; display: flex; align-items: center; gap: 8px; background: var(--module);
+    border-radius: 9px; padding: 6px 10px; color: var(--text-caption);
+  }
+  .search .ph { flex: 1; color: var(--text-caption); font-size: 13px; }
+  .search .rx { font-size: 11px; letter-spacing: 1px; color: var(--text-tertiary); }
+  .search .cc {
+    font-size: 11px; font-weight: 600; border-radius: 5px; padding: 1px 7px;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  /* 필터 알약 */
+  .pills { display: flex; gap: 6px; padding: 8px 12px 10px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; border: .5px solid var(--border);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--text-secondary);
+  }
+  .pill b { color: var(--text); font-weight: 500; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill .car { color: var(--text-caption); font-size: 10px; }
+  /* 커밋 목록 */
+  .list { list-style: none; padding: 0; }
+  .row {
+    display: flex; gap: 8px; height: 46px; padding-right: 16px; border-bottom: .5px solid var(--border-light);
+    align-items: stretch;
+  }
+  .graph { flex: none; width: 29px; position: relative; }
+  .graph svg { position: absolute; inset: 0; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .subject {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px;
+  }
+  .row.merge .subject { color: var(--text-tertiary); }
+  .chips { flex: none; display: flex; gap: 4px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 3px; max-width: 150px; padding: 1px 7px;
+    border-radius: 999px; background: var(--module); font-size: 10.5px; line-height: 15px; color: var(--text-secondary);
+  }
+  .chip svg { flex: none; }
+  .chip span.txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-caption); }
+  .note {
+    max-width: 787px; margin: 10px auto 0; font-size: 12px; color: var(--text-secondary);
+    background: var(--accent-soft); border-radius: 8px; padding: 8px 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="caption"><b>시안 A</b> 다른 브랜치 선(파란 레인) 제거 — 자기 브랜치 한 줄만 남김</div>
+  <div class="window">
+    <div class="chrome">
+      <span class="tab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e0a13a" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>파일</span>
+      <span class="tab on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-9 5"/></svg>Git<span class="cnt">5</span></span>
+      <span class="plus">+</span>
+      <span class="right">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </span>
+    </div>
+    <div class="branch-row">
+      <span class="name">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-9 5"/></svg>
+        feat_462_turn_tab_jump
+      </span>
+      <span class="actions">
+        <button class="btn">가져오기</button>
+        <button class="btn">올리기</button>
+        <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 10.9 5M20 4v7h-7"/></svg></button>
+      </span>
+    </div>
+    <div class="tabs-row">
+      <span class="seg"><button>변경</button><button class="on">기록</button></span>
+      <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8 8 0 10.9 5M20 4v7h-7"/></svg></button>
+    </div>
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span class="ph">텍스트 또는 해시</span>
+      <span class="rx">. *</span>
+      <span class="cc">Cc</span>
+    </div>
+    <div class="pills">
+      <span class="pill">브랜치 <b>feat_462_turn_ta…</b><span class="car">⌄</span></span>
+      <span class="pill">사용자 <span class="car">⌄</span></span>
+      <span class="pill">날짜 전체 <span class="car">⌄</span></span>
+      <span class="pill">경로 <span class="car">⌄</span></span>
+    </div>
+    <ol class="list" id="list"></ol>
+  </div>
+  <div class="note">변경: 그래프가 브랜치 한 줄(13px 레인 1개)만 그려서 분기·머지 선이 옆으로 튀어나오던 영역이 사라집니다. 줄 여백도 120px → 29px으로 좁아져 제목이 더 보여요. 머지 줄은 지금처럼 회색 처리.</div>
+
+<script>
+  const rows = [
+    { s: "Turn tab: show which conver…", chip: "origin & feat_462_turn_ta…", m: "kimtaehan · 오늘 AM 10:17" },
+    { s: "CI: derive next version by numeric sort of…", chip: "origin & dev", m: "kimtaehan · 오늘 AM 9:43" },
+    { s: "Merge pull request #459 from kim-taehan/feat_456_turn_t…", m: "kimtaehan · 오늘 AM 9:41", merge: 1 },
+    { s: "Turn tab: keep a single tab a…", chip: "origin & feat_456_turn_ta…", m: "kimtaehan · 오늘 AM 9:39" },
+    { s: "CI: compute next version from gh release list (GraphQL, n…", m: "kimtaehan · 오늘 AM 9:36" },
+    { s: "Merge pull request #455 from kim-taehan/feat_444_toggl…", m: "kimtaehan · 오늘 AM 9:29", merge: 1 },
+    { s: "Right panel: add ⌘B/Ctrl+B t…", chip: "feat_444_toggle_right_panel", m: "kimtaehan · 오늘 AM 9:27" },
+    { s: "CI: fetch tags in next-version, checkout before gh release …", m: "kimtaehan · 오늘 AM 9:27" },
+    { s: "Desktop MCP: new_conversation tells the model to use it …", m: "kimtaehan · 오늘 AM 9:24" },
+    { s: "Notifications: separate external (desktop notification + do…", m: "kimtaehan · 오늘 AM 9:22" },
+    { s: "Plus popups: remove add-server (MCP) and add-hook for…", m: "kimtaehan · 오늘 AM 9:22" },
+    { s: "CI: pass --publish never to electron-builder in release wor…", m: "kimtaehan · 오늘 AM 9:19" },
+    { s: "Merge pull request #448 from kim-taehan/fix_447_release…", m: "kimtaehan · 오늘 AM 9:18", merge: 1 },
+    { s: "Release: first auto release fal…", chip: "origin & fix_447_release_…", m: "kimtaehan · 오늘 AM 9:17" },
+  ];
+  const BRANCH_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-9 5"/></svg>';
+  const list = document.getElementById("list");
+  const LANE_X = 15, GREEN = "#4d9e45";
+  for (const r of rows) {
+    const li = document.createElement("li");
+    li.className = "row" + (r.merge ? " merge" : "");
+    // 단일 레인 — 46px 줄마다 점 하나, 세로선은 연속
+    const svg =
+      '<svg width="29" height="46" viewBox="0 0 29 46">' +
+      '<line x1="15" y1="0" x2="15" y2="46" stroke="' + GREEN + '" stroke-width="1.5"/>' +
+      '<circle cx="15" cy="23" r="3.5" fill="' + GREEN + '"/>' +
+      "</svg>";
+    li.innerHTML =
+      '<span class="graph">' + svg + "</span>" +
+      '<div class="main"><div class="line"><span class="subject">' + r.s + "</span>" +
+      (r.chip ? '<span class="chips"><span class="chip" style="color:' + GREEN + '">' + BRANCH_SVG + '<span class="txt">' + r.chip + "</span></span></span>" : "") +
+      '</div><span class="meta">' + r.m + "</span></div>";
+    list.appendChild(li);
+  }
+</script>
+</body>
+</html>

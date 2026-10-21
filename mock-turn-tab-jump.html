@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>턴 작업 탭 — 그 턴의 대화로 이동 (시안)</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --text: #0f1115;
+  --text-secondary: #61666b;
+  --text-tertiary: #81858c;
+  --text-caption: #adb2b8;
+  --border-light: rgba(0, 0, 0, 0.06);
+  --fill-hover: rgba(38, 49, 72, 0.06);
+  --fill-active: rgba(38, 49, 72, 0.1);
+  --fill-selector: #f5f6f7;
+  --accent: #4176e6;
+  --accent-soft: #e4edfd;
+  --ok: #16a34a;
+  --danger: #dc2626;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  background: #eceef0;
+  color: var(--text);
+  padding: 28px 20px 56px;
+}
+.page { max-width: 640px; margin: 0 auto; }
+h1 { font-size: 16px; margin: 0 0 4px; }
+.sub { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 22px; }
+
+.block { margin-bottom: 26px; }
+.block__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.badge { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; flex: none; }
+.badge--other { background: var(--accent-soft); color: #2b5fd9; }
+.badge--here { background: var(--fill-selector); color: var(--text-secondary); }
+.block__cap { font-size: 12px; color: var(--text-secondary); }
+.block__note { font-size: 12px; color: var(--text-secondary); margin: 8px 2px 0; line-height: 1.7; }
+.block__note b { color: var(--text); font-weight: 600; }
+
+/* ── 패널 (오른쪽 패널 폭 기준 ~440) ── */
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* 탭 줄 */
+.strip {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+.chips { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.tab {
+  position: relative;
+  flex: 0 1 auto;
+  display: flex; align-items: center; gap: 5px;
+  min-width: 80px; max-width: 170px;
+  height: 28px;
+  padding: 0 24px 0 10px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.tab--fixed { flex: none; min-width: 0; padding-right: 10px; }
+.tab.active { background: var(--fill-active); color: var(--text); }
+.tab svg { flex: none; }
+.tab__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+.count {
+  flex: none; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--accent-soft); color: #2b5fd9;
+  font-size: 11px; line-height: 16px; text-align: center;
+}
+.chrome { display: flex; align-items: center; gap: 4px; flex: none; color: var(--text-tertiary); }
+
+/* ── 턴 작업 탭 본문 (turnTab.css 그대로) ── */
+.turn-tab { display: flex; flex-direction: column; min-height: 240px; }
+.turn-tab__head {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+.turn-tab__dot {
+  flex: none; width: 8px; height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  background: var(--accent);
+}
+.turn-tab__dot--done { border-color: var(--ok); background: var(--ok); }
+.turn-tab__title {
+  min-width: 0; overflow: hidden;
+  color: var(--text); font-weight: 600;
+  text-overflow: ellipsis; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── NEW: 대화 컨텍스트 줄 ── */
+.turn-tab__conv {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%;
+  min-height: 34px;
+  margin: 0;
+  padding: 0 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-light);
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.turn-tab__conv:hover:not(:disabled) { background: var(--fill-hover); color: var(--text); }
+.turn-tab__conv:disabled { cursor: default; }
+.turn-tab__conv-label { flex: none; color: var(--text-tertiary); font-size: 11.5px; }
+.turn-tab__conv-name {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500;
+}
+.turn-tab__conv--other .turn-tab__conv-name { color: #2b5fd9; }
+.turn-tab__conv-arrow { flex: none; color: var(--text-tertiary); }
+.turn-tab__conv--other .turn-tab__conv-arrow { color: #2b5fd9; }
+.turn-tab__conv:disabled .turn-tab__conv-arrow { display: none; }
+.turn-tab__conv:disabled .turn-tab__conv-name { color: var(--text-tertiary); }
+.mark-new {
+  flex: none;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+  color: #fff; background: #2b5fd9;
+  border-radius: 999px; padding: 2px 7px;
+}
+
+/* ── 작업 줄 (chat.css .turn-row 그대로) ── */
+.turn-tab__body { flex: 1 1 auto; padding: 14px; }
+.turn__work { display: flex; flex-direction: column; gap: 6px; }
+.turn-row { min-width: 0; color: var(--text-tertiary); font-size: 13px; }
+.turn-row__line {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; min-width: 0; min-height: 24px;
+  padding: 0; border: none; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: default;
+}
+.turn-row__icon { flex: none; }
+.turn-row__title { flex: none; color: var(--text-secondary); }
+.turn-row__dot { flex: none; width: 2px; height: 2px; margin: 0 2px; border-radius: 1px; background: var(--text-caption); }
+.turn-row__summary {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap;
+  mask-image: linear-gradient(to right, black calc(100% - 48px), transparent);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 48px), transparent);
+}
+.turn-row__text {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>“턴 작업” 탭 — 그 턴이 어느 대화인지 + 그 대화로 이동</h1>
+  <p class="sub">여러 대화가 함께 도는 사이, 탭 한 줄에서 대화 제목을 보고 누르면 그 대화로 건너뛴다</p>
+
+  <!-- ───────── 다른 대화 (이동 가능) ───────── -->
+  <div class="block">
+    <div class="block__head">
+      <span class="badge badge--other">다른 대화에서 도는 중</span>
+      <span class="block__cap">줄을 누르면 그 대화로 이동</span>
+    </div>
+    <div class="panel">
+      <div class="strip">
+        <div class="chips">
+          <div class="tab tab--fixed">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-linejoin="round"><path d="M1.75 4.25C1.75 3.42 2.42 2.75 3.25 2.75H6.25L7.75 4.25H12.75C13.58 4.25 14.25 4.92 14.25 5.75V11.75C14.25 12.58 13.58 13.25 12.75 13.25H3.25C2.42 13.25 1.75 12.58 1.75 11.75Z"/></svg>
+            <span class="tab__title">파일</span>
+          </div>
+          <div class="tab tab--fixed">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5V11M11.5 7C11.5 9.5 4.5 8.5 4.5 11"/></svg>
+            <span class="tab__title">Git</span><span class="count">4</span>
+          </div>
+          <div class="tab active">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z"/></svg>
+            <span class="tab__title">턴 작업</span>
+          </div>
+          <div class="tab" style="border:none;color:var(--text-tertiary)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5V12.5M3.5 8H12.5"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="turn-tab" data-state="running">
+        <div class="turn-tab__head">
+          <span class="turn-tab__dot" aria-hidden="true"></span>
+          <strong class="turn-tab__title">작업 중 · 1분 55초</strong>
+        </div>
+        <button type="button" class="turn-tab__conv turn-tab__conv--other">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;color:var(--text-tertiary)">
+            <path d="M3 3.25H13C13.8 3.25 14.25 3.7 14.25 4.5V9C14.25 9.8 13.8 10.25 13 10.25H7.5L4.5 12.75V10.25H3C2.2 10.25 1.75 9.8 1.75 9V4.5C1.75 3.7 2.2 3.25 3 3.25Z"/>
+          </svg>
+          <span class="turn-tab__conv-label">대화</span>
+          <span class="turn-tab__conv-name">PR #459 본문 수리</span>
+          <span class="mark-new">NEW</span>
+          <span class="turn-tab__conv-arrow" aria-hidden="true">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8H12M9 5L12 8L9 11"/></svg>
+          </span>
+        </button>
+        <div class="turn-tab__body">
+          <div class="turn__work">
+            <div class="turn-row">
+              <div class="turn-row__line">
+                <svg class="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75C5.38 1.75 3.5 3.6 3.5 6C3.5 7.6 4.35 8.6 5.25 9.4V11.25H10.75V9.4C11.65 8.6 12.5 7.6 12.5 6C12.5 3.6 10.62 1.75 8 1.75Z"/><path d="M6 13.75H10"/></svg>
+                <span class="turn-row__title">생각</span>
+                <span class="turn-row__dot" aria-hidden="true"></span>
+                <span class="turn-row__summary">That explains the "no record" state in the user's session…</span>
+              </div>
+            </div>
+            <div class="turn-row">
+              <div class="turn-row__line">
+                <svg class="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M4.5 6L6.5 8L4.5 10M8 10.5H11"/></svg>
+                <span class="turn-row__title">Bash</span>
+                <span class="turn-row__dot" aria-hidden="true"></span>
+                <span class="turn-row__summary">gh pr view 459 --json baseRefName,title</span>
+              </div>
+            </div>
+            <div class="turn-row">
+              <div class="turn-row__line">
+                <svg class="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.75H9.5L12.5 4.75V14.25H4Z"/><path d="M9.5 1.75V4.75H12.5"/></svg>
+                <span class="turn-row__title">Edit</span>
+                <span class="turn-row__dot" aria-hidden="true"></span>
+                <span class="turn-row__summary">renderer/ChatTurn.tsx</span>
+              </div>
+            </div>
+            <p class="turn-row__text">PR은 생성됐는데 백틱이 셸에 먹혀 본문이 깨졌네요. 파일로 올려서 본문 수리합니다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="block__note">
+      <b>NEW 줄</b>(머리 아래) — 이 턴이 속한 대화 제목. <b>누르면 그 대화로 이동</b> (서로 다른 대화·프로젝트에서 턴이 함께 도는 중일 때)
+    </p>
+  </div>
+
+  <!-- ───────── 지금 보는 대화 ───────── -->
+  <div class="block">
+    <div class="block__head">
+      <span class="badge badge--here">지금 보는 대화</span>
+      <span class="block__cap">같은 제목을 보이지만 이동 버튼 없음</span>
+    </div>
+    <div class="panel">
+      <div class="strip">
+        <div class="chips">
+          <div class="tab tab--fixed">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-linejoin="round"><path d="M1.75 4.25C1.75 3.42 2.42 2.75 3.25 2.75H6.25L7.75 4.25H12.75C13.58 4.25 14.25 4.92 14.25 5.75V11.75C14.25 12.58 13.58 13.25 12.75 13.25H3.25C2.42 13.25 1.75 12.58 1.75 11.75Z"/></svg>
+            <span class="tab__title">파일</span>
+          </div>
+          <div class="tab tab--fixed">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5V11M11.5 7C11.5 9.5 4.5 8.5 4.5 11"/></svg>
+            <span class="tab__title">Git</span><span class="count">4</span>
+          </div>
+          <div class="tab active">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z"/></svg>
+            <span class="tab__title">턴 작업</span>
+          </div>
+          <div class="tab" style="border:none;color:var(--text-tertiary)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5V12.5M3.5 8H12.5"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="turn-tab" data-state="done">
+        <div class="turn-tab__head">
+          <span class="turn-tab__dot turn-tab__dot--done" aria-hidden="true"></span>
+          <strong class="turn-tab__title">완료 · 1분 15초</strong>
+        </div>
+        <div class="turn-tab__conv" role="note">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;color:var(--text-tertiary)">
+            <path d="M3 3.25H13C13.8 3.25 14.25 3.7 14.25 4.5V9C14.25 9.8 13.8 10.25 13 10.25H7.5L4.5 12.75V10.25H3C2.2 10.25 1.75 9.8 1.75 9V4.5C1.75 3.7 2.2 3.25 3 3.25Z"/>
+          </svg>
+          <span class="turn-tab__conv-label">대화</span>
+          <span class="turn-tab__conv-name">PR #459 본문 수리</span>
+        </div>
+        <div class="turn-tab__body">
+          <div class="turn__work">
+            <div class="turn-row">
+              <div class="turn-row__line">
+                <svg class="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75C5.38 1.75 3.5 3.6 3.5 6C3.5 7.6 4.35 8.6 5.25 9.4V11.25H10.75V9.4C11.65 8.6 12.5 7.6 12.5 6C12.5 3.6 10.62 1.75 8 1.75Z"/><path d="M6 13.75H10"/></svg>
+                <span class="turn-row__title">생각</span>
+                <span class="turn-row__dot" aria-hidden="true"></span>
+                <span class="turn-row__summary">Let me check the PR state and the test result.</span>
+              </div>
+            </div>
+            <div class="turn-row">
+              <div class="turn-row__line">
+                <svg class="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M4.5 6L6.5 8L4.5 10M8 10.5H11"/></svg>
+                <span class="turn-row__title">Bash</span>
+                <span class="turn-row__dot" aria-hidden="true"></span>
+                <span class="turn-row__summary">gh pr view 459 --json baseRefName,headRefName,state</span>
+              </div>
+            </div>
+            <p class="turn-row__text">네, 정상입니다. 실물 테스트(진짜 앱 + 가짜 LLM)에서 “진행 줄 클릭 → 탭에 실시간 내용”이 통과했습니다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="block__note">
+      지금 보고 있는 대화의 턴이면 <b>화살표 없음</b> — 제목만 조용히 표시(어디서 왔는지 확인용)
+    </p>
+  </div>
+</div>
+</body>
+</html>

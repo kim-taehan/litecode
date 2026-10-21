@@ -288,6 +288,29 @@ export class ExtensionsService extends Service {
     })
   }
 
+  /** 서버 옵션 (startWithApp · stopWithApp) — 설정 > 기능의 확장 카드에서 고른다 (이슈 #565).
+   *  settings.extensionServers 에 저장하고 곧바로 서버 동기화. startWithApp 을 켜면 지금 바로 띄운다 (켜진 확장만) */
+  setServerOptions(id: string, options: ExtensionServerOptions): Promise<ExtensionResult> {
+    return this.enqueue(async (): Promise<ExtensionResult> => {
+      const entry = this.entries.find((item) => item.id === id)
+      if (!entry) return { ok: false, failure: { code: 'not-installed', params: { id } } }
+      const server = entry.manifest?.server
+      if (!server) return { ok: false, failure: { code: 'not-installed', params: { id } } }
+      try {
+        const { [id]: previous, ...others } = this.ctx.settings.get().extensionServers ?? {}
+        this.ctx.settings.set({ extensionServers: { ...others, [id]: { ...previous, ...options } } })
+      } catch (error) {
+        return ioFailed(error)
+      }
+      // 옵션이 바뀐 지금이 "앱을 켠 때"와 가장 가까운 순간 — startWithApp 을 켰으면 지금 확장(켜져 있어야) 바로 띄운다
+      if (options.startWithApp && this.state(entry, this.enabled(id)).state === 'on') {
+        this.servers.start(id, server, this.files.installedDir(id))
+      }
+      this.publish()
+      return { ok: true }
+    })
+  }
+
   /** 확장 ↔ 앱 통로 (이슈 #536) — id 는 화면이 iframe 출처로 정한 것. 켜진 정상 확장만, 메서드마다 manifest 권한을 본다. 던지지 않는다.
    *  owner 는 요청한 창(IPC event.sender) — 고르기 창을 거기 붙인다 (#538) */
   async call(id: string, method: string, params: unknown, project?: CallProject, owner?: unknown): Promise<ExtensionCallResult> {

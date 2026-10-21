@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>기록 그래프 — 위로 튀어나온 선 제거 (세부 시안)</title>
+<style>
+  :root {
+    --bg: #ffffff; --text: #0f1115; --text-tertiary: #81858c; --text-caption: #adb2b8;
+    --border-light: rgba(0,0,0,.06); --module: #f5f6f7;
+    --accent: #4176e6; --accent-soft: #e4edfd;
+    --lane0: #4d9e45; --lane1: #2f7de1; --danger: #e5484d;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: #eceef0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+    color: var(--text); padding: 14px;
+  }
+  .caption { max-width: 720px; margin: 0 auto 10px; font-size: 13px; color: var(--text-secondary, #61666b); }
+  .caption b { color: var(--text); font-size: 14px; }
+  .panel {
+    max-width: 720px; margin: 0 auto 14px; background: var(--bg); border-radius: 10px; overflow: hidden;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,.1), 0 6px 20px rgba(0,0,0,.06);
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12px; font-weight: 600;
+    border-bottom: .5px solid var(--border-light); background: var(--bg);
+  }
+  .panel-head .tag { font-size: 11px; font-weight: 600; border-radius: 5px; padding: 1px 7px; }
+  .tag.before { background: #fdecec; color: var(--danger); }
+  .tag.after { background: #e7f6ee; color: #2e7d4f; }
+  .list { list-style: none; padding: 0; }
+  .row { display: flex; align-items: stretch; height: 84px; border-bottom: .5px solid var(--border-light); position: relative; }
+  .gutter { flex: none; position: relative; }
+  .gutter svg { display: block; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding-right: 16px; }
+  .line { display: flex; align-items: baseline; gap: 8px; }
+  .subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+  .row.merge .subject { color: var(--text-tertiary); }
+  .chip {
+    flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 190px; padding: 1px 8px;
+    border-radius: 999px; background: var(--module); font-size: 12px; line-height: 17px; color: #61666b;
+  }
+  .chip svg { color: var(--lane1); }
+  .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { font-size: 12px; color: var(--text-caption); }
+  /* 빨간 표시 — 제거 대상 */
+  .zone {
+    position: absolute; border: 1.5px dashed var(--danger); border-radius: 6px; background: rgba(229,72,77,.05);
+    pointer-events: none;
+  }
+  .zone-label {
+    position: absolute; font-size: 12px; font-weight: 600; color: var(--danger); white-space: nowrap;
+  }
+  .note {
+    max-width: 720px; margin: 4px auto 0; font-size: 12px; color: #61666b;
+    background: var(--accent-soft); border-radius: 8px; padding: 8px 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="caption"><b>세부 시안</b> — 머지 곡선(파란 점선) 위로 아무 점 없이 뻗어 오른 파란 직선 구간을 제거. 2배 확대, 실제 기록 7줄.</div>
+
+  <div id="before"></div>
+  <div id="after"></div>
+  <div class="note"><b>제거 안:</b> 파란 선은 자기 브랜치의 커밋(점) 줄부터 아래로만 내려가고, 머지 곡선에 닿기 직전(점 없는 긴 기다림 구간)에서는 그린다. 곡선 이하(아래 방향)는 그대로 유지.</div>
+
+<script>
+  const W = 72, ROW = 84, MID = 42, S = 2.5, R = 6;
+  const X0 = 28, X1 = 52;
+  const GREEN = "#4d9e45", BLUE = "#2f7de1";
+  const BRANCH_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-9 5"/></svg>';
+  // [subject, meta, merge?, dotLane0, dotLane1, chip]
+  const rows = [
+    ["Right panel: add ⌘B/Ctrl+B t…", "kimtaehan · 오늘 AM 9:27", 0, 0, 1, "feat_444_toggle_right_panel"],
+    ["CI: fetch tags in next-version, checkout before gh releas…", "kimtaehan · 오늘 AM 9:27", 0, 1, 0, null],
+    ["Desktop MCP: new_conversation tells the model to use it …", "kimtaehan · 오늘 AM 9:24", 0, 1, 0, null],
+    ["Notifications: separate external (desktop notification + d…", "kimtaehan · 오늘 AM 9:22", 0, 1, 0, null],
+    ["Plus popups: remove add-server (MCP) and add-hook for…", "kimtaehan · 오늘 AM 9:22", 0, 1, 0, null],
+    ["CI: pass --publish never to electron-builder in release w…", "kimtaehan · 오늘 AM 9:19", 0, 1, 0, null],
+    ["Merge pull request #448 from kim-taehan/fix_447_release…", "kimtaehan · 오늘 AM 9:18", 1, 1, 0, null],
+  ];
+
+  function draw(mode) { // mode: 'before' | 'after'
+    let svg = `<svg width="${W}" height="${rows.length * ROW}" viewBox="0 0 ${W} ${rows.length * ROW}">`;
+    rows.forEach((r, i) => {
+      const y0 = i * ROW;
+      // lane0 (녹색) — 항상 통한다
+      svg += `<line x1="${X0}" y1="${y0}" x2="${X0}" y2="${y0 + ROW}" stroke="${GREEN}" stroke-width="${S}"/>`;
+      // lane1 (파랑)
+      if (i < 6) {
+        if (mode === "before") svg += `<line x1="${X1}" y1="${y0}" x2="${X1}" y2="${y0 + ROW}" stroke="${BLUE}" stroke-width="${S}"/>`;
+        // after: 줄 2~7(인덱스 1~5)엔 기다림 선 없음
+      } else {
+        // 머지 줄 — 곡선(녹 도트 → lane1 아래 끝) + lane1 세로선은 곡선 아래로만(아래 줄부터)
+        const bend = ROW * 0.45;
+        svg += `<path d="M ${X0} ${y0 + MID} C ${X0} ${y0 + MID + bend}, ${X1} ${y0 + ROW - bend}, ${X1} ${y0 + ROW}" stroke="${BLUE}" stroke-width="${S}" fill="none"/>`;
+        if (mode === "before") svg += `<line x1="${X1}" y1="${y0}" x2="${X1}" y2="${y0 + ROW}" stroke="${BLUE}" stroke-width="${S}"/>`;
+        else svg += `<line x1="${X1}" y1="${y0 + ROW}" x2="${X1}" y2="${y0 + ROW + 6}" stroke="${BLUE}" stroke-width="${S}"/>`;
+      }
+      // 도트
+      if (r[3]) svg += `<circle cx="${X0}" cy="${y0 + MID}" r="${R}" fill="${GREEN}"/>`;
+      if (r[4]) svg += `<circle cx="${X1}" cy="${y0 + MID}" r="${R}" fill="${BLUE}"/>`;
+    });
+    svg += `</svg>`;
+    let html = `<ol class="list">`;
+    rows.forEach((r, i) => {
+      html += `<li class="row${r[2] ? ' merge' : ''}"><span class="gutter" data-i="${i}"></span>
+        <div class="main"><div class="line"><span class="subject">${r[0]}</span>${
+        r[5] ? `<span class="chip">${BRANCH_SVG}<span>${r[5]}</span></span>` : ''}</div>
+        <span class="meta">${r[1]}</span></div></li>`;
+    });
+    html += `</ol>`;
+    return { svg, html };
+  }
+
+  function mount(id, mode, tag, labelText) {
+    const root = document.getElementById(id);
+    const d = draw(mode);
+    const head = `<div class="panel-head"><span class="tag ${mode}">${mode === "before" ? "현재" : "제거 후"}</span>${labelText}</div>`;
+    root.innerHTML = `<div class="panel">${head}${d.html}</div>`;
+    const panel = root.firstElementChild;
+    // svg는 각 줄 gutter 에 줄 단위로 나눠 삽입 (위치 추적 쉽도록)
+    const svgEl = document.createElement("div");
+    svgEl.innerHTML = d.svg;
+    const bigSvg = svgEl.firstElementChild;
+    const gutters = panel.querySelectorAll(".gutter");
+    gutters.forEach(g => {
+      const i = Number(g.dataset.i);
+      g.style.width = W + "px";
+      const clip = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      clip.setAttribute("width", W); clip.setAttribute("height", ROW);
+      clip.setAttribute("viewBox", `0 0 ${W} ${ROW}`);
+      const gEl = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      gEl.setAttribute("transform", `translate(0 ${-i * ROW})`);
+      gEl.innerHTML = bigSvg.innerHTML;
+      clip.appendChild(gEl);
+      g.appendChild(clip);
+    });
+    if (mode === "before") {
+      // 제거 대상 표시: 파란 선(1줄 도트 아래 ~ 7줄 곡선 접합부 위)
+      const top = 0 * ROW + MID + R + 4;
+      const bot = 6 * ROW - 2;
+      const zone = document.createElement("div");
+      zone.className = "zone";
+      zone.style.left = (X1 - 8) + "px";
+      zone.style.width = "16px";
+      zone.style.top = top + "px";
+      zone.style.height = (bot - top) + "px";
+      panel.querySelector(".list").appendChild(zone);
+      const lab = document.createElement("span");
+      lab.className = "zone-label";
+      lab.textContent = "← 위로 튀어나온 구간";
+      lab.style.left = (X1 + 14) + "px";
+      lab.style.top = (2 * ROW + 6) + "px";
+      panel.querySelector(".list").appendChild(lab);
+    }
+  }
+
+  mount("before", "before", "before", "파란 선이 점 없이 위로 길게 뻗어 있다");
+  mount("after", "after", "after", "점 없는 기다림 구간 제거 — 선은 점 줄과 곡선에서만");
+</script>
+</body>
+</html>

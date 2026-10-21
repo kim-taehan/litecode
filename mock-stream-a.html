@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 A — 진행 중 중간 글 안 보기</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --text: #0f1115;
+  --text-secondary: #61666b;
+  --text-tertiary: #81858c;
+  --text-caption: #adb2b8;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-ring: rgba(0, 0, 0, 0.12);
+  --fill-hover: rgba(38, 49, 72, 0.06);
+  --fill-active: rgba(38, 49, 72, 0.1);
+  --fill-selector: #f5f6f7;
+  --accent: #4176e6;
+  --accent-soft: #e4edfd;
+  --chat-font-size: 14px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, "Pretendard", "Apple SD Gothic Neo", sans-serif;
+  background: #eceef0;
+  color: var(--text);
+  padding: 28px 20px 60px;
+}
+.page { max-width: 640px; margin: 0 auto; }
+h1 { font-size: 16px; margin: 0 0 4px; }
+.sub { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 6px; line-height: 1.6; }
+.sub b { color: var(--text); }
+.legend { display: flex; gap: 14px; font-size: 11.5px; color: var(--text-secondary); margin: 0 0 18px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+.legend .keep i { background: var(--fill-hover); border: 1px solid var(--border); }
+.legend .hide i { background: #e8eb00; opacity: .35; }
+
+/* ── 앱 채팅 열 ── */
+.chat { background: var(--bg); border: 0.5px solid var(--border-ring); border-radius: 12px; padding: 20px 22px 8px; display: flex; flex-direction: column; gap: 14px; }
+
+.user-turn { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.bubble { max-width: 78%; padding: 12px 16px; font-size: var(--chat-font-size); line-height: 1.55; white-space: pre-wrap; }
+.bubble--user { align-self: flex-end; background: var(--accent-soft); color: var(--text); border-radius: 14px 14px 4px 14px; }
+.user-turn__meta { display: flex; align-items: center; gap: 4px; height: 24px; color: var(--text-caption); font-size: 12px; }
+
+/* ── 진행 중 턴 ── */
+.turn { display: flex; flex-direction: column; min-width: 0; }
+.turn__work { display: flex; flex-direction: column; gap: 6px; }
+/* A: 중간 글(text) 줄은 채팅에 없다 — .turn-row--text 를 안 그린다 */
+.note {
+  font-size: 11.5px; color: #8a6d00; background: #fdf6d8; border: 1px dashed #e0cc6b;
+  border-radius: 8px; padding: 6px 10px; line-height: 1.6; margin-top: 2px;
+}
+.note b { color: #6d5600; }
+
+/* 진행 중 맨 아래 파란 줄 (이슈 #416) */
+.turn-running { display: flex; flex-direction: column; align-items: flex-start; color: var(--accent); font-size: calc(var(--chat-font-size) - 2px); line-height: 22px; }
+.turn-running__line { display: flex; align-items: center; gap: 6px; width: 100%; padding: 1px 6px 1px 2px; border-radius: 6px; background: var(--fill-active); min-width: 0; }
+.turn-running__summary { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, black calc(100% - 48px), transparent); -webkit-mask-image: linear-gradient(to right, black calc(100% - 48px), transparent); }
+.turn-running__dot { flex: none; width: 2px; height: 2px; border-radius: 1px; background: currentColor; }
+.turn-running__seconds { flex: none; font-variant-numeric: tabular-nums; }
+.turn-running__dots span { animation: turn-dot 1.2s infinite; opacity: 0.25; }
+.turn-running__dots span:nth-child(2) { animation-delay: 0.2s; }
+.turn-running__dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes turn-dot { 0%,60%,100% { opacity: 0.25; } 30% { opacity: 1; } }
+@keyframes turn-shimmer { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+[data-live] .s { animation: turn-shimmer 1.6s ease-in-out infinite; }
+
+/* ── 끝난 턴 (변경 없음) ── */
+.turn__head { display: flex; align-items: center; height: 33px; padding: 0 0 8px; margin-bottom: 8px; border-bottom: 0.5px solid var(--border); color: var(--text-tertiary); font-size: calc(var(--chat-font-size) - 1px); }
+.bubble--assistant { padding: 2px 0 10px; line-height: 1.6; font-size: var(--chat-font-size); }
+.bubble--assistant code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; background: var(--fill-selector); border-radius: 5px; padding: 1px 5px; color: var(--accent); }
+
+/* ── 우측 "턴 작업" 탭 미리보기 ── */
+.panel { margin-top: 18px; }
+.panel__cap { font-size: 11.5px; color: var(--text-secondary); margin: 0 0 6px; }
+.panel__box { background: var(--bg); border: 0.5px solid var(--border-ring); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.panel__title { font-size: 12px; font-weight: 600; color: var(--text); }
+.pr { display: flex; align-items: center; gap: 6px; font-size: calc(var(--chat-font-size) - 1px); color: var(--text-tertiary); min-height: 24px; }
+.pr__title { color: var(--text-secondary); flex: none; }
+.pr__dot { width: 2px; height: 2px; border-radius: 1px; background: var(--text-caption); margin: 0 2px; flex: none; }
+.pr__summary { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, black calc(100% - 40px), transparent); -webkit-mask-image: linear-gradient(to right, black calc(100% - 40px), transparent); }
+.pr__icon { flex: none; color: var(--text-tertiary); display: inline-flex; }
+.pr--text { flex-direction: column; align-items: stretch; gap: 3px; padding: 8px 10px; border-radius: 8px; background: var(--fill-selector); color: var(--text-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.pr--text .pr__title { margin-bottom: 1px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>시안 A — 진행 중엔 중간 글 안 보기</h1>
+  <p class="sub">
+    진행 중 채팅에는 <b>중간 글("Let me…")을 안 보입니다</b>. 생각·도구·중간 글은 전부 우측 "턴 작업" 탭(아래 미리보기)으로,
+    채팅에는 <b>파란 진행 줄</b>(지금 하는 일 + 경과)만. 끝나면 최종 답이 정상 표시 — 최종 답은 어느 시안이나 그대로.
+  </p>
+  <div class="legend">
+    <span class="keep"><i></i>변경 없음 — 진행 줄</span>
+    <span class="hide" style="display:flex;align-items:center"><i></i>숨김 (지금: 채팅에 전체)</span>
+  </div>
+
+  <!-- 채팅 -->
+  <div class="chat">
+    <div class="user-turn">
+      <div class="bubble bubble--user">로그 파일이 왜 잘려 보이는지 확인해줘</div>
+      <div class="user-turn__meta"><time>09:41</time></div>
+    </div>
+
+    <div class="turn" data-state="running">
+      <!-- A: liveRows 가 비어 있어 채팅에 줄 없음 (중간 글·생각·도구 전부 탭으로) -->
+      <div class="note"><b>여기까지가 채팅에 보이는 전부</b> — 중간 글 3개(아래 탭에서 전문)·생각·도구 줄은 채팅에 쌓이지 않는다</div>
+      <div class="turn-running" data-live>
+        <div class="turn-running__line">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z"/></svg>
+          <span class="turn-running__summary s">지금 하는 일: Bash · npm run lint</span>
+          <span class="turn-running__dot" aria-hidden="true"></span>
+          <span class="turn-running__seconds">12초</span>
+          <span class="turn-running__dots" aria-hidden="true"><span>·</span><span>·</span><span>·</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 끝난 턴 — 어디든 동일 -->
+    <div class="turn" data-state="done">
+      <div class="turn__head"><span>완료 · 34초</span></div>
+      <div class="bubble bubble--assistant">
+        잘림은 버퍼가 채워지지 않아서였어요. <code>log.append()</code> 뒤에 <code>flush()</code>를 넣었고, <code>src/log.ts</code> 41행을 고쳤습니다.
+      </div>
+    </div>
+  </div>
+
+  <!-- 우측 탭 미리보기 -->
+  <div class="panel">
+    <p class="panel__cap">파란 줄을 누르면 열리는 우측 "턴 작업" 탭 (진행 줄 전문이 여기로) — 시안은 A와 같음</p>
+    <div class="panel__box">
+      <div class="panel__title">턴 작업 · 진행 중</div>
+      <div class="pr"><span class="pr__icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M8 1.75C5.38 1.75 3.5 3.6 3.5 6C3.5 7.6 4.35 8.6 5.25 9.4V11.25H10.75V9.4C11.65 8.6 12.5 7.6 12.5 6C12.5 3.6 10.62 1.75 8 1.75Z"/><path d="M6 13.75H10"/></svg></span><span class="pr__title">생각</span><span class="pr__dot"></span><span class="pr__summary">Planning how to check the log flush</span></div>
+      <div class="pr"><span class="pr__icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 1.75H9.5L12.5 4.75V14.25H4Z"/><path d="M9.5 1.75V4.75H12.5"/></svg></span><span class="pr__title">Read</span><span class="pr__dot"></span><span class="pr__summary">src/log.ts</span></div>
+      <div class="pr"><span class="pr__icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M4.5 6L6.5 8L4.5 10M8 10.5H11"/></svg></span><span class="pr__title">Bash</span><span class="pr__dot"></span><span class="pr__summary" data-live style="animation: turn-shimmer 1.6s ease-in-out infinite">npm run lint</span></div>
+      <div class="pr--text"><span class="pr__title" style="color:var(--text-tertiary);font-size:11.5px">중간 글</span>Let me take a closer look at what's happening with the log buffer before I make any changes.</div>
+      <div class="pr--text"><span class="pr__title" style="color:var(--text-tertiary);font-size:11.5px">중간 글</span>Let me read the log append section to see where flush is missing.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

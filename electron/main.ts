@@ -42,6 +42,7 @@ import { systemQuitHost } from './quitHost.ts'
 import { tr } from '../src/i18n.ts'
 import { Channel } from '../shared/ipc.ts'
 import { isWebUrl } from '../shared/webUrl.ts'
+import { DEFAULT_SERVER_OPTIONS, type ExtensionServerOptions } from '../src/services/extensions.ts'
 import { isMode, type Mode } from '../shared/modes.ts'
 import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
@@ -377,6 +378,7 @@ function extensionsBridge(ctx: Context): void {
   handle(ctx, Channel.EXTENSIONS_CANCEL, async (_event, token: unknown) => ctx.extensions.cancel(String(token)))
   handle(ctx, Channel.EXTENSIONS_REMOVE, async (_event, id: unknown) => ctx.extensions.remove(String(id)))
   handle(ctx, Channel.EXTENSIONS_SET_ENABLED, async (_event, id: unknown, on: unknown) => ctx.extensions.setEnabled(String(id), on === true))
+  handle(ctx, Channel.EXTENSIONS_SET_SERVER_OPTIONS, async (_event, id: unknown, options: unknown) => ctx.extensions.setServerOptions(String(id), { ...DEFAULT_SERVER_OPTIONS, ...normalizeServerOptions(options) }))
   handle(ctx, Channel.EXTENSIONS_READ_ENTRY, async (_event, id: unknown) => ctx.extensions.readEntry(String(id)))
   handle(ctx, Channel.EXTENSIONS_READ_LOCALE, async (_event, language: unknown) => ctx.extensions.readLocale(String(language)))
   ctx.on('extensions/changed', (extensions) => broadcast(Channel.EXTENSIONS_CHANGED, extensions))
@@ -395,6 +397,15 @@ const reservedPorts = (): number[] => [
   ...(ctx.get('appMcp')?.localPorts() ?? []),
   ...(ctx.get('remote')?.status().addresses.map((address) => Number(address.slice(address.lastIndexOf(':') + 1))) ?? []),
 ]
+/** IPC 로 오는 서버 옵션 — boolean 두 개만 받고, 나머지는 기본값으로 메운다 (화면이 줘도 다시 본다) */
+function normalizeServerOptions(value: unknown): Partial<ExtensionServerOptions> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const out: Partial<ExtensionServerOptions> = {}
+  for (const key of ['startWithApp', 'stopWithApp'] as const) {
+    if (typeof value[key] === 'boolean') out[key] = value[key]
+  }
+  return out
+}
 // 확장이 담아 온 스킬은 앱 스킬 폴더로 (#561) — 내장 디자인 스킬과 같은 자리, 바뀌면 엔진이 턴이 끝난 뒤 다시 읽는다
 const extensionSkills = { dir: path.join(userData, 'opencode', 'skills'), reload: () => ctx.get('llm')?.reloadWhenIdle() }
 mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher, fetch: extensionFetch, reservedPorts, skills: extensionSkills }))

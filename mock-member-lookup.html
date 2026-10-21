@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회원 정보 조회 — 시안</title>
+<style>
+  :root{
+    --bg:#ffffff;
+    --bg-soft:#f5f6f7;
+    --text:#0f1115;
+    --text-secondary:#61666b;
+    --text-tertiary:#81858c;
+    --caption:#adb2b8;
+    --border:rgba(0,0,0,.1);
+    --border-light:rgba(0,0,0,.06);
+    --fill-hover:rgba(38,49,72,.06);
+    --fill-active:rgba(38,49,72,.1);
+    --accent:#4176e6;
+    --accent-soft:#e4edfd;
+    --card:#ffffff;
+    --shadow-soft:0 0 0 .5px rgba(0,0,0,.1),0 4px 16px 0 rgba(0,0,0,.03),0 0 24px 0 rgba(0,0,0,.03);
+    --ok:#2c7a4b;      --ok-bg:rgba(63,166,107,.12);
+    --warn:#a15c07;    --warn-bg:rgba(245,158,11,.14);
+    --off:#81858c;     --off-bg:rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#151517;
+      --bg-soft:#1b1b1c;
+      --text:#f9fafb;
+      --text-secondary:#cfd3d6;
+      --text-tertiary:#adb2b8;
+      --caption:#81858c;
+      --border:rgba(255,255,255,.12);
+      --border-light:rgba(255,255,255,.07);
+      --fill-hover:rgba(255,255,255,.06);
+      --fill-active:rgba(255,255,255,.1);
+      --accent:#7aaaff;
+      --accent-soft:#34415b;
+      --card:#1b1b1e;
+      --shadow-soft:0 0 0 .5px rgba(255,255,255,.1),0 4px 16px 0 rgba(0,0,0,.35);
+      --ok:#5ecb8a;    --ok-bg:rgba(63,166,107,.18);
+      --warn:#f2b05e;  --warn-bg:rgba(245,158,11,.16);
+      --off:#8b9097;   --off-bg:rgba(255,255,255,.08);
+    }
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    font-size:14px;color:var(--text);background:var(--bg);
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  .content{max-width:1060px;margin:0 auto;padding:36px 40px 64px}
+
+  /* ---------- header ---------- */
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
+  .page-head h1{font-size:20px;font-weight:650;letter-spacing:-.2px}
+  .page-head p{margin-top:5px;font-size:13px;color:var(--text-tertiary)}
+  .btn{
+    display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;
+    border-radius:9px;font-size:13px;font-weight:550;transition:background .12s;
+  }
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{filter:brightness(1.07)}
+  .btn-ghost{background:var(--card);border:.5px solid var(--border)}
+  .btn-ghost:hover{background:var(--fill-hover)}
+  .btn-danger{background:var(--card);border:.5px solid rgba(229,72,77,.4);color:#e5484d}
+  .btn-danger:hover{background:rgba(229,72,77,.07)}
+
+  /* ---------- search card ---------- */
+  .search-card{
+    background:var(--card);border-radius:14px;box-shadow:var(--shadow-soft);
+    padding:16px 18px;margin-bottom:18px;
+  }
+  .search-row{display:flex;align-items:center;gap:10px}
+  .segment{display:inline-flex;background:var(--bg-soft);border-radius:10px;padding:3px;flex:none}
+  .seg{padding:6px 13px;border-radius:8px;font-size:13px;color:var(--text-secondary);transition:all .12s}
+  .seg:hover{color:var(--text)}
+  .seg.active{background:var(--card);color:var(--text);font-weight:550;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+  .input{
+    flex:1;height:38px;padding:0 13px;border-radius:10px;font-size:13.5px;color:var(--text);
+    background:var(--bg-soft);border:.5px solid transparent;outline:none;transition:all .12s;
+  }
+  .input::placeholder{color:var(--caption)}
+  .input:focus{background:var(--card);border-color:var(--accent);box-shadow:0 0 0 3px rgba(65,118,230,.15)}
+  .filter-row{display:flex;align-items:center;justify-content:space-between;margin-top:13px;padding-top:13px;border-top:1px solid var(--border-light)}
+  .chips{display:flex;gap:7px}
+  .chip{
+    display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 12px;border-radius:999px;
+    font-size:12.5px;color:var(--text-secondary);border:.5px solid var(--border);background:var(--card);transition:all .12s;
+  }
+  .chip em{font-style:normal;font-size:11px;color:var(--caption)}
+  .chip:hover{background:var(--fill-hover)}
+  .chip.active{background:var(--accent-soft);border-color:transparent;color:var(--accent);font-weight:550}
+  .chip.active em{color:var(--accent);opacity:.7}
+  .select{
+    height:28px;padding:0 28px 0 11px;border-radius:8px;font-size:12.5px;color:var(--text-secondary);
+    background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2381858c' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+    border:.5px solid var(--border);appearance:none;cursor:pointer;outline:none;
+  }
+
+  /* ---------- result meta ---------- */
+  .result-meta{display:flex;align-items:baseline;justify-content:space-between;margin:2px 6px 9px;font-size:12.5px;color:var(--text-tertiary)}
+  .result-meta b{font-size:13.5px;font-weight:600;color:var(--text)}
+
+  /* ---------- table ---------- */
+  .table-card{background:var(--card);border-radius:14px;box-shadow:var(--shadow-soft);overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  thead th{
+    text-align:left;font-size:11.5px;font-weight:550;color:var(--text-tertiary);letter-spacing:.2px;
+    padding:12px 16px;background:var(--bg-soft);border-bottom:1px solid var(--border-light);white-space:nowrap;
+  }
+  tbody td{padding:0 16px;height:54px;font-size:13px;border-bottom:1px solid var(--border-light);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr{cursor:pointer;transition:background .1s}
+  tbody tr:hover{background:var(--fill-hover)}
+  tbody tr.selected{background:var(--accent-soft)}
+  tbody tr.selected td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  .muted{color:var(--text-secondary)}
+  .cell-name{display:flex;align-items:center;gap:10px;font-weight:500}
+  .avatar{
+    width:28px;height:28px;border-radius:50%;flex:none;
+    display:flex;align-items:center;justify-content:center;
+    background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:600;
+  }
+  tr.deleted .cell-name,tr.deleted .muted{color:var(--text-tertiary);text-decoration:none}
+  .badge{display:inline-block;padding:2.5px 10px;border-radius:999px;font-size:11.5px;font-weight:550}
+  .badge-active{background:var(--ok-bg);color:var(--ok)}
+  .badge-suspended{background:var(--warn-bg);color:var(--warn)}
+  .badge-deleted{background:var(--off-bg);color:var(--off)}
+
+  /* ---------- empty ---------- */
+  .empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:56px 0 60px;color:var(--text-tertiary)}
+  .empty svg{opacity:.5}
+  .empty p{font-size:14px;font-weight:500;color:var(--text-secondary)}
+  .empty span{font-size:12.5px}
+
+  /* ---------- pagination ---------- */
+  .pagination{display:flex;align-items:center;justify-content:center;gap:4px;padding:12px}
+  .pg{
+    min-width:28px;height:28px;padding:0 6px;border-radius:8px;font-size:12.5px;color:var(--text-secondary);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .pg:hover:not(:disabled){background:var(--fill-hover)}
+  .pg.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .pg:disabled{opacity:.35;cursor:default}
+
+  /* ---------- drawer ---------- */
+  .drawer{
+    position:fixed;top:0;right:0;bottom:0;width:352px;background:var(--card);
+    border-left:.5px solid var(--border);box-shadow:-12px 0 32px rgba(0,0,0,.06);
+    transform:translateX(102%);transition:transform .22s cubic-bezier(.4,0,.2,1);
+    display:flex;flex-direction:column;z-index:10;
+  }
+  .drawer.open{transform:translateX(0)}
+  .drawer-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px}
+  .drawer-head h2{font-size:14px;font-weight:600}
+  .icon-btn{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-tertiary)}
+  .icon-btn:hover{background:var(--fill-hover);color:var(--text)}
+  .drawer-body{flex:1;overflow-y:auto;padding:0 20px 20px}
+  .profile{display:flex;align-items:center;gap:13px;padding-bottom:16px;border-bottom:1px solid var(--border-light)}
+  .avatar-lg{width:50px;height:50px;border-radius:14px;font-size:19px}
+  .profile .name{font-size:17px;font-weight:650;letter-spacing:-.2px}
+  .profile .sub{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:12.5px;color:var(--text-tertiary)}
+  .info{padding-top:14px;display:flex;flex-direction:column;gap:12px}
+  .info .row{display:flex;gap:12px;font-size:13px}
+  .info .row b{flex:0 0 64px;font-weight:450;color:var(--text-tertiary);font-size:12.5px;padding-top:1px}
+  .info .row span{color:var(--text);word-break:break-all}
+  .section-title{margin:20px 0 10px;font-size:11.5px;font-weight:600;color:var(--text-tertiary);letter-spacing:.4px}
+  .acts{list-style:none;display:flex;flex-direction:column;gap:0}
+  .acts li{position:relative;padding:0 0 16px 18px;font-size:12.5px}
+  .acts li::before{content:"";position:absolute;left:0;top:5px;width:7px;height:7px;border-radius:50%;background:var(--accent-soft)}
+  .acts li::after{content:"";position:absolute;left:3px;top:15px;bottom:-1px;width:1.5px;background:var(--border-light)}
+  .acts li:last-child::after{display:none}
+  .acts li:last-child{padding-bottom:2px}
+  .acts .when{display:block;margin-top:2px;font-size:11.5px;color:var(--caption)}
+  .drawer-foot{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--border-light)}
+  .drawer-foot .btn{flex:1;justify-content:center}
+</style>
+</head>
+<body>
+<div class="content">
+  <header class="page-head">
+    <div>
+      <h1>회원 정보 조회</h1>
+      <p>이름 · 아이디 · 휴대폰 · 이메일로 회원을 검색하고 상세 정보를 확인합니다.</p>
+    </div>
+    <button class="btn btn-ghost" type="button">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5v10M1.5 6.5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      회원 등록
+    </button>
+  </header>
+
+  <section class="search-card">
+    <div class="search-row">
+      <div class="segment" id="fieldSegment">
+        <button class="seg active" data-field="name" type="button">이름</button>
+        <button class="seg" data-field="id" data-label="아이디" type="button">아이디</button>
+        <button class="seg" data-field="phone" data-label="휴대폰" type="button">휴대폰</button>
+        <button class="seg" data-field="email" data-label="이메일" type="button">이메일</button>
+      </div>
+      <input class="input" id="query" type="text" placeholder="이름 입력 (예: 김하늘)" spellcheck="false">
+      <button class="btn btn-primary" id="searchBtn" type="button">검색</button>
+    </div>
+    <div class="filter-row">
+      <div class="chips" id="statusChips">
+        <button class="chip active" data-status="all" type="button">전체 <em id="cAll"></em></button>
+        <button class="chip" data-status="active" type="button">활성 <em id="cActive"></em></button>
+        <button class="chip" data-status="suspended" type="button">잠정정지 <em id="cSuspended"></em></button>
+        <button class="chip" data-status="deleted" type="button">탈퇴 <em id="cDeleted"></em></button>
+      </div>
+      <select class="select" id="sortSel">
+        <option value="joined_desc">가입일 최신순</option>
+        <option value="joined_asc">가입일 과거순</option>
+        <option value="login_desc">최근 로그인순</option>
+      </select>
+    </div>
+  </section>
+
+  <div class="result-meta">
+    <b id="resultCount"></b>
+    <span id="pageInfo"></span>
+  </div>
+
+  <section class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>이름</th><th>아이디</th><th>휴대폰</th><th>이메일</th><th>상태</th><th>가입일</th><th>최근 로그인</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>
+      <svg width="34" height="34" viewBox="0 0 34 34" fill="none"><circle cx="15" cy="15" r="10.5" stroke="#81858c" stroke-width="2"/><path d="M23 23l7 7" stroke="#81858c" stroke-width="2" stroke-linecap="round"/><path d="M11 13.2c1-.9 2.4-1.4 4-1.4 1.6 0 3 .5 4 1.4" stroke="#81858c" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <p>검색 결과가 없습니다</p>
+      <span>검색어를 확인하거나 조건을 바꿔서 다시 검색해 보세요.</span>
+    </div>
+    <div class="pagination" id="pagination"></div>
+  </section>
+</div>
+
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <h2>회원 상세</h2>
+    <button class="icon-btn" id="closeDrawer" type="button" aria-label="닫기">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 2l9 9m0-9l-9 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body">
+    <div class="profile">
+      <span class="avatar avatar-lg" id="dAvatar"></span>
+      <div>
+        <div class="name" id="dName"></div>
+        <div class="sub"><span class="badge" id="dBadge"></span><span id="dId"></span></div>
+      </div>
+    </div>
+    <div class="info">
+      <div class="row"><b>휴대폰</b><span id="dPhone"></span></div>
+      <div class="row"><b>이메일</b><span id="dEmail"></span></div>
+      <div class="row"><b>등급</b><span id="dGrade"></span></div>
+      <div class="row"><b>거주지</b><span id="dAddr"></span></div>
+      <div class="row"><b>가입일</b><span id="dJoined"></span></div>
+      <div class="row"><b>최근 로그인</b><span id="dLogin"></span></div>
+      <div class="row"><b>비고</b><span id="dNote"></span></div>
+    </div>
+    <div class="section-title">최근 활동</div>
+    <ul class="acts" id="dActs"></ul>
+  </div>
+  <div class="drawer-foot">
+    <button class="btn btn-primary" type="button">정보 수정</button>
+    <button class="btn btn-danger" type="button">탈퇴 처리</button>
+  </div>
+</aside>
+
+<script>
+const MEMBERS = [
+  {id:"hanul_kim",  name:"김하늘", phone:"010-4821-3327", email:"haneul.kim@gmail.com",  status:"active",    grade:"VIP",   addr:"서울특별시 성동구 성수이로 42, 903호", joined:"2024-11-02", login:"2026-10-15 09:42", note:"우편물 수령 요청" , acts:[["로그인","2026-10-15 09:42"],["배송주소 변경","2026-10-12 17:24"],["결제 성공 — 멤버십 연차","2026-10-01 10:05"],["회원 가입","2024-11-02 14:31"]]},
+  {id:"doo_yunpark",name:"박도윤", phone:"010-3345-8812", email:"doyoon.park@naver.com", status:"active",    grade:"일반", addr:"부산광역시 해운대구 구평로 210, 1105호", joined:"2025-03-18", login:"2026-10-14 21:03", note:"",            acts:[["로그인","2026-10-14 21:03"],["이메일 인증","2026-09-28 11:47"],["프로필 수정","2026-08-30 20:12"],["회원 가입","2025-03-18 09:15"]]},
+  {id:"seoyeon.lee",name:"이서연", phone:"010-9902-1145", email:"seoyeon.lee@gmail.com", status:"suspended", grade:"VIP",  addr:"대구광역시 수성구 달구벌대로 2485, 502호", joined:"2024-07-21", login:"2026-09-30 15:20", note:"분쟁 건 — 확인 중", acts:[["잠정정지 처리","2026-09-30 16:00"],["로그인","2026-09-30 15:20"],["제보 접수","2026-09-30 14:52"],["회원 가입","2024-07-21 18:40"]]},
+  {id:"minjun_choi",name:"최민준", phone:"010-7712-5566", email:"minjun.choi@daum.net",  status:"active",    grade:"일반", addr:"광주광역시 남구 금남로 284, 301호", joined:"2025-08-09", login:"2026-10-15 08:11", note:"",            acts:[["로그인","2026-10-15 08:11"],["쿠폰 사용","2026-10-09 13:36"],["회원 가입","2025-08-09 16:22"]]},
+  {id:"daeun_jung", name:"정다은", phone:"010-2245-9073", email:"daeun.jung@gmail.com",  status:"deleted",   grade:"일반", addr:"인천광역시 미추홀구 용현로 105, 702호", joined:"2023-12-15", login:"2026-07-02 10:45", note:"",            acts:[["탈퇴 처리","2026-07-02 10:45"],["로그인","2026-07-01 22:10"],["탈퇴 신청","2026-06-30 21:03"],["회원 가입","2023-12-15 12:58"]]},
+  {id:"jihwoo.oh",  name:"오지호", phone:"010-6681-2234", email:"jihwoo.oh@naver.com",   status:"active",    grade:"일반", addr:"대전광역시 동구 자여로 217, 403호", joined:"2026-01-28", login:"2026-10-15 11:07", note:"신규 온보딩 완료", acts:[["로그인","2026-10-15 11:07"],["첫 결제 — 스탠더드","2026-02-03 19:44"],["회원 가입","2026-01-28 10:02"]]},
+  {id:"somi.han",   name:"한소미", phone:"010-5529-8841", email:"somi.han@gmail.com",    status:"active",    grade:"VIP",  addr:"경기도 성남시 분당구 판교역로 224, 1501호", joined:"2025-05-04", login:"2026-10-13 19:32", note:"",          acts:[["로그인","2026-10-13 19:32"],["결제 성공 — 멤버십 연차","2026-05-04 09:30"],["등급 변경 — VIP","2026-05-04 09:31"],["회원 가입","2025-05-04 09:18"]]},
+  {id:"jae_hyuk.yoon",name:"윤재혁", phone:"010-8834-1290", email:"jhyuk.yoon@daum.net",  status:"suspended", grade:"일반", addr:"울산광역시 중구 중앙로 7, 604호", joined:"2024-02-11", login:"2026-08-19 13:56", note:"연체 1건", acts:[["잠정정지 처리","2026-08-20 09:00"],["로그인","2026-08-19 13:56"],["연체 안내 발송","2026-08-15 10:00"],["회원 가입","2024-02-11 15:37"]]},
+  {id:"chaewon.lim",name:"임채원", phone:"010-1187-4402", email:"chaewon.lim@gmail.com", status:"active",    grade:"일반", addr:"제주특별자치도 제주시 애월읍 애일로 15, 201호", joined:"2026-09-30", login:"2026-10-14 23:18", note:"",            acts:[["로그인","2026-10-14 23:18"],["프로필 수정","2026-10-08 20:15"],["회원 가입","2026-09-30 21:44"]]}
+];
+
+const STATUS = {active:"활성", suspended:"잠정정지", deleted:"탈퇴"};
+const FIELD_LABEL = {name:"이름", id:"아이디", phone:"휴대폰", email:"이메일"};
+const PLACEHOLDER = {
+  name:"이름 입력 (예: 김하늘)", id:"아이디 입력 (예: hanul_kim)",
+  phone:"휴대폰 번호 입력 (예: 010-4821)", email:"이메일 입력 (예: @gmail.com)"
+};
+const PER_PAGE = 6;
+const state = {field:"name", q:"", status:"all", sort:"joined_desc", page:1, selected:null};
+
+const $ = s => document.querySelector(s);
+const digits = s => s.replace(/\D/g,"");
+
+function filtered(){
+  const q = state.q.trim().toLowerCase();
+  let list = MEMBERS.filter(m => {
+    if(state.status !== "all" && m.status !== state.status) return false;
+    if(!q) return true;
+    if(state.field === "phone") return digits(m.phone).includes(digits(q));
+    const v = state.field === "id" ? m.id : state.field === "email" ? m.email : m.name;
+    return v.toLowerCase().includes(q);
+  });
+  const by = state.sort === "joined_asc" ? (a,b)=>a.joined.localeCompare(b.joined)
+           : state.sort === "login_desc" ? (a,b)=>b.login.localeCompare(a.login)
+           : (a,b)=>b.joined.localeCompare(a.joined);
+  return list.sort(by);
+}
+
+function render(){
+  const list = filtered();
+  const pages = Math.max(1, Math.ceil(list.length / PER_PAGE));
+  state.page = Math.min(state.page, pages);
+  const slice = list.slice((state.page-1)*PER_PAGE, state.page*PER_PAGE);
+
+  $("#resultCount").textContent = "검색 결과 " + list.length + "명";
+  $("#pageInfo").textContent = state.page + " / " + pages;
+  $("#empty").hidden = slice.length > 0;
+
+  $("#tbody").innerHTML = slice.map(m => `
+    <tr data-id="${m.id}" class="${m.status==="deleted"?"deleted":""} ${m.id===state.selected?"selected":""}">
+      <td><div class="cell-name"><span class="avatar">${m.name[0]}</span>${m.name}</div></td>
+      <td class="muted">${m.id}</td>
+      <td class="muted">${m.phone}</td>
+      <td class="muted">${m.email}</td>
+      <td><span class="badge badge-${m.status}">${STATUS[m.status]}</span></td>
+      <td class="muted">${m.joined}</td>
+      <td class="muted">${m.login}</td>
+    </tr>`).join("");
+
+  // pagination
+  let html = `<button class="pg" data-p="${state.page-1}" type="button" ${state.page===1?"disabled":""}>‹</button>`;
+  for(let i=1;i<=pages;i++) html += `<button class="pg ${i===state.page?"active":""}" data-p="${i}" type="button">${i}</button>`;
+  html += `<button class="pg" data-p="${state.page+1}" type="button" ${state.page===pages?"disabled":""}>›</button>`;
+  $("#pagination").innerHTML = html;
+  $("#pagination").style.display = list.length > PER_PAGE ? "flex" : "none";
+}
+
+function openDrawer(m){
+  state.selected = m.id;
+  $("#dAvatar").textContent = m.name[0];
+  $("#dName").textContent = m.name;
+  const b = $("#dBadge");
+  b.textContent = STATUS[m.status];
+  b.className = "badge badge-" + m.status;
+  $("#dId").textContent = m.id;
+  $("#dPhone").textContent = m.phone;
+  $("#dEmail").textContent = m.email;
+  $("#dGrade").textContent = m.grade;
+  $("#dAddr").textContent = m.addr;
+  $("#dJoined").textContent = m.joined;
+  $("#dLogin").textContent = m.login;
+  $("#dNote").textContent = m.note || "—";
+  $("#dActs").innerHTML = m.acts.map(a => `<li>${a[0]}<span class="when">${a[1]}</span></li>`).join("");
+  $("#drawer").classList.add("open");
+  render();
+}
+
+// counts
+document.getElementById("cAll").textContent = MEMBERS.length;
+document.getElementById("cActive").textContent = MEMBERS.filter(m=>m.status==="active").length;
+document.getElementById("cSuspended").textContent = MEMBERS.filter(m=>m.status==="suspended").length;
+document.getElementById("cDeleted").textContent = MEMBERS.filter(m=>m.status==="deleted").length;
+
+// field segment
+$("#fieldSegment").addEventListener("click", e=>{
+  const btn = e.target.closest(".seg"); if(!btn) return;
+  document.querySelectorAll(".seg").forEach(s=>s.classList.remove("active"));
+  btn.classList.add("active");
+  state.field = btn.dataset.field;
+  $("#query").placeholder = PLACEHOLDER[state.field];
+  $("#query").focus();
+});
+
+// status chips
+$("#statusChips").addEventListener("click", e=>{
+  const chip = e.target.closest(".chip"); if(!chip) return;
+  document.querySelectorAll(".chip").forEach(c=>c.classList.remove("active"));
+  chip.classList.add("active");
+  state.status = chip.dataset.status;
+  state.page = 1;
+  render();
+});
+
+// search
+function doSearch(){ state.q = $("#query").value; state.page = 1; render(); }
+$("#searchBtn").addEventListener("click", doSearch);
+$("#query").addEventListener("keydown", e=>{ if(e.key==="Enter") doSearch(); });
+
+// sort
+$("#sortSel").addEventListener("change", e=>{ state.sort = e.target.value; render(); });
+
+// row select
+$("#tbody").addEventListener("click", e=>{
+  const tr = e.target.closest("tr"); if(!tr) return;
+  const m = MEMBERS.find(x=>x.id===tr.dataset.id);
+  if(m) openDrawer(m);
+});
+
+// pagination
+$("#pagination").addEventListener("click", e=>{
+  const btn = e.target.closest(".pg"); if(!btn || btn.disabled) return;
+  state.page = Number(btn.dataset.p);
+  render();
+});
+
+// close drawer
+$("#closeDrawer").addEventListener("click", ()=>$("#drawer").classList.remove("open"));
+
+// initial: 전체 표시 + 첫 행 선택
+render();
+const first = MEMBERS.find(m=>m.joined === MEMBERS.reduce((a,b)=>b.joined>a.joined?b:a).joined);
+openDrawer(first);
+</script>
+</body>
+</html>

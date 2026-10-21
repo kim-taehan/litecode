@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>설정 > 기능 — 설치한 확장 (서버 옵션)</title>
+<style>
+  :root {
+    --bg: #ffffff; --bg-sidebar: #f5f6f7;
+    --surface: #ffffff; --surface-panel: #ffffff;
+    --text: #0f1115; --text-strong-hover: #2b2e33; --text-secondary: #61666b;
+    --text-tertiary: #81858c; --text-caption: #adb2b8;
+    --on-text: #ffffff;
+    --border: rgba(0,0,0,.08); --border-light: rgba(0,0,0,.05);
+    --border-strong: rgba(0,0,0,.16); --border-ring: rgba(0,0,0,.12);
+    --nav-hover: rgba(38,49,72,.05); --nav-active: rgba(38,49,72,.08);
+    --fill-hover: rgba(38,49,72,.06);
+    --fill-active: rgba(38,49,72,.10);
+    --fill-selector: rgba(0,0,0,.02);
+    --module: rgba(0,0,0,.03); --menu: rgba(255,255,255,.92);
+    --accent: #4176e6; --accent-soft: #e4edfd;
+    --danger: #e5484d; --danger-bg: #fdecec;
+    --ok: #2e9e44;
+    --switch-thumb: #ffffff;
+    --mask: rgba(0,0,0,.36);
+    --shadow-prominent: 0 24px 64px rgba(15,17,21,.24), 0 0 0 0.5px rgba(0,0,0,.05);
+    --extension: #8a5ce0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1d21; --bg-sidebar: #26282e;
+      --surface: #26282e; --surface-panel: #2b2e34;
+      --text: #f2f4f7; --text-strong-hover: #ffffff; --text-secondary: #b3b8c0;
+      --text-tertiary: #81858c; --text-caption: #6c7078;
+      --on-text: #15171a;
+      --border: rgba(255,255,255,.10); --border-light: rgba(255,255,255,.06);
+      --border-strong: rgba(255,255,255,.18); --border-ring: rgba(255,255,255,.14);
+      --nav-hover: rgba(255,255,255,.06); --nav-active: rgba(255,255,255,.10);
+      --fill-hover: rgba(255,255,255,.07);
+      --fill-active: rgba(255,255,255,.12);
+      --fill-selector: rgba(255,255,255,.03);
+      --module: rgba(255,255,255,.05); --menu: rgba(43,46,52,.92);
+      --accent: #6f9ef2; --accent-soft: rgba(111,158,242,.16);
+      --danger: #ff6b6f; --danger-bg: rgba(255,107,111,.14);
+      --ok: #46d060;
+      --switch-thumb: #2b2e34;
+      --mask: rgba(0,0,0,.55);
+      --shadow-prominent: 0 24px 64px rgba(0,0,0,.5), 0 0 0 0.5px rgba(255,255,255,.05);
+      --extension: #b08cf5;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Pretendard', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif;
+  }
+  .stage { display: flex; justify-content: center; padding: 24px 12px 48px; min-height: 100vh; }
+
+  /* 설정 판 (설정 모달과 같은 크기: 800px, R28, shadow) */
+  .settings-panel {
+    display: flex; width: 800px; max-width: 100%;
+    height: min(760px, calc(100vh - 48px));
+    background: var(--surface-panel);
+    border-radius: 28px;
+    box-shadow: var(--shadow-prominent);
+    overflow: hidden;
+  }
+
+  /* 왼쪽 메뉴 */
+  .settings-nav { width: 188px; flex-shrink: 0; padding: 22px 12px 0; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+  .settings-nav__title { padding: 0 12px; font-size: 16px; font-weight: 500; line-height: 24px; color: var(--text); }
+  .settings-nav__list { display: flex; flex-direction: column; gap: 4px; }
+  .settings-nav__item {
+    display: flex; align-items: center; gap: 8px;
+    height: 40px; padding: 9px 16px 9px 12px;
+    border: none; border-radius: 12px; background: none;
+    text-align: left; font-family: inherit; font-size: 14px; line-height: 22px; color: var(--text); cursor: pointer;
+  }
+  .settings-nav__item:hover { background: var(--nav-hover); }
+  .settings-nav__item--active, .settings-nav__item--active:hover { background: var(--nav-active); }
+  .settings-nav__icon { flex-shrink: 0; color: var(--text-secondary); }
+
+  /* 오른쪽 */
+  .settings-content { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; }
+  .settings-header {
+    flex-shrink: 0; min-height: 54px; padding: 20px 14px 8px 10px;
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  }
+  .settings-outline-button {
+    height: 28px; padding: 0 10px;
+    border: 0.5px solid var(--border-ring); border-radius: 8px;
+    background: transparent; font-family: inherit; font-size: 12px; line-height: 18px; color: var(--text); white-space: nowrap; cursor: pointer;
+  }
+  .settings-outline-button:hover { background: var(--fill-hover); }
+  .settings-close {
+    flex-shrink: 0; width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; font-size: 16px;
+  }
+  .settings-close:hover { background: var(--fill-hover); }
+  .settings-body { flex-grow: 1; min-height: 0; overflow-y: auto; padding: 0 24px 24px; }
+
+  /* 기능 페이지 */
+  .features-page { display: flex; flex-direction: column; gap: 14px; padding-top: 16px; }
+  .features-page__search { display: flex; align-items: center; gap: 10px; }
+  .session-search {
+    flex: 1; min-width: 0; height: 36px; padding: 0 14px;
+    display: flex; align-items: center; gap: 8px;
+    border: 0.5px solid var(--border-strong); border-radius: 12px;
+    background: var(--surface); font-size: 14px; color: var(--text-secondary);
+  }
+  .extensions-add {
+    height: 36px; padding: 0 14px;
+    display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+    border: 0.5px solid var(--border-strong); border-radius: 12px;
+    background: var(--text); color: var(--on-text);
+    font-family: inherit; font-size: 14px; cursor: pointer; white-space: nowrap;
+  }
+  .extensions-add:hover { opacity: .9; }
+
+  /* 기능 카드 */
+  .feature-rows { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .feature-row {
+    border: 0.5px solid var(--border-strong); border-radius: 20px;
+    background: var(--surface-panel); overflow: visible;
+  }
+  .feature-row[data-expanded] { background: var(--fill-hover); box-shadow: var(--shadow-card, 0 1px 2px rgba(0,0,0,.04)); }
+  .feature-row__head { display: flex; align-items: center; gap: 14px; padding: 0 16px 0 0; }
+  .feature-row__toggle {
+    flex: 1; min-width: 0; min-height: 56px;
+    display: grid; grid-template-columns: 36px minmax(0,1fr);
+    column-gap: 12px; align-items: center;
+    padding: 12px 0 12px 16px;
+    border: none; background: none; font: inherit; text-align: left; color: var(--text); cursor: pointer;
+    border-radius: 20px; transition: background 120ms;
+  }
+  .feature-row__toggle:hover { background: var(--fill-hover); }
+  .feature-row__tile {
+    width: 36px; height: 36px;
+    display: grid; place-items: center;
+    border-radius: 11px; background: var(--fill-active); color: var(--text-secondary);
+  }
+  .feature-row[data-on] .feature-row__tile { background: var(--accent-soft); color: var(--accent); }
+  .feature-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .feature-row__title { font-size: 14.5px; line-height: 20px; font-weight: 600; letter-spacing: -.1px; }
+  .feature-row__line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .feature-row__summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; line-height: 18px; color: var(--text-secondary); }
+  .feature-row__toggle[aria-expanded='true'] .feature-row__summary { white-space: normal; }
+
+  /* 펼쳐진 상세 — 배경이 바뀐 카드 안에 한 칸 내림(64 → 60px) + 위 구분선 + 살짝 밝은 면 */
+  .feature-row[data-expanded] .feature-row__detail {
+    border-top: 0.5px solid var(--border-light);
+    background: color-mix(in srgb, var(--fill-hover) 50%, transparent);
+    border-radius: 0 0 20px 20px;
+  }
+  .feature-row__detail {
+    display: flex; flex-direction: column; gap: 12px;
+    padding: 14px 16px 16px 60px;
+    font-size: 13px; line-height: 20px; color: var(--text-secondary);
+  }
+
+  /* 확장 카드 (보라) */
+  .extension-row .extension-row__tile {
+    background: color-mix(in srgb, var(--extension) 14%, transparent); color: var(--extension);
+  }
+  .extension-row[data-on] .extension-row__tile {
+    background: color-mix(in srgb, var(--extension) 18%, transparent); color: var(--extension);
+  }
+  .extension-row__badge {
+    flex-shrink: 0; padding: 0 8px;
+    border-radius: 10px; font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
+    border-color: transparent;
+    background: color-mix(in srgb, var(--extension) 12%, transparent); color: var(--extension);
+  }
+  .extension-row__version { flex-shrink: 0; font-size: 12px; line-height: 18px; color: var(--text-tertiary); white-space: nowrap; }
+  .extension-row__more {
+    width: 28px; height: 28px;
+    display: grid; place-items: center;
+    border: none; border-radius: 8px; background: none; color: var(--text-secondary); cursor: pointer;
+  }
+  .extension-row__more:hover { background: var(--fill-hover); }
+
+  /* 토글 36×20 — 끔은 옅은 선, 켬은 본문 글자색 바탕 */
+  .settings-switch {
+    flex-shrink: 0; width: 36px; height: 20px; padding: 2px;
+    display: flex; border: none; border-radius: 999px;
+    background: var(--border-ring); cursor: pointer;
+  }
+  .settings-switch[aria-checked='true'] { background: var(--text); }
+  .settings-switch__thumb {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--switch-thumb); transition: transform 120ms;
+  }
+  .settings-switch[aria-checked='true'] .settings-switch__thumb { transform: translateX(16px); background: var(--on-text); }
+
+  /* 설치한 확장 구분선 */
+  .extensions-section { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .extensions-section__divider {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 13px; line-height: 20px; font-weight: 600; color: var(--text-secondary);
+  }
+  .extensions-section__divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
+  .extension-confirm__rows {
+    display: grid; grid-template-columns: 96px minmax(0,1fr);
+    column-gap: 12px;
+    margin: 0; font-size: 13px; line-height: 20px;
+  }
+  .extension-confirm__rows dt, .extension-confirm__rows dd {
+    margin: 0; padding: 6px 0;
+  }
+  .extension-confirm__rows dt { color: var(--text-tertiary); font-size: 12px; letter-spacing: .2px; }
+  .extension-confirm__rows dd { color: var(--text); overflow-wrap: anywhere; }
+  .extension-confirm__rows code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+
+  .extension-row__details {
+    margin: 0; white-space: pre-line; overflow-wrap: anywhere;
+    color: var(--text-secondary); font-size: 12.5px; line-height: 19px;
+    max-height: 120px; overflow-y: auto;
+    padding-right: 6px;
+    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent);
+    mask-image: linear-gradient(to bottom, black 70%, transparent);
+  }
+
+  /* 새로 들어간 것: 서버 옵션 — 설정 > 기능의 확장 카드 펼침 안에
+     "앱 켤 때 같이 띄우기" · "앱 끌 때 같이 내리기" 체크 2개
+     (SonarQube 패널 오른쪽 탭의 서버 카드에서 이사 온 것) */
+  .extension-server-options {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-top: 4px; padding: 12px 14px;
+    border: 0.5px solid var(--border-strong); border-radius: 14px;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--extension) 6%, transparent), transparent 30%) padding-box,
+      var(--surface);
+    box-shadow: 0 1px 2px rgba(0,0,0,.02);
+  }
+  .extension-server-options__title {
+    display: flex; align-items: center; gap: 6px;
+    padding-bottom: 8px; margin-bottom: 6px;
+    border-bottom: 0.5px solid var(--border-light);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: .8px; text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+  .extension-server-options__title svg { flex-shrink: 0; color: var(--extension); }
+  .extension-server-option {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 8px 4px; margin: 0 -4px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 100ms;
+  }
+  .extension-server-option:hover { background: var(--fill-hover); }
+  .extension-server-option__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .extension-server-option__label {
+    font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text);
+  }
+  .extension-server-option:hover .extension-server-option__label { color: var(--text-strong-hover); }
+  .extension-server-option__note {
+    font-size: 11.5px; line-height: 16px; color: var(--text-tertiary);
+  }
+  .check {
+    flex-shrink: 0; width: 20px; height: 20px;
+    display: grid; place-items: center;
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--surface); color: transparent; cursor: pointer;
+    transition: border-color 100ms, background 100ms;
+  }
+  .check svg { width: 12px; height: 12px; }
+  .check[aria-checked='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-text); }
+
+  .hint {
+    margin: 0; padding: 8px 12px;
+    border-radius: 10px; background: var(--bg-sidebar);
+    font-size: 12px; line-height: 18px; color: var(--text-secondary);
+  }
+  .hint b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="settings-panel">
+
+      <!-- 왼쪽 메뉴 (기능 선택 상태) -->
+      <nav class="settings-nav" aria-label="설정 메뉴">
+        <p class="settings-nav__title">설정</p>
+        <div class="settings-nav__list" role="menu">
+          <button class="settings-nav__item" type="button">일반</button>
+          <button class="settings-nav__item" type="button">모형</button>
+          <button class="settings-nav__item settings-nav__item--active" type="button" aria-current="true">
+            <svg class="settings-nav__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+              <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+            </svg>
+            기능
+          </button>
+          <button class="settings-nav__item" type="button">모바일</button>
+          <button class="settings-nav__item" type="button">주제</button>
+        </div>
+      </nav>
+
+      <!-- 오른쪽: 기능 페이지 -->
+      <div class="settings-content">
+        <div class="settings-header">
+          <div style="margin-left:auto; display:flex; align-items:center; gap:8px; min-width:0;">
+            <button class="settings-outline-button" type="button">설정 파일 열기</button>
+            <button class="settings-close" type="button" aria-label="닫기">×</button>
+          </div>
+        </div>
+
+        <div class="settings-body">
+          <div class="features-page">
+
+            <!-- 찾기 + 확장 추가 -->
+            <div class="features-page__search">
+              <div class="session-search" role="search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <circle cx="10.5" cy="10.5" r="6.5"/>
+                  <path d="M15.5 15.5L20 20"/>
+                </svg>
+                <span>기능 찾기…</span>
+              </div>
+              <button class="extensions-add" type="button">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                  <path d="M6 1.5v9M1.5 6h9"/>
+                </svg>
+                확장 추가 (zip)
+              </button>
+            </div>
+
+            <!-- 기능 카드 1 (예시: 채팅 — 꺼짐) -->
+            <ul class="feature-rows">
+              <li class="feature-row" data-expanded>
+                <div class="feature-row__head">
+                  <button class="feature-row__toggle" aria-expanded="false">
+                    <span class="feature-row__tile" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                      </svg>
+                    </span>
+                    <span class="feature-row__text">
+                      <span class="feature-row__line">
+                        <span class="feature-row__title">채팅</span>
+                      </span>
+                      <span class="feature-row__summary">새 대화 · 세션 · 기록 — 모델로 코드 작성</span>
+                    </span>
+                  </button>
+                  <span class="extension-row__more" aria-hidden="true" style="color:var(--text-caption)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                  </span>
+                  <button class="settings-switch" role="switch" aria-checked="true" aria-label="채팅"><span class="settings-switch__thumb" /></button>
+                </div>
+              </li>
+            </ul>
+
+            <!-- 설치한 확장 구분선 -->
+            <div class="extensions-section" aria-label="설치한 확장">
+              <div class="extensions-section__divider">
+                <span>설치한 확장</span>
+              </div>
+
+              <ul class="feature-rows">
+                <!-- 예시: 다른 확장 (꺼짐, 접힘) -->
+                <li class="feature-row extension-row" data-kind="off">
+                  <div class="feature-row__head">
+                    <button class="feature-row__toggle" aria-expanded="false">
+                      <span class="feature-row__tile" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M19.5 13.5L12 21l-7.5-7.5a6 6 0 1 1 8.49-8.49L12 5.5l1.01-1.01a6 6 0 1 1 8.49 8.49z"/>
+                        </svg>
+                      </span>
+                      <span class="feature-row__text">
+                        <span class="feature-row__line">
+                          <span class="feature-row__title">GitLens</span>
+                          <span class="extension-row__badge">확장</span>
+                          <span class="extension-row__version">v0.1.4</span>
+                        </span>
+                        <span class="feature-row__summary">커밋마다 파일을 블라인드합니다</span>
+                      </span>
+                    </button>
+                    <span class="extension-row__more" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                    </span>
+                    <button class="settings-switch" role="switch" aria-checked="false" aria-label="GitLens"><span class="settings-switch__thumb" /></button>
+                  </div>
+                </li>
+
+                <!-- SONARQUBE — 켜짐, 펼침. 서버 옵션 체크 2개가 펼쳐진 상세에 있다 -->
+                <li class="feature-row extension-row" data-kind="on" data-on data-expanded>
+                  <div class="feature-row__head">
+                    <button class="feature-row__toggle" aria-expanded="true" aria-controls="sonar-detail">
+                      <span class="feature-row__tile" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M14 7l1.5 3L18.5 11.5 15.5 13 14 16l-1.5-3L9.5 11.5 12.5 10z"/>
+                          <circle cx="11" cy="13" r="8"/>
+                        </svg>
+                      </span>
+                      <span class="feature-row__text">
+                        <span class="feature-row__line">
+                          <span class="feature-row__title">SonarQube</span>
+                          <span class="extension-row__badge">확장</span>
+                          <span class="extension-row__version">v0.2.7</span>
+                        </span>
+                        <span class="feature-row__summary">확장에 든 SonarQube 를 이 기기에서 띄워 지금 프로젝트를 분석하고, 품질 게이트·이슈를 봅니다</span>
+                      </span>
+                    </button>
+                    <span class="extension-row__more" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                    </span>
+                    <button class="settings-switch" role="switch" aria-checked="true" aria-label="SonarQube"><span class="settings-switch__thumb" /></button>
+                  </div>
+
+                  <!-- 펼친 상세: 기존 정보(dl) + details + ★ 서버 옵션(신규) -->
+                  <div class="feature-row__detail" id="sonar-detail">
+                    <dl class="extension-confirm__rows">
+                      <dt>id</dt>
+                      <dd><code>sonarqube</code></dd>
+                      <dt>버전</dt>
+                      <dd>0.2.7</dd>
+                      <dt>설명</dt>
+                      <dd>확장에 든 SonarQube 를 이 기기에서 띄워 지금 프로젝트를 분석하고, 품질 게이트·이슈를 봅니다</dd>
+                    </dl>
+
+                    <p class="extension-row__details">오른쪽 패널의 + 메뉴 › 확장 › SonarQube 로 엽니다.
+[띄우기] 로 서버를 켭니다 — 처음엔 1분 남짓, 그다음부터 20초 남짓 걸리고 메모리를 약 2GB 씁니다.
+[분석] 으로 지금 프로젝트를 분석합니다. 범위를 전체 · 폴더·파일 · 내 변경(이 브랜치에서 바뀐 파일과 커밋 안 한 파일)으로 고를 수 있고, 범위 결과는 전체 결과와 따로 보관합니다.
+이슈의 파일 경로를 누르면 그 파일이 열립니다. [수정 요청](여러 개는 골라서 한 번에)을 누르면 새 대화가 열리고 수정 요청이 바로 보내집니다 — 덧붙일 말은 그 대화에서 이어서 하세요. 수정은 함께 설치되는 sonarqube-fix 스킬을 따라 해당 부분만, 동작을 바꾸지 않게 고칩니다.
+마지막 결과는 서버가 꺼져 있어도 보이고, 확장을 지울 때까지 남습니다.
+서버는 이 기기(127.0.0.1)에서만 접속되고 바깥으로 요청하지 않습니다.</p>
+
+                    <!-- ★ 신규: 앱 쪽 서버 옵션 (SonarQube 패널에서 이사 온 것) -->
+                    <div class="extension-server-options" role="group" aria-label="서버 옵션">
+                      <span class="extension-server-options__title">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <rect x="3" y="4" width="18" height="7" rx="1.5"/>
+                          <rect x="3" y="13" width="18" height="7" rx="1.5"/>
+                          <circle cx="7.5" cy="7.5" r="1" fill="currentColor" stroke="none"/>
+                          <circle cx="7.5" cy="16.5" r="1" fill="currentColor" stroke="none"/>
+                        </svg>
+                        서버 옵션
+                      </span>
+
+                      <label class="extension-server-option">
+                        <span class="extension-server-option__text">
+                          <span class="extension-server-option__label">앱을 켤 때 같이 띄우기</span>
+                          <span class="extension-server-option__note">기본: 꺼짐 — litecode 를 켤 때 이 확장의 내장 서버가 자동으로 시작됩니다.</span>
+                        </span>
+                        <span class="check" role="checkbox" aria-checked="true" tabindex="0">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M5 12.5l4.5 4.5L19 7"/>
+                          </svg>
+                        </span>
+                      </label>
+
+                      <label class="extension-server-option">
+                        <span class="extension-server-option__text">
+                          <span class="extension-server-option__label">앱을 닫을 때 같이 내리기</span>
+                          <span class="extension-server-option__note">기본: 켜짐 — litecode 가 꺼질 때 서버도 함께 종료됩니다. 꺼두면 litecode 가 꺼져도 서버가 남습니다.</span>
+                        </span>
+                        <span class="check" role="checkbox" aria-checked="true" tabindex="0">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M5 12.5l4.5 4.5L19 7"/>
+                          </svg>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            <p class="hint">
+              <b>서버 옵션</b> — SonarQube 패널의 서버 카드에서 두 체크가 여기로 이사 왔습니다.
+              데이터는 <code>settings.extensionServers[&lt;id&gt;]</code> 에 있고, <code>server.setOptions</code> IPC 로 씁니다.
+            </p>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // 시안용 — 체크 토글만 동작
+  document.querySelectorAll('.check').forEach(function (node) {
+    function flip() {
+      var now = node.getAttribute('aria-checked') === 'true'
+      node.setAttribute('aria-checked', String(!now))
+    }
+    node.addEventListener('click', flip)
+    node.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip() }
+    })
+  })
+  // 확장 카드 펼침 토글 (SonarQube)
+  document.querySelectorAll('.extension-row .feature-row__toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var expanded = btn.getAttribute('aria-expanded') === 'true'
+      btn.setAttribute('aria-expanded', String(!expanded))
+      btn.closest('.feature-row').toggleAttribute('data-expanded')
+    })
+  })
+</script>
+</body>
+</html>

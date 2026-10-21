@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>설정 > 모델 (카드형)</title>
+<style>
+  :root {
+    --bg: #ffffff; --bg-sidebar: #f5f6f7;
+    --text: #0f1115; --text-strong-hover: #2b2e33; --text-secondary: #61666b;
+    --text-tertiary: #81858c; --text-caption: #adb2b8;
+    --border-strong: rgba(0,0,0,.16); --border-ring: rgba(0,0,0,.12);
+    --fill-hover: rgba(38,49,72,.06);
+    --accent: #4176e6; --accent-soft: #e4edfd;
+    --danger: #e5484d; --danger-bg: #fdecec;
+    --surface: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Pretendard', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; }
+  .page { max-width: 720px; margin: 0 auto; padding: 28px 20px 60px; }
+  .page__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .page__title { font-size: 18px; font-weight: 600; }
+  .page__close { width: 32px; height: 32px; border: none; background: none; font-size: 20px; color: var(--text-secondary); border-radius: 8px; cursor: pointer; }
+  .page__close:hover { background: var(--fill-hover); }
+  .provider-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 0.5px solid var(--border-ring); border-radius: 999px; background: var(--bg-sidebar); font-size: 13px; color: var(--text-secondary); }
+  .provider-chip__dot { width: 8px; height: 8px; border-radius: 50%; background: #4d9e45; }
+  .settings-field { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 12px; padding: 6px 0; }
+  .settings-field__label { font-size: 12.5px; color: var(--text-secondary); }
+  .settings-input { width: 100%; min-width: 0; height: 34px; padding: 0 10px; border: 0.5px solid var(--border-strong); border-radius: 12px; background: var(--surface); font-family: inherit; font-size: 14px; color: var(--text); }
+  .settings-input--readonly { background: var(--bg-sidebar); color: var(--text-caption); }
+  select.settings-input { appearance: none; padding-right: 28px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%), linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+    background-position: calc(100% - 16px) center, calc(100% - 11px) center; background-size: 5px 5px; background-repeat: no-repeat; }
+  .model-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 0.5px solid var(--border-strong); border-radius: 14px; background: var(--surface); }
+  .model-card__row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .model-card__row:first-child { flex-wrap: nowrap; }
+  .model-card__row:first-child .settings-input { flex: 1; }
+  .model-card__id { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; }
+  .model-card__number { flex: none; width: 130px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 0.5px solid var(--border-ring); border-radius: 999px; background: transparent; font-family: inherit; font-size: 13px; color: var(--text-secondary); white-space: nowrap; cursor: pointer; transition: background .12s; }
+  .pill:hover { background: var(--fill-hover); }
+  .pill[aria-pressed='true'] { padding-left: 10px; background: var(--text); border-color: var(--text); color: #fff; font-weight: 600; }
+  .pill[aria-pressed='true']:hover { background: var(--text-strong-hover); }
+  .pill__check { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #fff; color: var(--text); font-size: 11px; line-height: 1; font-weight: 700; }
+  .icon-btn { flex: none; width: 28px; height: 28px; border: none; border-radius: 8px; background: none; font-size: 16px; color: var(--text-secondary); cursor: pointer; }
+  .icon-btn:hover { background: var(--danger-bg); color: var(--danger); }
+  .hint { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--bg-sidebar); font-size: 12.5px; line-height: 18px; color: var(--text-secondary); }
+  .hint strong { color: var(--text); font-weight: 600; }
+  .hint__term { display: inline-block; padding-right: 4px; }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .footer { margin-top: 18px; display: flex; justify-content: flex-end; gap: 8px; }
+  .btn { height: 36px; padding: 0 16px; border: 0.5px solid var(--border-ring); border-radius: 12px; background: transparent; font-family: inherit; font-size: 14px; color: var(--text); cursor: pointer; }
+  .btn:hover:not(:disabled) { background: var(--fill-hover); }
+  .btn--primary { background: var(--text); border-color: var(--text); color: #fff; }
+  .btn--primary:hover:not(:disabled) { background: var(--text-strong-hover); }
+  .actions { display: flex; gap: 8px; margin: 12px 0 0; }
+  .actions .btn { height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; }
+  .state { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; margin-left: 10px; }
+  .state--off { background: var(--fill-hover); color: var(--text-secondary); }
+  .card-head { display: flex; align-items: center; }
+  .card-head__label { font-size: 13px; font-weight: 600; margin-right: 4px; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="page__head">
+      <span class="page__title">설정 파일 열기</span>
+      <button class="page__close" title="닫기">×</button>
+    </div>
+
+    <div class="provider-chip"><span class="provider-chip__dot"></span>gateway-local (10.250.121.100)</div>
+
+    <label class="settings-field" style="margin-top:14px">
+      <span class="settings-field__label">API 키</span>
+      <span class="settings-input settings-input--readonly" style="display:block">설정됨 — 바꾸려면 새 키 입력</span>
+    </label>
+    <label class="settings-field">
+      <span class="settings-field__label">Base URL</span>
+      <span class="settings-input settings-input--readonly" style="display:block">http://10.250.121.100/v1</span>
+    </label>
+    <label class="settings-field">
+      <span class="settings-field__label">API 프로토콜</span>
+      <select class="settings-input" disabled><option>OpenAI Chat Completions</option></select>
+    </label>
+
+    <div class="settings-field__label" style="margin-top:8px">모델 <span style="color:var(--text-caption)">· 2개</span></div>
+
+    <div class="stack">
+
+      <!-- 카드 1: 사고 끄기 OFF -->
+      <div class="model-card">
+        <div class="card-head">
+          <span class="card-head__label">1</span>
+          <span class="state state--off">사고 OFF</span>
+        </div>
+        <div class="model-card__row">
+          <input class="settings-input model-card__id" value="qwen3.8-27b" />
+          <input class="settings-input" value="Qwen3.8 27B" />
+          <button class="icon-btn" title="모델 삭제">×</button>
+        </div>
+        <div class="model-card__row">
+          <input class="settings-input model-card__number" type="number" value="100000" />
+          <input class="settings-input model-card__number" type="number" placeholder="자동 · 25000" />
+          <div class="model-card__toggles" style="margin-left:auto; display:flex; gap:8px;">
+            <button class="pill" aria-pressed="true" data-pill><span class="pill__check">✓</span>이미지 입력</button>
+            <button class="pill" data-pill>사고 끄기</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 카드 2: 사고 끄기 ON -->
+      <div class="model-card">
+        <div class="card-head">
+          <span class="card-head__label">2</span>
+          <span class="state">사고 ON</span>
+        </div>
+        <div class="model-card__row">
+          <input class="settings-input model-card__id" value="qwen3.8-27b" />
+          <input class="settings-input" value="qwen3.8-27b_thinking" />
+          <button class="icon-btn" title="모델 삭제">×</button>
+        </div>
+        <div class="model-card__row">
+          <input class="settings-input model-card__number" type="number" value="100000" />
+          <input class="settings-input model-card__number" type="number" placeholder="自動 · 25000" />
+          <div class="model-card__toggles" style="margin-left:auto; display:flex; gap:8px;">
+            <button class="pill" data-pill>이미지 입력</button>
+            <button class="pill" aria-pressed="true" data-pill><span class="pill__check">✓</span>사고 끄기</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <p class="hint">
+      <strong class="hint__term">사고 끄기</strong> — 답하기 전에 생각하는 과정을 건너뛰어 더 빠르게 답합니다. 어려운 작업은 정확도가 내려갈 수 있습니다.
+    </p>
+
+    <div class="actions">
+      <button class="btn">+ 모델 추가</button>
+      <button class="btn">사용 가능한 모델 가져오기</button>
+    </div>
+    <div class="footer">
+      <button class="btn">취소</button>
+      <button class="btn btn--primary">적용</button>
+    </div>
+  </div>
+
+<script>
+  document.querySelectorAll('[data-pill]').forEach(function (pill) {
+    pill.addEventListener('click', function () {
+      var on = pill.getAttribute('aria-pressed') === 'true';
+      if (on) {
+        pill.setAttribute('aria-pressed', 'false');
+        var c = pill.querySelector('.pill__check');
+        if (c) c.remove();
+      } else {
+        pill.setAttribute('aria-pressed', 'true');
+        if (!pill.querySelector('.pill__check')) {
+          var s = document.createElement('span');
+          s.className = 'pill__check';
+          s.textContent = '✓';
+          pill.prepend(s);
+        }
+      }
+    });
+  });
+</script>
+</body>
+</html>

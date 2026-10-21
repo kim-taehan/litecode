@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 C — 현재 (기존 동작)</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --text: #0f1115;
+  --text-secondary: #61666b;
+  --text-tertiary: #81858c;
+  --text-caption: #adb2b8;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-ring: rgba(0, 0, 0, 0.12);
+  --fill-hover: rgba(38, 49, 72, 0.06);
+  --fill-active: rgba(38, 49, 72, 0.1);
+  --fill-selector: #f5f6f7;
+  --accent: #4176e6;
+  --accent-soft: #e4edfd;
+  --chat-font-size: 14px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, "Pretendard", "Apple SD Gothic Neo", sans-serif;
+  background: #eceef0;
+  color: var(--text);
+  padding: 28px 20px 60px;
+}
+.page { max-width: 640px; margin: 0 auto; }
+h1 { font-size: 16px; margin: 0 0 4px; }
+.sub { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 6px; line-height: 1.6; }
+.sub b { color: var(--text); }
+.legend { display: flex; gap: 14px; font-size: 11.5px; color: var(--text-secondary); margin: 0 0 18px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+.legend .keep i { background: var(--fill-hover); border: 1px solid var(--border); }
+.legend .now i { background: #fdecec; border: 1px dashed #e89; }
+
+/* ── 앱 채팅 열 ── */
+.chat { background: var(--bg); border: 0.5px solid var(--border-ring); border-radius: 12px; padding: 20px 22px 8px; display: flex; flex-direction: column; gap: 14px; }
+
+.user-turn { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.bubble { max-width: 78%; padding: 12px 16px; font-size: var(--chat-font-size); line-height: 1.55; white-space: pre-wrap; }
+.bubble--user { align-self: flex-end; background: var(--accent-soft); color: var(--text); border-radius: 14px 14px 4px 14px; }
+.user-turn__meta { display: flex; align-items: center; gap: 4px; height: 24px; color: var(--text-caption); font-size: 12px; }
+
+/* ── 진행 중 턴 ── */
+.turn { display: flex; flex-direction: column; min-width: 0; }
+.turn__work { display: flex; flex-direction: column; gap: 6px; margin-bottom: 2px; }
+
+/* 현재: 중간 글(text) 줄은 채팅에 본문 그대로 실시간 표시 (이슈 #416 이 유지한 동작) */
+.turn-row--text { color: var(--text); font-size: var(--chat-font-size); line-height: 1.6; white-space: pre-wrap; }
+
+/* 진행 중 맨 아래 파란 줄 (이슈 #416) */
+.turn-running { display: flex; flex-direction: column; align-items: flex-start; color: var(--accent); font-size: calc(var(--chat-font-size) - 2px); line-height: 22px; }
+.turn-running__line { display: flex; align-items: center; gap: 6px; width: 100%; padding: 1px 6px 1px 2px; border-radius: 6px; background: var(--fill-active); min-width: 0; }
+.turn-running__summary { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, black calc(100% - 48px), transparent); -webkit-mask-image: linear-gradient(to right, black calc(100% - 48px), transparent); }
+.turn-running__dot { flex: none; width: 2px; height: 2px; border-radius: 1px; background: currentColor; }
+.turn-running__seconds { flex: none; font-variant-numeric: tabular-nums; }
+.turn-running__dots span { animation: turn-dot 1.2s infinite; opacity: 0.25; }
+.turn-running__dots span:nth-child(2) { animation-delay: 0.2s; }
+.turn-running__dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes turn-dot { 0%,60%,100% { opacity: 0.25; } 30% { opacity: 1; } }
+@keyframes turn-shimmer { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* ── 끝난 턴 (변경 없음) ── */
+.turn__head { display: flex; align-items: center; height: 33px; padding: 0 0 8px; margin-bottom: 8px; border-bottom: 0.5px solid var(--border); color: var(--text-tertiary); font-size: calc(var(--chat-font-size) - 1px); }
+.bubble--assistant { padding: 2px 0 10px; line-height: 1.6; font-size: var(--chat-font-size); }
+.bubble--assistant code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; background: var(--fill-selector); border-radius: 5px; padding: 1px 5px; color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>시안 C — 현재 동작 (비교용)</h1>
+  <p class="sub">
+    중간 글("Let me…")이 <b>채팅에 본문 글자로 그대로 실시간 표시</b>되어 도는 동안 노이즈가 커집니다.
+    A(안 보기)·B(한 줄) 와 같은 턴을 보여 주므로 세 파일을 비교하면 차이가 바로 보입니다.
+  </p>
+  <div class="legend">
+    <span class="now" style="display:flex;align-items:center"><i></i>현재: 채팅에 전체 표시</span>
+  </div>
+
+  <!-- 채팅 -->
+  <div class="chat">
+    <div class="user-turn">
+      <div class="bubble bubble--user">로그 파일이 왜 잘려 보이는지 확인해줘</div>
+      <div class="user-turn__meta"><time>09:41</time></div>
+    </div>
+
+    <div class="turn" data-state="running">
+      <div class="turn__work">
+        <div class="turn-row--text">Let me take a closer look at what's happening with the log buffer before I make any changes. The truncation could come from a few different spots in the write path.</div>
+        <div class="turn-row--text">Let me read the log append section to see where flush is missing.</div>
+        <div class="turn-row--text">Let me run the linter to confirm nothing else breaks around this path. That should give me a baseline.</div>
+      </div>
+      <div class="turn-running">
+        <div class="turn-running__line">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z"/></svg>
+          <span class="turn-running__summary">지금 하는 일: Bash · npm run lint</span>
+          <span class="turn-running__dot" aria-hidden="true"></span>
+          <span class="turn-running__seconds">12초</span>
+          <span class="turn-running__dots" aria-hidden="true"><span>·</span><span>·</span><span>·</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 끝난 턴 — 어디든 동일 -->
+    <div class="turn" data-state="done">
+      <div class="turn__head"><span>완료 · 34초</span></div>
+      <div class="bubble bubble--assistant">
+        잘림은 버퍼가 채워지지 않아서였어요. <code>log.append()</code> 뒤에 <code>flush()</code>를 넣었고, <code>src/log.ts</code> 41행을 고쳤습니다.
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

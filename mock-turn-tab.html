@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>이 턴의 작업 탭 — 시안</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --text: #0f1115;
+  --text-secondary: #61666b;
+  --text-tertiary: #81858c;
+  --border-light: rgba(0, 0, 0, 0.06);
+  --fill-hover: rgba(38, 49, 72, 0.06);
+  --fill-active: rgba(38, 49, 72, 0.1);
+  --accent-soft: #e4edfd;
+  --warn: #f59e0b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  background: #eceef0;
+  color: var(--text);
+  padding: 32px 20px 56px;
+}
+.page { max-width: 880px; margin: 0 auto; }
+h1 { font-size: 17px; margin: 0 0 4px; }
+.sub { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 26px; }
+
+.block { margin-bottom: 30px; }
+.block__head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.badge { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; flex: none; }
+.badge--now { background: #fdecec; color: #d64545; }
+.badge--new { background: var(--accent-soft); color: #2b5fd9; }
+.block__cap { font-size: 12px; color: var(--text-secondary); }
+.block__note { font-size: 12px; color: var(--text-secondary); margin: 8px 2px 0; line-height: 1.7; }
+.block__note b { color: var(--text); font-weight: 600; }
+.mark-now { color: #d64545; font-weight: 600; }
+.mark-new { color: #2b5fd9; font-weight: 600; }
+
+/* ── 탭 줄 — 앱 파일 미리보기 머리(52px) 그대로 ── */
+.strip {
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 0 12px;
+  font-size: 13px;
+}
+.chips { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chrome { display: flex; align-items: center; gap: 4px; flex: none; color: var(--text-tertiary); }
+.chrome button {
+  width: 24px; height: 24px; padding: 0; border: none; border-radius: 6px;
+  background: transparent; color: inherit; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.chrome button:hover { background: var(--fill-hover); color: var(--text); }
+
+.tab {
+  position: relative;
+  flex: 0 1 auto;
+  display: flex; align-items: center; gap: 5px;
+  min-width: 80px; max-width: 170px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.tab--fixed { flex: none; min-width: 0; }
+.tab:hover { background: var(--fill-hover); }
+.tab.active { background: var(--fill-active); color: var(--text); }
+.tab svg { flex: none; }
+.tab__title { flex: 1 1 auto; min-width: 0; line-height: 1.4; }
+.count {
+  flex: none; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--accent-soft); color: #2b5fd9;
+  font-size: 11px; line-height: 16px; text-align: center;
+}
+.x {
+  position: absolute; top: 4px; right: 4px;
+  width: 20px; height: 20px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 6px; background: transparent; color: var(--text-tertiary);
+  opacity: 0; pointer-events: none; cursor: pointer;
+}
+.tab:hover .x, .tab.active .x { opacity: 1; pointer-events: auto; }
+
+/* ── 지금 : 이름 끝 흐림(× 이름 끝 위에 겹쳐 active 탭은 이름이 잘려 보임) ── */
+.now .tab__title {
+  overflow: hidden;
+  mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
+}
+.now .tab--fixed .tab__title { mask-image: none; -webkit-mask-image: none; }
+.now .tab:hover .tab__title,
+.now .tab.active .tab__title {
+  mask-image: linear-gradient(to right, black calc(100% - 30px), transparent calc(100% - 14px));
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 30px), transparent calc(100% - 14px));
+}
+
+/* ── 제안 : × 자리(20px) 미리 비워 이름은 늘 전체, 긴 이름만 … 으로 ── */
+.new .tab { padding: 0 24px 0 10px; }
+.new .tab--fixed { padding-right: 10px; }
+.new .tab__title { overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>오른쪽 패널 탭 — 이름 “이 턴의 작업” → “턴 작업”</h1>
+  <p class="sub">탭 줄(파일 미리보기 머리)만 시안 — 이름 짧게 + 한 개만 유지하기</p>
+
+  <!-- ───────── 지금 ───────── -->
+  <div class="block">
+    <div class="block__head">
+      <span class="badge badge--now">지금</span>
+      <span class="block__cap">턴이 한 개 쌓일 때마다 탭이 하나 더 — 고른 탭은 × 때문에 이름이 흐려지고 잘려 보인다</span>
+    </div>
+    <div class="strip now">
+      <div class="chips">
+        <div class="tab tab--fixed">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--warn)" stroke-width="1.2" stroke-linejoin="round">
+            <path d="M1.75 4.25C1.75 3.42 2.42 2.75 3.25 2.75H6.25L7.75 4.25H12.75C13.58 4.25 14.25 4.92 14.25 5.75V11.75C14.25 12.58 13.58 13.25 12.75 13.25H3.25C2.42 13.25 1.75 12.58 1.75 11.75Z"/>
+          </svg>
+          <span class="tab__title">파일</span>
+        </div>
+        <div class="tab tab--fixed">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/>
+            <path d="M4.5 5V11M11.5 7C11.5 9.5 4.5 8.5 4.5 11"/>
+          </svg>
+          <span class="tab__title">Git</span><span class="count">3</span>
+        </div>
+        <div class="tab active">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z"/>
+          </svg>
+          <span class="tab__title">이 턴의 작업</span>
+          <button class="x" type="button"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+        </div>
+        <div class="tab">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z"/>
+          </svg>
+          <span class="tab__title">이 턴의 작업</span>
+          <button class="x" type="button"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+        </div>
+        <div class="tab">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 4.5L6.5 8L3 11.5"/><path d="M8.5 12H13"/>
+          </svg>
+          <span class="tab__title">터미널 1</span>
+          <button class="x" type="button"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+        </div>
+        <div class="tab">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+            <path d="M4 1.75H9.5L12.5 4.75V14.25H4Z"/><path d="M9.5 1.75V4.75H12.5"/>
+          </svg>
+          <span class="tab__title">chat-layout.live.test.ts</span>
+          <button class="x" type="button"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+        </div>
+        <button class="x" type="button" style="position:static;opacity:1;color:var(--text-tertiary);width:24px;height:24px" title="+">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5V12.5M3.5 8H12.5"/></svg>
+        </button>
+      </div>
+      <div class="chrome">
+        <button type="button" title="전체 화면"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5V6H2.5M10 2.5V6H13.5M6 13.5V10H2.5M10 13.5V10H13.5"/></svg></button>
+        <button type="button" title="닫기"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+      </div>
+    </div>
+    <p class="block__note">
+      <span class="mark-now">✕</span> “이 턴의 작업” 탭이 <b>턴마다</b> — 같은 이름 칩이 몇 개나 쌓이고<br>
+      <span class="mark-now">✕</span> 고른(또는 마우스 올려둔) 칩은 × 가 이름 끝 위에 겹쳐서 <b>“이 턴의 조…”</b> 처럼 흐려지고 잘려 보임
+    </p>
+  </div>
+
+  <!-- ───────── 제안 ───────── -->
+  <div class="block">
+    <div class="block__head">
+      <span class="badge badge--new">제안</span>
+      <span class="block__cap">이름 <b>“턴 작업”</b> 으로 줄임 — 늘 탭 <b>1개</b>, 새 턴이 오면 그 탭이 바뀌고 이름은 끝까지 보인다</span>
+    </div>
+    <div class="strip new">
+      <div class="chips">
+        <div class="tab tab--fixed">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--warn)" stroke-width="1.2" stroke-linejoin="round">
+            <path d="M1.75 4.25C1.75 3.42 2.42 2.75 3.25 2.75H6.25L7.75 4.25H12.75C13.58 4.25 14.25 4.92 14.25 5.75V11.75C14.25 12.58 13.58 13.25 12.75 13.25H3.25C2.42 13.25 1.75 12.58 1.75 11.75Z"/>
+          </svg>
+          <span class="tab__title">파일</span>
+        </div>
+        <div class="tab tab--fixed">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/>
+            <path d="M4.5 5V11M11.5 7C11.5 9.5 4.5 8.5 4.5 11"/>
+          </svg>
+          <span class="tab__title">Git</span><span class="count">3</span>
+        </div>
+        <div class="tab active">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z"/>
+          </svg>
+          <span class="tab__title">턴 작업</span>
+          <button class="x" type="button"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+        </div>
+        <div class="tab">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 4.5L6.5 8L3 11.5"/><path d="M8.5 12H13"/>
+          </svg>
+          <span class="tab__title">터미널 1</span>
+          <button class="x" type="button"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+        </div>
+        <div class="tab">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+            <path d="M4 1.75H9.5L12.5 4.75V14.25H4Z"/><path d="M9.5 1.75V4.75H12.5"/>
+          </svg>
+          <span class="tab__title">chat-layout.live.test.ts</span>
+          <button class="x" type="button"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+        </div>
+        <button class="x" type="button" style="position:static;opacity:1;color:var(--text-tertiary);width:24px;height:24px" title="+">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5V12.5M3.5 8H12.5"/></svg>
+        </button>
+      </div>
+      <div class="chrome">
+        <button type="button" title="전체 화면"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6V2.5H6M13.5 6V2.5H10M2.5 10V13.5H6M13.5 10V13.5H10"/></svg></button>
+        <button type="button" title="닫기"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4L12 12M12 4L4 12"/></svg></button>
+      </div>
+    </div>
+    <p class="block__note">
+      <span class="mark-new">✓</span> 제목을 <b>“턴 작업”</b> 으로 — “이 턴의 작업” 보다 한 칸 좁아 칩 한 편에 들어감(영문 유지: Turn work)<br>
+      <span class="mark-new">✓</span> 한 창만 — 새 턴의 진행 줄을 누르면 <b>지금 이 탭</b>의 열쇠가 새 턴으로 바뀜(위치 그대로, 새 탭 없음). 탭을 닫으면 닫아둔 채로 그대로<br>
+      <span class="mark-new">✓</span> 이름을 흐리지 않음 — × 자리는 칩 오른쪽에 <b>항상 비워 두고</b> × 는 이름 위를 안 지남. 이름이 실제로 길어서 안 들어갈 때만 … 으로 줄임(긴 파일 이름도 끝이 아니라 … 로)
+    </p>
+  </div>
+</div>
+</body>
+</html>

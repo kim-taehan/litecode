@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>커피 주문</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif;
+    background: #efe9e2;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .phone {
+    width: 400px;
+    background: #faf7f2;
+    border-radius: 28px;
+    box-shadow: 0 12px 48px rgba(62, 39, 22, .18);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  /* ── header ── */
+  .store {
+    background: linear-gradient(135deg, #6f4e37 0%, #4a3122 100%);
+    color: #fff;
+    padding: 22px 20px 18px;
+    position: relative;
+  }
+  .store .row1 { display: flex; align-items: center; gap: 14px; }
+  .logo {
+    width: 54px; height: 54px; border-radius: 50%;
+    background: #fdf6ec;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.25);
+  }
+  .logo svg { height: 34px; width: auto; display: block; }
+  .store h1 { font-size: 19px; font-weight: 700; letter-spacing: -.2px; }
+  .store .meta { font-size: 12.5px; opacity: .85; margin-top: 4px; display: flex; gap: 10px; }
+  .store .meta .open { color: #b8f0c0; font-weight: 600; }
+  .store .badge {
+    position: absolute; top: 14px; right: 14px;
+    background: #f59e0b; color: #fff;
+    font-size: 11px; font-weight: 700;
+    padding: 4px 9px; border-radius: 20px;
+  }
+  /* ── scroll area ── */
+  .scroll { flex: 1; overflow-y: auto; padding: 16px 16px 130px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab {
+    border: none; background: #eadfd2; color: #6f4e37;
+    font-size: 13px; font-weight: 600;
+    padding: 8px 16px; border-radius: 20px; cursor: pointer;
+    font-family: inherit;
+    transition: all .15s;
+  }
+  .tab:hover { background: #e0d2bf; }
+  .tab.active { background: #4a3122; color: #fdf6ec; }
+  /* ── menu cards ── */
+  .item {
+    display: flex; gap: 14px;
+    background: #fff;
+    border: 1.5px solid transparent;
+    border-radius: 16px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .item:hover { border-color: #d8c6ae; }
+  .item.selected { border-color: #6f4e37; box-shadow: 0 0 0 1px #6f4e37; }
+  .thumb {
+    width: 74px; height: 74px; border-radius: 12px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .thumb svg { height: 52px; width: auto; }
+  .info { flex: 1; min-width: 0; }
+  .info .name { font-size: 15px; font-weight: 700; color: #2d1d12; }
+  .info .desc { font-size: 12px; color: #8a7a68; margin-top: 3px; line-height: 1.4; }
+  .info .bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+  .price { font-size: 15px; font-weight: 800; color: #4a3122; }
+  .price small { font-size: 11px; font-weight: 600; color: #8a7a68; }
+  .add {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: none; background: #6f4e37; color: #fff;
+    font-size: 18px; line-height: 1;
+    cursor: pointer; transition: transform .12s, background .15s;
+    font-family: inherit;
+  }
+  .add:hover { background: #553a27; transform: scale(1.08); }
+  .add:active { transform: scale(.94); }
+  /* ── bottom cart bar ── */
+  .cart-bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: #fff;
+    border-top: 1px solid #e8dfd3;
+    padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -6px 24px rgba(62,39,22,.08);
+  }
+  .cart-summary { display: flex; align-items: center; justify-content: space-between; }
+  .cart-left { font-size: 13px; color: #6b5d4f; }
+  .cart-left b { font-size: 16px; color: #2d1d12; font-weight: 800; margin-right: 6px; }
+  .cart-left .count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    background: #f59e0b; color: #fff;
+    border-radius: 10px; font-size: 11px; font-weight: 700;
+    margin-right: 4px;
+  }
+  .order-btn {
+    border: none; border-radius: 14px;
+    background: #4a3122; color: #fdf6ec;
+    font-size: 14.5px; font-weight: 700; font-family: inherit;
+    padding: 13px 22px; cursor: pointer;
+    transition: opacity .15s, transform .12s;
+  }
+  .order-btn:hover:not(:disabled) { background: #5c4030; }
+  .order-btn:active:not(:disabled) { transform: scale(.97); }
+  .order-btn:disabled { background: #d9cfc2; color: #fff; cursor: not-allowed; }
+  /* ── sheet (options) ── */
+  .overlay {
+    position: absolute; inset: 0;
+    background: rgba(30, 18, 10, .45);
+    opacity: 0; pointer-events: none;
+    transition: opacity .2s;
+    z-index: 5;
+  }
+  .overlay.on { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: #fff;
+    border-radius: 22px 22px 28px 28px;
+    padding: 18px 18px 22px;
+    transform: translateY(100%);
+    transition: transform .25s cubic-bezier(.3,.9,.35,1);
+    z-index: 6;
+    max-height: 82%;
+    overflow-y: auto;
+  }
+  .sheet.on { transform: translateY(0); }
+  .sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: #ddd2c4; margin: 0 auto 14px; }
+  .sheet-head { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; }
+  .sheet-head .name { font-size: 17px; font-weight: 800; color: #2d1d12; }
+  .sheet-head .price { font-size: 15px; font-weight: 700; color: #6f4e37; margin-top: 2px; }
+  .sheet-head .thumb { width: 62px; height: 62px; border-radius: 12px; }
+  .opt-label { font-size: 13px; font-weight: 700; color: #2d1d12; margin: 14px 0 8px; }
+  .opt-label .req { color: #e11d48; font-size: 11px; font-weight: 600; margin-left: 3px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1.5px solid #ddd2c4; background: #fff;
+    color: #6b5d4f; font-size: 13px; font-weight: 600; font-family: inherit;
+    padding: 8px 14px; border-radius: 20px; cursor: pointer;
+    transition: all .13s;
+  }
+  .chip:hover { border-color: #b79a7d; }
+  .chip.on { background: #4a3122; border-color: #4a3122; color: #fdf6ec; }
+  .check-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 2px; cursor: pointer; user-select: none;
+  }
+  .check-row + .check-row { border-top: 1px solid #f2ece3; }
+  .check-box {
+    width: 21px; height: 21px; border-radius: 7px;
+    border: 1.5px solid #cbb8a2; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .13s;
+  }
+  .check-row.on .check-box { background: #4a3122; border-color: #4a3122; }
+  .check-box svg { opacity: 0; transition: opacity .12s; }
+  .check-row.on .check-box svg { opacity: 1; }
+  .check-row .t { flex: 1; font-size: 13.5px; font-weight: 600; color: #2d1d12; }
+  .check-row .p { font-size: 12.5px; color: #8a7a68; font-weight: 600; }
+  .qty-row { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+  .qty-row .lbl { font-size: 13px; font-weight: 700; color: #2d1d12; }
+  .stepper { display: flex; align-items: center; gap: 14px; }
+  .stepper button {
+    width: 32px; height: 32px; border-radius: 10px;
+    border: 1.5px solid #ddd2c4; background: #fff;
+    font-size: 17px; color: #4a3122; cursor: pointer; font-family: inherit;
+    transition: background .13s;
+  }
+  .stepper button:hover:not(:disabled) { background: #f4ede3; }
+  .stepper button:disabled { color: #ccc2b5; cursor: not-allowed; }
+  .stepper .n { font-size: 16px; font-weight: 800; min-width: 24px; text-align: center; }
+  .sheet-foot {
+    margin-top: 18px; border-top: 1px solid #f2ece3; padding-top: 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .sheet-foot .total { font-size: 17px; font-weight: 800; color: #2d1d12; }
+  .sheet-foot .total small { display: block; font-size: 11px; font-weight: 600; color: #8a7a68; margin-bottom: 2px; }
+  .confirm-btn {
+    border: none; border-radius: 14px;
+    background: #6f4e37; color: #fff;
+    font-size: 14.5px; font-weight: 700; font-family: inherit;
+    padding: 13px 30px; cursor: pointer; transition: background .15s, transform .12s;
+  }
+  .confirm-btn:hover { background: #5c4030; }
+  .confirm-btn:active { transform: scale(.97); }
+  /* ── cart list sheet ── */
+  .cart-line { display: flex; align-items: center; gap: 10px; padding: 11px 2px; }
+  .cart-line + .cart-line { border-top: 1px solid #f2ece3; }
+  .cart-line .nm { flex: 1; min-width: 0; }
+  .cart-line .nm b { font-size: 13.5px; color: #2d1d12; display: block; }
+  .cart-line .nm span { font-size: 11.5px; color: #8a7a68; }
+  .cart-line .pr { font-size: 13px; font-weight: 700; color: #2d1d12; margin: 0 6px; white-space: nowrap; }
+  .cart-line .qty { display: flex; align-items: center; gap: 8px; }
+  .cart-line .qty button {
+    width: 24px; height: 24px; border-radius: 7px;
+    border: 1.5px solid #ddd2c4; background: #fff;
+    font-size: 13px; cursor: pointer; font-family: inherit; color: #4a3122;
+  }
+  .cart-line .qty button:hover { background: #f4ede3; }
+  .cart-line .qty span { font-size: 13px; font-weight: 700; min-width: 18px; text-align: center; }
+  .empty-cart { text-align: center; color: #a3947f; font-size: 13px; padding: 26px 0; }
+  /* ── toast ── */
+  .toast {
+    position: absolute; top: 18px; left: 50%;
+    transform: translate(-50%, -80px);
+    background: #2d1d12; color: #fdf6ec;
+    font-size: 13px; font-weight: 700;
+    padding: 11px 20px; border-radius: 24px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    transition: transform .28s cubic-bezier(.3,1.2,.4,1);
+    z-index: 20; white-space: nowrap;
+  }
+  .toast.on { transform: translate(-50%, 0); }
+  /* ── done overlay ── */
+  .done {
+    position: absolute; inset: 0; z-index: 15;
+    background: rgba(45, 29, 18, .94);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #fdf6ec; text-align: center;
+    opacity: 0; pointer-events: none; transition: opacity .25s;
+    padding: 30px;
+  }
+  .done.on { opacity: 1; pointer-events: auto; }
+  .done .mark {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: #7cc98f;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 18px;
+    animation: pop .4s cubic-bezier(.3,1.6,.5,1) both .1s;
+  }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .done h2 { font-size: 21px; font-weight: 800; margin-bottom: 8px; }
+  .done .num { font-size: 14px; opacity: .85; }
+  .done .num b { font-size: 24px; color: #f5c66b; margin: 0 3px; }
+  .done p.sub { font-size: 12.5px; opacity: .7; margin-top: 6px; }
+  .done button {
+    margin-top: 26px; border: none; border-radius: 14px;
+    background: #f5c66b; color: #2d1d12;
+    font-size: 14px; font-weight: 800; font-family: inherit;
+    padding: 13px 36px; cursor: pointer;
+  }
+  .done button:hover { background: #f7d089; }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <header class="store">
+    <div class="badge">배달 12~18분</div>
+    <div class="row1">
+      <div class="logo">
+        <svg viewBox="0 0 64 64" fill="none">
+          <path d="M14 22h30a2 2 0 0 1 2 2v3h4a6 6 0 0 1 0 12h-4v1a13 13 0 0 1-13 13H27a13 13 0 0 1-13-13V22z" fill="#6f4e37"/>
+          <path d="M18 26v22a9 9 0 0 0 9 9h8a9 9 0 0 0 9-9V26H18z" fill="#c99b6d"/>
+          <path d="M24 25c0-3 2-4 2-7M32 25c0-3 2-4 2-7" stroke="#8a6a4f" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <h1>브라운 하트 커피</h1>
+        <div class="meta"><span class="open">● 영업 중</span><span>10:00 – 22:00</span><span>평점 4.8 ★</span></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="scroll">
+    <div class="tabs">
+      <button class="tab active" data-cat="all">전체</button>
+      <button class="tab" data-cat="coffee">커피</button>
+      <button class="tab" data-cat="tea">티</button>
+      <button class="tab" data-cat="dessert">디저트</button>
+    </div>
+    <div id="menu"></div>
+  </div>
+
+  <div class="cart-bar" id="cartBar" style="display:none">
+    <div class="cart-summary">
+      <div class="cart-left"><b id="cartTotal">0원</b><span class="count" id="cartCount">0</span><span id="cartHint">주문 내역 보기</span></div>
+      <button class="order-btn" id="orderBtn">주문하기</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay"></div>
+
+  <!-- option sheet -->
+  <div class="sheet" id="optionSheet">
+    <div class="grab"></div>
+    <div class="sheet-head">
+      <div class="thumb" id="oThumb"></div>
+      <div>
+        <div class="name" id="oName"></div>
+        <div class="price" id="oPrice"></div>
+      </div>
+    </div>
+
+    <div class="opt-label">사이즈 <span class="req">필수</span></div>
+    <div class="chips" id="sizeChips"></div>
+
+    <div class="opt-label">온도 <span class="req">필수</span></div>
+    <div class="chips" id="tempChips"></div>
+
+    <div class="opt-label">당도</div>
+    <div class="chips" id="sugarChips"></div>
+
+    <div class="opt-label">추가 옵션</div>
+    <div id="addOpts"></div>
+
+    <div class="qty-row">
+      <span class="lbl">수량</span>
+      <div class="stepper">
+        <button id="qMinus">−</button>
+        <span class="n" id="qtyNum">1</span>
+        <button id="qPlus">+</button>
+      </div>
+    </div>
+
+    <div class="sheet-foot">
+      <div class="total"><small>합계</small><span id="oTotal">0원</span></div>
+      <button class="confirm-btn" id="confirmBtn">담기</button>
+    </div>
+  </div>
+
+  <!-- cart sheet -->
+  <div class="sheet" id="cartSheet">
+    <div class="grab"></div>
+    <div class="sheet-head" style="margin-bottom:6px">
+      <div class="name" style="font-size:16px">장바구니</div>
+    </div>
+    <div id="cartLines"></div>
+    <div class="sheet-foot">
+      <div class="total"><small>합계</small><span id="cTotal">0원</span></div>
+      <button class="confirm-btn" id="cOrderBtn">주문하기</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="done" id="done">
+    <div class="mark">
+      <svg width="38" height="38" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <h2>주문 완료!</h2>
+    <div class="num">주문번호 <b id="orderNo">#000</b></div>
+    <p class="sub">약 12~18분 후 배달이 시작돼요. 준비되면 알림이 도착해요.</p>
+    <button id="doneBtn">확인</button>
+  </div>
+
+</div>
+
+<script>
+const MENU = [
+  { id:'americano', name:'아메리카노', desc:'부드러운 스페셜티 원두', price:3500, cat:'coffee',
+    colors:['#e9d9c6','#5a3d28'] },
+  { id:'latte', name:'카페라떼', desc:'달콤한 우유와 에스프레소', price:4500, cat:'coffee',
+    colors:['#e9d9c6','#8a5f3c'] },
+  { id:'vanilla', name:'바닐라 라떼', desc:'바닐라 시럽을 살짝', price:5000, cat:'coffee',
+    colors:['#f0e3c8','#a0713f'] },
+  { id:'cappu', name:'카푸치노', desc:'진한 크리미한 비어', price:4500, cat:'coffee',
+    colors:['#e9d9c6','#6e4a2e'] },
+  { id:'choco', name:'초콜릿 라떼', desc:'벨기에 다크 초콜릿', price:5500, cat:'coffee',
+    colors:['#e5d3c0','#57351f'] },
+  { id:'greentea', name:'유자 그린티', desc:'상큼한 국산 유자', price:4500, cat:'tea',
+    colors:['#e2ecd8','#5f7a3a'] },
+  { id:'earl', name:'얼그레이 밀크티', desc:'차잎과 우유의 조화', price:4500, cat:'tea',
+    colors:['#e8ddc9','#8a7145'] },
+  { id:'strawberry', name:'딸기 스무디', desc:'신선한 딸기 요거트', price:6500, cat:'tea',
+    colors:['#f6dfe0','#d26a7d'] },
+  { id:'croissant', name:'버터 크루아상', desc:'오븐에서 갓 만들어 드려요', price:4500, cat:'dessert',
+    colors:['#f2e3cb','#c99b55'] },
+  { id:'cheesecake', name:'뉴욕 치즈케이크', desc:'바삭한 크럼블 토핑', price:7000, cat:'dessert',
+    colors:['#f4ead9','#e0b25e'] },
+];
+
+const SIZES = [
+  { id:'s', label:'S', d:0 },
+  { id:'m', label:'M', d:500 },
+  { id:'l', label:'L', d:1000 },
+];
+const TEMPS = [
+  { id:'hot', label:'HOT' },
+  { id:'ice', label:'ICE' },
+];
+const SUGARS = [
+  { id:'normal', label:'정상' },
+  { id:'plus', label:'조금 달게' },
+  { id:'much', label:'많이 달게' },
+  { id:'less', label:'덜 달게' },
+];
+const ADDS = [
+  { id:'shot', label:'엑스트라 샷', d:500 },
+  { id:'oat', label:'오트밀크', d:1000 },
+  { id:'chocsyr', label:'초코 시럽', d:500 },
+];
+
+const $ = id => document.getElementById(id);
+const won = n => n.toLocaleString('ko-KR') + '원';
+
+/* cup svg per drink color */
+function cupSVG(c1, c2, id) {
+  const uid = id + (Math.random()*1e6|0);
+  return `<svg viewBox="0 0 80 80" fill="none">
+    <ellipse cx="40" cy="70" rx="26" ry="6" fill="rgba(0,0,0,.07)"/>
+    <path d="M20 28h40l-4 36a6 6 0 0 1-6 5H30a6 6 0 0 1-6-5l-4-36z" fill="${c1}"/>
+    <path d="M22.5 34h35l-3 28a4 4 0 0 1-4 3.6h-22A4 4 0 0 1 25.5 62l-3-28z" fill="${c2}"/>
+    <path d="M60 34h5a8 8 0 0 1 0 16h-7l1.2-9.6z" fill="${c1}"/>
+    <path d="M32 24c0-3 2.5-4 2.5-8M42 24c0-3 2.5-4 2.5-8M52 24c0-3 2.5-4 2.5-8" stroke="#b9a58c" stroke-width="2.4" stroke-linecap="round" opacity=".85"/>
+  </svg>`;
+}
+
+/* ── render menu ── */
+function renderMenu(cat) {
+  const box = $('menu');
+  box.innerHTML = '';
+  MENU.filter(m => cat === 'all' || m.cat === cat).forEach(m => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.dataset.id = m.id;
+    div.innerHTML = `
+      <div class="thumb" style="background:${m.colors[0]}">${cupSVG(m.colors[0], m.colors[1], 'm'+m.id)}</div>
+      <div class="info">
+        <div class="name">${m.name}</div>
+        <div class="desc">${m.desc}</div>
+        <div class="bottom">
+          <span class="price">${won(m.price)}</span>
+          <button class="add" aria-label="옵션 선택">+</button>
+        </div>
+      </div>`;
+    div.onclick = () => openOption(m);
+    box.appendChild(div);
+  });
+}
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  renderMenu(t.dataset.cat);
+});
+
+/* ── option sheet ── */
+let cur = null;               // { item, size, temp, sugar, adds:Set, qty }
+let toastTimer;
+
+function showToast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
+}
+
+function openOption(item) {
+  cur = { item, size:'m', temp: item.cat==='dessert' ? 'hot' : 'ice', sugar:'normal', adds:new Set(), qty:1 };
+  $('oName').textContent = item.name;
+  $('oThumb').style.background = item.colors[0];
+  $('oThumb').innerHTML = cupSVG(item.colors[0], item.colors[1], 'o'+item.id);
+  $('oPrice').textContent = won(item.price);
+  if (item.cat === 'dessert') {
+    $('tempChips').parentElement.style.display = 'none';
+    $('sugarChips').parentElement.style.display = 'none';
+  } else {
+    $('tempChips').parentElement.style.display = '';
+    $('sugarChips').parentElement.style.display = '';
+  }
+  buildChips($('sizeChips'), SIZES, v => cur.size = v, 'size');
+  buildChips($('tempChips'), TEMPS, v => cur.temp = v, 'temp');
+  buildChips($('sugarChips'), SUGARS, v => cur.sugar = v, 'sugar');
+  renderAdds();
+  $('qMinus').disabled = true;
+  $('qtyNum').textContent = 1;
+  updateTotal();
+  $('optionSheet').classList.add('on');
+  $('cartSheet').classList.remove('on');
+  $('overlay').classList.add('on');
+}
+
+function buildChips(box, list, set, key) {
+  box.innerHTML = '';
+  list.forEach(opt => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (cur[key] === opt.id ? ' on' : '');
+    b.textContent = opt.label;
+    b.onclick = () => {
+      cur[key] = opt.id;
+      box.querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      updateTotal();
+    };
+    box.appendChild(b);
+  });
+}
+
+function renderAdds() {
+  const box = $('addOpts');
+  box.innerHTML = '';
+  ADDS.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'check-row' + (cur.adds.has(a.id) ? ' on' : '');
+    row.innerHTML = `
+      <div class="check-box"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <span class="t">${a.label}</span>
+      <span class="p">+${won(a.d)}</span>`;
+    row.onclick = () => {
+      if (cur.adds.has(a.id)) cur.adds.delete(a.id); else cur.adds.add(a.id);
+      row.classList.toggle('on');
+      updateTotal();
+    };
+    box.appendChild(row);
+  });
+}
+
+function unitPrice() {
+  let p = cur.item.price;
+  const s = SIZES.find(x => x.id === cur.size);
+  if (s) p += s.d;
+  ADDS.forEach(a => { if (cur.adds.has(a.id)) p += a.d; });
+  return p;
+}
+function updateTotal() {
+  $('qtyNum').textContent = cur.qty;
+  $('qMinus').disabled = cur.qty <= 1;
+  $('oTotal').textContent = won(unitPrice() * cur.qty);
+}
+$('qMinus').onclick = () => { if (cur.qty > 1) { cur.qty--; updateTotal(); } };
+$('qPlus').onclick = () => { if (cur.qty < 20) { cur.qty++; updateTotal(); } };
+
+/* ── cart ── */
+const cart = [];
+function cartCountTotal() { return cart.reduce((n, l) => n + l.qty, 0); }
+function cartTotal() { return cart.reduce((n, l) => n + l.price * l.qty, 0); }
+
+function refreshCartBar() {
+  const n = cartCountTotal();
+  if (!n) { $('cartBar').style.display = 'none'; return; }
+  $('cartBar').style.display = '';
+  $('cartTotal').textContent = won(cartTotal());
+  $('cartCount').textContent = n;
+}
+
+function renderCartLines() {
+  const box = $('cartLines');
+  if (!cart.length) {
+    box.innerHTML = '<div class="empty-cart">장바구니가 비어 있어요 ☕</div>';
+  } else {
+    box.innerHTML = '';
+    cart.forEach(line => {
+      const d = document.createElement('div');
+      d.className = 'cart-line';
+      d.innerHTML = `
+        <div class="nm"><b>${line.name}</b><span>${line.opts}</span></div>
+        <span class="pr">${won(line.price * line.qty)}</span>
+        <div class="qty">
+          <button data-a="minus">−</button><span>${line.qty}</span><button data-a="plus">+</button>
+        </div>`;
+      d.querySelector('[data-a="minus"]').onclick = () => changeCartQty(line, -1);
+      d.querySelector('[data-a="plus"]').onclick = () => changeCartQty(line, +1);
+      box.appendChild(d);
+    });
+  }
+  $('cTotal').textContent = won(cartTotal());
+}
+function changeCartQty(line, d) {
+  line.qty += d;
+  if (line.qty <= 0) cart.splice(cart.indexOf(line), 1);
+  if (line.qty > 20) line.qty = 20;
+  renderCartLines();
+  refreshCartBar();
+}
+
+$('confirmBtn').onclick = () => {
+  if (!cur) return;
+  const sizeL = cur.item.cat === 'dessert' ? '' : SIZES.find(s => s.id === cur.size).label + ' ';
+  const optStr = [
+    sizeL,
+    TEMPS.find(t => t.id === cur.temp).label,
+    SUGARS.find(s => s.id === cur.sugar).label,
+    ...[...cur.adds].map(id => ADDS.find(a => a.id === id).label)
+  ].filter(Boolean).join(' · ');
+  const key = cur.item.id + '|' + optStr;
+  const line = cart.find(l => l.key === key);
+  if (line) line.qty = Math.min(20, line.qty + cur.qty);
+  else cart.push({ key, name: cur.item.name, opts: optStr, price: unitPrice(), qty: cur.qty });
+  closeSheets();
+  refreshCartBar();
+  showToast(cur.qty + '건 담았어요');
+};
+
+function openCart() {
+  renderCartLines();
+  $('cartSheet').classList.add('on');
+  $('optionSheet').classList.remove('on');
+  $('overlay').classList.add('on');
+}
+$('cartBar').onclick = e => { if (!e.target.classList.contains('order-btn')) openCart(); };
+
+/* ── sheets ── */
+function closeSheets() {
+  $('overlay').classList.remove('on');
+  $('optionSheet').classList.remove('on');
+  $('cartSheet').classList.remove('on');
+}
+$('overlay').onclick = closeSheets;
+
+/* ── order ── */
+function doOrder(btn) {
+  if (!cart.length) { showToast('먼저 메뉴를 담아요'); return; }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '주문 진행 중…';
+  }
+  setTimeout(() => {
+    $('orderNo').textContent = '#' + (100 + (Math.random() * 900 | 0));
+    $('done').classList.add('on');
+    if (btn) { btn.disabled = false; btn.textContent = '주문하기'; }
+    closeSheets();
+  }, 900);
+}
+$('orderBtn').onclick = e => { e.stopPropagation(); doOrder(); };
+$('cOrderBtn').onclick = () => doOrder($('cOrderBtn'));
+$('doneBtn').onclick = () => {
+  $('done').classList.remove('on');
+  cart.length = 0;
+  refreshCartBar();
+};
+
+renderMenu('all');
+</script>
+</body>
+</html>

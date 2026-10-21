@@ -453,6 +453,9 @@ export const ko = {
   'extensions.info.origins': '허용한 주소',
   'extensions.origins.revoke': '거두기',
   'extensions.origins.revokeLabel': '{origin} 허용 거두기',
+  'extensions.serverOptions.title': '서버 옵션',
+  'extensions.serverOptions.startWithApp': '앱을 켤 때 같이 띄우기',
+  'extensions.serverOptions.stopWithApp': '앱을 닫을 때 같이 내리기',
   'extensions.mounting': '올리는 중',
   // 패널 확장 (이슈 #511, 시안 _workspace/mock-extension-panel)
   'extensions.installed': '{name} 를 설치했습니다.',
