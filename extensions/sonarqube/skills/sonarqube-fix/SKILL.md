@@ -18,9 +18,13 @@ Fix exactly the SonarQube issues you were given — nothing more. The goal is th
 2. Decide per issue: fix minimally, or do not fix (with a one-line reason).
 3. Make the edits.
 4. If the project has a quick check for the touched code (type check, the related unit tests), run it. Do not run long or full test suites unless asked.
+5. Re-check with SonarQube: call the `litecode_sonarqube_check` tool with the files you changed (project-relative paths). It re-analyzes just those files and returns the issues that remain.
+   - If an issue you were asked to fix is still there, fix it once more (at most 2 re-checks in total), still following the rules above.
+   - New issues in lines you did not touch are not yours to fix — list them.
+   - If the tool is missing or says the server is not running, do not retry — tell the user to press 분석 in the SonarQube panel (same scope) to confirm.
 
 ## Reply
 - One line per issue: `path:line` — fixed / not fixed — what changed (or why not).
 - The diff stays small; if it grew beyond the reported lines, say why.
 - Other problems you noticed but did not touch, as a short list.
-- Remind the user that re-running the same scope in the SonarQube panel ([분석]) confirms the issue is gone.
+- The re-check result: resolved / still remaining (with the reason), or that the re-check could not run.

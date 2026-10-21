@@ -69,6 +69,7 @@ import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { TaskTools } from '../src/services/appMcp/tools/tasks.ts'
 import { GitService } from '../src/services/git.ts'
 import { GitTools } from '../src/services/appMcp/tools/git.ts'
+import { SonarqubeTools } from '../src/services/appMcp/tools/sonarqube.ts'
 import { gitWebUrl, type GitAction, type GitLogPageQuery } from '../shared/git.ts'
 import { attentionTarget } from '../shared/delegation.ts'
 import { captureConsole, createLogFile } from '../src/services/logFile.ts'
@@ -398,6 +399,8 @@ const reservedPorts = (): number[] => [
 const extensionSkills = { dir: path.join(userData, 'opencode', 'skills'), reload: () => ctx.get('llm')?.reloadWhenIdle() }
 mounted.push(ctx.plugin(ExtensionsService, { ...systemExtensionsHost(userData), cipher: keyCipher, fetch: extensionFetch, reservedPorts, skills: extensionSkills }))
 mounted.push(ctx.plugin(extensionsBridge))
+// SonarQube 확장이 켜져 있으면 AI 재검사 도구(litecode_sonarqube_check)를 연다 — 데스크탑 MCP 가 꺼져 있으면 이 플러그인만 기다린다 (#563)
+mounted.push(ctx.plugin(SonarqubeTools))
 
 /** 모든 앱 창에 보낸다. 창 하나의 send 실패(못 옮기는 값·닫히는 창)는 로그만 — 나머지 창과, 이벤트를 낸 서비스 쪽(cordis emit 은 리스너 예외를 던진다)으로 번지지 않게 (QA 03_qa_ext_pr3) */
 function broadcast(channel: string, ...args: unknown[]): void {

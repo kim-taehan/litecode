@@ -38,7 +38,7 @@ describe('engineConfig — 스킬', () => {
         ['websearch', 'deny'],
       ]) // 웹 도구 규칙은 그대로
     }
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, litecode_sonarqube_check: 'allow', webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
   })
 
   it('Claude 켬: ~/.claude/skills·.claude/skills 를 뒤에 더한다', () => {

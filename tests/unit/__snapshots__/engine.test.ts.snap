@@ -19,6 +19,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "litecode_git_switch: "ask"",
     "litecode_git_push: "ask"",
     "litecode_git_pull: "ask"",
+    "litecode_sonarqube_check: "allow"",
     "bash: "ask"",
     "edit: "ask"",
     "glob: "ask"",
@@ -115,6 +116,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "litecode_git_branches: "ask"",
     "litecode_open: "ask"",
     "litecode_list_projects: "ask"",
+    "litecode_sonarqube_check: "ask"",
   ],
   "litecode-full": [
     "*: "allow"",
@@ -134,6 +136,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "litecode_git_switch: "allow"",
     "litecode_git_push: "allow"",
     "litecode_git_pull: "allow"",
+    "litecode_sonarqube_check: "allow"",
     "bash: "ask"",
     "edit: "ask"",
     "glob: "ask"",
@@ -166,6 +169,7 @@ exports[`engineConfig — 도구 실행 전 게이트 (#102) > 빈 매처(전부
     "litecode_git_branches: "ask"",
     "litecode_open: "ask"",
     "litecode_list_projects: "ask"",
+    "litecode_sonarqube_check: "ask"",
   ],
 }
 `;

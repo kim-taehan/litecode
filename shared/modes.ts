@@ -69,6 +69,8 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
     if (permission === APP_SEND_TOOL || permission === APP_MAKE_TOOL || permission === APP_NEW_CONVERSATION_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'
     if (permission === APP_READ_TOOL) return child ? 'deny' : asking ? 'ask' : 'allow'
     if (permission === 'litecode_present') return child ? 'deny' : 'allow'
+    // SonarQube 재검사 (이슈 #563) — 프로젝트 파일을 바꾸지 않아 네 모드 모두 묻지 않는다. 하위 작업은 아래 기본 규칙
+    if (permission === 'litecode_sonarqube_check' && !child) return 'allow'
     if (child) return asking ? 'ask' : 'allow'
     if (permission === 'litecode_list_projects' || permission === 'litecode_open') return 'allow'
     return mode === 'plan' ? 'deny' : asking ? 'ask' : 'allow'
