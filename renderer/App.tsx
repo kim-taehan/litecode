@@ -234,6 +234,21 @@ export function App() {
     if (target) await openNotice(target)
   }
 
+  // 최근 대화 팝오버 (제목찾기 옆 버튼) — 전 프로젝트 저장된 대화를 한 번에. 열림 상태만 여기, 그리기는 Sidebar
+  const [recentOpen, setRecentOpen] = useState(false)
+  function toggleRecent(): void {
+    setRecentOpen((on) => !on)
+  }
+  function closeRecent(): void {
+    setRecentOpen(false)
+  }
+  /** 행 클릭 — 그 대화의 프로젝트로 열고 그 대화를 본다(알림을 눌렀을 때와 같은 길) */
+  function openRecentConversation(id: string): void {
+    const session = sessionsRef.current.find((s) => s.id === id)
+    if (!session) return
+    void openNotice({ project: session.project, conversationId: session.id })
+  }
+
   /** 휴지통을 눌러 "삭제 확인" 을 기다리는 대화 */
   const [confirming, setConfirming] = useState<string>()
   /** 이름을 바꾸는 중인 대화 (이슈 #63) — 프로젝트 이름 바꾸기처럼 행이 그 자리에서 입력칸으로 바뀐다. Enter·바깥으로 나가면 저장, Esc 는 취소 */
@@ -802,6 +817,11 @@ export function App() {
         renameConversation={renameConversation}
         pinConversation={pinConversation}
         setSettingsOpen={setSettingsOpen}
+        recentOpen={recentOpen}
+        allProjects={projects ?? []}
+        toggleRecent={toggleRecent}
+        closeRecent={closeRecent}
+        openRecentConversation={openRecentConversation}
       />
 
       <main className={`main${layout.hidden ? ' main--railed' : ''}`}>

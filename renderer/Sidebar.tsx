@@ -11,6 +11,7 @@ import { RunningCount, RunningFilter } from './Background.tsx'
 import { runningOutside } from './backgroundView.ts'
 import { StopIcon } from './stopTurn.tsx'
 import { PinButton, PinnedMark, SessionSearch } from './SessionListTools.tsx'
+import { RecentConversations } from './RecentConversations.tsx'
 import { GearIcon, LogoMark, PencilIcon, SidebarIcon, TrashIcon, Badge } from './SidebarIcons.tsx'
 import { HoverCard, startMarquee, stopMarquee, type useHoverCard } from './hoverCard.tsx'
 import { UpdateNotice } from './UpdateNotice.tsx'
@@ -56,6 +57,13 @@ interface SidebarProps {
   renameConversation(target: Session, name: string): Promise<void>
   pinConversation(target: Session): Promise<void>
   setSettingsOpen: Dispatch<SetStateAction<boolean>>
+  /** 최근 대화 팝오버 (제목찾기 옆 버튼) — 열림 상태 */
+  recentOpen: boolean
+  /** 전 프로젝트 목록 — 최근 대화 행의 이름 라벨 */
+  allProjects: readonly Pick<Project, 'path' | 'name'>[]
+  toggleRecent(): void
+  closeRecent(): void
+  openRecentConversation(id: string): void
 }
 
 /** 대화 목록 한 묶음에 보이는 개수 — 넘어가면 [더보기] 로 10개씩 (이슈 #568) */
@@ -96,7 +104,12 @@ export function Sidebar({
   removeConversation,
   renameConversation,
   pinConversation,
-   setSettingsOpen,
+    setSettingsOpen,
+  recentOpen,
+  allProjects,
+  toggleRecent,
+  closeRecent,
+  openRecentConversation,
 }: SidebarProps) {
   // [더보기]·[접기] (이슈 #568) — 처음 10개, [더보기] 로 10개씩. [접기] 는 다시 10개.
   // 프로젝트 바뀌면(경로가 바뀐다) 처음 10개·접힌 상태로 돌아온다. [접기] 는 10개보다 많게 펼친 뒤에나 보인다
@@ -112,6 +125,7 @@ export function Sidebar({
   const hasMore = listed.length > shown
   const onMore = useCallback(() => setShown((n) => n + SIDEBAR_PAGE), [])
   const onLess = useCallback(() => setShown(SIDEBAR_PAGE), [])
+  const recentRef = useRef<HTMLButtonElement>(null)
 
    return (
     <aside className="sidebar" style={{ width: layout.width, display: layout.hidden ? 'none' : undefined }}>
@@ -187,7 +201,32 @@ export function Sidebar({
         {t('sidebar.conversations')}
         <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
       </div>
-      <SessionSearch value={titleQuery} onChange={setTitleQuery} />
+      <div className="sidebar__session-search">
+        <SessionSearch value={titleQuery} onChange={setTitleQuery} />
+        <button
+          ref={recentRef}
+          type="button"
+          className="recent-toggle"
+          aria-pressed={recentOpen}
+          aria-label={t('sidebar.recent')}
+          title={t('sidebar.recent')}
+          onClick={toggleRecent}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+        </button>
+      </div>
+      <RecentConversations
+        open={recentOpen}
+        onClose={closeRecent}
+        sessions={sessions}
+        projects={allProjects}
+        onOpen={openRecentConversation}
+        buttonRef={recentRef}
+        width={layout.width - 24}
+      />
 
       <div className="sidebar__sessions">
         {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
