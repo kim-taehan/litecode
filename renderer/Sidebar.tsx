@@ -197,12 +197,9 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar__label">
-        {t('sidebar.conversations')}
-        <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
-      </div>
       <div className="sidebar__session-search">
         <SessionSearch value={titleQuery} onChange={setTitleQuery} />
+        <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
         <button
           ref={recentRef}
           type="button"
