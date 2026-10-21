@@ -12,6 +12,8 @@ export const ko = {
   'sidebar.untitled': '새 대화',
   'sidebar.conversations': '대화 목록',
   'sidebar.current': '현재',
+  'sidebar.showMore': '더보기',
+  'sidebar.remaining': '+{count}',
   'sidebar.waiting': '답을 기다리는 중',
   'sidebar.messageCount': '메시지 {count}개',
   'sidebar.confirmDelete': '삭제 확인',

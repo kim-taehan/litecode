@@ -1,4 +1,4 @@
-import { Fragment, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { Fragment, useCallback, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import type { Project } from '../shared/ipc.ts'
 import { TITLE_MAX } from '../shared/chat.ts'
 import { ago } from './ago.ts'
@@ -58,6 +58,9 @@ interface SidebarProps {
   setSettingsOpen: Dispatch<SetStateAction<boolean>>
 }
 
+/** 대화 목록 한 묶음에 보이는 개수 — 넘어가면 [더보기] 로 10개씩 (이슈 #568) */
+const SIDEBAR_PAGE = 10
+
 /** 펼친 사이드바 — 로고 줄·프로젝트 전환 카드·새 대화·대화 목록·설정 (승인 시안). 상태는 모두 App 이 쥐고 여기는 그리기만 한다 */
 export function Sidebar({
   t,
@@ -93,9 +96,21 @@ export function Sidebar({
   removeConversation,
   renameConversation,
   pinConversation,
-  setSettingsOpen,
+   setSettingsOpen,
 }: SidebarProps) {
-  return (
+  // [더보기] 접기 (이슈 #568) — 프로젝트 바뀌면(경로가 바뀐다) 처음 10개만 보여 다시 접는다
+  const [shown, setShown] = useState(SIDEBAR_PAGE)
+  const key = project?.path ?? ''
+  const lastKey = useRef(key)
+  if (lastKey.current !== key) {
+    lastKey.current = key
+    setShown(SIDEBAR_PAGE)
+  }
+  const visible = listed.slice(0, shown)
+  const hasMore = listed.length > shown
+  const onMore = useCallback(() => setShown((n) => n + SIDEBAR_PAGE), [])
+
+   return (
     <aside className="sidebar" style={{ width: layout.width, display: layout.hidden ? 'none' : undefined }}>
       <div
         className="sidebar__resize"
@@ -175,7 +190,7 @@ export function Sidebar({
         {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
             바뀌고 한 번 더 눌러야 지운다(설정 화면 provider 삭제와 같은 방식). 포커스를 잃거나 Esc 면 되돌린다 */}
         {listed.length === 0 && titleQuery.trim() && <div className="session-list__empty">{t('sidebar.noMatch')}</div>}
-        {listed.map((session, at) => (
+        {visible.map((session, at) => (
           <Fragment key={session.id}>
           {/* 고정 묶음과 나머지 사이의 선 */}
           {at > 0 && !session.pinned && listed[at - 1]!.pinned && <div className="session-list__divider" role="separator" />}
@@ -299,6 +314,14 @@ export function Sidebar({
           </Fragment>
         ))}
       </div>
+
+      {/* [더보기] — 스크롤 밖, 목록 아래 고정 (이슈 #568). 10개 남지 않으면 사라진다 */}
+      {hasMore && (
+        <button type="button" className="conversation-list__more" onClick={onMore}>
+          <span>{t('sidebar.showMore')}</span>
+          <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
+        </button>
+      )}
       <div className="sidebar__fade" aria-hidden="true" />
       <HoverCard card={sessionHover.card} />
 

@@ -11,6 +11,8 @@ export const en = {
   'sidebar.untitled': 'New chat',
   'sidebar.conversations': 'Chats',
   'sidebar.current': 'Current',
+  'sidebar.showMore': 'Show more',
+  'sidebar.remaining': '+{count}',
   'sidebar.waiting': 'Waiting for a reply',
   'sidebar.messageCount': '{count} messages',
   'sidebar.confirmDelete': 'Confirm delete',
