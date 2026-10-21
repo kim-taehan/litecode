@@ -59,6 +59,7 @@
   --diff-add-bg: rgba(34, 197, 94, 0.08);
   --diff-del: rgb(236, 19, 19);
   --diff-del-bg: rgba(236, 19, 19, 0.08);
+  --extension: #8a5ce0;                      /* 확장 보라 (이슈 #568 [더보기] 칩 등) */
   /* 대화 본문 글자 크기 (설정 > 일반) — 렌더러가 설정값으로 덮는다. 제목은 기준 + delta, 표 등 한 단계 작은 글자는 secondary */
   --chat-font-size: 14px;
   --chat-font-delta: 0px;
@@ -113,6 +114,7 @@
     --diff-add-bg: rgba(34, 197, 94, 0.12);  /* 추가 글자는 두 테마 같다 */
     --diff-del: rgb(242, 90, 90);            /* red-400 */
     --diff-del-bg: rgba(242, 90, 90, 0.12);
+    --extension: #b08cf5;                    /* 확장 보라 다크 — 밝게 */
   }
 }
 
@@ -473,6 +475,34 @@ button {
 
 .sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
+}
+
+/* [더보기] — 스크롤 바깥, 목록 아래 고정 (이슈 #568 대화 목록 10개 접기). 확장 보라 칩, 남은 개수 (N) */
+.conversation-list__more {
+  flex: none;
+  margin: 2px 12px 2px;
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--extension) 8%, transparent);
+  color: var(--extension);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.conversation-list__more:hover {
+  background: color-mix(in srgb, var(--extension) 14%, transparent);
+}
+
+.conversation-list__more-count {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--extension) 70%, var(--text-tertiary));
 }
 
 /* 목록 끝 24px 페이드 — 마지막 행이 발치 줄에 툭 잘리지 않게 */
