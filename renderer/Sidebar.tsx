@@ -353,19 +353,17 @@ export function Sidebar({
           </div>
           </Fragment>
         ))}
-        {/* [더보기]·[접기] — 마지막 행 뒤에 (이슈 #568). 10개 남지 않으면 사라진다, [접기] 는 10개보다 많게 펼친 뒤에나 */}
-        {hasMore && (
-          <div className="conversation-list__toggle">
-            <button type="button" className="conversation-list__more" onClick={onMore}>
-              <span>{t('sidebar.showMore')}</span>
-              <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
-            </button>
-            {expanded && (
-              <button type="button" className="conversation-list__collapse" onClick={onLess}>
-                {t('sidebar.collapse')}
-              </button>
-            )}
-          </div>
+        {/* [더보기]/[접기] — 마지막 행 뒤에 (이슈 #568). 10개 남지 않으면 사라진다 */}
+        {hasMore && !expanded && (
+          <button type="button" className="conversation-list__more-bar" onClick={onMore}>
+            <span>{t('sidebar.showMore')}</span>
+            <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
+          </button>
+        )}
+        {!hasMore && expanded && (
+          <button type="button" className="conversation-list__more-bar conversation-list__collapse-bar" onClick={onLess}>
+            {t('sidebar.collapse')}
+          </button>
         )}
       </div>
       <div className="sidebar__fade" aria-hidden="true" />
