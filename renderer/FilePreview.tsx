@@ -184,6 +184,11 @@ function Panel({
   // 파일 탭은 한 번 본 뒤부터 계속 마운트 — 다른 탭에 갔다 와도 펼친 폴더·스크롤이 그대로 (dsh keepMounted, 안 본 탭은 미리 안 그린다)
   const filesVisited = useRef(false)
   if (active === undefined) filesVisited.current = true
+  // “턴 작업” 탭도 한 번 연 뒤부터 계속 마운트 — 닫을 때 언마운트 비용을 없애서 전환이 즉시 (이슈 #583)
+  const seenTurnsRef = useRef<Set<string>>(new Set())
+  const seenTurns = seenTurnsRef.current
+  if (isTurnTab(active)) seenTurns.add(active)
+  for (const key of [...seenTurns]) if (!state.tabs.includes(key)) seenTurns.delete(key)
   // 작업 탭 (이슈 #325) — 이름(작업 N · 설명)은 작업 목록 저장소에서. 기능 묶음과 무관하다 (작업이 있는 대화에서만 열린다)
   const taskMap = useTaskMap()
 
@@ -505,17 +510,24 @@ function Panel({
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
       )}
       {active !== undefined && isTaskTab(active) && <TaskTab key={active} taskId={taskIdOf(active)!} directory={directory} />}
-      {turnRef !== undefined && active !== undefined && (
-        <TurnTab
-          key={active}
-          conversationId={turnRef.conversationId}
-          startedAt={turnRef.startedAt}
-          directory={directory}
-          title={titleFor?.(turnRef.conversationId)}
-          here={activeConversationId === turnRef.conversationId}
-          onJump={onOpenConversation ? () => onOpenConversation(turnRef.conversationId) : undefined}
-        />
-      )}
+      {/* “턴 작업” 탭 — 한 번 연 것은 계속 마운트해 두고 고른 것만 본다(닫을 때 언마운트 비용이 없어 전환이 즉시, 이슈 #583).
+          탭을 닫으면 set 에서 빠져나와 언마운트된다 */}
+      {[...seenTurns].map((key) => {
+        const ref = turnRefOf(key)
+        if (ref === undefined) return null
+        return (
+          <TurnTab
+            key={key}
+            conversationId={ref.conversationId}
+            startedAt={ref.startedAt}
+            directory={directory}
+            title={titleFor?.(ref.conversationId)}
+            here={activeConversationId === ref.conversationId}
+            hidden={active !== key}
+            onJump={onOpenConversation ? () => onOpenConversation(ref.conversationId) : undefined}
+          />
+        )
+      })}
       {/* 확장 탭 (이슈 #511) — 연 것은 모두 마운트해 두고 고른 것만 보인다(다른 탭에 갔다 와도 iframe 안 상태가 그대로). 탭을 닫으면 iframe 도 사라진다.
           버전이 바뀌면(업그레이드) key 가 바뀌어 새 HTML 로 다시 그린다 */}
       {tabs.map((key) => {

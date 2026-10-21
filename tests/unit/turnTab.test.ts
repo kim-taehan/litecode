@@ -17,9 +17,17 @@ vi.mock('../../renderer/turnDetailStore.ts', async (importOriginal) => {
 
 const items: TurnItem[] = [{ id: 'm:1', kind: 'think', text: '생각 전문', done: true }]
 
-function render(props: { conversationId: string; startedAt: number; title?: string; here?: boolean; onJump?: () => void }): string {
+function render(props: { conversationId: string; startedAt: number; title?: string; here?: boolean; onJump?: () => void; hidden?: boolean }): string {
   return renderToStaticMarkup(createElement(TurnTab, { ...props, directory: '/p' }))
 }
+
+describe('숨김 (계속 마운트해 둔 고르지 않은 탭, 이슈 #583)', () => {
+  it('hidden 이면 root 에 hidden 속성을, 아니면 안 낸다', () => {
+    feedTurnSnapshot('c-hide', 5_000, items)
+    expect(render({ conversationId: 'c-hide', startedAt: 5_000 })).not.toContain('hidden=""')
+    expect(render({ conversationId: 'c-hide', startedAt: 5_000, hidden: true })).toContain('<div class="turn-tab" data-state="running" hidden="">')
+  })
+})
 
 describe('대화 줄', () => {
   it('다른 대화의 턴 — 버튼 줄: 대화 제목 + 화살표(그 대화로 이동)', () => {

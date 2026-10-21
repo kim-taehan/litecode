@@ -11,7 +11,7 @@ import './turnTab.css'
 // 데이터는 채팅의 진행 줄과 같은 출처(turnDetailStore — 채팅 이벤트로 이어 붙는다, 다시 뜨면 스냅샷). 줄은 채팅의 작업 줄과
 // 같은 컴포넌트(WorkRow)로 그리므로 안에 들어 있는 모습과 같다. 맨 아래를 보고 있으면 따라 내려간다 (TaskTab 과 같은 길)
 
-export const TurnTab = memo(function TurnTab({ conversationId, startedAt, directory, title, here, onJump }: { conversationId: string; startedAt: number; directory: string; title?: string; here?: boolean; onJump?: () => void }) {
+export const TurnTab = memo(function TurnTab({ conversationId, startedAt, directory, title, here, onJump, hidden = false }: { conversationId: string; startedAt: number; directory: string; title?: string; here?: boolean; onJump?: () => void; hidden?: boolean }) {
   const t = useT()
   const detail = useTurnDetail(conversationId, startedAt)
   const live = detail !== undefined && detail.endedAt === undefined
@@ -26,7 +26,7 @@ export const TurnTab = memo(function TurnTab({ conversationId, startedAt, direct
 
   if (detail === undefined) {
     return (
-      <div className="turn-tab">
+      <div className="turn-tab" hidden={hidden}>
         <p className="file-preview__empty">{t('turnTab.gone')}</p>
       </div>
     )
@@ -39,7 +39,7 @@ export const TurnTab = memo(function TurnTab({ conversationId, startedAt, direct
     : turnHeadText(t, detail.duration, !!detail.failed, detail.interrupted, detail.declined)
 
   return (
-    <div className="turn-tab" data-state={state}>
+    <div className="turn-tab" data-state={state} hidden={hidden}>
       <div className="turn-tab__head">
         <span className="turn-tab__dot" aria-hidden="true" />
         <strong className="turn-tab__title">{head}</strong>

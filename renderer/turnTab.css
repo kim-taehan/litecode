@@ -7,6 +7,11 @@
   flex-direction: column;
 }
 
+/* 계속 마운트해 둔 탭들 중 고르지 않은 것은 숨긴다 (이슈 #583) — display:flex 가 hidden 을 이기지 않게 */
+.turn-tab[hidden] {
+  display: none;
+}
+
 .turn-tab__head {
   display: flex;
   align-items: center;
