@@ -3,7 +3,7 @@ import type { HistoryMessage } from '../../shared/contract.ts'
 import { stopFeedback } from '../../shared/hooks.ts'
 import type { TurnItem } from '../../shared/ipc.ts'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
-import { answerText, clockTime, formatDuration, liveAnswer, looksLikePath, minimapTurns, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
+import { answerText, clockTime, formatDuration, looksLikePath, minimapTurns, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
 
 // 답 한 턴의 화면 모양 — 진행 줄 쌓기, 작업/답 가르기, 줄 글자
 
@@ -21,15 +21,6 @@ describe('upsertItem', () => {
     const c = upsertItem(b, text('a', '12'))
     expect(c.map((item) => item.id)).toEqual(['a', 'b'])
     expect(c[0]).toEqual(text('a', '12'))
-  })
-})
-
-describe('liveAnswer — 도는 턴에서 채팅에 흘릴 글 (이슈 #565)', () => {
-  it('마지막 도구 뒤의 글만 — 그 앞의 중간 글은 빼고, 빈 글은 빼고, 쓰는 중(done false)이어도 흘린다', () => {
-    expect(liveAnswer([text('a', 'Let me read…'), tool('t1'), text('b', '답 첫 줄', false)]).map((item) => item.id)).toEqual(['b'])
-    expect(liveAnswer([text('a', '바로 답')]).map((item) => item.id)).toEqual(['a'])
-    expect(liveAnswer([text('a', 'Let me…'), tool('t1')])).toEqual([])
-    expect(liveAnswer([tool('t1'), text('b', '  ')])).toEqual([])
   })
 })
 
