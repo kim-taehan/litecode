@@ -3,7 +3,7 @@ import type { HistoryMessage } from '../../shared/contract.ts'
 import { stopFeedback } from '../../shared/hooks.ts'
 import type { TurnItem } from '../../shared/ipc.ts'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
-import { answerText, clockTime, formatDuration, looksLikePath, minimapTurns, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
+import { answerText, clockTime, formatDuration, looksLikePath, minimapTurns, minimapTurnDetails, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
 
 // 답 한 턴의 화면 모양 — 진행 줄 쌓기, 작업/답 가르기, 줄 글자
 
@@ -107,9 +107,57 @@ describe('minimapTurns', () => {
     { role: 'assistant', text: '답 3' },
   ]
   it('턴 끝 훅이 이어 보낸 글은 줄이 아니다 — 줄 수가 닻 수와 같고 이름표에 훅 머리가 없다', () => {
-    expect(minimapTurns(messages)).toEqual(['첫 질문', '둘째 질문'])
+    expect(minimapTurns(messages, 'c-1')).toEqual(['첫 질문', '둘째 질문'])
   })
   it('글 없이 첨부만 보낸 턴은 파일 이름이 이름표다', () => {
-    expect(minimapTurns([{ role: 'user', text: '', attachments: [{ name: 'a.png' }, { name: 'b.txt' }] } as HistoryMessage])).toEqual(['a.png, b.txt'])
+    expect(minimapTurns([{ role: 'user', text: '', attachments: [{ name: 'a.png' }, { name: 'b.txt' }] } as HistoryMessage], 'c-1')).toEqual(['a.png, b.txt'])
+  })
+})
+
+describe('minimapTurnDetails', () => {
+  // 이슈 #575 — 마커 클릭 시 우측 "턴 작업" 탭에 보낼 데이터: 그 턴(내 말)의 startedAt·진행 줄. 뒤를 이은 어시스턴트 응답이 있으면 끝난 턴
+
+  const msg = (patch: Partial<HistoryMessage>): HistoryMessage => ({ ...patch } as HistoryMessage)
+  const item: TurnItem = { kind: 'text', id: 'a', text: 'done', done: true }
+
+  it('끝난 턴이면 내 말 시 + 뒤 어시스턴트의 진행 줄·모든 정보가 붙는다', () => {
+    const details = minimapTurnDetails(
+      [
+        msg({ role: 'user', text: '질문', at: 100 }),
+        msg({ role: 'assistant', text: '답', items: [item], duration: 2_000, error: undefined }),
+      ],
+      'c-1',
+    )
+    expect(details).toEqual([{ text: '질문', startedAt: 100, conversationId: 'c-1', items: [item], duration: 2_000, failed: false }])
+  })
+
+  it('마지막 내 말 뒤에 어시스턴트 반응이 없으면 진행 중 — 줄이 비고 시작만 남는다', () => {
+    const [only] = minimapTurnDetails([msg({ role: 'user', text: '첫 말', at: 5 })], 'c-1')
+    expect(only).toEqual({ text: '첫 말', startedAt: 5, conversationId: 'c-1', items: [], failed: false })
+  })
+
+  it('실패·중단·거절 응답은 그대로 전한다', () => {
+    const details = minimapTurnDetails(
+      [
+        msg({ role: 'user', text: '질문', at: 100 }),
+        msg({ role: 'assistant', text: '', items: [item], error: 'boom', interrupted: true, declined: true }),
+      ],
+      'c-1',
+    )
+    expect(details[0]).toMatchObject({ failed: true, interrupted: true, declined: true })
+  })
+
+  it('턴 끝 훅이 보낸 글은 줄에 안 들어간다 (minimapTurns 와 같은 닻)', () => {
+    expect(
+      minimapTurnDetails(
+        [
+          msg({ role: 'user', text: 'a' }),
+          msg({ role: 'assistant', text: '' }),
+          msg({ role: 'user', text: stopFeedback('hook') }),
+          msg({ role: 'assistant', text: '' }),
+        ],
+        'c-1',
+      ).map((t) => t.text),
+    ).toEqual(['a'])
   })
 })
