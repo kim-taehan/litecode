@@ -9,6 +9,7 @@ import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
 import { openTurnTab } from './filePreviewStore.ts'
+import { feedCompletedTurn } from './turnDetailStore.ts'
 import { runningLine } from './jobsView.ts'
 import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import type { MessageOrigin } from '../shared/contract.ts'
@@ -149,6 +150,13 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   // 끝난 턴에서 AI 가 결과물로 선언한 파일 — 도는 중에는 없다 (이슈 #91)
   const presented = useMemo(() => (running ? undefined : presentedFiles(items)), [running, items])
 
+  const canOpenPanel = !running && items.length > 0 && conversationId !== undefined && startedAt !== undefined
+  const openPanel = () => {
+    if (conversationId === undefined || startedAt === undefined) return
+    feedCompletedTurn(conversationId, startedAt, items, { duration, failed, interrupted, declined })
+    openTurnTab(directory, conversationId, startedAt)
+  }
+
   return (
     <div className="turn" data-state={running ? 'running' : interrupted ? 'interrupted' : failed ? 'failed' : 'done'}>
       {!running && compactions.map((item) => <CompactionMark key={item.id} item={item} />)}
@@ -162,11 +170,21 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
             onClick={() => setOpen((now) => !now)}
           >
             <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted, declined)}</span>
+            {canOpenPanel && (
+              <span className="turn__head-panel" onClick={(event) => { event.stopPropagation(); openPanel() }} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel() } }} title={t('turnTab.tab')} aria-label={t('turnTab.tab')}>
+                <PanelIcon />
+              </span>
+            )}
             <Chevron />
           </button>
         ) : (
           <div className="turn__head">
             <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted, declined)}</span>
+            {canOpenPanel && (
+              <span className="turn__head-panel" onClick={openPanel} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel() } }} title={t('turnTab.tab')} aria-label={t('turnTab.tab')}>
+                <PanelIcon />
+              </span>
+            )}
           </div>
         ))}
       {workFold.mounted && work.length > 0 && (
@@ -456,6 +474,15 @@ function Chevron() {
   return (
     <svg className="turn__chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 6L8 10L12 6" />
+    </svg>
+  )
+}
+
+function PanelIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="2" width="12" height="12" rx="2" />
+      <path d="M9.5 2V14" />
     </svg>
   )
 }
