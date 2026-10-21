@@ -677,6 +677,41 @@ export class ExtensionsService extends Service {
     return done(this.servers.status(id, server, this.serverOptions(id)))
   }
 
+  /** AI 도구의 SonarQube 재검사 (이슈 #563, appMcp/tools/sonarqube.ts) — 켜진 SonarQube 확장의 내장 서버로 paths 만 범위 분석하고,
+   *  서버가 결과를 처리할 때까지 기다린 뒤 그 범위에 남은 이슈를 준다. 결과는 범위 키(`<키>__scope`)라 패널의 "폴더·파일" 범위와 같은 자리에 남는다.
+   *  실패는 { ok: false, reason } — 모델이 읽는 영어 */
+  async sonarCheck(directory: string, paths: readonly string[]): Promise<{ ok: true; projectKey: string; skipped: string[]; total: number; issues: SonarIssueView[] } | { ok: false; reason: string }> {
+    await this.booted
+    const entry = this.entries.find((item) => item.manifest?.server?.admin === 'sonarqube' && this.state(item, this.enabled(item.id)).state === 'on')
+    const server = entry?.manifest?.server
+    if (!entry || !server) return { ok: false, reason: 'The SonarQube extension is not installed or is turned off.' }
+    if (this.servers.token(entry.id) === undefined) return { ok: false, reason: 'The SonarQube server is not running. Ask the user to press 띄우기 in the SonarQube panel, then try again.' }
+    const analyzed = await this.servers.analyze(entry.id, server, this.files.installedDir(entry.id), { directory, name: path.basename(directory) }, paths)
+    if (!analyzed.ok) return { ok: false, reason: analyzed.error === 'analysis-failed' ? `Analysis failed: ${analyzed.detail ?? ''}`.trim() : `Analysis did not run (${analyzed.error}).` }
+    // 서버가 올린 결과를 처리하는 동안 (실측: 수 초)
+    for (let i = 0; analyzed.taskId && i < 120; i++) {
+      const task = (await this.servers.api(entry.id, server, `/api/ce/task?id=${encodeURIComponent(analyzed.taskId)}`).catch(() => undefined)) as { task?: { status?: string; errorMessage?: string } } | undefined
+      const status = task?.task?.status
+      if (status === 'SUCCESS') break
+      if (status === 'FAILED' || status === 'CANCELED') return { ok: false, reason: `The server could not process the analysis (${status}): ${task?.task?.errorMessage ?? ''}`.trim() }
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+    const key = encodeURIComponent(analyzed.projectKey)
+    const found = (await this.servers.api(entry.id, server, `/api/issues/search?componentKeys=${key}&resolved=false&ps=100&s=SEVERITY&asc=false`)) as
+      | { total?: number; paging?: { total?: number }; issues?: { component: string; line?: number; rule?: string; type?: string; severity?: string; message?: string }[] }
+      | undefined
+    const prefix = `${analyzed.projectKey}:`
+    const issues = (found?.issues ?? []).map((issue) => ({
+      file: issue.component.startsWith(prefix) ? issue.component.slice(prefix.length) : issue.component,
+      ...(issue.line !== undefined && { line: issue.line }),
+      rule: issue.rule ?? '',
+      type: issue.type ?? '',
+      severity: issue.severity ?? '',
+      message: issue.message ?? '',
+    }))
+    return { ok: true, projectKey: analyzed.projectKey, skipped: analyzed.skipped, total: found?.paging?.total ?? found?.total ?? issues.length, issues }
+  }
+
   /** server.project · server.analyze (이슈 #545) — 지금 프로젝트의 SonarQube 키, [분석]. 분석의 성공·실패는 통로 실패가 아니라 결과 값({ ok, … })으로 준다
    *  (실패 사유인 스캐너 출력을 패널에 보이려고 — 통로 실패는 코드만 싣는다). 분석은 끝날 때까지 기다린다(전체 15초 남짓, 기한 15분) */
   private async analysis(id: string, manifest: ExtensionManifest, method: string, params: unknown, project: CallProject | undefined): Promise<ExtensionCallResult> {
@@ -810,6 +845,16 @@ export class ExtensionsService extends Service {
       console.warn(`[extensions] ${id} 의 켜짐 값을 지우지 못했다`, error)
     }
   }
+}
+
+/** AI 도구가 읽는 남은 이슈 한 줄 (이슈 #563) */
+export interface SonarIssueView {
+  file: string
+  line?: number
+  rule: string
+  type: string
+  severity: string
+  message: string
 }
 
 /** server.setOptions 의 params — startWithApp·stopWithApp 중 하나 이상, boolean 만 */

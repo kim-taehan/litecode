@@ -7,8 +7,9 @@ import { CompactionMark } from './Compaction.tsx'
 import { takeCompactions } from './compaction.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
-import { answerText, clockTime, formatDuration, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
+import { answerText, clockTime, formatDuration, liveAnswer, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
 import { openTurnTab } from './filePreviewStore.ts'
+import { feedCompletedTurn } from './turnDetailStore.ts'
 import { runningLine } from './jobsView.ts'
 import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import type { MessageOrigin } from '../shared/contract.ts'
@@ -128,11 +129,11 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
   const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
   const { work, answer } = running ? { work: [] as TurnItem[], answer: [] } : splitTurn(rest)
-  // 진행 중(이슈 #416) — 생각·도구·중간 글(text) 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "턴 작업" 탭으로.
-  // 채팅에는 상태 알림인 요약 중(compaction)만 그대로 (중간 글은 피드백 #8, 2026-10-20: "Let me…" 이 노이즈라 진행 중엔 숨김)
-  const liveRows = running
-    ? items.filter((item): item is Extract<TurnItem, { kind: 'compaction' }> => item.kind === 'compaction')
-    : []
+  // 진행 중(이슈 #416) — 생각·도구·중간 글 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "턴 작업" 탭으로.
+  // 채팅에는 요약 중(compaction)과, 마지막 도구·생각 뒤의 글(= 답이 될 글)만 흘린다 — 중간 글("Let me…")은 피드백 #8 대로 숨기되
+  // 최종 답은 스트리밍한다(이슈 #565 — #534 가 글 줄을 다 숨겨 답이 끝날 때 한꺼번에 나왔다)
+  const liveRows = running ? items.filter((item): item is Extract<TurnItem, { kind: 'compaction' }> => item.kind === 'compaction') : []
+  const liveText = running ? liveAnswer(rest) : []
   // 진짜 실패만 작업 줄을 펼쳐 둔다. 중단(사용자 stop·엔진 재시작)은 failed 의 한 갈래지만 완료처럼 접힌다 (이슈 #516)
   const unfolded = failed && !interrupted
   const foldable = !running && !unfolded && work.length > 0
@@ -149,6 +150,13 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   // 끝난 턴에서 AI 가 결과물로 선언한 파일 — 도는 중에는 없다 (이슈 #91)
   const presented = useMemo(() => (running ? undefined : presentedFiles(items)), [running, items])
 
+  const canOpenPanel = !running && items.length > 0 && conversationId !== undefined && startedAt !== undefined
+  const openPanel = () => {
+    if (conversationId === undefined || startedAt === undefined) return
+    feedCompletedTurn(conversationId, startedAt, items, { duration, failed, interrupted, declined })
+    openTurnTab(directory, conversationId, startedAt)
+  }
+
   return (
     <div className="turn" data-state={running ? 'running' : interrupted ? 'interrupted' : failed ? 'failed' : 'done'}>
       {!running && compactions.map((item) => <CompactionMark key={item.id} item={item} />)}
@@ -162,11 +170,21 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
             onClick={() => setOpen((now) => !now)}
           >
             <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted, declined)}</span>
+            {canOpenPanel && (
+              <span className="turn__head-panel" onClick={(event) => { event.stopPropagation(); openPanel() }} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel() } }} title={t('turnTab.tab')} aria-label={t('turnTab.tab')}>
+                <PanelIcon />
+              </span>
+            )}
             <Chevron />
           </button>
         ) : (
           <div className="turn__head">
             <span className="turn__head-label">{turnHeadText(t, duration, failed, interrupted, declined)}</span>
+            {canOpenPanel && (
+              <span className="turn__head-panel" onClick={openPanel} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel() } }} title={t('turnTab.tab')} aria-label={t('turnTab.tab')}>
+                <PanelIcon />
+              </span>
+            )}
           </div>
         ))}
       {workFold.mounted && work.length > 0 && (
@@ -176,11 +194,16 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
           )}
         </div>
       )}
-      {/* 진행 중 — 요약 중만 채팅에. 생각·도구·중간 글 줄은 아래 파란 한 줄과 우측 탭으로 (이슈 #416, 피드백 #8) */}
-      {liveRows.length > 0 && (
+      {/* 진행 중 — 요약 중과 답이 될 글만 채팅에. 생각·도구·중간 글 줄은 아래 파란 한 줄과 우측 탭으로 (이슈 #416, 피드백 #8, #565) */}
+      {(liveRows.length > 0 || liveText.length > 0) && (
         <div className="turn__work">
           {liveRows.map((item) => (
             <CompactionMark key={item.id} item={item} />
+          ))}
+          {liveText.map((item) => (
+            <div key={item.id} className="turn-row turn-row--text" data-kind="text">
+              <Markdown text={item.text.trim()} directory={directory} streaming />
+            </div>
           ))}
         </div>
       )}
@@ -456,6 +479,15 @@ function Chevron() {
   return (
     <svg className="turn__chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 6L8 10L12 6" />
+    </svg>
+  )
+}
+
+function PanelIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="2" width="12" height="12" rx="2" />
+      <path d="M9.5 2V14" />
     </svg>
   )
 }

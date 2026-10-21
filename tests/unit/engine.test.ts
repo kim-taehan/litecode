@@ -10,6 +10,8 @@ import { engineModelId } from '../../shared/engineModelId.ts'
 
 // git 도구 (#290) — 읽기는 모드 에이전트에 allow, 쓰기는 기본 권한에 ask·전체 권한에 allow(2026-10-12), 전역·하위 작업은 둘 다 deny
 const GIT_READ_ALLOW = { litecode_git_status: 'allow', litecode_git_diff: 'allow', litecode_git_log: 'allow', litecode_git_branches: 'allow' }
+/** 묻지 않는 읽기 도구 — git 읽기 넷 + SonarQube 재검사(이슈 #563) */
+const READ_ALLOW = { ...GIT_READ_ALLOW, litecode_sonarqube_check: 'allow' }
 const GIT_WRITE_ASK = { litecode_git_stage: 'ask', litecode_git_commit: 'ask', litecode_git_branch_create: 'ask', litecode_git_switch: 'ask', litecode_git_push: 'ask', litecode_git_pull: 'ask' }
 const GIT_WRITE_ALLOW = Object.fromEntries(Object.keys(GIT_WRITE_ASK).map((name) => [name, 'allow']))
 const GIT_DENY = Object.fromEntries([...Object.keys(GIT_READ_ALLOW), ...Object.keys(GIT_WRITE_ASK)].map((name) => [name, 'deny']))
@@ -132,14 +134,14 @@ describe('engineConfig — 모드 에이전트 (웹 도구 켬)', () => {
 
   it('계획은 opencode plan 을 덮어써 편집·명령·웹을 막고 계획 프롬프트를 준다', () => {
     expect(MODE_AGENT.plan).toBe('plan')
-    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', litecode_open: 'allow', litecode_list_projects: 'allow', litecode_read_project: 'allow', litecode_present: 'allow', ...GIT_READ_ALLOW, external_directory: 'ask', doom_loop: 'ask' })
+    expect(agent['plan']!.permission).toEqual({ edit: 'deny', bash: 'deny', webfetch: 'deny', websearch: 'deny', task: 'deny', '*_*': 'deny', litecode_open: 'allow', litecode_list_projects: 'allow', litecode_read_project: 'allow', litecode_present: 'allow', ...READ_ALLOW, external_directory: 'ask', doom_loop: 'ask' })
     expect(agent['plan']!.prompt).toMatch(/plan mode/)
   })
 
   it('매번 묻기는 편집·명령·웹을 묻고 질문 도구를 다시 허용한다, 전체 권한은 모두 허용 — 둘 다 primary 에 build 첫 줄 프롬프트', () => {
     expect(agent[MODE_AGENT.ask]).toMatchObject({ mode: 'primary', permission: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', question: 'allow' } })
     expect(agent[MODE_AGENT.full]).toMatchObject({ mode: 'primary', permission: { '*': 'allow' } })
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...READ_ALLOW, ...GIT_WRITE_ALLOW })
     expect(agent[MODE_AGENT.ask]!.prompt).toMatch(/^You are an AI coding agent\./)
     expect(agent[MODE_AGENT.full]!.prompt).toBe(agent[MODE_AGENT.ask]!.prompt)
   })
@@ -174,7 +176,7 @@ describe('engineConfig — 웹 도구 끔 (기본)', () => {
         ['websearch', 'deny'],
       ])
     }
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, webfetch: 'deny', websearch: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...READ_ALLOW, ...GIT_WRITE_ALLOW, webfetch: 'deny', websearch: 'deny' })
     expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ edit: 'ask', bash: 'ask', question: 'allow' })
   })
 
@@ -201,7 +203,7 @@ describe('engineConfig — MCP 도구 권한 (#28)', () => {
   it('매번 묻기와 그 하위 작업은 MCP 도구를 묻는다, 기본(build)·전체 권한은 와일드카드 규칙이 없다(허용)', () => {
     expect(agent[MODE_AGENT.ask]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
     expect(agent[SUBAGENT_ASK]!.permission).toMatchObject({ '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny' })
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, webfetch: 'deny', websearch: 'deny' })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...READ_ALLOW, ...GIT_WRITE_ALLOW, webfetch: 'deny', websearch: 'deny' })
     expect(agent['build']!.permission).not.toHaveProperty('*_*')
   })
 })
