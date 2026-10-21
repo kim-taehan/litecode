@@ -343,7 +343,7 @@ button.turn-running__line:focus-visible { outline: 2px solid var(--accent); outl
   margin: 0 auto;
 }
 
-/* 오른쪽 가장자리 미니맵 — 턴마다 가로줄, 지금 보는 턴은 진하게, 눌러 이동 (dsh TurnNavigator). 대화 칸이 좁으면 숨긴다 */
+/* 오른쪽 가장자리 미니맵 — 턴마다 가로줄, 지금 보는 턴은 진하게, 눌러 이동 (dsh TurnNavigator). 창이 좁아져도 항상 보인다 (#577) */
 .chat-pane {
   position: relative;
   flex-grow: 1;
@@ -391,10 +391,6 @@ button.turn-running__line:focus-visible { outline: 2px solid var(--accent); outl
 }
 .minimap__mark:hover::before { transform: translateY(-50%) scaleX(0.9); background: var(--text-tertiary); }
 .minimap__mark[aria-current='true']::before { transform: translateY(-50%) scaleX(1); background: var(--text); }
-
-@container (max-width: 900px) {
-  .minimap { display: none; }
-}
 
 /* `!명령` 결과 카드 — 명령·끝난 사정·고정폭 출력. 맥락 밖이라 답과 다른 모양(둥근 연회색 판) */
 .shell-card {

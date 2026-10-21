@@ -125,3 +125,11 @@
 - Expect: 미니맵 마커 클릭 = 해당 턴으로 스크롤 + 우측 "턴 작업" 탭 열림
 - Status: done (2026-10-21, fix_575_minimap_turn_tab, PR → dev)
 - Fix: 2026-10-21 — `Minimap` 마커가 클릭 시 스크롤만 한 뒤 `onTurnOpen(turn)` 을 부르게 만들고, `turnView.ts` 의 `minimapTurnDetails(messages, conversationId)` 가 각 마커에 그 턴의 `startedAt`(user.message.at)·끝난 답의 `items`·`duration`·`failed/interrupted/declined`·`conversationId` 를 채운다. `ConversationView` 는 끝난 턴이면 `feedCompletedTurn` + `openTurnTab`(진행 중 턴은 `openTurnTab` 만). 예전처럼 내 말(`.user-turn`) 닻 순서는 그대로라 scroll pairing 이 흔들리지 않는다.
+
+## 2026-10-21 #577 — 창이 줄면 턴 미니맵이 숨김
+
+- Where: 채팅 오른쪽 턴 미니맵(`Minimap.tsx`)
+- What: "메인창이 줄면 하이드 되는데 확인해죠"
+- Expect: 창이 줄어도 미니맵은 늘 보인다 (사용자 결정 2026-10-21)
+- Status: done (2026-10-21, fix_577_minimap_always, PR → dev)
+- Fix: 2026-10-21 — `renderer/chat.css` 의 `@container (max-width: 900px) { .minimap { display: none; } }` 제거. 채팅 칸(`.chat-pane`, `container-type: inline-size`) 폭이 900px 이하면 숨기던 규칙이라, 창을 줄이거나 사이드바·오른쪽 패널을 넓히면 채팅 칸 900px 미만으로 떨어져 미니맵이 사라졌다.
