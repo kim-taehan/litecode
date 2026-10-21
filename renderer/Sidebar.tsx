@@ -356,13 +356,15 @@ export function Sidebar({
         {/* [더보기]/[접기] — 마지막 행 뒤에 (이슈 #568). 10개 남지 않으면 사라진다 */}
         {hasMore && !expanded && (
           <button type="button" className="conversation-list__more-bar" onClick={onMore}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
             <span>{t('sidebar.showMore')}</span>
             <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
           </button>
         )}
         {!hasMore && expanded && (
           <button type="button" className="conversation-list__more-bar conversation-list__collapse-bar" onClick={onLess}>
-            {t('sidebar.collapse')}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15" /></svg>
+            <span>{t('sidebar.collapse')}</span>
           </button>
         )}
       </div>
