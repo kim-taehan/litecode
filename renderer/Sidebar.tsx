@@ -197,12 +197,9 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar__label">
-        {t('sidebar.conversations')}
-        <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
-      </div>
       <div className="sidebar__session-search">
         <SessionSearch value={titleQuery} onChange={setTitleQuery} />
+        <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
         <button
           ref={recentRef}
           type="button"
@@ -356,19 +353,19 @@ export function Sidebar({
           </div>
           </Fragment>
         ))}
-        {/* [더보기]·[접기] — 마지막 행 뒤에 (이슈 #568). 10개 남지 않으면 사라진다, [접기] 는 10개보다 많게 펼친 뒤에나 */}
-        {hasMore && (
-          <div className="conversation-list__toggle">
-            <button type="button" className="conversation-list__more" onClick={onMore}>
-              <span>{t('sidebar.showMore')}</span>
-              <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
-            </button>
-            {expanded && (
-              <button type="button" className="conversation-list__collapse" onClick={onLess}>
-                {t('sidebar.collapse')}
-              </button>
-            )}
-          </div>
+        {/* [더보기]/[접기] — 마지막 행 뒤에 (이슈 #568). 10개 남지 않으면 사라진다 */}
+        {hasMore && !expanded && (
+          <button type="button" className="conversation-list__more-bar" onClick={onMore}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+            <span>{t('sidebar.showMore')}</span>
+            <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
+          </button>
+        )}
+        {!hasMore && expanded && (
+          <button type="button" className="conversation-list__more-bar conversation-list__collapse-bar" onClick={onLess}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15" /></svg>
+            <span>{t('sidebar.collapse')}</span>
+          </button>
         )}
       </div>
       <div className="sidebar__fade" aria-hidden="true" />
