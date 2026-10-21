@@ -172,6 +172,16 @@ export class ExtensionServers {
   }
 
   /** 내장 서버로 가는 요청에 붙일 토큰 — 관리자 준비가 끝났을 때만 */
+  /** 내장 서버의 API 를 앱이 직접 부른다(관리자 토큰) — AI 도구의 재검사가 결과를 읽는다 (이슈 #563). 실행 중이 아니면 undefined, 404 도 undefined */
+  async api(id: string, server: ExtensionServer, pathAndQuery: string): Promise<unknown> {
+    const token = this.token(id)
+    if (token === undefined) return undefined
+    const response = await (this.options.fetch ?? globalThis.fetch)(`http://127.0.0.1:${server.port}${pathAndQuery}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) })
+    if (response.status === 404) return undefined
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return response.json()
+  }
+
   token(id: string): string | undefined {
     // 실행 중일 때만 — 서버가 스스로 끝난 뒤 그 포트를 잡은 다른 프로그램에 토큰을 보내지 않는다 (QA 03_qa_537)
     return this.states.get(id)?.phase === 'running' ? this.tokens.get(id) : undefined

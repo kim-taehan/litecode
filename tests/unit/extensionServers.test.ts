@@ -45,6 +45,8 @@ http.createServer((req, res) => {
     if (!user(req.headers.authorization)) { res.statusCode = 401; return res.end() }
     if (url.pathname === '/api/users/change_password') { password = form.get('password'); res.statusCode = 204; return res.end() }
     if (url.pathname === '/api/user_tokens/revoke') { tokens.delete(form.get('name')); res.statusCode = 204; return res.end() }
+    if (url.pathname === '/api/ce/task') return json(200, { task: { status: 'SUCCESS' } })
+    if (url.pathname === '/api/issues/search') return json(200, { paging: { total: 1 }, issues: [{ component: url.searchParams.get('componentKeys') + ':src/a.ts', line: 3, rule: 'ts:S1', type: 'CODE_SMELL', severity: 'MINOR', message: 'still here' }] })
     if (url.pathname === '/api/user_tokens/generate') { const token = 'squ_' + Math.random().toString(16).slice(2); tokens.set(form.get('name'), token); return json(200, { token }) }
     res.statusCode = 404
     res.end()
@@ -75,7 +77,7 @@ beforeEach(async () => {
 afterEach(async () => {
   // 남은 가짜 서버를 거둔다 — 기록이 있는 것만
   contexts.splice(0)
-  for (const id of ['srv-ext']) {
+  for (const id of ['srv-ext', 'sonarqube']) {
     try {
       const { pid } = JSON.parse(await fs.readFile(path.join(root, 'data', id, 'server', SERVER_RECORD), 'utf8')) as { pid: number }
       process.kill(-pid, 'SIGKILL')
@@ -311,6 +313,32 @@ describe('server.project · server.analyze (이슈 #545)', () => {
     await store.applyPending()
     const { ext } = await boot()
     for (const method of ['server.project', 'server.analyze', 'server.log']) expect(await ext.call('plain-ext', method, {}, project()), method).toEqual({ ok: false, error: 'permission-missing' })
+  })
+})
+
+describe('sonarCheck — AI 재검사 도구가 부르는 것 (이슈 #563)', () => {
+  const project = (): string => path.join(dir, 'proj')
+
+  it('서버가 안 떠 있으면 사유, 떠 있으면 범위 분석 → 처리 대기 → 남은 이슈(파일 기준 경로)', async () => {
+    await install('sonarqube')
+    await fs.mkdir(path.join(project(), 'src'), { recursive: true })
+    const { ext } = await boot()
+    expect(await ext.sonarCheck(project(), ['src/'])).toMatchObject({ ok: false, reason: expect.stringContaining('not running') })
+    await ext.call('sonarqube', 'server.start', undefined)
+    await until(async () => (await status(ext, 'sonarqube')).phase === 'running')
+    expect(await ext.sonarCheck(project(), ['src/'])).toEqual({
+      ok: true,
+      projectKey: 'proj__scope',
+      skipped: [],
+      total: 1,
+      issues: [{ file: 'src/a.ts', line: 3, rule: 'ts:S1', type: 'CODE_SMELL', severity: 'MINOR', message: 'still here' }],
+    })
+    await ext.call('sonarqube', 'server.stop', undefined)
+  })
+
+  it('SonarQube 확장이 없으면 사유', async () => {
+    const { ext } = await boot()
+    expect(await ext.sonarCheck(project(), ['src/'])).toMatchObject({ ok: false, reason: expect.stringContaining('not installed') })
   })
 })
 

@@ -16,7 +16,7 @@ SonarQube 확장 — 확장에 든 SonarQube CE 를 이 기기에서 띄워 지�
 node scripts/fetch-sonarqube.mjs            # build/vendor/sonarqube/<타깃>/server/ 에 받는다 (버전·sha256 고정)
 mkdir -p /tmp/sq && cp extensions/sonarqube/extension.json extensions/sonarqube/index.html /tmp/sq/
 cp -R build/vendor/sonarqube/mac-arm64/server /tmp/sq/server
-(cd /tmp/sq && zip -qry -1 ../sonarqube-0.2.7-mac-arm64.zip .)
+(cd /tmp/sq && zip -qry -1 ../sonarqube-0.2.8-mac-arm64.zip .)
 ```
 
 zip 은 697MB 남짓이라 git 에 넣지 않는다(`server` 권한 확장만 상한이 1GB 다). 패널만 고쳤으면 있는 zip 의 두 파일만 바꿔 넣는다:
