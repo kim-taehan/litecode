@@ -167,7 +167,8 @@ export function App() {
 
   const project = projects?.find((candidate) => candidate.path === current)
   const visible = sessions.filter((session) => session.project === project?.path && !isBlank(session))
-  const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
+  const all = sessions.filter((session) => session.project === project?.path)
+  const active = all.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0] ?? all[0]
   const activeIdRef = useRef<string>(undefined)
   activeIdRef.current = active?.id
   // 본문 탭(view)은 대화별로 새로 시작 — 추론 과정을 보다가 다른 대화로 가면 대화 탭으로 돌아온다 (이슈 #364)
