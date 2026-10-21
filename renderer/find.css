@@ -285,6 +285,17 @@
   white-space: nowrap;
 }
 
+/* 현재 프로젝트 — 라벨을 진하게 + ✓ 로 구분 (여기서 열림) */
+.recent-pop__proj--now {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.recent-pop__proj-check {
+  margin-right: 3px;
+  color: var(--accent);
+}
+
 /* 2줄 — 대화 제목 + 오른쪽 시간 */
 .recent-pop__main {
   display: flex;
