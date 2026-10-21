@@ -30,21 +30,24 @@ const task = (patch: Partial<Subtask> = {}): Subtask => ({
 })
 
 describe('작업 탭 열기', () => {
+  const readP = () => getPanelState(undefined, '/p')
+  const readQ = () => getPanelState(undefined, '/q')
+
   it('열쇠는 \\0task/<작업 id>, 같은 작업은 한 탭 — 다시 열면 그 탭을 고른다. 닫을 수 있다', () => {
     expect(taskIdOf(taskTabKey('bgtask:c1:2'))).toBe('bgtask:c1:2')
     expect(isTaskTab('src/a.ts')).toBe(false)
     openTaskTab('/p', 'bgtask:c1:1')
     openFilePreview('/p', 'a.ts')
     openTaskTab('/p', 'bgtask:c1:1')
-    expect(getPanelState()).toMatchObject({ open: true, tabs: [taskTabKey('bgtask:c1:1'), 'a.ts'], active: taskTabKey('bgtask:c1:1') })
-    closeTab(taskTabKey('bgtask:c1:1'))
-    expect(getPanelState()?.tabs).toEqual(['a.ts'])
+    expect(readP()).toMatchObject({ open: true, tabs: [taskTabKey('bgtask:c1:1'), 'a.ts'], active: taskTabKey('bgtask:c1:1') })
+    closeTab(taskTabKey('bgtask:c1:1'), '/p')
+    expect(readP()?.tabs).toEqual(['a.ts'])
   })
 
   it('다른 프로젝트면 터미널 탭처럼 새로 시작한다', () => {
     openTaskTab('/p', 'bgtask:c1:1')
     openTaskTab('/q', 'bgtask:c2:1')
-    expect(getPanelState()).toMatchObject({ directory: '/q', tabs: [taskTabKey('bgtask:c2:1')] })
+    expect(readQ()).toMatchObject({ directory: '/q', tabs: [taskTabKey('bgtask:c2:1')] })
   })
 })
 

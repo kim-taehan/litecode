@@ -10,7 +10,7 @@ import './presented.css'
 // (답의 파일 칩과 같은 길 — 파일이 그 사이 지워졌거나 프로젝트 밖이 됐으면 패널이 그렇다고 말한다). 모양은 "AI 가 고친 파일" 카드(changedFiles.css)에 맞췄다.
 // 모은 규칙은 presented.ts. 대화 안 찾기(ChatFind)의 대상이 아니다 (고친 파일 카드와 같다)
 
-export const PresentedCard = memo(function PresentedCard({ files, directory }: { files: readonly PresentedFile[]; directory: string }) {
+export const PresentedCard = memo(function PresentedCard({ files, directory, conversationId }: { files: readonly PresentedFile[]; directory: string; conversationId?: string }) {
   const t = useT()
   return (
     <section className="presented" aria-label={t('present.cardTitle', { count: files.length })}>
@@ -20,7 +20,7 @@ export const PresentedCard = memo(function PresentedCard({ files, directory }: {
           const { name, folder } = splitPath(file.path)
           return (
             <li key={file.path}>
-              <button type="button" className="presented__row" title={t('markdown.previewFile', { file: file.path })} onClick={() => openFilePreview(directory, file.path)}>
+              <button type="button" className="presented__row" title={t('markdown.previewFile', { file: file.path })} onClick={() => openFilePreview(directory, file.path, undefined, {}, conversationId)}>
                 <svg className="presented__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M4 1.75H9.5L12.5 4.75V14.25H4Z" />
                   <path d="M9.5 1.75V4.75H12.5" />

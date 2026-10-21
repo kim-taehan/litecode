@@ -9,7 +9,7 @@ import { focusComposerInput } from './composerFocus.ts'
 import { splitPath } from './changedFiles.ts'
 import { DiffCard } from './DiffCard.tsx'
 import { useFeatures } from './featuresStore.ts'
-import { openFilePreview, openGitTab, type PanelState } from './filePreviewStore.ts'
+import { openFilePreview, openGitTab, type GitSub } from './filePreviewStore.ts'
 import { commitControls, commitNotice, commitThenPush } from './gitCommit.ts'
 import { DANGER_ITEMS, entryPaths, FILE_MENU, isMenuKey, menuEnabled, menuShortcut, menuShortcutLabel, menuVisible, type FileMenuItem } from './gitMenu.ts'
 import { changeCount, foldsOf, ignoredOf, ignoredShown, refreshGit, refreshIgnored, refreshLogGit, toggleAllGitFolds, toggleGitFold, toggleIgnoredShown, useGitView } from './gitStore.ts'
@@ -685,7 +685,7 @@ function FolderIcon() {
   )
 }
 
-export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: PanelState['gitSub'] }) {
+export function GitPanel({ directory, gitSub, conversationId }: { directory: string; gitSub?: GitSub; conversationId?: string }) {
   const t = useT()
   const view = useGitView(directory)
   const [sub, setSub] = useState<Sub>(gitSub?.sub ?? 'changes')
@@ -874,6 +874,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
             onRun={run}
             onDiscard={(file) => setConfirm({ kind: 'discard', file })}
             onFileAction={fileAction}
+            conversationId={conversationId}
           />
         )}
         {sub === 'log' && <GitLog directory={directory} view={view} />}
@@ -917,7 +918,7 @@ export function GitPanel({ directory, gitSub }: { directory: string; gitSub?: Pa
     setNotice(undefined)
     if (item === 'commitFile' || item === 'stash' || item === 'trash') setConfirm({ kind: item, entry })
     else if (item === 'discard' && entry.changed) setConfirm({ kind: 'discard', file: entry.changed })
-    else if (item === 'preview') openFilePreview(directory, entry.path)
+    else if (item === 'preview') openFilePreview(directory, entry.path, undefined, {}, conversationId)
     else if (item === 'copyPatch') void copyPatch(entry)
     else if (item === 'ignore' || item === 'exclude') void addIgnore(entry.path, item === 'ignore' ? 'gitignore' : 'exclude')
   }
@@ -1099,6 +1100,7 @@ function ChangesView({
   onRun,
   onDiscard,
   onFileAction,
+  conversationId,
 }: {
   directory: string
   view: GitStatus
@@ -1106,6 +1108,7 @@ function ChangesView({
   onRun(action: GitAction): Promise<unknown>
   onDiscard(file: GitFile): void
   onFileAction(item: FileMenuItem, entry: ChangeEntry): void
+  conversationId?: string
 }) {
   const t = useT()
   const mac = navigator.platform.startsWith('Mac')
@@ -1171,7 +1174,7 @@ function ChangesView({
             </div>
             <div className="attention-card__body">
               {conflicts.map((file) => (
-                <button key={file.path} type="button" className="attention-card__command git-conflict" onClick={() => openFilePreview(directory, file.path)}>
+                <button key={file.path} type="button" className="attention-card__command git-conflict" onClick={() => openFilePreview(directory, file.path, undefined, {}, conversationId)}>
                   {`U ${file.path}`}
                 </button>
               ))}
@@ -1179,7 +1182,7 @@ function ChangesView({
             </div>
             <div className="attention-card__actions">
               {conflicts[0] && (
-                <button type="button" className="attention-card__button" onClick={() => openFilePreview(directory, conflicts[0]!.path)}>
+                <button type="button" className="attention-card__button" onClick={() => openFilePreview(directory, conflicts[0]!.path, undefined, {}, conversationId)}>
                   {t('git.openFile')}
                 </button>
               )}

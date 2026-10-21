@@ -43,7 +43,7 @@ vi.mock('../../renderer/extensionsStore.ts', () => ({ useExtensions: () => store
 
 const ko = (key: MessageKey, vars?: Record<string, string | number>) => translate('ko', key, vars)
 const html = (element: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(element)
-const read = getPanelState
+const read = (dir: string, conv?: string) => getPanelState(conv, dir)
 
 const ext = (patch: Partial<ExtensionSummary> & { id: string }): ExtensionSummary => ({ name: `${patch.id} 이름`, description: '설명', version: '1.0.0', enabled: true, state: 'on', ...patch })
 
@@ -60,12 +60,13 @@ describe('확장 탭 — 저장소', () => {
   it('같은 확장은 한 탭 — 이미 있으면 그 탭으로. 패널이 닫혀 있으면 연다(파일 칩과 같은 길: open + focus 오름)', () => {
     openFilePreview('/ext', 'a.ts')
     expect(openExtensionTab('/ext', 'tetris-demo')).toBe(true)
-    selectTab('a.ts')
-    closeFilePreview()
-    const focus = read()!.focus
+    selectTab('a.ts', '/ext')
+    closeFilePreview('/ext')
+    const focus = read('/ext')!.focus
     expect(openExtensionTab('/ext', 'tetris-demo')).toBe(true)
-    expect(read()).toMatchObject({ directory: '/ext', open: true, tabs: ['a.ts', extensionTabKey('tetris-demo')], active: extensionTabKey('tetris-demo'), quiet: false })
-    expect(read()!.focus).toBe(focus + 1)
+    expect(read('/ext')).toMatchObject({ directory: '/ext', open: true, tabs: ['a.ts', extensionTabKey('tetris-demo')], active: extensionTabKey('tetris-demo'), quiet: false })
+    expect(read('/ext')!.focus).toBe(focus + 1)
+    closeFilePreview('/ext')
   })
 
   it('프로젝트가 없으면(대화 없음) 열지 못한다 — false', () => {
@@ -81,12 +82,13 @@ describe('확장 탭 — 저장소', () => {
       ext({ id: 'failed-ext', state: 'failed', reason: { code: 'mount-failed', params: { message: 'x' } } }),
       ext({ id: 'mount-ext', state: 'mounting' }),
     ])
-    expect(read()).toMatchObject({ tabs: ['a.ts', extensionTabKey('keep-ext')], active: extensionTabKey('keep-ext') })
+    expect(read('/close')).toMatchObject({ tabs: ['a.ts', extensionTabKey('keep-ext')], active: extensionTabKey('keep-ext') })
     // 파일 탭은 건드리지 않는다, 바뀐 것이 없으면 그대로
-    const before = read()
+    const before = read('/close')
     closeExtensionTabs([ext({ id: 'keep-ext' })])
-    expect(read()).toBe(before)
-    closeTab(extensionTabKey('keep-ext'))
+    expect(read('/close')).toBe(before)
+    closeTab(extensionTabKey('keep-ext'), '/close')
+    closeFilePreview('/close')
   })
 
   it('버전이 바뀌면 본문의 재마운트 key 가 바뀐다 (업그레이드 → 새 HTML 로 다시 그림)', () => {

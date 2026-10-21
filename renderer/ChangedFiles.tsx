@@ -13,7 +13,7 @@ import './changedFiles.css'
 
 const stat = (added: number, removed: number, unknownBefore: boolean) => `+${added} −${unknownBefore ? '?' : removed}`
 
-export const ChangedFilesCard = memo(function ChangedFilesCard({ changes, directory }: { changes: TurnChanges; directory: string }) {
+export const ChangedFilesCard = memo(function ChangedFilesCard({ changes, directory, conversationId }: { changes: TurnChanges; directory: string; conversationId?: string }) {
   const t = useT()
   const [all, setAll] = useState(false)
   const files = all ? changes.files : changes.files.slice(0, CHANGED_FILES_FOLD)
@@ -26,7 +26,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({ changes, direct
       </div>
       <ul className="changed-files__list">
         {files.map((file) => (
-          <FileRow key={file.path} file={file} directory={directory} />
+          <FileRow key={file.path} file={file} directory={directory} conversationId={conversationId} />
         ))}
       </ul>
       {more > 0 && (
@@ -40,7 +40,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({ changes, direct
   )
 })
 
-function FileRow({ file, directory }: { file: ChangedFile; directory: string }) {
+function FileRow({ file, directory, conversationId }: { file: ChangedFile; directory: string; conversationId?: string }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const { name, folder } = splitPath(file.path)
@@ -65,7 +65,7 @@ function FileRow({ file, directory }: { file: ChangedFile; directory: string }) 
             className="changed-files__open"
             aria-label={t('markdown.previewFile', { file: file.path })}
             title={t('markdown.previewFile', { file: file.path })}
-            onClick={() => openFilePreview(directory, file.path)}
+            onClick={() => openFilePreview(directory, file.path, undefined, {}, conversationId)}
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M9 2.5H13.5V7M13.5 2.5L7.5 8.5M6 3.5H3.5V12.5H12.5V10" />

@@ -12,6 +12,7 @@ import {
   exitCompare,
   extensionFrameKey,
   extensionIdOf,
+  gitTabIsOpen,
   isExtensionTab,
   isFileTab,
   isTaskTab,
@@ -32,6 +33,7 @@ import {
   TURN_PREFIX,
   turnRefOf,
   usePanelState,
+  useGitSub,
   type PanelState,
 } from './filePreviewStore.ts'
 import { Tokens, useHighlight } from './Highlighted.tsx'
@@ -96,23 +98,25 @@ export interface FilePreviewPanelProps {
  *  패널이 닫혀 있어도 늘 마운트돼 있어서 확장 목록(이슈 #511)을 여기서 듣는다: 꺼졌거나·삭제됐거나·상태가 정상이 아닌 확장의 탭을 닫고,
  *  설정 화면의 [열기]가 탭을 열 자리(지금 프로젝트)를 알린다 */
 export function FilePreviewPanel({ directory, titleFor, activeConversationId, onOpenConversation }: FilePreviewPanelProps) {
-  const state = usePanelState()
+  const state = usePanelState(activeConversationId, directory)
   const extensions = useExtensions()
+  const convId = activeConversationId
+  const dir = directory
   const stale = !!state?.open && state.directory !== directory
   useEffect(() => {
-    if (stale) closeFilePreview()
+    if (stale && dir) closeFilePreview(dir, convId)
   }, [stale])
   // 바뀜 이벤트만 — 첫 읽기 전의 빈 목록으로 탭을 닫지 않게
   useEffect(() => window.litecode.onExtensionsChanged(closeExtensionTabs), [])
   return state?.open && !stale ? (
-    <Panel state={state} extensions={extensions} titleFor={titleFor} activeConversationId={activeConversationId} onOpenConversation={onOpenConversation} />
+    <Panel state={state} extensions={extensions} titleFor={titleFor} activeConversationId={activeConversationId} onOpenConversation={onOpenConversation} directory={directory!} />
   ) : null
 }
 
 /** 대화 머리 오른쪽 끝 — 오른쪽 패널을 열고 숨기는 버튼 (왼쪽 사이드바 접기 그림을 뒤집은 것). 늘 보인다 — 숨겨도 탭은 남는다 (사용자 요청 2026-10-04) */
-export function RightPanelButton({ directory }: { directory: string }) {
+export function RightPanelButton({ directory, conversationId }: { directory: string; conversationId?: string }) {
   const t = useT()
-  const state = usePanelState()
+  const state = usePanelState(conversationId, directory)
   const open = !!state?.open && state.directory === directory
   const label = open ? t('filePreview.hidePanel') : t('filePreview.openPanel')
   return (
@@ -122,7 +126,7 @@ export function RightPanelButton({ directory }: { directory: string }) {
       aria-label={label}
       title={label}
       aria-pressed={open}
-      onClick={() => (open ? closeFilePreview() : revealPanel(directory))}
+      onClick={() => (open ? closeFilePreview(directory, conversationId) : revealPanel(directory, conversationId))}
     >
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
         <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
@@ -148,17 +152,27 @@ function Panel({
   titleFor,
   activeConversationId,
   onOpenConversation,
-}: { state: PanelState; extensions: readonly ExtensionSummary[] } & Omit<FilePreviewPanelProps, 'directory'>) {
+  directory,
+}: {
+  state: PanelState
+  extensions: readonly ExtensionSummary[]
+  directory: string
+  activeConversationId?: string
+  onOpenConversation?: (conversationId: string) => void
+  titleFor?: (conversationId: string) => string
+}) {
   const t = useT()
   const [width, setWidth] = useState(readWidth)
   const root = useRef<HTMLElement>(null)
   const returnFocus = useRef<Element | null>(null)
   const drag = useRef<{ x: number; width: number; max: number }>(undefined)
-  // Git 탭 (이슈 #290) — 기능 git 이 켜져 있을 때만. 꺼졌는데 Git 탭을 고른 채면 파일 탭으로 본다
+  // Git 탭 (이슈 #290, #579) — 기능 git 이 켜져 있을 때만. Git 은 프로젝트(directory) 단위: gitOpen 에 있으면 모든 대화에 보인다
   const gitOn = useFeatures().has('git')
-  // 터미널 탭 (이슈 #303) — 기능 terminal 이 켜져 있을 때만. 꺼졌는데 터미널 탭을 고른 채면 파일 탭으로 본다
+  const gitForProject = gitOn && directory ? gitTabIsOpen(directory) : false
+  const gitSub = useGitSub(directory ?? '')
+  // 터미널 탭 (이슈 #303) — 기능 terminal 이 켜져 있을 때만. 꺼졌으면 터미널 탭은 보이지 않는다
   const terminalOn = useFeatures().has('terminal')
-  const { directory, tabs: allTabs, fullscreen, jump } = state
+  const { tabs: allTabs, fullscreen, jump } = state
   // 기능이 꺼지면(셸도 다 끝났다) 터미널 탭은 보이지 않는다
   const tabs = terminalOn ? allTabs : allTabs.filter((key) => !isTerminalTab(key))
   const active = state.active === GIT_TAB && !gitOn ? undefined : isTerminalTab(state.active) && !terminalOn ? undefined : state.active
@@ -194,7 +208,7 @@ function Panel({
 
   function close(): void {
     const back = returnFocus.current
-    closeFilePreview()
+    closeFilePreview(directory, activeConversationId)
     if (back instanceof HTMLElement && back.isConnected) back.focus()
     else document.querySelector<HTMLElement>('.composer__input')?.focus()
   }
@@ -202,15 +216,15 @@ function Panel({
   /** 터미널 탭을 닫는다 — 셸도 끝낸다(메인), 탭은 closeTab 이 이웃을 고른다. 패널은 닫지 않는다 */
   function closeTerminal(key: string, terminalId: number): void {
     void window.litecode.closeTerminal(directory, terminalId).catch(() => {})
-    closeTab(key)
+    closeTab(key, directory, activeConversationId)
   }
 
   // Esc — 비교 보기면 먼저 끝내고, 전체 화면이면 풀고, 아니면 닫는다
   function onKeyDown(event: KeyboardEvent<HTMLElement>): void {
     if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return
     event.preventDefault()
-    if (compare) exitCompare()
-    else if (fullscreen) toggleFullscreen()
+    if (compare) exitCompare(directory, activeConversationId)
+    else if (fullscreen) toggleFullscreen(directory, activeConversationId)
     else close()
   }
 
@@ -251,20 +265,20 @@ function Panel({
             tabIndex={0}
             className="file-preview__tab file-preview__tab--files"
             aria-selected={active === undefined}
-            onClick={() => selectTab(undefined)}
-            onKeyDown={(event) => activateOnKey(event, () => selectTab(undefined))}
+            onClick={() => selectTab(undefined, directory, activeConversationId)}
+            onKeyDown={(event) => activateOnKey(event, () => selectTab(undefined, directory, activeConversationId))}
           >
             <FolderIcon className="file-preview__tab-icon file-preview__tab-icon--folder" />
             <span className="file-preview__tab-title">{t('filePreview.files')}</span>
           </div>
-          {gitOn && (
+          {gitForProject && (
             <div
               role="tab"
               tabIndex={0}
               className="file-preview__tab file-preview__tab--files file-preview__tab--git"
               aria-selected={active === GIT_TAB}
-              onClick={() => selectTab(GIT_TAB)}
-              onKeyDown={(event) => activateOnKey(event, () => selectTab(GIT_TAB))}
+            onClick={() => selectTab(GIT_TAB, directory, activeConversationId)}
+                onKeyDown={(event) => activateOnKey(event, () => selectTab(GIT_TAB, directory, activeConversationId))}
             >
               <BranchIcon className="file-preview__tab-icon" />
               <span className="file-preview__tab-title">{t('git.tab')}</span>
@@ -286,9 +300,9 @@ function Panel({
                   title={name}
                   aria-label={name}
                   data-task={taskId}
-                  onClick={() => selectTab(key)}
-                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
-                  onAuxClick={(event) => event.button === 1 && closeTab(key)}
+                  onClick={() => selectTab(key, directory, activeConversationId)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key, directory, activeConversationId))}
+                  onAuxClick={(event) => event.button === 1 && closeTab(key, directory, activeConversationId)}
                 >
                   <TaskIcon className="file-preview__tab-icon" />
                   <span className="file-preview__tab-title">{name}</span>
@@ -299,7 +313,7 @@ function Panel({
                     title={t('filePreview.closeTab', { name })}
                     onClick={(event) => {
                       event.stopPropagation()
-                      closeTab(key)
+                      closeTab(key, directory, activeConversationId)
                     }}
                   >
                     <CrossIcon size={12} />
@@ -320,9 +334,9 @@ function Panel({
                   title={name}
                   aria-label={name}
                   data-turn={key.slice(TURN_PREFIX.length)}
-                  onClick={() => selectTab(key)}
-                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
-                  onAuxClick={(event) => event.button === 1 && closeTab(key)}
+                  onClick={() => selectTab(key, directory, activeConversationId)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key, directory, activeConversationId))}
+                  onAuxClick={(event) => event.button === 1 && closeTab(key, directory, activeConversationId)}
                 >
                   <TurnTabIcon className="file-preview__tab-icon" />
                   <span className="file-preview__tab-title">{name}</span>
@@ -333,7 +347,7 @@ function Panel({
                     title={t('filePreview.closeTab', { name })}
                     onClick={(event) => {
                       event.stopPropagation()
-                      closeTab(key)
+                      closeTab(key, directory, activeConversationId)
                     }}
                   >
                     <CrossIcon size={12} />
@@ -354,9 +368,9 @@ function Panel({
                   title={name}
                   aria-label={name}
                   data-extension={extensionId}
-                  onClick={() => selectTab(key)}
-                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
-                  onAuxClick={(event) => event.button === 1 && closeTab(key)}
+                  onClick={() => selectTab(key, directory, activeConversationId)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key, directory, activeConversationId))}
+                  onAuxClick={(event) => event.button === 1 && closeTab(key, directory, activeConversationId)}
                 >
                   <PuzzleIcon size={14} className="file-preview__tab-icon file-preview__tab-icon--extension" />
                   <span className="file-preview__tab-title">{name}</span>
@@ -367,7 +381,7 @@ function Panel({
                     title={t('filePreview.closeTab', { name })}
                     onClick={(event) => {
                       event.stopPropagation()
-                      closeTab(key)
+                      closeTab(key, directory, activeConversationId)
                     }}
                   >
                     <CrossIcon size={12} />
@@ -388,8 +402,8 @@ function Panel({
                   title={`${name} · ${directory}`}
                   aria-label={name}
                   data-terminal={terminalId}
-                  onClick={() => selectTab(key)}
-                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
+                  onClick={() => selectTab(key, directory, activeConversationId)}
+                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key, directory, activeConversationId))}
                   onAuxClick={(event) => event.button === 1 && closeTerminal(key, terminalId)}
                 >
                   <TerminalIcon className="file-preview__tab-icon" />
@@ -419,9 +433,9 @@ function Panel({
                 title={key}
                 aria-label={baseName(key)}
                 data-file={key}
-                onClick={() => selectTab(key)}
-                onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
-                onAuxClick={(event) => event.button === 1 && closeTab(key)}
+                onClick={() => selectTab(key, directory, activeConversationId)}
+                onKeyDown={(event) => activateOnKey(event, () => selectTab(key, directory, activeConversationId))}
+                onAuxClick={(event) => event.button === 1 && closeTab(key, directory, activeConversationId)}
               >
                 <FileIcon className="file-preview__tab-icon" />
                 <span className="file-preview__tab-title">{baseName(key)}</span>
@@ -432,7 +446,7 @@ function Panel({
                   title={t('filePreview.closeTab', { name: baseName(key) })}
                   onClick={(event) => {
                     event.stopPropagation()
-                    closeTab(key)
+                    closeTab(key, directory, activeConversationId)
                   }}
                 >
                   <CrossIcon size={12} />
@@ -445,9 +459,9 @@ function Panel({
         <TabAddMenu
           terminal={terminalOn}
           extensions={menuExtensions(extensions)}
-          onFiles={() => openFilesTab(directory)}
-          onTerminal={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id)).catch(() => {})}
-          onExtension={(id) => openExtensionTab(directory, id)}
+          onFiles={() => openFilesTab(directory, activeConversationId)}
+          onTerminal={() => void window.litecode.openTerminal(directory).then(({ id }) => openTerminalTab(directory, id, {}, activeConversationId)).catch(() => {})}
+          onExtension={(id) => openExtensionTab(directory, id, activeConversationId)}
         />
         <span className="file-preview__chrome">
           {compare && (
@@ -460,7 +474,7 @@ function Panel({
                 className="file-preview__tool file-preview__compare-off"
                 aria-label={t('filePreview.compareOff')}
                 title={t('filePreview.compareOff')}
-                onClick={exitCompare}
+                onClick={() => exitCompare(directory, activeConversationId)}
               >
                 <CompareIcon />
               </button>
@@ -472,7 +486,7 @@ function Panel({
             aria-label={fullscreen ? t('filePreview.exitFullscreen') : t('filePreview.fullscreen')}
             title={fullscreen ? t('filePreview.exitFullscreen') : t('filePreview.fullscreen')}
             aria-pressed={fullscreen}
-            onClick={toggleFullscreen}
+            onClick={() => toggleFullscreen(directory, activeConversationId)}
           >
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               {fullscreen ? (
@@ -487,8 +501,8 @@ function Panel({
           </button>
         </span>
       </div>
-      {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} />}
-      {active === GIT_TAB && <GitPanel directory={directory} gitSub={state.gitSub} />}
+      {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} conversationId={activeConversationId} />}
+      {active === GIT_TAB && <GitPanel directory={directory} gitSub={gitSub} conversationId={activeConversationId} />}
       {active !== undefined && isTerminalTab(active) && (
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
       )}
@@ -510,10 +524,10 @@ function Panel({
         const id = extensionIdOf(key)
         if (id === undefined) return null
         const extension = extensions.find((item) => item.id === id)
-        return <ExtensionTab key={extensionFrameKey(id, extension?.version)} id={id} name={extension?.name ?? id} hidden={active !== key} directory={directory} />
+        return <ExtensionTab key={extensionFrameKey(id, extension?.version)} id={id} name={extension?.name ?? id} hidden={active !== key} directory={directory} conversationId={activeConversationId} />
       })}
       {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && !isExtensionTab(active) && active !== GIT_TAB && (
-        <CompareSplit compare={compare} directory={directory} active={active} jump={jump} tabs={tabs} />
+        <CompareSplit compare={compare} directory={directory} active={active} jump={jump} tabs={tabs} conversationId={activeConversationId} />
       )}
     </aside>
   )
@@ -536,12 +550,14 @@ function CompareSplit({
   active,
   jump,
   tabs,
+  conversationId,
 }: {
   compare: { a: string; b: string } | undefined
   directory: string
   active: string
   jump?: { key: string; line: number; seq: number }
   tabs: string[]
+  conversationId?: string
 }) {
   if (compare && compare.a === active) {
     return (
@@ -558,7 +574,7 @@ function CompareSplit({
       token={active}
       jump={jump?.key === active ? jump : undefined}
       compareCandidates={compareCandidates(tabs, active)}
-      onCompare={(other) => startCompare(directory, active, other)}
+      onCompare={(other) => startCompare(directory, active, other, conversationId)}
     />
   )
 }
@@ -622,7 +638,7 @@ function CompareMenu({ candidates, onPick }: { candidates: string[]; onPick(key:
 
 type Level = 'loading' | Extract<DirectoryListing, { status: 'ok' }> | 'failed'
 
-function FilesView({ directory, hidden }: { directory: string; hidden: boolean }) {
+function FilesView({ directory, hidden, conversationId }: { directory: string; hidden: boolean; conversationId?: string }) {
   const t = useT()
   const [levels, setLevels] = useState<Record<string, Level>>({})
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
@@ -708,7 +724,7 @@ function FilesView({ directory, hidden }: { directory: string; hidden: boolean }
       </div>
       <div className="file-tree__body">
         <ul className="file-tree__level" role="tree" aria-label={t('filePreview.filesLabel')}>
-          <TreeLevel relative="" levels={levels} expanded={expanded} onToggle={toggle} onOpen={(file) => openFilePreview(directory, file)} filter={query} />
+          <TreeLevel relative="" levels={levels} expanded={expanded} onToggle={toggle} onOpen={(file) => openFilePreview(directory, file, undefined, {}, conversationId)} filter={query} />
         </ul>
       </div>
     </div>
@@ -969,7 +985,7 @@ function SandboxFrame({ doc, title, frameRef }: { doc: string; title: string; fr
  *  한 파일짜리라 같은 폴더 리소스는 끼우지 않는다(assets 없음 — 상대 경로 리소스는 CSP 에 막힌다).
  *  통로 (이슈 #536): 이 탭의 iframe 이 보낸 요청만 받아(extensionBridge.bridgeRequestOf — 확장 id 는 탭이 쥔 id) 메인에 넘기고 그 iframe 으로 답한다.
  *  허용하지 않은 주소면 iframe 위에 동의 띠를 그린다(앱이 그린다 — 확장이 흉내 낼 수 없게 iframe 바깥) */
-function ExtensionTab({ id, name, hidden, directory }: { id: string; name: string; hidden: boolean; directory: string }) {
+function ExtensionTab({ id, name, hidden, directory, conversationId }: { id: string; name: string; hidden: boolean; directory: string; conversationId?: string }) {
   const [result, setResult] = useState<ExtensionEntryResult>()
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [consent] = useState(() => new ConsentQueue())
@@ -996,7 +1012,7 @@ function ExtensionTab({ id, name, hidden, directory }: { id: string; name: strin
         call: (method, params) => window.litecode.callExtension(id, method, params, directory),
         ask: (origin) => consent.ask(origin),
         allow: (origin) => window.litecode.allowExtensionOrigin(id, origin),
-        open: (path, line) => openFilePreview(directory, path, line),
+        open: (path, line) => openFilePreview(directory, path, line, {}, conversationId),
         compose: (text, send) => requestCompose(directory, text, send),
       }).then((reply) => frame.postMessage(bridgeReply(request.id, reply), '*'))
     }
