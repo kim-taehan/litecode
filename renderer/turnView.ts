@@ -75,10 +75,46 @@ export function looksLikePath(token: string): boolean {
   return token.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(token)
 }
 
+/** 미니맵 줄 하나 — 이름표(툴팁)와, 마커 클릭 시 우측 "턴 작업" 탭을 열려면 그 턴의 보낸 시각·끝난 답.
+ *  `startedAt` 이 없으면 안 열려 (그 전 내 말에 시각이 없는 오래된 기록) */
+export interface MinimapTurn {
+  text: string
+  startedAt: number
+  conversationId: string
+  items: TurnItem[]
+  duration?: number
+  failed: boolean
+  interrupted?: boolean
+  declined?: boolean
+}
+
 /** 미니맵 줄의 이름표 — 대화 칸의 `.user-turn` 닻과 순서로 짝짓는다 (Minimap.tsx). 턴 끝 훅이 이어 보낸 글은 말풍선이 아니라
  *  닻이 없으니 줄에서도 뺀다 (ChatTurn.tsx UserMessage). 글 없이 첨부만 보낸 턴은 파일 이름 */
-export function minimapTurns(messages: readonly HistoryMessage[]): string[] {
-  return messages
-    .filter((message) => message.role === 'user' && stopFeedbackReason(message.text) === undefined)
-    .map((message) => message.text || (message.attachments ?? []).map((item) => item.name).join(', '))
+export function minimapTurns(messages: readonly HistoryMessage[], conversationId: string): string[] {
+  return minimapTurnDetails(messages, conversationId).map((turn) => turn.text)
+}
+
+/** 미니맵 줄마다 그 턴의 이름표와 우측 "턴 작업" 탭에 쓸 데이터. 줄은 여전히 `.user-turn` (내 말)과 순서로 짝짓고,
+ *  줄 당 하나씩 그 뒤의 첫 어시스턴트 응답을 이어 붙인다. 이어 붙인 응답이 있으면 끝난 턴 — 보낸 시각(user 의 at)·items·모든 정보.
+ *  없으면(진행 중·첫 내 말) startedAt 없음 — 마커는 스크롤만 한다 (Minimap.tsx) */
+export function minimapTurnDetails(messages: readonly HistoryMessage[], conversationId: string): MinimapTurn[] {
+  const turns: MinimapTurn[] = []
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!
+    if (message.role !== 'user' || stopFeedbackReason(message.text) !== undefined) continue
+    // 다음 인덱스만 그 "턴"의 응답; 그 뒤에 또 다른 user 가 오면 새로운 턴이므로 거기서 끊는다
+    const next = messages[i + 1]
+    const answer = next && next.role === 'assistant' ? next : undefined
+    turns.push({
+      text: message.text || (message.attachments ?? []).map((item) => item.name).join(', '),
+      startedAt: message.at ?? 0,
+      conversationId,
+      items: answer?.items ?? [],
+      ...(answer && answer.duration !== undefined && { duration: answer.duration }),
+      failed: !!answer?.error,
+      ...(answer?.interrupted === true && { interrupted: true }),
+      ...(answer?.declined === true && { declined: true }),
+    })
+  }
+  return turns
 }

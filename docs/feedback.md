@@ -117,3 +117,11 @@
   - 테스트: `tests/unit/mcp.test.ts:146-159,185-192,274-302,453-470` · `tests/unit/makeTools.test.ts:251-356`(`.mcp.json` 에 Claude Code 모양 쓰기·비밀→앱 안) · 실물 `tests/live/mcp.live.test.ts:17`
 - 메커니즘: 엔진의 `opencode.json` 에 mcp 블록이 없어, 세 길(폼·파일·대화) 모두 매 턴 `prepare → mcpAdd` 로 그 폴더 인스턴스에 런타임으로만 붙음(디스크 불리·엔진 재기동 시 다음 턴에 재붙임). 대화 경로는 `toFile` 일 때 (a) 의 `.mcp.json` 수정을 대리 — 즉 폼은 세 출처 중 "앱 저장소" 만 다루는 GUI일 뿐 독점 경로가 아님.
 - 판정: 코드에서 확인됨 — 사용자가 기대한 두 경로(파일 수정·LLM 대화) 모두 실제로 존재·동작(유닛+실물 테스트 존재). 팝업 폼은 그중 하나일 뿐
+
+## 2026-10-21 #575 — 미니맵 점 클릭 시 "턴 작업" 탭 안 열림
+
+- Where: 채팅 오른쪽 미니맵(`Minimap.tsx`)의 가로줄(턴 마커)
+- What: "미니맵 점만 클릭하면 우측에 '턴 작업' 탭이 안 열려요. 점 클릭 = 그 턴 보러 가기 + 탭을 열고 싶는데 지금 스크롤만 돼요."
+- Expect: 미니맵 마커 클릭 = 해당 턴으로 스크롤 + 우측 "턴 작업" 탭 열림
+- Status: done (2026-10-21, fix_575_minimap_turn_tab, PR → dev)
+- Fix: 2026-10-21 — `Minimap` 마커가 클릭 시 스크롤만 한 뒤 `onTurnOpen(turn)` 을 부르게 만들고, `turnView.ts` 의 `minimapTurnDetails(messages, conversationId)` 가 각 마커에 그 턴의 `startedAt`(user.message.at)·끝난 답의 `items`·`duration`·`failed/interrupted/declined`·`conversationId` 를 채운다. `ConversationView` 는 끝난 턴이면 `feedCompletedTurn` + `openTurnTab`(진행 중 턴은 `openTurnTab` 만). 예전처럼 내 말(`.user-turn`) 닻 순서는 그대로라 scroll pairing 이 흔들리지 않는다.

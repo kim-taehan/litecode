@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { ScrollMemory } from './scrollMemory.ts'
 import { useT } from './settingsStore.ts'
+import type { MinimapTurn } from './turnView.ts'
 
 // 대화 오른쪽 가장자리 미니맵 (dsh ui-chat TurnNavigator 참조) — 내 말(턴)마다 가로줄 하나. 대화 칸 위 1/3 선을 지난 마지막 턴이
-// "지금" 이라 진하게. 누르면 그 턴의 내 말이 위에 오게 옮긴다. 턴의 자리는 대화 칸 안의 `.user-turn` 이다
+// "지금" 이라 진하게. 누르면 그 턴의 내 말이 위에 오게 옮기고, 끝난 턴이면 onTurnOpen 을 불려 우측 "턴 작업" 탭을 연다 (이슈 #575).
+// 턴의 자리는 대화 칸 안의 `.user-turn` 이다
 
-/** 미니맵을 그린다. turns 는 턴마다 내 말 글 (줄의 이름표·툴팁) */
-export function Minimap({ scroller, turns }: { scroller: RefObject<HTMLElement | null>; turns: readonly string[] }) {
+/** 미니맵을 그린다. turns 는 턴마다 내 말 글(이름표·툴팁)과 그 턴의 우측 탭 데이터 */
+export function Minimap({ scroller, turns, onTurnOpen }: { scroller: RefObject<HTMLElement | null>; turns: readonly MinimapTurn[]; onTurnOpen?(turn: MinimapTurn): void }) {
   const t = useT()
   const [active, setActive] = useState(0)
   const frame = useRef(0)
@@ -37,19 +39,20 @@ export function Minimap({ scroller, turns }: { scroller: RefObject<HTMLElement |
   if (turns.length === 0) return null
   return (
     <nav className="minimap" aria-label={t('chat.minimap')}>
-      {turns.map((text, index) => (
+      {turns.map((turn, index) => (
         <button
           key={index}
           type="button"
           className="minimap__mark"
           aria-current={index === active ? 'true' : undefined}
-          aria-label={t('chat.minimapTurn', { index: index + 1, text })}
-          title={text}
+          aria-label={t('chat.minimapTurn', { index: index + 1, text: turn.text })}
+          title={turn.text}
           onClick={() => {
             const element = scroller.current
             const anchor = element && anchors(element)[index]
             if (!element || !anchor) return
             element.scrollTo({ top: element.scrollTop + anchor.getBoundingClientRect().top - element.getBoundingClientRect().top - 12 })
+            onTurnOpen?.(turn)
           }}
         />
       ))}

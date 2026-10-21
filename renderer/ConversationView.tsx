@@ -4,7 +4,9 @@ import type { FeatureId } from '../shared/features.ts'
 import { planEnded, switchedMode } from './chatState.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap } from './Minimap.tsx'
-import { minimapTurns } from './turnView.ts'
+import { minimapTurnDetails, type MinimapTurn } from './turnView.ts'
+import { openTurnTab } from './filePreviewStore.ts'
+import { feedCompletedTurn } from './turnDetailStore.ts'
 import { ScrollToBottom } from './ScrollToBottom.tsx'
 import type { findModel } from './modelChoice.ts'
 import { Trajectory } from './Trajectory.tsx'
@@ -54,6 +56,14 @@ interface ConversationViewProps {
 
 /** 지금 대화의 머리 줄·탭과 본문(말풍선·`!` 카드·도는 턴 또는 Trajectory). 상태는 App 이 쥐고 여기는 그리기만 한다 */
 export function ConversationView({ t, active, titleOf, features, trajectoryOn, view, setView, listRef, setFinding, finding, following, chosen, send, shareShell }: ConversationViewProps) {
+  /** 미니맵 줄 클릭 — 그 턴으로 스크롤(Minimap)은 한 뒤 우측 "턴 작업" 탭을 연다 (이슈 #575).
+   *  끝난 턴은 채팅 items 로 기록을 보충해 오래된 턴도 보이고, 진행 중 턴(시작 시각만)은 실시간 저장소만 본다 */
+  function openMinimapTurn(turn: MinimapTurn) {
+    if (turn.startedAt === undefined) return
+    if (turn.items.length > 0) feedCompletedTurn(turn.conversationId, turn.startedAt, turn.items, { duration: turn.duration, failed: turn.failed, interrupted: turn.interrupted, declined: turn.declined })
+    openTurnTab(active.project, turn.conversationId, turn.startedAt)
+  }
+
   /** 그 자리의 `!` 카드들 (실행한 순서) */
   function shellCards(session: Session, at: (position: number) => boolean) {
     if (session.history === 'unloaded' || session.history === 'loading') return [] // 자리를 셀 말풍선이 아직 없다
@@ -170,7 +180,7 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
         </div>
       </div>
       </FindingProvider>
-      <Minimap scroller={listRef} turns={minimapTurns(active.messages)} />
+      <Minimap scroller={listRef} turns={minimapTurnDetails(active.messages, active.id)} onTurnOpen={openMinimapTurn} />
       <ScrollToBottom scroller={listRef} following={following} />
       </div>
       )}
