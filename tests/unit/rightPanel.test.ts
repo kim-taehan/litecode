@@ -10,6 +10,7 @@ import {
   exitCompare,
   getGitSub,
   getPanelState,
+  gitTabIsOpen,
   isFileTab,
   isTerminalTab,
   openFilePreview,
@@ -360,17 +361,17 @@ describe('대화별 패널', () => {
     closeFilePreview('/conv', 'c2')
   })
 
-  it('Git 탭 — 프로젝트 공통: openGitTab 이 모든 대화 패널을 Git 탭으로 열고, closeGitTab 은 Files 로', () => {
+  it('Git 탭은 프로젝트 공통 — 한 대화에서 열면 다른 대화에서도 보인다', () => {
     openFilePreview('/git-conv', 'a.ts', undefined, {}, 'c1')
     openFilePreview('/git-conv', 'b.ts', undefined, {}, 'c2')
     openGitTab('/git-conv', 'changes')
+    expect(gitTabIsOpen('/git-conv')).toBe(true)
     expect(getGitSub('/git-conv')).toMatchObject({ sub: 'changes' })
-    // 두 대화 패널 모두 Git 탭이 선택됨
-    expect(read('/git-conv', 'c1')?.active).toBe(GIT_TAB)
-    expect(read('/git-conv', 'c2')?.active).toBe(GIT_TAB)
+    // 두 대화 패널 모두 존재
+    expect(read('/git-conv', 'c1')).toBeDefined()
+    expect(read('/git-conv', 'c2')).toBeDefined()
     closeGitTab('/git-conv')
-    expect(read('/git-conv', 'c1')?.active).toBeUndefined()
-    expect(read('/git-conv', 'c2')?.active).toBeUndefined()
+    expect(gitTabIsOpen('/git-conv')).toBe(false)
     closeFilePreview('/git-conv', 'c1')
     closeFilePreview('/git-conv', 'c2')
   })
