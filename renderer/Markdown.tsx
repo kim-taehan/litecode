@@ -19,13 +19,13 @@ import './markdown.css'
 // (폐쇄망에서 원격 이미지는 어차피 안 오고, 열려 있으면 답을 본 순간 밖으로 요청이 나간다 — 추적·유출 통로).
 // 코드 블록의 문법 색은 highlight.ts(번들에 실은 highlight.js 문법만, 이슈 #81) — 토큰도 React 요소로 그린다.
 
-/** 파일 언급 칩 — 그 답의 프로젝트와, 그 안의 실제 파일로 확인된 인라인 코드. conversationId 로 대화별 패널 (#579) */
-const FileMentions = createContext<{ directory: string; conversationId?: string; files: ReadonlySet<string> } | undefined>(undefined)
+/** 파일 언급 칩 — 그 답의 프로젝트와, 그 안의 실제 파일로 확인된 인라인 코드 */
+const FileMentions = createContext<{ directory: string; files: ReadonlySet<string> } | undefined>(undefined)
 
 /** 답 원문 하나를 그린다. 빈 줄이 몇 개든 문단 사이는 CSS 간격 하나다.
  *  directory 를 주면 인라인 코드 중 그 프로젝트의 실제 파일을 칩으로 그린다 (판정은 메인 — dsh fileMentions 처럼 추측하지 않는다).
  *  streaming: 글이 뒤로 자라는 중(답이 오는 중) — 끝 블록만 다시 파싱하고 앞 블록은 얼려 다시 그리지 않는다 (이슈 #175) */
-export function Markdown({ text, directory, streaming = false, conversationId }: { text: string; directory?: string; streaming?: boolean; conversationId?: string }) {
+export function Markdown({ text, directory, streaming = false }: { text: string; directory?: string; streaming?: boolean }) {
   const root = useMarkdownRoot(text, streaming)
   const definitions = useDefinitions(root)
   const files = useFileMentions(root, directory)
@@ -37,7 +37,7 @@ export function Markdown({ text, directory, streaming = false, conversationId }:
       })}
     </div>
   )
-  return directory && files.size > 0 ? <FileMentions.Provider value={{ directory, conversationId, files }}>{body}</FileMentions.Provider> : body
+  return directory && files.size > 0 ? <FileMentions.Provider value={{ directory, files }}>{body}</FileMentions.Provider> : body
 }
 
 /** 스트리밍 중엔 증분 파서, 끝나면(streaming 이 꺼지면) 전체를 한 번 다시 — 증분이 놓친 참조 링크 같은 어긋남을 바로잡는다 */
@@ -219,7 +219,7 @@ function InlineCode({ value }: { value: string }) {
       type="button"
       className="md-file"
       title={t('markdown.previewFile', { file: value })}
-      onClick={() => openFilePreview(mentions.directory, value, undefined, {}, mentions.conversationId)}
+      onClick={() => openFilePreview(mentions.directory, value)}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
         <path d="M4 1.75H9.5L12.5 4.75V14.25H4Z" />

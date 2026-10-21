@@ -21,8 +21,4 @@
    - `Background task detail tab in the right panel (#325)`
    - `Terminal: move to right panel tabs, multiple terminals, new shortcuts (#309)`
 
-    `(#<issue>)` 는 이슈를 가리킨다(머지 시 이슈 자동 닫힘).
-
-## 답변 언어
-
-사용자와의 모든 답변·문의를 **한글로만** 한다.
+   `(#<issue>)` 는 이슈를 가리킨다(머지 시 이슈 자동 닫힘).

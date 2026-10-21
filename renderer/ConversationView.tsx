@@ -86,7 +86,7 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
       <div className="main__header">
         {titleOf(active)}
         {features.has('openIn') && <OpenInButton directory={active.project} />}
-        <RightPanelButton directory={active.project} conversationId={active.id} />
+        <RightPanelButton directory={active.project} />
         {/* 더 보기 ⋯ — 대화 내보내기 (이슈 #177) */}
         <ConversationMenu key={active.id} conversationId={active.id} />
       </div>

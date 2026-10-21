@@ -85,12 +85,6 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 - **기능 묶음**(끄면 통째로 내려간다, `shared/features.ts`): 필수(늘 켜짐, 기능 화면에 줄 없음) — 입력 트리거·`shell`(!명령)·`skills`·`mcp`·`hooks`·`terminal`·`openIn`(마지막 둘은 2026-10-15 로 옮김) / 고르는 것 — `trajectory`·`appMcp`(데스크탑 MCP) 기본 켜짐, `notifications`·`remote`(모바일 연결)·`web`(웹 접속)·`voice`(음성 입력)·`browser`(Chrome 조종)·`updates`(새 버전 알림 — 기능 화면의 카드는 2026-10-15 로 잠정 숨김) 기본 꺼짐
 - **그 밖**: `quit`(종료 확인·창 닫기), 로그·부팅 진단(`electron/resilience.ts`·`logFile.ts`), 패키징(`scripts/fetch-*.mjs` + electron-builder, opencode·ripgrep·음성 엔진 동봉)
 - **화면**(`renderer/`): 사이드바(프로젝트 전환·대화 목록·찾기·고정) + 대화(마크다운·문법 색·진행 줄·승인/질문 카드·모드 칩·할 일 줄·고친 파일/결과물 카드·훅 줄·찾기) + 입력 카드(`+` 메뉴의 스킬·MCP·훅 팝업, 첨부, 음성) + 오른쪽 패널(파일·폴더·HTML 미리보기) + 설정(일반·모델·기능·모바일)
-
-### 채팅 진행 줄 컨셉 (#565 → #573)
-- 진행 중 채팅에 **텍스트를 흘리지 않는다.** 파란 진행 줄(지금 하는 일 + 경과) + compaction 알림만.
-- 모든 텍스트(중간 글 "Let me…" 포함 · 최종 답 스트리밍)는 **우측 "턴 작업" 탭에만**.
-- 턴이 끝나면 최종 답은 `splitTurn` 로 채팅에 정상 표시.
-- 근거: #565 (liveAnswer 추가) → #573 (liveAnswer 제거) — 중간 글이 도구 호출 시 채팅에서 사라져 혼란.
 - **모바일**(`mobile/`, Android): 데스크탑에 붙는 화면 — 단독 세션 없음. 지금은 루프백 평문 연결만(TLS·LAN·QR 없음)
 - **테스트**: 착지 기준은 `npm run typecheck` + `npm test`(단위). 실물 테스트(`tests/live/`)는 쓰지도 돌리지도 않는다(요청이 있을 때만)
 ## 실행

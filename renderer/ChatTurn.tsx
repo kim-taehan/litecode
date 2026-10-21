@@ -189,7 +189,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
       {workFold.mounted && work.length > 0 && (
         <div className="turn__work" {...workFold.fold}>
           {work.map((item) =>
-            item.kind === 'compaction' ? <CompactionMark key={item.id} item={item} /> : <WorkRow key={item.id} item={item} directory={directory} turnRunning={running} conversationId={conversationId} />,
+            item.kind === 'compaction' ? <CompactionMark key={item.id} item={item} /> : <WorkRow key={item.id} item={item} directory={directory} turnRunning={running} />,
           )}
         </div>
       )}
@@ -204,11 +204,11 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
       {/* 답 — 기존 셀렉터(.bubble--assistant)를 그대로 쓴다. 모양은 말풍선이 아니다. 모델이 빈 줄로 답을 시작하기도 해서 앞뒤 공백은 뗀다 */}
       {!running && (
         <div className="bubble bubble--assistant">
-          {failed ? text : <Markdown text={source} directory={directory} conversationId={conversationId} />}
+          {failed ? text : <Markdown text={source} directory={directory} />}
         </div>
       )}
-      {presented && <PresentedCard files={presented} directory={directory} conversationId={conversationId} />}
-      {changes && <ChangedFilesCard changes={changes} directory={directory} conversationId={conversationId} />}
+      {presented && <PresentedCard files={presented} directory={directory} />}
+      {changes && <ChangedFilesCard changes={changes} directory={directory} />}
       {/* 답 행동 줄 (dsh ui-chat MessageIconActions) — 답 전체 복사. 마우스를 올리거나 포커스가 들어올 때만 보인다 (chat.css) */}
       {!running && source.trim() && (
         <div className="turn__meta">
@@ -232,12 +232,12 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
 
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다).
  *  우측 "턴 작업" 탭(TurnTab)도 같은 줄을 그린다 (이슈 #416) */
-export function WorkRow({ item, directory, turnRunning, conversationId }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean; conversationId?: string }) {
+export function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
   const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
   const { peers, targets } = useDelegation()
-  if (item.kind === 'subtask') return <SubtaskRow item={item} directory={directory} turnRunning={turnRunning} conversationId={conversationId} />
+  if (item.kind === 'subtask') return <SubtaskRow item={item} directory={directory} turnRunning={turnRunning} />
   // 다른 프로젝트에 지시 보내기·결과 읽기 (앱 MCP 의 세션 도구, 이슈 #55·#137) — "MCP · 서버 · 도구" 대신 받는 프로젝트·대화와 지금 상태
   const delegation = delegationLine(item, targets, peers)
   if (delegation) return <DelegationRow line={delegation} />
@@ -249,7 +249,7 @@ export function WorkRow({ item, directory, turnRunning, conversationId }: { item
     if (!item.text.trim()) return null
     return (
       <div className="turn-row turn-row--text" data-kind="text">
-        <Markdown text={item.text.trim()} directory={directory} streaming={turnRunning} conversationId={conversationId} />
+        <Markdown text={item.text.trim()} directory={directory} streaming={turnRunning} />
       </div>
     )
   }
@@ -368,7 +368,7 @@ function HookRow({ item }: { item: Extract<TurnItem, { kind: 'hook' }> }) {
 /** 하위 작업 한 줄 (task — 엔진이 자식 세션에서 따로 돌린다, 이슈 #31). 여럿이 동시에 돌면 줄마다 제 초가 오른다. 펼치면 그 자식의 생각·도구·글 줄이
  *  (진행 중엔 실시간으로) 들여 쌓인다. 모양은 dsh ui-subagent 의 목록 행(상태 · 이름 · 설명 … 오른쪽에 걸린 시간·토큰)과 Claude Code 의 Task 블록 참조.
  *  끝난 턴에 아직 running 으로 남은 줄(중지·엔진 재시작으로 끝 신호를 못 받음)은 "중단됨" 이다 */
-function SubtaskRow({ item, directory, turnRunning, conversationId }: { item: Subtask; directory: string; turnRunning: boolean; conversationId?: string }) {
+function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory: string; turnRunning: boolean }) {
   const [open, setOpen] = useState(false)
   const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
@@ -409,7 +409,7 @@ function SubtaskRow({ item, directory, turnRunning, conversationId }: { item: Su
       </button>
       {bodyFold.mounted && (
         <div className="turn-subtask__body" {...bodyFold.fold}>
-          {rows.map((child) => <WorkRow key={child.id} item={child} directory={directory} turnRunning={turnRunning} conversationId={conversationId} />)}
+          {rows.map((child) => <WorkRow key={child.id} item={child} directory={directory} turnRunning={turnRunning} />)}
           {rows.length === 0 && !item.error && <p className="turn-subtask__empty">{t('chat.subtaskEmpty')}</p>}
           {item.error && <pre className="turn-row__code turn-row__code--error">{item.error}</pre>}
         </div>

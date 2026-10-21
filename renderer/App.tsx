@@ -8,7 +8,7 @@ import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
 import { RemotePairPrompt } from './MobileSettings.tsx'
 import { useTriggers } from './useTriggers.ts'
-import { allPanelsForProject, closeFilePreview, getPanelState, openTerminalTab, requestFilesSearch, revealPanel, terminalIdOf } from './filePreviewStore.ts'
+import { closeFilePreview, getPanelState, openTerminalTab, requestFilesSearch, revealPanel, terminalIdOf } from './filePreviewStore.ts'
 import { useAppMcp } from './useAppMcp.ts'
 import { useGitWatch } from './gitStore.ts'
 import type { ShellCardView } from './ShellCard.tsx'
@@ -289,9 +289,9 @@ export function App() {
     }
   }, [sessions, projects, lastViewed, projectPath, projectName, notices.state, providers, mode])
   // 터미널은 오른쪽 패널의 탭 (이슈 #303) — 열린 탭·고른 탭은 filePreviewStore 가 쥔다. AI 가 open(터미널) 을 부른 것은(id) 조용히 연다 —
-  // 키(포커스)를 가져오지 않게 (이슈 #51). (#579) 어느 대화 탭으로 열지는 호출 컨텍스트가 정한다
+  // 키(포커스)를 가져오지 않게 (이슈 #51)
   useAppMcp(features.has('appMcp'), active?.project, (directory, id) => {
-    openTerminalTab(directory, id, { quiet: true }, panelConvIdRef.current)
+    openTerminalTab(directory, id, { quiet: true })
   })
   const trigger = useTriggers({
     directory: active?.project,
@@ -357,18 +357,18 @@ export function App() {
   useTerminalKeys({ project: active?.project, terminalOn })
 
   // 프로젝트 전환 — 패널의 탭 묶음은 건너가지 않는다(이전부터 그랬고). 다만 터미널은 메인에 셸로 남아 있으므로 떠나면
-  // 그 프로젝트의 모든 대화 패널의 터미널 셸을 끝낸다 — 안 하면 탭은 사라지고 셸만 남는다 (이슈 #303, #579: 대화별 탭)
+  // 그 프로젝트의 터미널 셸을 끝낸다 — 안 하면 탭은 사라지고 셸만 남는다 (이슈 #303 받아들인 한계)
   const prevTerminalProject = useRef(active?.project)
   useEffect(() => {
     const prev = prevTerminalProject.current
     const next = active?.project
     prevTerminalProject.current = next
     if (prev === undefined || next === undefined || prev === next) return
-    for (const state of allPanelsForProject(prev)) {
-      for (const key of state.tabs) {
-        const id = terminalIdOf(key)
-        if (id !== undefined) void window.litecode.closeTerminal(prev, id).catch(() => {})
-      }
+    const panel = getPanelState()
+    if (panel?.directory !== prev) return // 이미 새 프로젝트 상태로 바뀌었다면 할 일이 없다
+    for (const key of panel.tabs) {
+      const id = terminalIdOf(key)
+      if (id !== undefined) void window.litecode.closeTerminal(prev, id).catch(() => {})
     }
   }, [active?.project])
 
@@ -486,17 +486,15 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // ⌘P / Ctrl+P — 파일 찾기 (이슈 #528). 오른쪽 패널 Files 탭의 검색 칸에 포커스. (#579: 지금 대화의 패널)
+  // ⌘P / Ctrl+P — 파일 찾기 (이슈 #528). 오른쪽 패널 Files 탭의 검색 칸에 포커스.
   const projectPathRef = useRef(project?.path)
   projectPathRef.current = project?.path
-  const panelConvIdRef = useRef(active?.id)
-  panelConvIdRef.current = active?.id
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'p') return
       event.preventDefault()
       const dir = projectPathRef.current
-      if (dir) requestFilesSearch(dir, panelConvIdRef.current)
+      if (dir) requestFilesSearch(dir)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -529,12 +527,11 @@ export function App() {
       const directory = panelDirectoryRef.current
       if (!directory) return
       event.preventDefault()
-      const conversationId = panelConvIdRef.current
-      const state = getPanelState(conversationId, directory)
-      if (state?.open) {
-        closeFilePreview(directory, conversationId)
+      const state = getPanelState()
+      if (state?.open && state.directory === directory) {
+        closeFilePreview()
         if (!focusComposerInput()) return
-      } else revealPanel(directory, conversationId)
+      } else revealPanel(directory)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
