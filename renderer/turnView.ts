@@ -19,6 +19,12 @@ export function splitTurn(items: readonly TurnItem[]): { work: TurnItem[]; answe
   return { work: [...items.slice(0, cut), ...items.slice(end)], answer: items.slice(cut, end) }
 }
 
+/** 도는 턴에서 채팅에 흘릴 글 (이슈 #565) — 마지막 도구·생각 뒤의 글 줄(끝난 턴의 답과 같은 규칙, splitTurn). 그 앞의 중간 글("Let me…")은
+ *  우측 "턴 작업" 탭에만 (피드백 #8). 답을 쓰다가 도구를 부르면 그 글은 중간 글이 되어 채팅에서 빠진다 */
+export function liveAnswer(items: readonly TurnItem[]): Extract<TurnItem, { kind: 'text' }>[] {
+  return splitTurn(items).answer.filter((item): item is Extract<TurnItem, { kind: 'text' }> => item.kind === 'text' && item.text.trim() !== '')
+}
+
 /** 답 글. 답 줄이 다 끝났으면 그 글, 아니면(줄을 못 받았거나 덜 받음) 엔진이 준 답 전체(fallback) */
 export function answerText(answer: readonly TurnItem[], fallback: string): string {
   const texts = answer.filter((item): item is Extract<TurnItem, { kind: 'text' }> => item.kind === 'text')
