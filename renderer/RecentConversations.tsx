@@ -17,9 +17,11 @@ interface RecentConversationsProps {
   buttonRef: RefObject<HTMLButtonElement | null>
   /** 패널 폭 — 사이드바 폭에서 여백(12*2)을 뺀 값 */
   width: number
+  /** 지금 열려 있는 프로젝트 — 그 대화는 라벨을 진하게 보여 구분한다 */
+  currentProject?: string
 }
 
-const RECENT_LIMIT = 50
+const RECENT_LIMIT = 10
 
 interface RecentRow {
   id: string
@@ -30,7 +32,7 @@ interface RecentRow {
   pinned: boolean
 }
 
-/** 행 — 고정한 대화 먼저, 그 뒤 updatedAt 내림차순. 최대 RECENT_LIMIT(= sessions.json 보관 한도와 같은 값).
+/** 행 — 고정한 대화 먼저, 그 뒤 updatedAt 내림차순. 최대 10개(검색 결과도 10개까지).
  *  글이 있으면 제목·프로젝트명 부분일치로 거른다 */
 export function recentRows(
   sessions: Session[],
@@ -57,7 +59,7 @@ export function recentRows(
 /** 최근 대화를 한 번에 — 제목찾기 옆 버튼(open=true)으로 연다.
  *  행 클릭 = 그 프로젝트로 전환 + 그 대화 보기 (App 의 알림 열기 경로와 같은 길).
  *  키: ↑↓·Enter·Esc(같은 규칙). 시간이 열려 있는 동안 30초마다 갱신 */
-export function RecentConversations({ open, onClose, sessions, projects, onOpen, buttonRef, width }: RecentConversationsProps) {
+export function RecentConversations({ open, onClose, sessions, projects, onOpen, buttonRef, width, currentProject }: RecentConversationsProps) {
   const t = useT()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -177,22 +179,28 @@ export function RecentConversations({ open, onClose, sessions, projects, onOpen,
       />
       <div className="recent-pop__list">
         {query.trim() && rows.length === 0 && <div className="recent-pop__empty">{t('sidebar.recentEmpty')}</div>}
-        {rows.map((row, i) => (
-          <button
-            key={row.id}
-            type="button"
-            data-recent-active={i === active || undefined}
-            className={`recent-pop__row${i === active ? ' recent-pop__row--on' : ''}`}
-            onMouseEnter={() => setActive(i)}
-            onClick={() => act(i)}
-          >
-            <span className="recent-pop__proj">{row.projectName}</span>
-            <span className="recent-pop__main">
-              <span className="recent-pop__title">{row.title || t('sidebar.untitled')}</span>
-              <span className="recent-pop__time">{ago(row.updatedAt, now)}</span>
-            </span>
-          </button>
-        ))}
+        {rows.map((row, i) => {
+          const isNow = currentProject !== undefined && row.project === currentProject
+          return (
+            <button
+              key={row.id}
+              type="button"
+              data-recent-active={i === active || undefined}
+              className={`recent-pop__row${i === active ? ' recent-pop__row--on' : ''}`}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => act(i)}
+            >
+              <span className={`recent-pop__proj${isNow ? ' recent-pop__proj--now' : ''}`}>
+                {isNow && <span className="recent-pop__proj-check" aria-hidden="true">✓</span>}
+                {row.projectName}
+              </span>
+              <span className="recent-pop__main">
+                <span className="recent-pop__title">{row.title || t('sidebar.untitled')}</span>
+                <span className="recent-pop__time">{ago(row.updatedAt, now)}</span>
+              </span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

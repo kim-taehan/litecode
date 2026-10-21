@@ -58,14 +58,12 @@ interface JobsDockProps {
   background?: readonly Subtask[]
   /** 그 대화의 프로젝트 — 백그라운드 작업 줄의 › 가 이 프로젝트의 오른쪽 패널에 작업 탭을 연다 (#325) */
   directory?: string
-  /** 그 대화의 id — (#579) 대화별 패널 */
-  conversationId?: string
 }
 
 /** 입력 카드 위 접힌 한 줄 — 도는 하위 작업이 있으면 "작업 N · 종류 · 제목 · 경과 ⌄"(대표 = 가장 먼저 시작한 것),
  *  다 끝났으면 "끝난 작업 N ⌄". 턴이 끝난 뒤에도 그 턴의 끝난 작업을 새 턴을 보낼 때까지 보인다 — 진행 줄은 턴이 끝나면 비므로
  *  돌던 동안의 진행 줄을 잡아 둔다(새 턴이 시작되면 빈 진행 줄로 바뀐다). 대화를 바꾸면 key 로 새로 그려 잊는다 */
-export function JobsDock({ items, pending, startedAt, background = [], directory, conversationId }: JobsDockProps) {
+export function JobsDock({ items, pending, startedAt, background = [], directory }: JobsDockProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [kept, setKept] = useState<readonly TurnItem[]>()
@@ -92,7 +90,7 @@ export function JobsDock({ items, pending, startedAt, background = [], directory
 
   if (empty) return null
   const count = (waiting ? 1 : 0) + running.length
-  const onOpen = directory === undefined ? undefined : (item: Subtask) => (background.includes(item) ? () => openTaskTab(directory, item.id, conversationId) : undefined)
+  const onOpen = directory === undefined ? undefined : (item: Subtask) => (background.includes(item) ? () => openTaskTab(directory, item.id) : undefined)
   return (
     <section className="jobs-dock" aria-label={t('jobs.title')} ref={root}>
       <button

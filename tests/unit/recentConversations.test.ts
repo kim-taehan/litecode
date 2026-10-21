@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { recentRows } from '../../renderer/RecentConversations.tsx'
 import { newSession } from '../../renderer/session.ts'
 
-// 최근 대화 팝오버 (이슈 #580) 의 순수 부분 — 행 정렬(고정 우선 → 최신)·필터(제목·프로젝트명)·한도(50).
+// 최근 대화 팝오버 (이슈 #580) 의 순수 부분 — 행 정렬(고정 우선 → 최신)·필터(제목·프로젝트명)·한도(10).
 // 행 클릭·좌표·키보드는 화면 쪽(RecentConversations.tsx)
 
 const session = (project: string, title: string, updatedAt: number, pinned = false) => ({ ...newSession(project), title, updatedAt, pinned })
@@ -19,12 +19,12 @@ describe('recentRows — 고정한 대화 우선, 그 뒤 최신순', () => {
     expect(rows.map((r) => r.title)).toEqual(['배포', '주문 API', '로그인', '결제 수정'])
   })
 
-  it('최대 50개 — 그보다 오래된 것은 잘린다', () => {
-    const many = Array.from({ length: 55 }, (_, i) => session('/w/shop-web', `c-${i}`, i * 1_000))
+  it('최대 10개 — 그보다 오래된 것은 잘린다', () => {
+    const many = Array.from({ length: 15 }, (_, i) => session('/w/shop-web', `c-${i}`, i * 1_000))
     const rows = recentRows(many, P)
-    expect(rows).toHaveLength(50)
-    expect(rows[0]?.title).toBe('c-54')
-    expect(rows[49]?.title).toBe('c-5')
+    expect(rows).toHaveLength(10)
+    expect(rows[0]?.title).toBe('c-14')
+    expect(rows[9]?.title).toBe('c-5')
   })
 })
 

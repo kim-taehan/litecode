@@ -226,6 +226,7 @@ export function Sidebar({
         onOpen={openRecentConversation}
         buttonRef={recentRef}
         width={layout.width - 24}
+        currentProject={project?.path}
       />
 
       <div className="sidebar__sessions">
