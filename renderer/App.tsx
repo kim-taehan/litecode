@@ -166,7 +166,7 @@ export function App() {
   })
 
   const project = projects?.find((candidate) => candidate.path === current)
-  const visible = sessions.filter((session) => session.project === project?.path)
+  const visible = sessions.filter((session) => session.project === project?.path && !isBlank(session))
   const active = visible.find((session) => session.id === activeIds[project?.path ?? '']) ?? visible[0]
   const activeIdRef = useRef<string>(undefined)
   activeIdRef.current = active?.id
