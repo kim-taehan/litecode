@@ -35,7 +35,6 @@ export interface GitSub {
 // ── 저장소 상태 ─────────────────────────────────────────────────────────────
 
 const panels = new Map<string, PanelState>()
-const gitOpen = new Set<string>()
 const gitSubs = new Map<string, GitSub>()
 
 let jumps = 0
@@ -221,13 +220,16 @@ export function openExtensionTab(directory: string | undefined, id: string, conv
 // ── 프로젝트 단위 (Git) ─────────────────────────────────────────────────────
 
 export function openGitTab(directory: string, sub?: 'changes' | 'log'): void {
-  gitOpen.add(directory)
+  for (const [, state] of panels) {
+    if (state.directory === directory) {
+      state.open = true
+      state.active = GIT_TAB
+      state.focus++
+      state.quiet = false
+    }
+  }
   if (sub) gitSubs.set(directory, { sub, seq: ++jumps })
   bump()
-}
-
-export function gitTabIsOpen(directory: string): boolean {
-  return gitOpen.has(directory)
 }
 
 export function getGitSub(directory: string): GitSub | undefined {
@@ -238,13 +240,11 @@ export function useGitSub(directory: string): GitSub | undefined {
   return useSyncExternalStore(subscribe, () => gitSubs.get(directory))
 }
 
-/** Git 탭을 닫고 모든 대화에서 사라진다 */
+/** Git 탭을 고르지 않는다 (닫기 버튼 없음 — 활성 탭만 Files 로 되돌린다) */
 export function closeGitTab(directory: string): void {
-  gitOpen.delete(directory)
-  gitSubs.delete(directory)
   for (const [, state] of panels) {
-    if (state.directory === directory) {
-      state.active = state.active === GIT_TAB ? undefined : state.active
+    if (state.directory === directory && state.active === GIT_TAB) {
+      state.active = undefined
     }
   }
   bump()
@@ -254,7 +254,7 @@ export function closeGitTab(directory: string): void {
 
 export function selectTab(key: string | undefined, directory: string, conversationId?: string): void {
   const state = getOrCreate(directory, conversationId)
-  if (key === GIT_TAB && gitTabIsOpen(directory)) {
+  if (key === GIT_TAB) {
     // Git 탭을 고른 경우 — Git 은 프로젝트 단위라 모든 대화에 적용
     for (const [, s] of panels) {
       if (s.directory === directory) s.active = GIT_TAB

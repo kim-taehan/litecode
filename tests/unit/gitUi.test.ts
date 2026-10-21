@@ -10,7 +10,7 @@ import { logChips, logWhen } from '../../renderer/logLine.ts'
 import { LogFilterBar } from '../../renderer/LogFilterBar.tsx'
 import { defaultLogFilter } from '../../renderer/logFilter.ts'
 import { SECTION_UNTRACKED } from '../../renderer/gitTree.ts'
-import { closeGitTab, getGitSub, gitTabIsOpen, openFilePreview, openGitTab } from '../../renderer/filePreviewStore.ts'
+import { closeGitTab, getGitSub, openFilePreview, openGitTab } from '../../renderer/filePreviewStore.ts'
 
 // Git 탭·브랜치 알약·AI 승인 카드의 화면 (이슈 #290) — 정적 마크업과 저장소 규칙. 진짜 창 모양은 스크린샷으로 따로 봤다(보고서)
 
@@ -75,13 +75,11 @@ describe('패널 탭 저장소 — Git 탭', () => {
   it('openGitTab 은 Git 탭을 열고, 하위 탭을 줄 때마다 seq 가 오른다', () => {
     openFilePreview('/g', 'a.ts')
     openGitTab('/g', 'log')
-    expect(gitTabIsOpen('/g')).toBe(true)
     const first = getGitSub('/g')!
     expect(first).toMatchObject({ sub: 'log' })
     openGitTab('/g', 'log')
     expect(getGitSub('/g')!.seq).toBeGreaterThan(first.seq)
     closeGitTab('/g')
-    expect(gitTabIsOpen('/g')).toBe(false)
   })
 })
 

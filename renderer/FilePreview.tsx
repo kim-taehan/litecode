@@ -12,7 +12,6 @@ import {
   exitCompare,
   extensionFrameKey,
   extensionIdOf,
-  gitTabIsOpen,
   isExtensionTab,
   isFileTab,
   isTaskTab,
@@ -166,9 +165,8 @@ function Panel({
   const root = useRef<HTMLElement>(null)
   const returnFocus = useRef<Element | null>(null)
   const drag = useRef<{ x: number; width: number; max: number }>(undefined)
-  // Git 탭 (이슈 #290, #579) — 기능 git 이 켜져 있을 때만. Git 은 프로젝트(directory) 단위: gitOpen 에 있으면 모든 대화에 보인다
+  // Git 탭 (이슈 #290, #579) — 기능 git 이 켜져 있을 때 항상 보인다. Git 은 프로젝트(directory) 단위: sub/스크롤 상태는 gitSubs 에
   const gitOn = useFeatures().has('git')
-  const gitForProject = gitOn && directory ? gitTabIsOpen(directory) : false
   const gitSub = useGitSub(directory ?? '')
   // 터미널 탭 (이슈 #303) — 기능 terminal 이 켜져 있을 때만. 꺼졌으면 터미널 탭은 보이지 않는다
   const terminalOn = useFeatures().has('terminal')
@@ -271,7 +269,7 @@ function Panel({
             <FolderIcon className="file-preview__tab-icon file-preview__tab-icon--folder" />
             <span className="file-preview__tab-title">{t('filePreview.files')}</span>
           </div>
-          {gitForProject && (
+          {gitOn && (
             <div
               role="tab"
               tabIndex={0}
