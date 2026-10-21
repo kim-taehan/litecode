@@ -1,5 +1,5 @@
 import { Fragment, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import type { Attention, AttentionAnswer, AttentionTarget, Mode, PickedAttachment, TurnItem } from '../shared/ipc.ts'
+import type { Attention, AttentionAnswer, AttentionTarget, HistoryMessage, Mode, PickedAttachment, TurnItem } from '../shared/ipc.ts'
 import type { FeatureId } from '../shared/features.ts'
 import { planEnded, switchedMode } from './chatState.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
@@ -22,6 +22,15 @@ import type { Session } from './session.ts'
 const NO_ITEMS: readonly TurnItem[] = []
 const answerAttention = (request: Attention, answer: AttentionAnswer, target?: AttentionTarget) =>
   window.litecode.replyAttention(request.sessionId, request.id, answer, target)
+
+/** 끝난 assistant 턴의 startedAt — preceding user message 의 at. 없으면 undefined */
+function precedingUserAt(messages: readonly HistoryMessage[], index: number): number | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message && message.role === 'user' && message.at !== undefined) return message.at
+  }
+  return undefined
+}
 
 interface ConversationViewProps {
   t: Translate
@@ -122,6 +131,8 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
                 declined={message.declined}
                 duration={message.duration}
                 directory={active.project}
+                conversationId={active.id}
+                startedAt={precedingUserAt(active.messages, index)}
               />
             )}
           </Fragment>

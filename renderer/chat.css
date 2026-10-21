@@ -112,6 +112,24 @@ button.turn__head:hover { color: var(--text); }
 }
 .turn__head[aria-expanded='true'] .turn__chevron { transform: rotate(180deg); }
 
+.turn__head-panel {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  border-radius: 4px;
+  color: var(--text-caption);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+.turn__head:hover .turn__head-panel { opacity: 1; }
+.turn__head-panel:hover { color: var(--text); background: var(--bg-hover); }
+.turn__head-panel:focus-visible { opacity: 1; outline: 1px solid var(--accent); outline-offset: 1px; }
+
 /* 작업 줄 — 줄 사이 6px, 답과는 12px (dsh) */
 .turn__work {
   display: flex;

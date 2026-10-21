@@ -94,6 +94,29 @@ export function feedTurnSnapshot(conversationId: string, startedAt: number, item
   put({ items: [...items], startedAt }, keyOf(conversationId, startedAt))
 }
 
+/** 끝난 턴의 기록을 보충한다 — 상한 밖으로 걷힌 오래된 턴을 사용자가 열 때 채팅의 items 로 넣는다. 이미 있으면 그대로 둔다 */
+export function feedCompletedTurn(
+  conversationId: string,
+  startedAt: number,
+  items: readonly TurnItem[],
+  meta?: { duration?: number; failed?: boolean; interrupted?: boolean; declined?: boolean },
+): void {
+  const key = keyOf(conversationId, startedAt)
+  if (entries.has(key)) return
+  put(
+    {
+      items: [...items],
+      startedAt,
+      endedAt: Date.now(),
+      ...(meta?.duration !== undefined && { duration: meta.duration }),
+      ...(meta?.failed === true && { failed: true }),
+      ...(meta?.interrupted === true && { interrupted: true }),
+      ...(meta?.declined === true && { declined: true }),
+    },
+    key,
+  )
+}
+
 export function turnDetail(conversationId: string, startedAt: number): TurnDetail | undefined {
   return entries.get(keyOf(conversationId, startedAt))
 }
