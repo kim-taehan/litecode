@@ -98,8 +98,10 @@ export function Sidebar({
   pinConversation,
    setSettingsOpen,
 }: SidebarProps) {
-  // [더보기] 접기 (이슈 #568) — 프로젝트 바뀌면(경로가 바뀐다) 처음 10개만 보여 다시 접는다
+  // [더보기]·[접기] (이슈 #568) — 처음 10개, [더보기] 로 10개씩. [접기] 는 다시 10개.
+  // 프로젝트 바뀌면(경로가 바뀐다) 처음 10개·접힌 상태로 돌아온다. [접기] 는 10개보다 많게 펼친 뒤에나 보인다
   const [shown, setShown] = useState(SIDEBAR_PAGE)
+  const expanded = shown > SIDEBAR_PAGE
   const key = project?.path ?? ''
   const lastKey = useRef(key)
   if (lastKey.current !== key) {
@@ -109,6 +111,7 @@ export function Sidebar({
   const visible = listed.slice(0, shown)
   const hasMore = listed.length > shown
   const onMore = useCallback(() => setShown((n) => n + SIDEBAR_PAGE), [])
+  const onLess = useCallback(() => setShown(SIDEBAR_PAGE), [])
 
    return (
     <aside className="sidebar" style={{ width: layout.width, display: layout.hidden ? 'none' : undefined }}>
@@ -313,15 +316,21 @@ export function Sidebar({
           </div>
           </Fragment>
         ))}
+        {/* [더보기]·[접기] — 마지막 행 뒤에 (이슈 #568). 10개 남지 않으면 사라진다, [접기] 는 10개보다 많게 펼친 뒤에나 */}
+        {hasMore && (
+          <div className="conversation-list__toggle">
+            <button type="button" className="conversation-list__more" onClick={onMore}>
+              <span>{t('sidebar.showMore')}</span>
+              <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
+            </button>
+            {expanded && (
+              <button type="button" className="conversation-list__collapse" onClick={onLess}>
+                {t('sidebar.collapse')}
+              </button>
+            )}
+          </div>
+        )}
       </div>
-
-      {/* [더보기] — 스크롤 밖, 목록 아래 고정 (이슈 #568). 10개 남지 않으면 사라진다 */}
-      {hasMore && (
-        <button type="button" className="conversation-list__more" onClick={onMore}>
-          <span>{t('sidebar.showMore')}</span>
-          <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
-        </button>
-      )}
       <div className="sidebar__fade" aria-hidden="true" />
       <HoverCard card={sessionHover.card} />
 

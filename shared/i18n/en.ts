@@ -12,6 +12,7 @@ export const en = {
   'sidebar.conversations': 'Chats',
   'sidebar.current': 'Current',
   'sidebar.showMore': 'Show more',
+  'sidebar.collapse': 'Collapse',
   'sidebar.remaining': '+{count}',
   'sidebar.waiting': 'Waiting for a reply',
   'sidebar.messageCount': '{count} messages',
