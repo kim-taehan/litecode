@@ -231,8 +231,10 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
 })
 
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다).
- *  우측 "턴 작업" 탭(TurnTab)도 같은 줄을 그린다 (이슈 #416) */
-export function WorkRow({ item, directory, turnRunning, conversationId }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean; conversationId?: string }) {
+ *  우측 "턴 작업" 탭(TurnTab)도 같은 줄을 그린다 (이슈 #416)
+ *  memo: props(item·directory·turnRunning·conversationId)가 같으면 다시 그리지 않는다 — 탭 열기 첫 렌더와 닫기 시 같은 줄이
+ *  다시 그려지는 것을 줄인다 (이슈 #583). item 은 턴 아이템 목록 안의 객체 참조가 바뀌면 재그린다 (정상) */
+export const WorkRow = memo(function WorkRow({ item, directory, turnRunning, conversationId }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean; conversationId?: string }) {
   const [open, setOpen] = useState(false)
   const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
@@ -342,11 +344,11 @@ export function WorkRow({ item, directory, turnRunning, conversationId }: { item
       {bodyFold.mounted && body && <div className="turn-row__body" {...bodyFold.fold}>{body}</div>}
     </div>
   )
-}
+})
 
 /** 사용자 훅 한 줄 (이슈 #102, 시안 _workspace/mock-hooks/Chat.dc.html) — "훅 · 이벤트 · 명령 통과/막음/실패 … N초". 통과는 조용한 줄,
  *  막음은 붉은 줄, 실패는 경고색, 사유(막은 훅의 stderr·실패 사유)는 아래 한 줄로 (hooks.css) */
-function HookRow({ item }: { item: Extract<TurnItem, { kind: 'hook' }> }) {
+const HookRow = memo(function HookRow({ item }: { item: Extract<TurnItem, { kind: 'hook' }> }) {
   const t = useT()
   return (
     <div className="turn-row turn-hook" data-kind="hook" data-outcome={item.outcome}>
@@ -363,12 +365,12 @@ function HookRow({ item }: { item: Extract<TurnItem, { kind: 'hook' }> }) {
       {item.reason && <div className="turn-hook__reason">{item.outcome === 'blocked' ? t('hooks.blocked', { reason: item.reason }) : item.reason}</div>}
     </div>
   )
-}
+})
 
 /** 하위 작업 한 줄 (task — 엔진이 자식 세션에서 따로 돌린다, 이슈 #31). 여럿이 동시에 돌면 줄마다 제 초가 오른다. 펼치면 그 자식의 생각·도구·글 줄이
  *  (진행 중엔 실시간으로) 들여 쌓인다. 모양은 dsh ui-subagent 의 목록 행(상태 · 이름 · 설명 … 오른쪽에 걸린 시간·토큰)과 Claude Code 의 Task 블록 참조.
  *  끝난 턴에 아직 running 으로 남은 줄(중지·엔진 재시작으로 끝 신호를 못 받음)은 "중단됨" 이다 */
-function SubtaskRow({ item, directory, turnRunning, conversationId }: { item: Subtask; directory: string; turnRunning: boolean; conversationId?: string }) {
+const SubtaskRow = memo(function SubtaskRow({ item, directory, turnRunning, conversationId }: { item: Subtask; directory: string; turnRunning: boolean; conversationId?: string }) {
   const [open, setOpen] = useState(false)
   const bodyFold = useFindFold(open, () => setOpen(true))
   const t = useT()
@@ -416,7 +418,7 @@ function SubtaskRow({ item, directory, turnRunning, conversationId }: { item: Su
       )}
     </div>
   )
-}
+})
 
 /** 진행 중 맨 아래 한 줄 (이슈 #416) — 지금 하는 일(마지막 생각·도구·하위 작업 줄) + 보낸 시각부터 경과 + 움직이는 점.
  *  누르면 우측 패널의 "턴 작업" 탭이 열려 전체 진행을 실시간으로 보인다. 시계는 이 줄만 다시 그린다 (dsh RunningStatus) */

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import type { FileDiff } from '../shared/ipc.ts'
 import { diffRows, foldRows, rowsText, type DiffRow } from './diffRows.ts'
 import { Tokens } from './Highlighted.tsx'
@@ -27,7 +27,7 @@ export function DiffStat({ diffs }: { diffs: readonly FileDiff[] }) {
   return <span className="diff-stat">{`+${added} −${removed}`}</span>
 }
 
-export function DiffCard({ diffs }: { diffs: readonly FileDiff[] }) {
+export const DiffCard = memo(function DiffCard({ diffs }: { diffs: readonly FileDiff[] }) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -73,7 +73,7 @@ export function DiffCard({ diffs }: { diffs: readonly FileDiff[] }) {
       </div>
     </div>
   )
-}
+})
 
 function LineView({ line: { row, diff, tokens } }: { line: Line }) {
   const t = useT()

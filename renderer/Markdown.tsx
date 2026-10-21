@@ -25,7 +25,7 @@ const FileMentions = createContext<{ directory: string; conversationId?: string;
 /** 답 원문 하나를 그린다. 빈 줄이 몇 개든 문단 사이는 CSS 간격 하나다.
  *  directory 를 주면 인라인 코드 중 그 프로젝트의 실제 파일을 칩으로 그린다 (판정은 메인 — dsh fileMentions 처럼 추측하지 않는다).
  *  streaming: 글이 뒤로 자라는 중(답이 오는 중) — 끝 블록만 다시 파싱하고 앞 블록은 얼려 다시 그리지 않는다 (이슈 #175) */
-export function Markdown({ text, directory, streaming = false, conversationId }: { text: string; directory?: string; streaming?: boolean; conversationId?: string }) {
+export const Markdown = memo(function Markdown({ text, directory, streaming = false, conversationId }: { text: string; directory?: string; streaming?: boolean; conversationId?: string }) {
   const root = useMarkdownRoot(text, streaming)
   const definitions = useDefinitions(root)
   const files = useFileMentions(root, directory)
@@ -38,7 +38,7 @@ export function Markdown({ text, directory, streaming = false, conversationId }:
     </div>
   )
   return directory && files.size > 0 ? <FileMentions.Provider value={{ directory, conversationId, files }}>{body}</FileMentions.Provider> : body
-}
+})
 
 /** 스트리밍 중엔 증분 파서, 끝나면(streaming 이 꺼지면) 전체를 한 번 다시 — 증분이 놓친 참조 링크 같은 어긋남을 바로잡는다 */
 function useMarkdownRoot(text: string, streaming: boolean): Md.Root {
