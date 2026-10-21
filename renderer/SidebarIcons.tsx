@@ -28,6 +28,28 @@ export function TrashIcon() {
   )
 }
 
+export function SearchIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="9" r="6" />
+      <path d="m15.5 15.5 3 3" />
+    </svg>
+  )
+}
+
+export function SlidersIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 5h14" />
+      <path d="M3 10h14" />
+      <path d="M3 15h14" />
+      <circle cx="14" cy="5" r="1.9" fill="var(--bg)" />
+      <circle cx="7" cy="10" r="1.9" fill="var(--bg)" />
+      <circle cx="12" cy="15" r="1.9" fill="var(--sidebar-fill)" />
+    </svg>
+  )
+}
+
 export function PencilIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

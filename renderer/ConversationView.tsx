@@ -1,7 +1,7 @@
 import { Fragment, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import type { Attention, AttentionAnswer, AttentionTarget, HistoryMessage, Mode, PickedAttachment, TurnItem } from '../shared/ipc.ts'
 import type { FeatureId } from '../shared/features.ts'
-import { planEnded, switchedMode } from './chatState.ts'
+import { planEnded, switchedMode, applyHistory } from './chatState.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap } from './Minimap.tsx'
 import { minimapTurnDetails, type MinimapTurn } from './turnView.ts'
@@ -34,6 +34,15 @@ function precedingUserAt(messages: readonly HistoryMessage[], index: number): nu
   return undefined
 }
 
+/** 그 assistant 턴을 바로 앞선 내 말 — 없으면(첨부만·오래된 기록) undefined */
+function precedingUserText(messages: readonly HistoryMessage[], index: number): string | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message && message.role === 'user') return message.text || undefined
+  }
+  return undefined
+}
+
 interface ConversationViewProps {
   t: Translate
   active: Session
@@ -52,16 +61,34 @@ interface ConversationViewProps {
   chosen: ReturnType<typeof findModel>
   send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts?: { mode?: Mode }): void
   shareShell(target: Session, cardId: string): Promise<string | undefined>
+  /** "이전 N개 보기" — 전체를 다시 불러온다 */
+  updateSession(id: string, recipe: (session: Session) => Session): void
 }
 
 /** 지금 대화의 머리 줄·탭과 본문(말풍선·`!` 카드·도는 턴 또는 Trajectory). 상태는 App 이 쥐고 여기는 그리기만 한다 */
-export function ConversationView({ t, active, titleOf, features, trajectoryOn, view, setView, listRef, setFinding, finding, following, chosen, send, shareShell }: ConversationViewProps) {
+export function ConversationView({
+  t,
+  active,
+  titleOf,
+  features,
+  trajectoryOn,
+  view,
+  setView,
+  listRef,
+  setFinding,
+  finding,
+  following,
+  chosen,
+  send,
+  shareShell,
+  updateSession,
+}: ConversationViewProps) {
   /** 미니맵 줄 클릭 — 그 턴으로 스크롤(Minimap)은 한 뒤 우측 "턴 작업" 탭을 연다 (이슈 #575).
    *  끝난 턴은 채팅 items 로 기록을 보충해 오래된 턴도 보이고, 진행 중 턴(시작 시각만)은 실시간 저장소만 본다 */
   function openMinimapTurn(turn: MinimapTurn) {
     if (turn.startedAt === undefined) return
-    if (turn.items.length > 0) feedCompletedTurn(turn.conversationId, turn.startedAt, turn.items, { duration: turn.duration, failed: turn.failed, interrupted: turn.interrupted, declined: turn.declined })
-    openTurnTab(active.project, turn.conversationId, turn.startedAt)
+    if (turn.items.length > 0) feedCompletedTurn(turn.conversationId, turn.startedAt, turn.items, { duration: turn.duration, failed: turn.failed, interrupted: turn.interrupted, declined: turn.declined, userQuery: turn.text })
+    openTurnTab(active.project, turn.conversationId, turn.startedAt, turn.text)
   }
 
   /** 그 자리의 `!` 카드들 (실행한 순서) */
@@ -79,6 +106,20 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
           onShare={() => shareShell(session, card.id)}
         />
       ))
+  }
+
+  /** "이전 N개 보기" — limit=N 으로 일부만 불러온 대화의 머리. 전체를 다시 불러온다 */
+  function loadEarlier() {
+    const id = active.id
+    updateSession(id, (session) => ({ ...session, history: 'loading' }))
+    void window.litecode.loadConversation(id).then((loaded) =>
+      updateSession(id, (session) => ({
+        ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
+        history: loaded.missingFolder ? 'missing' : 'loaded',
+        historyMore: false,
+        hiddenCount: undefined,
+      })),
+    )
   }
 
   return (
@@ -119,7 +160,14 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
         ) : active.history === 'unloaded' || active.history === 'loading' ? (
           <div className="empty">{t('chat.loading')}</div>
         ) : (
-          active.messages.length === 0 && <div className="empty">{t('chat.empty')}</div>
+          <>
+            {active.messages.length === 0 && <div className="empty">{t('chat.empty')}</div>}
+            {active.historyMore && (
+              <button type="button" className="run-plan" onClick={loadEarlier}>
+                {t('chat.loadMore', { count: active.hiddenCount ?? '' })}
+              </button>
+            )}
+          </>
         )}
         {/* 내 말은 말풍선, 답은 본문 폭 전체의 글 + 턴 머리 (ChatTurn.tsx) */}
         {active.messages.map((message, index) => (
@@ -143,6 +191,7 @@ export function ConversationView({ t, active, titleOf, features, trajectoryOn, v
                 directory={active.project}
                 conversationId={active.id}
                 startedAt={precedingUserAt(active.messages, index)}
+                userQuery={precedingUserText(active.messages, index)}
               />
             )}
           </Fragment>

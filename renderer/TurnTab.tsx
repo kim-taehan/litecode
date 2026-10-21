@@ -44,6 +44,13 @@ export function TurnTab({ conversationId, startedAt, directory, title, here, onJ
         <span className="turn-tab__dot" aria-hidden="true" />
         <strong className="turn-tab__title">{head}</strong>
       </div>
+      {/* 그 턴을 시작한 내 말 — 없으면(첨부만·오래된 기록) 안 본다 */}
+      {detail.userQuery && (
+        <div className="turn-tab__query" role="note">
+          <span className="turn-tab__query-label">{t('turnTab.query')}</span>
+          <span className="turn-tab__query-text">{detail.userQuery}</span>
+        </div>
+      )}
       {/* 이 턴이 속한 대화 (이슈 #462) — 다른 대화면 눌러 그 대화로 이동, 지금 보는 대화면 화살표 없이 제목만 */}
       {title !== undefined && title !== '' && (
         here ? (

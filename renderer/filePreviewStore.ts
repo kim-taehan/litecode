@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { feedTurnQuery } from './turnDetailStore.ts'
 
 // 오른쪽 패널(파일 미리보기) 상태 — 답의 파일 칩(Markdown.tsx)·대화 머리 버튼·Files 탭이 열고, 패널(FilePreview.tsx)이 그린다. 서로 멀리
 // 떨어져 있어(칩은 답 깊숙이, 패널은 앱 틀 오른쪽) props 로 잇지 않고 작은 저장소 하나로 잇는다. 경로가 아니라 칩과 같은 (프로젝트, 답의
@@ -165,13 +166,14 @@ export function isTurnTab(key: string | undefined): key is string {
 
 /** 턴 탭을 연다 — 같은 이름의 탭은 하나뿐 (이슈 #456). 이미 열려 있으면 그 자리의 열쇠를 새 턴으로 바꾼다(위치 그대로, 새 탭 없음),
  *  없으면 마지막에 열고 그 탭을 고른다 (진행 중 턴의 한 줄) */
-export function openTurnTab(directory: string, conversationId: string, startedAt: number): void {
+export function openTurnTab(directory: string, conversationId: string, startedAt: number, userQuery?: string): void {
   const state = base(directory)
   const key = turnTabKey(conversationId, startedAt)
   const index = state.tabs.findIndex((tab) => isTurnTab(tab))
   const tabs = state.tabs.filter((tab) => turnRefOf(tab) === undefined && tab !== key)
   tabs.splice(index < 0 ? tabs.length : index, 0, key)
   set({ ...state, open: true, tabs, active: key, focus: state.focus + 1, quiet: false })
+  if (userQuery) feedTurnQuery(conversationId, startedAt, userQuery)
 }
 
 /** 확장 탭의 열쇠 (이슈 #511) — `\0ext/<확장 id>`. 본문은 그 확장의 진입 HTML 을 격리된 iframe 에서 (FilePreview.tsx ExtensionTab) */

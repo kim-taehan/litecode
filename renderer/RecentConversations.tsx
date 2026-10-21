@@ -21,7 +21,7 @@ interface RecentConversationsProps {
   currentProject?: string
 }
 
-const RECENT_LIMIT = 10
+const RECENT_LIMIT = 5
 
 interface RecentRow {
   id: string
@@ -32,28 +32,38 @@ interface RecentRow {
   pinned: boolean
 }
 
-/** 행 — 고정한 대화 먼저, 그 뒤 updatedAt 내림차순. 최대 10개(검색 결과도 10개까지).
- *  글이 있으면 제목·프로젝트명 부분일치로 거른다 */
+/** 행 — 현재 프로젝트 최근 5개 먼저, 그 뒤 다른 프로젝트 최근 5개 (각 updatedAt 내림차순).
+ *  글이 있으면 제목·프로젝트명 부분일치로 거르고 (구분 없이) 최대 10개 */
 export function recentRows(
   sessions: Session[],
   projects: readonly Pick<Project, 'path' | 'name'>[],
   query = '',
+  currentProject?: string,
 ): RecentRow[] {
   const names = new Map(projects.map((p) => [p.path, p.name]))
   const q = query.trim().toLowerCase()
   const match = q ? (s: Session) => s.title.toLowerCase().includes(q) || (names.get(s.project) ?? '').toLowerCase().includes(q) : () => true
-  return sessions
-    .filter((s) => match(s))
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
-    .slice(0, RECENT_LIMIT)
-    .map((s) => ({
-      id: s.id,
-      project: s.project,
-      projectName: names.get(s.project) ?? s.project.split('/').pop() ?? s.project,
-      title: s.title,
-      updatedAt: s.updatedAt,
-      pinned: Boolean(s.pinned),
-    }))
+  const toRow = (s: Session): RecentRow => ({
+    id: s.id,
+    project: s.project,
+    projectName: names.get(s.project) ?? s.project.split('/').pop() ?? s.project,
+    title: s.title,
+    updatedAt: s.updatedAt,
+    pinned: Boolean(s.pinned),
+  })
+  // 새 대화(제목 없음)는 제외한다
+  const nonEmpty = sessions.filter((s) => s.title.trim() !== '')
+  if (q || currentProject === undefined) {
+    return nonEmpty
+      .filter((s) => match(s))
+      .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
+      .slice(0, RECENT_LIMIT * 2)
+      .map(toRow)
+  }
+  const byDate = (a: Session, b: Session) => b.updatedAt - a.updatedAt
+  const current = nonEmpty.filter((s) => s.project === currentProject).sort(byDate).slice(0, RECENT_LIMIT)
+  const other = nonEmpty.filter((s) => s.project !== currentProject).sort(byDate).slice(0, RECENT_LIMIT)
+  return [...current, ...other].map(toRow)
 }
 
 /** 최근 대화를 한 번에 — 제목찾기 옆 버튼(open=true)으로 연다.
@@ -68,7 +78,16 @@ export function RecentConversations({ open, onClose, sessions, projects, onOpen,
   const searchRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
-  const rows = useMemo(() => recentRows(sessions, projects, query), [sessions, projects, query])
+  const rows = useMemo(() => recentRows(sessions, projects, query, currentProject), [sessions, projects, query, currentProject])
+  const rowsWithPrev = useMemo(
+    () =>
+      rows.map((row, i) => ({
+        row,
+        i,
+        previousIsNow: i > 0 && currentProject !== undefined ? rows[i - 1].project === currentProject : undefined,
+      })),
+    [rows, currentProject],
+  )
 
   // 열면 갱신 + 좌표(버튼 rect) — 찾기관(12px 인셋) 좌측 정렬·버튼 아래 6px
   useEffect(() => {
@@ -79,7 +98,7 @@ export function RecentConversations({ open, onClose, sessions, projects, onOpen,
     const button = buttonRef.current
     if (button) {
       const rect = button.getBoundingClientRect()
-      setAnchor({ top: rect.bottom + 6, left: rect.left - 12 })
+      setAnchor({ top: rect.bottom + 6, left: rect.left - (rect.width / 2 - 12) })
     }
   }, [open, buttonRef])
 
@@ -179,26 +198,25 @@ export function RecentConversations({ open, onClose, sessions, projects, onOpen,
       />
       <div className="recent-pop__list">
         {query.trim() && rows.length === 0 && <div className="recent-pop__empty">{t('sidebar.recentEmpty')}</div>}
-        {rows.map((row, i) => {
+        {rowsWithPrev.map(({ row, i, previousIsNow }) => {
           const isNow = currentProject !== undefined && row.project === currentProject
+          const showGroupHeader = !query.trim() && (i === 0 || (previousIsNow !== undefined && isNow !== previousIsNow))
           return (
-            <button
-              key={row.id}
-              type="button"
-              data-recent-active={i === active || undefined}
-              className={`recent-pop__row${i === active ? ' recent-pop__row--on' : ''}`}
-              onMouseEnter={() => setActive(i)}
-              onClick={() => act(i)}
-            >
-              <span className={`recent-pop__proj${isNow ? ' recent-pop__proj--now' : ''}`}>
-                {isNow && <span className="recent-pop__proj-check" aria-hidden="true">✓</span>}
-                {row.projectName}
-              </span>
-              <span className="recent-pop__main">
-                <span className="recent-pop__title">{row.title || t('sidebar.untitled')}</span>
-                <span className="recent-pop__time">{ago(row.updatedAt, now)}</span>
-              </span>
-            </button>
+            <div key={row.id}>
+              {showGroupHeader && <div className="recent-pop__group">{isNow ? t('sidebar.recentCurrent') : t('sidebar.recentOther')}</div>}
+              <button
+                type="button"
+                data-recent-active={i === active || undefined}
+                className={`recent-pop__row${showGroupHeader && i !== 0 ? ' recent-pop__row--spaced' : ''}${i === active ? ' recent-pop__row--on' : ''}`}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => act(i)}
+              >
+                <span className="recent-pop__main">
+                  <span className="recent-pop__title">{row.title || t('sidebar.untitled')}</span>
+                  <span className="recent-pop__time">{ago(row.updatedAt, now)}</span>
+                </span>
+              </button>
+            </div>
           )
         })}
       </div>

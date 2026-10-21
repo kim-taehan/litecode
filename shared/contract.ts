@@ -240,6 +240,10 @@ export interface History {
   missingFolder?: boolean
   /** 불러오지 못한 사유 */
   error?: string
+  /** limit=N 으로 일부만 불러온 것 — true 면 앞에 안 보이는 턴이 있다 ("이전 {N}개 보기" 로 전체를 다시 부른다) */
+  more?: boolean
+  /** 더 불러올 엔진 메시지는 이 개수만 (화면은 N 개의 턴으로 보여 준다) */
+  hiddenCount?: number
 }
 
 /** 끝난 명령 하나 */

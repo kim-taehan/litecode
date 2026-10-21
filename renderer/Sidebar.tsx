@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import type { Project } from '../shared/ipc.ts'
 import { TITLE_MAX } from '../shared/chat.ts'
 import { ago } from './ago.ts'
@@ -7,12 +7,13 @@ import { StatusDot, type useNotices } from './Notices.tsx'
 import { otherProjectsStatus } from './noticeView.ts'
 import { FromIcon } from './Delegation.tsx'
 import { sidebarMark } from './delegationView.ts'
-import { RunningCount, RunningFilter } from './Background.tsx'
+import { RunningCount } from './Background.tsx'
 import { runningOutside } from './backgroundView.ts'
 import { StopIcon } from './stopTurn.tsx'
-import { PinButton, PinnedMark, SessionSearch } from './SessionListTools.tsx'
+import { PinButton, PinnedMark } from './SessionListTools.tsx'
 import { RecentConversations } from './RecentConversations.tsx'
-import { GearIcon, LogoMark, PencilIcon, SidebarIcon, TrashIcon, Badge } from './SidebarIcons.tsx'
+import { WsSettingsPopover, loadWsSettings, type WsSettings } from './WsSettings.tsx'
+import { GearIcon, LogoMark, PencilIcon, SearchIcon, SidebarIcon, SlidersIcon, TrashIcon, Badge } from './SidebarIcons.tsx'
 import { HoverCard, startMarquee, stopMarquee, type useHoverCard } from './hoverCard.tsx'
 import { UpdateNotice } from './UpdateNotice.tsx'
 import { clampSidebar, type useSidebarLayout } from './useSidebarLayout.ts'
@@ -33,10 +34,6 @@ interface SidebarProps {
   sessions: Session[]
   /** 지금 프로젝트에서 도는 대화 id */
   running: string[]
-  runningOnly: boolean
-  setRunningOnly: Dispatch<SetStateAction<boolean>>
-  titleQuery: string
-  setTitleQuery: Dispatch<SetStateAction<string>>
   /** 목록에 보이는 대화 (거른 뒤, 고정한 대화가 위) */
   listed: Session[]
   active: Session | undefined
@@ -67,7 +64,7 @@ interface SidebarProps {
 }
 
 /** 대화 목록 한 묶음에 보이는 개수 — 넘어가면 [더보기] 로 10개씩 (이슈 #568) */
-const SIDEBAR_PAGE = 10
+
 
 /** 펼친 사이드바 — 로고 줄·프로젝트 전환 카드·새 대화·대화 목록·설정 (승인 시안). 상태는 모두 App 이 쥐고 여기는 그리기만 한다 */
 export function Sidebar({
@@ -82,10 +79,6 @@ export function Sidebar({
   notices,
   sessions,
   running,
-  runningOnly,
-  setRunningOnly,
-  titleQuery,
-  setTitleQuery,
   listed,
   active,
   setActiveIds,
@@ -111,23 +104,103 @@ export function Sidebar({
   closeRecent,
   openRecentConversation,
 }: SidebarProps) {
-  // [더보기]·[접기] (이슈 #568) — 처음 10개, [더보기] 로 10개씩. [접기] 는 다시 10개.
-  // 프로젝트 바뀌면(경로가 바뀐다) 처음 10개·접힌 상태로 돌아온다. [접기] 는 10개보다 많게 펼친 뒤에나 보인다
-  const [shown, setShown] = useState(SIDEBAR_PAGE)
-  const expanded = shown > SIDEBAR_PAGE
-  const key = project?.path ?? ''
-  const lastKey = useRef(key)
-  if (lastKey.current !== key) {
-    lastKey.current = key
-    setShown(SIDEBAR_PAGE)
-  }
-  const visible = listed.slice(0, shown)
-  const hasMore = listed.length > shown
-  const onMore = useCallback(() => setShown((n) => n + SIDEBAR_PAGE), [])
-  const onLess = useCallback(() => setShown(SIDEBAR_PAGE), [])
-  const recentRef = useRef<HTMLButtonElement>(null)
+    const startOfToday = new Date(now).setHours(0, 0, 0, 0)
+    const recentRef = useRef<HTMLButtonElement>(null)
+    const wsSettingsRef = useRef<HTMLButtonElement>(null)
+    const [wsSettingsOpen, setWsSettingsOpen] = useState(false)
+    const [wsSettings, setWsSettings] = useState<WsSettings>(() => loadWsSettings())
+    const [expanded, setExpanded] = useState(false)
+    const projectKey = project?.path ?? ''
+    const lastProjectKey = useRef(projectKey)
+    if (lastProjectKey.current !== projectKey) {
+      lastProjectKey.current = projectKey
+      setExpanded(false)
+    }
 
-   return (
+    function updateWsSettings(next: WsSettings): void {
+      setWsSettings(next)
+    }
+
+    const visible = useMemo(() => {
+      let items = [...listed]
+      if (wsSettings.recency !== 'all') {
+        const days = wsSettings.recency === '7d' ? 7 : 30
+        const cutoffStart = new Date(now - days * 86_400_000).setHours(0, 0, 0, 0)
+        items = items.filter((s) => s.updatedAt >= cutoffStart || s.pinned)
+      }
+      if (wsSettings.sortBy === 'name') {
+        items.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || titleOf(a).localeCompare(titleOf(b), 'ko'))
+      } else if (wsSettings.sortBy === 'recent') {
+        items.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
+      }
+      if (wsSettings.groupBy === 'status' || wsSettings.groupBy === 'unread') {
+        const inProgressIds = new Set(items.filter((s) => {
+          const st = notices.state[s.id]?.status
+          return st === 'running' || st === 'failed' || st === 'interrupted' || s.pending
+        }).map((s) => s.id))
+        items.sort((a, b) => {
+          const ap = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+          if (ap !== 0) return ap
+          const ai = inProgressIds.has(a.id) ? 0 : 1
+          const bi = inProgressIds.has(b.id) ? 0 : 1
+          if (ai !== bi) return ai - bi
+          return 0
+        })
+      }
+      return items
+    }, [listed, wsSettings.recency, wsSettings.sortBy, wsSettings.groupBy, notices.state, now, titleOf])
+
+    const groupLabel = useMemo((): Map<string, string | null> => {
+      const labels = new Map<string, string | null>()
+      if (visible.length === 0) return labels
+      const firstPinned = visible.find((s) => s.pinned)
+      if (firstPinned) labels.set(firstPinned.id, 'pinned')
+      if (wsSettings.groupBy === 'none') {
+        // 고정/비고정 구분선만 — 헤더는 "고정됨" 뿐
+        const firstUnpinned = visible.find((s) => !s.pinned)
+        if (firstUnpinned) labels.set(firstUnpinned.id, 'unpinned')
+        return labels
+      }
+      const firstUnpinned = visible.find((s) => !s.pinned)
+      if (firstUnpinned) {
+        if (wsSettings.groupBy === 'date') {
+          labels.set(firstUnpinned.id, firstUnpinned.updatedAt >= startOfToday ? 'today' : 'earlier')
+        } else if (wsSettings.groupBy === 'status' || wsSettings.groupBy === 'unread') {
+          const isProgress = (s: (typeof visible)[number]) => {
+            const st = notices.state[s.id]?.status
+            return st === 'running' || st === 'failed' || st === 'interrupted' || !!s.pending
+          }
+          const firstProgress = visible.find((s) => !s.pinned && isProgress(s))
+          const firstAwaiting = visible.find((s) => !s.pinned && !isProgress(s))
+          if (firstProgress) labels.set(firstProgress.id, wsSettings.groupBy === 'unread' ? 'unreadOnly' : 'inProgress')
+          if (firstAwaiting) labels.set(firstAwaiting.id, wsSettings.groupBy === 'unread' ? 'readOnly' : 'awaiting')
+        }
+      }
+      return labels
+    }, [visible, wsSettings.groupBy, notices.state, startOfToday])
+
+    // 특별한 묶음(고정·오늘·진행·읽지않음)은 전부, 나머지는 10개만 [더보기] (사용자 2026-10-22)
+    // groupBy 'none'이면 고정/일반만 구분 — 그 외 날짜·상태 그룹은 "특별"
+    const CAP = 10
+    const isProgressSession = (s: (typeof visible)[number]): boolean => {
+      const st = notices.state[s.id]?.status
+      return st === 'running' || st === 'failed' || st === 'interrupted' || !!s.pending
+    }
+    const isSpecialSession = (s: (typeof visible)[number]): boolean => {
+      if (s.pinned) return true
+      const groupBy = wsSettings.groupBy
+      if (groupBy === 'none') return false
+      if (groupBy === 'date') return s.updatedAt >= startOfToday
+      return isProgressSession(s)
+    }
+    let tailStart = visible.findIndex((s) => !isSpecialSession(s))
+    if (tailStart === -1) tailStart = visible.length
+    const tailCount = Math.max(0, visible.length - tailStart)
+    const tailShown = expanded ? tailCount : Math.min(CAP, tailCount)
+    const hasMore = tailCount > tailShown
+    const shownCount = tailStart + tailShown
+    const shown = visible.slice(0, shownCount)
+    return (
     <aside className="sidebar" style={{ width: layout.width, display: layout.hidden ? 'none' : undefined }}>
       <div
         className="sidebar__resize"
@@ -197,23 +270,31 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar__session-search">
-        <SessionSearch value={titleQuery} onChange={setTitleQuery} />
-        <RunningFilter count={running.length} on={runningOnly} onToggle={() => setRunningOnly((on) => !on)} />
-        <button
-          ref={recentRef}
-          type="button"
-          className="recent-toggle"
-          aria-pressed={recentOpen}
-          aria-label={t('sidebar.recent')}
-          title={t('sidebar.recent')}
-          onClick={toggleRecent}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5l3 2" />
-          </svg>
-        </button>
+      <div className="sidebar__workspaces">
+        <span className="sidebar__workspaces-label">{t('sidebar.workspaces')}</span>
+        <span className="sidebar__workspaces-actions">
+          <button
+            ref={recentRef}
+            type="button"
+            className="sidebar__workspaces-action"
+            aria-pressed={recentOpen}
+            aria-label={t('sidebar.recent')}
+            title={t('sidebar.recent')}
+            onClick={toggleRecent}
+          >
+            <SearchIcon />
+          </button>
+          <button
+            ref={wsSettingsRef}
+            type="button"
+            className="sidebar__workspaces-action"
+            aria-label={t('sidebar.workspaceSettings')}
+            title={t('sidebar.workspaceSettings')}
+            onClick={() => setWsSettingsOpen((v) => !v)}
+          >
+            <SlidersIcon />
+          </button>
+        </span>
       </div>
       <RecentConversations
         open={recentOpen}
@@ -222,18 +303,34 @@ export function Sidebar({
         projects={allProjects}
         onOpen={openRecentConversation}
         buttonRef={recentRef}
-        width={layout.width - 24}
+         width={layout.width - 4}
         currentProject={project?.path}
+      />
+      <WsSettingsPopover
+        open={wsSettingsOpen}
+        onClose={() => setWsSettingsOpen(false)}
+        buttonRef={wsSettingsRef}
+        width={Math.max(layout.width - 4, 240)}
+        settings={wsSettings}
+        onChange={updateWsSettings}
       />
 
       <div className="sidebar__sessions">
         {/* 행의 휴지통은 dsh ui-workspace 세션 행의 hover 버튼처럼 hover·포커스 때만 시각 자리에 보인다. 누르면 "삭제 확인" 으로
             바뀌고 한 번 더 눌러야 지운다(설정 화면 provider 삭제와 같은 방식). 포커스를 잃거나 Esc 면 되돌린다 */}
-        {listed.length === 0 && titleQuery.trim() && <div className="session-list__empty">{t('sidebar.noMatch')}</div>}
-        {visible.map((session, at) => (
+        {shown.length === 0 && <div className="session-list__empty">{t('sidebar.noMatch')}</div>}
+        {shown.map((session, at) => {
+          const gl = groupLabel.get(session.id) ?? null
+          return (
           <Fragment key={session.id}>
-          {/* 고정 묶음과 나머지 사이의 선 */}
-          {at > 0 && !session.pinned && listed[at - 1]!.pinned && <div className="session-list__divider" role="separator" />}
+          {gl === 'pinned' && <div className="session-group__label">{t('sidebar.pinned')}</div>}
+          {gl === 'unpinned' && <div className="session-group__sep" />}
+          {gl === 'today' && <div className="session-group__label">{t('sidebar.today')}</div>}
+          {gl === 'earlier' && <div className="session-group__label">{t('sidebar.earlier')}</div>}
+          {gl === 'inProgress' && <div className="session-group__label">{t('sidebar.ws.groupStatusInProgress')}</div>}
+          {gl === 'awaiting' && <div className="session-group__label">{t('sidebar.ws.groupStatusAwaiting')}</div>}
+          {gl === 'unreadOnly' && <div className="session-group__label">{t('sidebar.ws.groupUnread')}</div>}
+          {gl === 'readOnly' && <div className="session-group__label">{t('sidebar.ws.groupRead')}</div>}
           <div
             data-hover-row
             className={`session-item${session.id === active?.id ? ' session-item--active' : ''}${confirming === session.id ? ' session-item--confirming' : ''}`}
@@ -352,17 +449,21 @@ export function Sidebar({
             )}
           </div>
           </Fragment>
-        ))}
-        {/* [더보기]/[접기] — 마지막 행 뒤에 (이슈 #568). 10개 남지 않으면 사라진다 */}
+        )
+        })}
         {hasMore && !expanded && (
-          <button type="button" className="conversation-list__more-bar" onClick={onMore}>
+          <button
+            type="button"
+            className="conversation-list__more-bar"
+            onClick={() => setExpanded(true)}
+          >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
             <span>{t('sidebar.showMore')}</span>
-            <span className="conversation-list__more-count">{t('sidebar.remaining', { count: listed.length - shown })}</span>
+            <span className="conversation-list__more-count">{t('sidebar.remaining', { count: tailCount - tailShown })}</span>
           </button>
         )}
-        {!hasMore && expanded && (
-          <button type="button" className="conversation-list__more-bar conversation-list__collapse-bar" onClick={onLess}>
+        {expanded && tailCount > CAP && (
+          <button type="button" className="conversation-list__more-bar conversation-list__collapse-bar" onClick={() => setExpanded(false)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15" /></svg>
             <span>{t('sidebar.collapse')}</span>
           </button>

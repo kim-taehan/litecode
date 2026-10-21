@@ -72,9 +72,10 @@ export async function dropUnfinishedCompactions(conn: EngineConnection, sessionI
   }
 }
 
-/** 레거시 세션의 메시지 전부 (오래된 것부터). limit 없이 부르면 한 번에 다 온다 (01w — limit=N 은 최근 N개) */
-export async function engineMessages(conn: EngineConnection, sessionId: string, workdir: string): Promise<EngineMessage[]> {
-  const res = await fetch(`${conn.url}/session/${sessionId}/message?${at(workdir)}`, { headers: conn.headers })
+/** 레거시 세션의 메시지 전부 (오래된 것부터). limit=N 은 최근 N개만 (01w) — 반환은 항상 오래된 것부터. 더 있나 (more)는 부를 때만 안다 */
+export async function engineMessages(conn: EngineConnection, sessionId: string, workdir: string, limit?: number): Promise<EngineMessage[]> {
+  const params = limit !== undefined && limit > 0 ? `limit=${limit}` : ''
+  const res = await fetch(`${conn.url}/session/${sessionId}/message?${at(workdir)}${params ? `&${params}` : ''}`, { headers: conn.headers })
   if (!res.ok) throw new Error(tr('error.messageRead', { status: res.status }))
   return (await res.json()) as EngineMessage[]
 }

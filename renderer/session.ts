@@ -27,6 +27,10 @@ export interface Session extends ChatFields {
   usage?: ChatUsage
   /** 지난 실행에서 저장된 대화의 내용 상태 — 목록 정보만 저장되고 내용은 열 때 엔진에서 부른다(ctx.sessions). 이번 실행에 만든 대화는 없다 */
   history?: 'unloaded' | 'loading' | 'loaded' | 'missing'
+  /** limit=N 으로 일부만 불러온 것 — true 면 앞에 안 보이는 턴이 있다. "이전 N개 보기" 로 전체를 다시 부른다 */
+  historyMore?: boolean
+  /** 더 (불러야 하는) 엔진 메시지 수 — "이전 N개 보기" 버튼의 표시에 쓴다 */
+  hiddenCount?: number
 }
 
 export function newSession(project: string): Session {
