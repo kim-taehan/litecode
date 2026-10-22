@@ -20,6 +20,7 @@ import type {
 import { DEFAULT_LANGUAGE, isBuiltinLanguage } from '../../shared/i18n/index.ts'
 import { setMainLocalePack } from '../i18n.ts'
 import { changedFiles } from './extensions/changes.ts'
+import { analyzeCommit, getCommits, getCommitDiff, requestReview, type AnalysisResult } from './extensions/diffReview.ts'
 import { ExtensionData } from './extensions/data.ts'
 import { EXTENSION_LIMITS } from './extensions/limits.ts'
 import { isExtensionId } from './extensions/manifest.ts'
@@ -335,6 +336,11 @@ export class ExtensionsService extends Service {
         case 'server.project':
         case 'server.analyze':
           return await this.analysis(id, manifest, method, params, project)
+        case 'diff.commits':
+        case 'diff.commit-diff':
+        case 'diff.analyze':
+        case 'diff.review':
+          return await this.diffReview(method, params, project)
         default:
           return await this.project(method, params, project)
       }
@@ -658,6 +664,52 @@ export class ExtensionsService extends Service {
     if (!project) return fail('no-project')
     const changed = await changedFiles(this.options.git ?? 'git', project.directory)
     return changed.ok ? done({ base: changed.base, files: changed.files }) : changed
+  }
+
+  /** diff.* (이슈 #601) — 커밋 목록·diff·정적 분석·AI 리뷰. git 은 읽기 전용이고, 파일 읽기는 프로젝트 안에서만 */
+  private async diffReview(method: string, params: unknown, project: CallProject | undefined): Promise<ExtensionCallResult> {
+    if (!project) return fail('no-project')
+    const git = this.options.git ?? 'git'
+    const commit = typeof params === 'object' && params !== null ? (params as { commit?: unknown }).commit : undefined
+    const limit = typeof params === 'object' && params !== null ? (params as { limit?: unknown }).limit : undefined
+    if (method === 'diff.commits') {
+      if (limit !== undefined && !(Number.isInteger(limit) && (limit as number) >= 1)) return fail('params-invalid')
+      const result = await getCommits(git, project.directory, typeof limit === 'number' ? limit : 10)
+      return result.ok ? done({ commits: result.commits }) : done(result)
+    }
+    if (method === 'diff.commit-diff') {
+      if (typeof commit !== 'string' || commit.trim() === '') return fail('params-invalid')
+      const result = await getCommitDiff(git, project.directory, commit)
+      return result.ok ? done({ diff: result.diff }) : done(result)
+    }
+    if (method === 'diff.analyze') {
+      if (typeof commit !== 'string' || commit.trim() === '') return fail('params-invalid')
+      const result = await analyzeCommit(git, project.directory, commit)
+      return result.ok ? done({ analysis: result.analysis }) : done(result)
+    }
+    if (method === 'diff.review') {
+      if (typeof commit !== 'string' || commit.trim() === '') return fail('params-invalid')
+      const analyzed = await analyzeCommit(git, project.directory, commit)
+      if (!analyzed.ok) return done(analyzed)
+      const model = this.reviewModel(params)
+      const result = await requestReview(git, project.directory, commit, analyzed.analysis, {
+        providerId: model?.providerId,
+        modelId: model?.modelId,
+        ask: model && this.ctx.llm ? (input: { providerId: string; modelId: string; directory: string; prompt: string }) => this.ctx.llm.askOnce({ providerId: input.providerId, modelId: input.modelId, directory: input.directory, prompt: input.prompt }) : undefined,
+      })
+      return result.ok ? done({ review: result.review }) : done(result)
+    }
+    return fail('method-unknown')
+  }
+
+  /** diff.review 의 모델 — params.model 이 있으면 그 것을, 없으면 undefined (fallback) */
+  private reviewModel(params: unknown): { providerId: string; modelId: string } | undefined {
+    if (typeof params !== 'object' || params === null) return undefined
+    const candidate = (params as { model?: unknown }).model
+    if (typeof candidate !== 'object' || candidate === null) return undefined
+    const { providerId, modelId } = candidate as { providerId?: unknown; modelId?: unknown }
+    if (typeof providerId !== 'string' || providerId === '' || typeof modelId !== 'string' || modelId === '') return undefined
+    return { providerId, modelId }
   }
 
   // --- 내장 서버 (이슈 #537) ---
