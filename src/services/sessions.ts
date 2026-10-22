@@ -246,14 +246,13 @@ export class SessionsService extends Service {
     void this.sweep()
   }
 
-  /** 대화 하나의 말풍선 — 엔진 세션이 아직 없으면(첫 메시지가 세션을 만들기 전에 실패) 빈 목록.
-    *  query { limit, offset } 이 있으면 페이 slicing — 더 이전이 있으면 more=true 를 되돌린다 (스크롤 최상단에서 자동 로드) */
-  async history(id: string, query?: { limit?: number; offset?: number }): Promise<History> {
+  /** 대화 하나의 말풍선 — 엔진 세션이 아직 없으면(첫 메시지가 세션을 만들기 전에 실패) 빈 목록. 전체를 한 번에 돌려준다 (#607) */
+  async history(id: string): Promise<History> {
     const conversation = (await this.read()).conversations.find((entry) => entry.id === id)
     if (!conversation) return { messages: [], error: tr('error.noConversation') }
     if (!conversation.engineSessionId) return { messages: [] }
     const shared = new Set((conversation.shells ?? []).flatMap((card) => (card.sharedMessageId ? [card.sharedMessageId] : [])))
-    const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId, shared, query)
+    const history = await this.ctx.llm.history(conversation.project, conversation.engineSessionId, shared)
     const labels = conversation.labels ?? {}
     const noted = conversation.attachments ?? {}
     const origins = conversation.origins ?? {}

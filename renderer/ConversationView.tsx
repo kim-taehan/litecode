@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { Fragment, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import type { Attention, AttentionAnswer, AttentionTarget, HistoryMessage, Mode, PickedAttachment, TurnItem } from '../shared/ipc.ts'
 import type { FeatureId } from '../shared/features.ts'
-import { planEnded, switchedMode, applyHistory } from './chatState.ts'
+import { planEnded, switchedMode } from './chatState.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap } from './Minimap.tsx'
 import { minimapTurnDetails, type MinimapTurn } from './turnView.ts'
@@ -21,9 +21,6 @@ import type { Session } from './session.ts'
 // 그래서 턴에 넘기는 "없음" 배열과 답 보내기 함수는 매번 새로 만들지 않는다
 const NO_ITEMS: readonly TurnItem[] = []
 
-/** 대화 처음 열 때(최근 페이를 빠르게)·스크롤 최상단 자동 로딩에서 한 번에 불러 오는 메시지의 최대 개수.
- *  더 이전 페이가 있으면 more=true + offset 커서가 오고, 스크롤 한 번 더 하면 그 커서로 다음 페이지가 보인다 (이슈 #599) */
-export const RECENT_FIRST_LIMIT = 10
 const answerAttention = (request: Attention, answer: AttentionAnswer, target?: AttentionTarget) =>
   window.litecode.replyAttention(request.sessionId, request.id, answer, target)
 
@@ -54,12 +51,7 @@ interface ConversationViewProps {
   chosen: ReturnType<typeof findModel>
   send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts?: { mode?: Mode }): void
   shareShell(target: Session, cardId: string): Promise<string | undefined>
-  /** "이전 N개 보기" — 전체를 다시 불러온다 */
-  updateSession(id: string, recipe: (session: Session) => Session): void
 }
-
-/** 스크롤 최상단 근처(40px 미만) — Minimap の nearBottom 과 방향만 반대. 새 턴이 그 사이에 오면 그대로 둔다 */
-const nearTop = (element: HTMLElement): boolean => element.scrollTop < 40
 
 /** 지금 대화의 머리 줄·탭과 본문(말풍선·`!` 카드·도는 턴 또는 Trajectory). 상태는 App 이 쥐고 여기는 그리기만 한다 */
 export function ConversationView({
@@ -77,7 +69,6 @@ export function ConversationView({
   chosen,
   send,
   shareShell,
-  updateSession,
 }: ConversationViewProps) {
   /** 그 자리의 `!` 카드들 (실행한 순서) */
   function shellCards(session: Session, at: (position: number) => boolean) {
@@ -95,60 +86,6 @@ export function ConversationView({
         />
       ))
   }
-
-  /** 스크롤 최상단에서 이전(더 오래된) 페이를 자동으로 불러온다 (이슈 #599).
-   *  offset=active.historyOffset — 서비스가 History.offset 으로 준 커서(끝에서부터 이미 보여 준 엔진 메시지 수). client 는 세지 않는다.
-   *  페이를 앞에 붙이고, 더 이전이 있으면 커서를 갱신하고, 없으면(historyMore=false) 멈춘다. */
-  function loadEarlier() {
-    const id = active.id
-    if (loadingRef.current) return
-    const element = listRef.current
-    const firstTurns = element ? [...element.querySelectorAll<HTMLElement>('.user-turn')] : []
-    firstTurnRef.current = firstTurns[0] ?? null
-    priorScrollTopRef.current = element ? element.scrollTop : 0
-    loadingRef.current = true
-    void window.litecode.loadConversation(id, { limit: RECENT_FIRST_LIMIT, offset: active.historyOffset ?? 0 }).then((loaded) => {
-      loadingRef.current = false
-      updateSession(id, (session) => ({
-        ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
-        history: loaded.missingFolder ? 'missing' : 'loaded',
-        ...(loaded.more ? { historyMore: true, historyOffset: loaded.offset ?? 0 } : { historyMore: false, historyOffset: 0 }),
-      }))
-    })
-  }
-
-  // 스크롤 최상단(nearTop)까지 올리면 자동으로 한 페이지만 더 불러온다 (이슈 #599).
-  // 로딩 중 중복 로딩은 loadingRef 로 막고, 로딩 후 새 첫 내 말이 안에 보이게 스크롤 오프셋 보정한다
-  const loadingRef = useRef(false)
-  /** 로딩 전 첫 내 말 — 로딩 후 .user-turn 첫 개(새 페이지만의 첫 내 말)와 같은 y 가 되게 스크롤 보정 */
-  const firstTurnRef = useRef<HTMLElement | null>(null)
-  /** 이전 스크롤 위치 — 새 페이지만이 그 위에 붙었다면 그 위치를 유지 */
-  const priorScrollTopRef = useRef(0)
-  useEffect(() => {
-    const element = listRef.current
-    if (!element || !active.historyMore || active.history !== 'loaded') return
-    const handler = () => {
-      if (nearTop(element)) loadEarlier()
-    }
-    element.addEventListener('scroll', handler, { passive: true })
-    return () => element.removeEventListener('scroll', handler)
-  }, [listRef, active.history, active.historyMore])
-  // 새 첫 내 말이 그려지면 로딩 전 스크롤 위치와 같은 y 에 보정 — 이전 첫 내 말과 새 첫 내 말이 겹치면 그 자리가
-  useEffect(() => {
-    const element = listRef.current
-    if (!element || !firstTurnRef.current) return
-    const priorScrollTop = priorScrollTopRef.current
-    const old = firstTurnRef.current
-    firstTurnRef.current = null
-    priorScrollTopRef.current = 0
-    if (!priorScrollTop) return
-    requestAnimationFrame(() => {
-      const newFirst = element.querySelector<HTMLElement>('.user-turn')
-      if (!newFirst) return
-      const targetTop = newFirst.getBoundingClientRect().top - element.getBoundingClientRect().top
-      if (Math.abs(targetTop - priorScrollTop) > 4) element.scrollTop = priorScrollTop - targetTop
-    })
-  }, [listRef, active.messages])
 
   return (
     <>

@@ -27,10 +27,6 @@ export interface Session extends ChatFields {
   usage?: ChatUsage
   /** 지난 실행에서 저장된 대화의 내용 상태 — 목록 정보만 저장되고 내용은 열 때 엔진에서 부른다(ctx.sessions). 이번 실행에 만든 대화는 없다 */
   history?: 'unloaded' | 'loading' | 'loaded' | 'missing'
-  /** limit=N 으로 최근 페이만 불러온 것 — true 면 스크롤 최상단에서 더 이전 페이를 자동 로드한다 */
-  historyMore?: boolean
-  /** 더 이전 페이 커서 (History.offset) — 스크롤 최상단 페이 로딩 때 query.offset 으로 넘긴다 */
-  historyOffset?: number
 }
 
 export function newSession(project: string): Session {
