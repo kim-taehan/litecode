@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>diff-review</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1c1f26;--sub:#6b7180;--faint:#9aa0ab;--line:#e3e5ea;--soft:#eef0f4;--accent:#4176e6;--ok:#23774a;--ok-bg:#e9f6ee;--bad:#a12a2f;--bad-bg:#fdecec;--warn:#9a5b00;--warn-bg:#fff3e0;--btn:#1c1f26;--btn-text:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#16181d;--card:#1f2228;--text:#e8eaf0;--sub:#a3a9b5;--faint:#7c8290;--line:#2e323a;--soft:#2a2e36;--accent:#7aa2ff;--ok:#6fd39b;--ok-bg:#1d3327;--bad:#ff8a8f;--bad-bg:#3a2224;--warn:#f5b860;--warn-bg:#3a2e1c;--btn:#e8eaf0;--btn-text:#16181d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",system-ui,sans-serif}
+main{display:flex;flex-direction:column;gap:12px;padding:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px}
+.pad{padding:14px 16px}
+.row{display:flex;align-items:center;gap:8px}
+.grow{flex:1;min-width:0}
+h1{margin:0;font-size:15px;font-weight:600}
+.sub{color:var(--sub);font-size:12px}
+.faint{color:var(--faint)}
+button{font:inherit;cursor:pointer;border-radius:8px;height:30px;padding:0 12px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+button.primary{border:0;background:var(--btn);color:var(--btn-text);font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.bar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden;margin-top:8px}
+.bar>i{display:block;height:6px;background:var(--accent);transition:width .3s}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+.metric{padding:10px;border:1px solid var(--line);border-radius:10px}
+.metric span{display:block;font-size:11.5px;color:var(--sub)}
+.metric b{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.metric b.ok{color:var(--ok)} .metric b.warn{color:var(--warn)} .metric b.bad{color:var(--bad)}
+.sev{flex-shrink:0;margin-top:2px;height:18px;padding:0 6px;border-radius:4px;font-size:11px;font-weight:600;line-height:18px}
+.sev.high{background:var(--bad-bg);color:var(--bad)}
+.sev.mid{background:var(--warn-bg);color:var(--warn)}
+.sev.low{background:var(--soft);color:var(--sub)}
+.issue{display:flex;gap:10px;padding:10px 16px;border-top:1px solid var(--line)}
+.issue-head{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.issue-title{font-size:12.5px;font-weight:600}
+.issue-loc{font:11px ui-monospace,Menlo,monospace;color:var(--accent);margin-left:auto}
+.issue-desc{font-size:12px;color:var(--sub);line-height:1.5}
+.issue-desc code{font:11.5px ui-monospace,Menlo,monospace;background:var(--soft);padding:1px 4px;border-radius:3px}
+.commit-item{padding:8px 12px;border-top:1px solid var(--line);cursor:pointer;transition:background .1s}
+.commit-item:hover{background:var(--soft)}
+.commit-item.sel{background:var(--soft);border-left:3px solid var(--accent)}
+.commit-hash{font:11.5px ui-monospace,Menlo,monospace;color:var(--accent)}
+.commit-msg{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.commit-meta{font:11px ui-monospace,Menlo,monospace;color:var(--faint);margin-top:1px}
+.dcode{font:11.5px/1.7 ui-monospace,Menlo,monospace;background:var(--soft);border-radius:6px;overflow-x:auto;padding:6px 0}
+.dline{padding:0 12px;white-space:pre}
+.dline.cx{color:var(--sub)}
+.dline.ad{background:color-mix(in srgb,var(--ok) 10%,transparent);color:var(--ok)}
+.dline.de{background:color-mix(in srgb,var(--bad) 10%,transparent);color:var(--bad)}
+.dline .n{color:var(--faint);margin-right:8px;user-select:none}
+.file-hd{display:flex;align-items:center;gap:8px;font:12px ui-monospace,Menlo,monospace;padding:8px 12px;border-bottom:1px solid var(--line)}
+.file-hd .a{color:var(--ok);font-weight:600}
+.file-hd .d{color:var(--bad);font-weight:600}
+.file-hd .bl{margin-left:auto;font-size:10.5px;color:var(--warn);background:var(--warn-bg);padding:1px 7px;border-radius:4px}
+.bnode{display:inline-block;font:10.5px ui-monospace,Menlo,monospace;padding:2px 8px;border-radius:4px;border:1px solid;margin-right:4px;margin-bottom:4px}
+.bnode.src{border-color:var(--ok);color:var(--ok);background:var(--ok-bg);font-weight:600}
+.bnode.d1{border-color:var(--bad);color:var(--bad);background:var(--bad-bg)}
+.bnode.d2{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
+.cycle-item{display:flex;align-items:center;gap:8px;padding:7px 12px;margin-bottom:4px;background:var(--bad-bg);border-radius:6px;font:11.5px ui-monospace,Menlo,monospace}
+.cycle-item .arrow{opacity:.5}
+.ctx-box{padding:10px 12px;background:var(--soft);border-radius:8px;font:11.5px/1.6 ui-monospace,Menlo,monospace;color:var(--sub);margin-top:8px}
+.note{padding:8px 10px;border-radius:8px;background:var(--soft);color:var(--sub);font-size:12.5px}
+.gate{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:var(--warn-bg);color:var(--warn);font-size:12.5px}
+.gate b{font-size:14px}
+.tabs{display:flex;gap:4px}
+.tabs button[aria-selected=true]{border:0;background:var(--btn);color:var(--btn-text)}
+</style>
+</head>
+<body>
+<main id="app">
+  <div class="card pad" style="display:flex;align-items:center;gap:12px">
+    <h1>diff-review</h1>
+    <div class="tabs" role="tablist" aria-label="모드">
+      <button role="tab" aria-selected="true" data-tab="commit">커밋 리뷰</button>
+      <button role="tab" aria-selected="false" data-tab="analysis">코드 분석</button>
+      <button role="tab" aria-selected="false" data-tab="review">AI 리뷰</button>
+    </div>
+  </div>
+
+  <div id="view-commit" class="card" hidden>
+    <div id="commit-list"></div>
+    <div class="pad" id="diff-area"><div class="note">커밋을 선택하세요</div></div>
+    <div class="row pad" style="border-top:1px solid var(--line);padding-top:10px;padding-bottom:10px">
+      <span class="sub" id="commit-stats">8파일 (2.3%)</span>
+      <div class="grow"></div>
+      <button type="button" id="btn-typecheck" disabled>typecheck ✓</button>
+      <button type="button" id="btn-tests" disabled>wrapping</button>
+      <button type="button" class="primary" data-tab="analysis">코드 분석 →</button>
+      <button type="button" class="primary" data-tab="review">✦ AI 리뷰 →</button>
+    </div>
+  </div>
+
+  <div id="view-analysis" class="card" hidden>
+    <div class="pad">
+      <div class="metric-grid">
+        <div class="metric"><span>변경 파일</span><b id="stat-changed">0</b></div>
+        <div class="metric"><span>Blast radius</span><b id="stat-blast">0</b></div>
+        <div class="metric"><span>순환 의존</span><b id="stat-cycles">0</b></div>
+        <div class="metric"><span>층 위반</span><b id="stat-violations">0</b></div>
+      </div>
+      <div class="note" style="margin-top:10px" id="analysis-status">분석 중…</div>
+    </div>
+
+    <div class="pad" style="padding-top:0">
+      <div class="sub" style="margin-bottom:8px;font-weight:600">Blast</div>
+      <div id="blast-nodes"></div>
+      <div class="row" style="margin-top:8px;font-size:11px">
+        <span class="faint">● source</span>
+        <span class="faint" style="color:var(--bad)">● 1도 (직접 import)</span>
+        <span class="faint" style="color:var(--warn)">● 2도 (간접)</span>
+      </div>
+    </div>
+
+    <div class="pad" style="padding-top:0">
+      <div class="sub" style="margin-bottom:8px;font-weight:600">순환 의존</div>
+      <div id="cycle-list"></div>
+    </div>
+
+    <div class="pad" style="padding-top:0">
+      <div class="sub" style="margin-bottom:4px;font-weight:600">층 위반</div>
+      <div class="note" id="violation-list">✓ 위반 없음</div>
+    </div>
+
+    <div class="row pad" style="border-top:1px solid var(--line);padding-top:10px;padding-bottom:10px">
+      <button type="button" data-tab="commit">← 커밋 리뷰</button>
+      <div class="grow"></div>
+      <button type="button" class="primary" data-tab="review">✦ AI 리뷰 →</button>
+    </div>
+  </div>
+
+  <div id="view-review" class="card" hidden>
+    <div class="pad">
+      <div class="sub" style="font-weight:600">AI에게 전달된 컨텍스트</div>
+      <div class="ctx-box" id="ctx-box">분석이 아직 없습니다. 먼저 커밋을 선택하세요.</div>
+    </div>
+
+    <div id="issue-list"></div>
+
+    <div class="pad" style="padding-top:10px" id="review-summary">
+      <div class="gate"><b>⏳</b><div>리뷰 실행 중…</div></div>
+    </div>
+
+    <div class="row pad" style="border-top:1px solid var(--line);padding-top:10px;padding-bottom:10px">
+      <button type="button" data-tab="analysis">← 코드 분석</button>
+      <button type="button" data-tab="commit">← 커밋 리뷰</button>
+      <div class="grow"></div>
+      <button type="button" class="primary" id="btn-send">✦ 대화로 보냄</button>
+    </div>
+  </div>
+</main>
+
+<script>
+// --- 통로 (app ↔ 확장) ---
+let seq = 0
+const waiting = new Map()
+window.addEventListener('message', (event) => {
+  const data = event.data
+  if (event.source !== parent || !data || data.litecode !== 1 || !waiting.has(data.id)) return
+  const { resolve } = waiting.get(data.id)
+  waiting.delete(data.id)
+  resolve(data)
+})
+
+function call(method, params) {
+  const id = ++seq
+  return new Promise((resolve, reject) => {
+    waiting.set(id, { resolve: (reply) => (reply.ok ? resolve(reply.result) : reject(new Error(reply.error))) })
+    parent.postMessage({ litecode: 1, id, method, params }, '*')
+  })
+}
+
+// --- 상태 ---
+const state = { tab: 'commit', commits: [], selectedCommit: null, diff: null, analysis: null, review: null, error: undefined }
+
+// --- 렌더 ---
+const views = {
+  commit: document.getElementById('view-commit'),
+  analysis: document.getElementById('view-analysis'),
+  review: document.getElementById('view-review'),
+}
+
+function setTab(tab) {
+  state.tab = tab
+  for (const [key, view] of Object.entries(views)) view.hidden = key !== tab
+  document.querySelectorAll('[role="tab"]').forEach((btn) => btn.setAttribute('aria-selected', String(btn.dataset.tab === tab)))
+}
+
+function renderCommits() {
+  const list = document.getElementById('commit-list')
+  list.innerHTML = ''
+  for (const c of state.commits) {
+    const item = document.createElement('div')
+    item.className = 'commit-item' + (c.hash === state.selectedCommit ? ' sel' : '')
+    if (c.reverted) item.style.opacity = '.45'
+    item.innerHTML = `
+      <div class="commit-hash">${c.hash}</div>
+      <div class="commit-msg">${c.msg}${c.reverted ? ' <em class="faint">(reverted)</em>' : ''}</div>
+      <div class="commit-meta">${c.author} · ${c.time} · ${c.files} 파일 · +${c.adds} -${c.removes}</div>
+    `
+    item.addEventListener('click', () => selectCommit(c.hash))
+    list.append(item)
+  }
+}
+
+async function renderDiff() {
+  const area = document.getElementById('diff-area')
+  if (!state.selectedCommit || !state.diff) {
+    area.innerHTML = '<div class="note">커밋을 선택하세요</div>'
+    return
+  }
+  const d = state.diff
+  area.innerHTML = `
+    <div class="file-hd">
+      <span>${state.selectedCommit}</span>
+      <span class="a">+${d.adds}</span><span class="d">-${d.removes}</span>
+    </div>
+    <div class="dcode">
+      ${d.lines.slice(0, 500).map((line) => `<div class="dline ${line.type}"><span class="n">${line.num}</span>${esc(line.text)}</div>`).join('')}
+    </div>
+  `
+}
+
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
+
+function renderAnalysis() {
+  const a = state.analysis
+  if (!a) return
+  document.getElementById('stat-changed').textContent = a.changedCount
+  const blast = document.getElementById('stat-blast')
+  blast.textContent = a.blastSize
+  blast.className = a.blastSize > 5 ? 'warn' : 'ok'
+  const cycles = document.getElementById('stat-cycles')
+  cycles.textContent = a.cycleCount
+  cycles.className = a.cycleCount > 0 ? 'bad' : 'ok'
+  const violations = document.getElementById('stat-violations')
+  violations.textContent = a.violationCount
+  violations.className = a.violationCount > 0 ? 'bad' : 'ok'
+
+  // blast files
+  const blastNodes = document.getElementById('blast-nodes')
+  blastNodes.innerHTML = ''
+  const changed = new Set(state.diff?.files.map?.((f) => f.path) ?? [])
+  a.blastFiles?.slice(0, 30).forEach((file, i) => {
+    const span = document.createElement('span')
+    span.className = 'bnode ' + (changed.has(file) ? 'src' : i < a.changedCount ? 'd1' : 'd2')
+    span.textContent = file.split('/').pop() ?? file
+    blastNodes.append(span)
+  })
+
+  // cycles
+  const cycleList = document.getElementById('cycle-list')
+  cycleList.innerHTML = ''
+  for (const c of a.cycles ?? []) {
+    const div = document.createElement('div')
+    div.className = 'cycle-item'
+    div.innerHTML = `<span class="sev ${c.severity.toLowerCase()}">${c.severity}</span><span>${c.nodes.map(esc).join(' <span class="arrow">→</span> ')}</span>`
+    cycleList.append(div)
+  }
+  if (!a.cycles?.length) cycleList.innerHTML = '<div class="note" style="color:var(--ok)">✓ 순환 없음</div>'
+
+  // violations
+  const vList = document.getElementById('violation-list')
+  vList.innerHTML = a.violationCount === 0
+    ? '<div class="note" style="color:var(--ok)">✓ 위반 없음</div>'
+    : a.violations.map((v) => `<div class="note" style="color:var(--bad)">${esc(v.file)}:${v.line} — ${esc(v.message)}</div>`).join('')
+}
+
+async function selectCommit(hash) {
+  state.selectedCommit = hash
+  renderCommits()
+  state.diff = null
+  state.analysis = null
+  state.review = null
+  renderDiff()
+  try {
+    const res = await call('diff.commit-diff', { commit: hash })
+    state.diff = res.diff
+    renderDiff()
+  } catch (e) {
+    state.error = e.message
+  }
+}
+
+async function runAnalysis() {
+  setTab('analysis')
+  const status = document.getElementById('analysis-status')
+  status.textContent = '분석 중…'
+  status.style.color = ''
+  try {
+    const res = await call('diff.analyze', { commit: state.selectedCommit })
+    state.analysis = res.analysis
+    renderAnalysis()
+    status.textContent = `✓ 완료 (${state.analysis.analysisTime.toFixed(1)}s)`
+  } catch (e) {
+    status.textContent = '분석 실패: ' + e.message
+    status.style.color = 'var(--bad)'
+  }
+}
+
+async function requestReview() {
+  setTab('review')
+  const ctx = state.analysis
+  if (!ctx) {
+    document.getElementById('ctx-box').textContent = '분석이 아직 없습니다. 먼저 커밋을 선택하세요.'
+    document.getElementById('review-summary').innerHTML = '<div class="gate"><b>⏳</b><div>분석 실행 후 리뷰해 주세요.</div></div>'
+    return
+  }
+  document.getElementById('ctx-box').textContent =
+    `commit ${state.selectedCommit} · ${ctx.changedCount}파일 (+${ctx.adds} -${ctx.removes})\n` +
+    `blast: ${ctx.blastSize} — ${ctx.blastFiles.slice(0, 10).join(', ')}${ctx.blastFiles.length > 10 ? ' …' : ''}\n` +
+    `cycles: ${ctx.cycleCount} · violations: ${ctx.violationCount}\n` +
+    `diff hash: ${ctx.diffHash}`
+  document.getElementById('review-summary').innerHTML = '<div class="gate"><b>⏳</b><div>리뷰 중…</div></div>'
+  document.getElementById('issue-list').innerHTML = ''
+  try {
+    const res = await call('diff.review', { commit: state.selectedCommit })
+    state.review = res.review
+    renderIssues()
+    const high = state.review.issues.filter((i) => i.severity === 'HIGH').length
+    const med = state.review.issues.filter((i) => i.severity === 'MED').length
+    const sum = document.getElementById('review-summary')
+    if (high > 0) sum.innerHTML = `<div class="gate" style="background:var(--bad-bg);color:var(--bad)"><b>${high}</b><div>HIGH — 수정 필요<div class="faint" style="font-size:11.5px;margin-top:2px">${state.review.summary}</div></div></div>`
+    else if (med > 0) sum.innerHTML = `<div class="gate"><b>${med}</b><div>MED — 확인 필요<div class="faint" style="font-size:11.5px;margin-top:2px">${state.review.summary}</div></div></div>`
+    else sum.innerHTML = `<div class="gate" style="background:var(--ok-bg);color:var(--ok)"><b>✓</b><div>문제의 소지가 없습니다 — ${state.review.summary}</div></div>`
+  } catch (e) {
+    document.getElementById('review-summary').innerHTML = `<div class="gate" style="background:var(--bad-bg);color:var(--bad)"><b>✗</b><div>리뷰 실패: ${esc(e.message)}</div></div>`
+  }
+}
+
+function renderIssues() {
+  const list = document.getElementById('issue-list')
+  list.innerHTML = ''
+  for (const issue of state.review.issues) {
+    const div = document.createElement('div')
+    div.className = 'issue'
+    div.innerHTML = `
+      <span class="sev ${issue.severity.toLowerCase()}">${issue.severity}</span>
+      <div>
+        <div class="issue-head">
+          <span class="issue-title">${esc(issue.title)}</span>
+          <span class="issue-loc">${esc(issue.file)}:${issue.line}</span>
+        </div>
+        ${issue.description ? `<div class="issue-desc">${esc(issue.description)}</div>` : ''}
+      </div>
+    `
+    list.append(div)
+  }
+}
+
+// --- 버튼 ---
+document.querySelectorAll('[data-tab]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const tab = btn.dataset.tab
+    if (tab === 'analysis') {
+      await runAnalysis()
+    } else if (tab === 'review') {
+      if (!state.analysis) await runAnalysis()
+      await requestReview()
+    }
+    setTab(tab)
+  })
+})
+
+document.getElementById('btn-send').addEventListener('click', async () => {
+  const ctx = state.analysis
+  const rv = state.review
+  if (!ctx || !rv) return
+  const text = [
+    `[diff-review] 커밋 ${state.selectedCommit} 리뷰 결과`,
+    '',
+    `commit ${state.selectedCommit} · ${ctx.changedCount}파일 (+${ctx.adds} -${ctx.removes})`,
+    `blast: ${ctx.blastSize} — ${ctx.blastFiles.slice(0, 10).join(', ')}`,
+    `cycles: ${ctx.cycleCount} · violations: ${ctx.violationCount}`,
+    '',
+    ...(rv.issues.length ? [`## issues (${rv.issues.length})`, ...rv.issues.map((i) => `[${i.severity}] ${i.title} (${i.file}:${i.line})\n  ${i.description}`), ''] : []),
+    `## summary`,
+    rv.summary,
+    '',
+    '수정 방법을 제안해 주세요.',
+  ].join('\n')
+  await call('chat.compose', { text, send: false })
+})
+
+// --- 시작 ---
+async function start() {
+  try {
+    const res = await call('diff.commits', { limit: 10 })
+    state.commits = res.commits ?? []
+    renderCommits()
+    if (state.commits.length > 0) {
+      state.selectedCommit = state.commits[0].hash
+      await selectCommit(state.selectedCommit)
+    }
+  } catch (error) {
+    state.error = error.message
+    document.getElementById('commit-list').innerHTML = `<div class="note" style="color:var(--bad)">${esc(error.message)}</div>`
+  }
+}
+start()
+</script>
+</body>
+</html>
