@@ -198,7 +198,7 @@ export function App() {
   /** 이 대화의 모드 — 고른 적 없으면 새 대화 기본 모드 */
   const mode = active?.mode ?? settings.defaultMode
   /** 알림 — 메인이 쥔 대화별 상태(점)와 앞일 때의 토스트. 지금 보는 대화를 메인에 알린다 */
-  const notices = useNotices(active?.id, features.has('notifications'))
+  const notices = useNotices(active?.id, features.has('notifications'), sessions)
   /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다. 알림 기능과 무관하다 — 대화별 pending 으로 센다 (backgroundView.ts) */
   const running = runningIn(sessions, project?.path)
   const listed = pinnedFirst(visible)
@@ -891,7 +891,7 @@ export function App() {
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
       <RemotePairPrompt on={features.has('remote')} />
       {quickOpen}
-      <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} />
+      <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} onAnswer={notices.answer} />
     </div>
   )
 }

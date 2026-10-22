@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import type { ConversationStatus, NoticeState, OpenTarget, Toast } from '../shared/ipc.ts'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Attention, ConversationStatus, NoticeState, OpenTarget, Toast } from '../shared/ipc.ts'
 import { useT } from './settingsStore.ts'
 import './notices.css'
 
@@ -15,24 +15,45 @@ export interface ToastItem {
   message?: string
 }
 
-/** 토스트가 머무는 시간 — 문구가 두 줄이라 dsh 기본(3초)보다 길게. notices.css 의 사라짐(5초 뒤 1초)과 맞춘다 */
-const HOLD_MS = 6000
+// 승인·질문 토스트는 답을 필요로 해서 보통 토스트(완료 알림)보다 오래 머문다
+const HOLD_MS = 6_000
+const ATTENTION_HOLD_MS = 30_000
 const MAX_TOASTS = 3
 
 let nextKey = 0
 
 /** enabled: 설정 > 기능의 알림 — 꺼지면 점·알림 토스트를 비우고 듣지 않는다 (짧은 안내 say 는 그대로) */
-export function useNotices(viewing: string | undefined, enabled = true) {
+export function useNotices(viewing: string | undefined, enabled = true, sessions: { id: string; attention?: Attention[] }[] = []) {
   const [state, setState] = useState<NoticeState>({})
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const viewingRef = useRef(viewing)
   viewingRef.current = viewing
 
-  function push(item: Omit<ToastItem, 'key'>): void {
+  function push(item: Omit<ToastItem, 'key'>, holdMs = HOLD_MS): void {
     const key = nextKey++
     setToasts((now) => [...now, { ...item, key }].slice(-MAX_TOASTS))
-    setTimeout(() => setToasts((now) => now.filter((entry) => entry.key !== key)), HOLD_MS)
+    setTimeout(() => setToasts((now) => now.filter((entry) => entry.key !== key)), holdMs)
   }
+
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
+  /** 토스트의 [거절][허용] 버튼 — 그 대화의 대기 카드(requestId)를 찾아 답을 보내고 토스트를 닫는다. 실패하면 토스트가 남아 재시도 가능 */
+  const answer = useCallback(
+    (toast: Toast, answerValue: Toast['allowAnswer'] | Toast['rejectAnswer']): void => {
+      if (!answerValue) return
+      const session = sessionsRef.current.find((entry) => entry.id === toast.conversationId)
+      const requests = session?.attention ?? []
+      const target = toast.kind === 'permission' ? requests.find((request) => request.kind === 'permission')?.id : requests.find((request) => request.kind === 'question')?.id
+      if (!target) return
+      const dismiss = () => setToasts((now) => now.filter((entry) => entry.toast?.conversationId !== toast.conversationId))
+      void window.litecode
+        .replyAttention(toast.conversationId, target, answerValue)
+        .then(dismiss, () => {
+          /* 실패 — 토스트가 남아 재시도 가능 (useAnswer 의 사유 표시는 카드 쪽) */
+        })
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!enabled) {
@@ -44,7 +65,7 @@ export function useNotices(viewing: string | undefined, enabled = true) {
     void window.litecode.getNotifications().then(setState, () => {})
     const offChanged = window.litecode.onNotificationsChanged(setState)
     const offToast = window.litecode.onNotificationToast((toast) => {
-      if (toast.conversationId !== viewingRef.current) push({ toast })
+      if (toast.conversationId !== viewingRef.current) push({ toast }, toast.allowAnswer || toast.rejectAnswer ? ATTENTION_HOLD_MS : undefined)
     })
     return () => {
       offChanged()
@@ -62,6 +83,8 @@ export function useNotices(viewing: string | undefined, enabled = true) {
     /** 짧은 안내 (예: 누른 알림의 대화가 지워졌다) */
     say: (message: string) => push({ message }),
     dismiss: (key: number) => setToasts((now) => now.filter((entry) => entry.key !== key)),
+    /** 토스트의 [거절][허용] 버튼 — 답을 보내고 그 대화의 토스트를 닫는다 */
+    answer,
   }
 }
 
@@ -78,28 +101,41 @@ function statusLabel(t: ReturnType<typeof useT>, status: ConversationStatus): st
   return t(`notify.${status}`)
 }
 
-export function Toasts({ items, onOpen, onDismiss }: { items: ToastItem[]; onOpen(target: OpenTarget): void; onDismiss(key: number): void }) {
+export function Toasts({ items, onOpen, onDismiss, onAnswer }: { items: ToastItem[]; onOpen(target: OpenTarget): void; onDismiss(key: number): void; onAnswer(toast: Toast, answerValue: Toast['allowAnswer'] | Toast['rejectAnswer']): void }) {
   const t = useT()
   if (items.length === 0) return null
   return (
     <div className="toasts" role="region" aria-label={t('notify.toasts')}>
       {items.map(({ key, toast, message }) =>
         toast ? (
-          <button
-            key={key}
-            type="button"
-            className="toast"
-            onClick={() => {
-              onDismiss(key)
-              onOpen({ conversationId: toast.conversationId, project: toast.project })
-            }}
-          >
-            <StatusDot status={toast.kind === 'question' || toast.kind === 'permission' ? 'attention' : toast.kind} />
-            <span className="toast__text">
-              <span className="toast__title">{toast.title || t('sidebar.untitled')}</span>
-              <span className="toast__detail">{t('notify.body', { project: toast.projectName, status: t(`notify.${toast.kind}`) })}</span>
+          <div key={key} className={`toast${toast.allowAnswer || toast.rejectAnswer ? ' toast--attention' : ''}`}>
+            <button
+              type="button"
+              className="toast__open"
+              onClick={() => {
+                onDismiss(key)
+                onOpen({ conversationId: toast.conversationId, project: toast.project })
+              }}
+            >
+              <StatusDot status={toast.kind === 'question' || toast.kind === 'permission' ? 'attention' : toast.kind} />
+              <span className="toast__text">
+                <span className="toast__title">{toast.title || t('sidebar.untitled')}</span>
+                <span className="toast__detail">{t('notify.body', { project: toast.projectName, status: t(`notify.${toast.kind}`) })}</span>
+              </span>
+            </button>
+            <span className="toast__buttons">
+              {toast.rejectAnswer && (
+                <button type="button" className="toast__button toast__button--reject" onClick={() => onAnswer(toast, toast.rejectAnswer!)}>
+                  {t('approval.reject')}
+                </button>
+              )}
+              {toast.allowAnswer && (
+                <button type="button" className="toast__button toast__button--primary" onClick={() => onAnswer(toast, toast.allowAnswer!)}>
+                  {t('approval.allowOnce')}
+                </button>
+              )}
             </span>
-          </button>
+          </div>
         ) : (
           <div key={key} className="toast toast--message" role="status">
             <span className="toast__text">{message}</span>

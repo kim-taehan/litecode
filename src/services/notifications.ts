@@ -37,6 +37,9 @@ export interface Toast {
   /** 대화 제목 — 빈 값이면 화면이 "새 대화" 로 번역한다 */
   title: string
   kind: NoticeKind
+  /** permission·question 에만 — [거절][허용] 을 토스트에서 바로 누를 때의 답. allow 는 once (always 는 카드에 남김) */
+  allowAnswer?: 'once'
+  rejectAnswer?: 'reject'
 }
 
 /** 알림을 눌러 열 곳 */
@@ -200,10 +203,15 @@ export class NotificationsService extends Service {
     if (kind === 'done' || kind === 'failed' || kind === 'interrupted') entry.unread = kind
     const projectName = await this.projectName(conversation.project)
     if (where === 'app') {
-      if (this.channels.app) this.ctx.emit('notifications/toast', { conversationId: conversation.id, project: conversation.project, projectName, title: conversation.title, kind })
+      if (this.channels.app) {
+        const answer: Partial<Toast> = kind === 'permission' ? { allowAnswer: 'once', rejectAnswer: 'reject' } : kind === 'question' ? { rejectAnswer: 'reject' } : {}
+        this.ctx.emit('notifications/toast', { conversationId: conversation.id, project: conversation.project, projectName, title: conversation.title, kind, ...answer })
+      }
       return
     }
     if (kind === 'interrupted') return
+    // 완료·실패(·중단) 는 더 이상 PC 알림으로 안 간다 (#590) — 앱 토스트 + 상태 점(항상)으로 통일. 창 뒤면 PC 알림 없이 대기
+    if (kind === 'done' || kind === 'failed') return
     if (!this.channels.system) return // 외부 알람 끔 — PC 알림·배지까지만 없다, 점은 이미 적혔다
     const target: OpenTarget = { conversationId: conversation.id, project: conversation.project }
     const note = this.host.show(
@@ -248,7 +256,7 @@ export class NotificationsService extends Service {
     this.ctx.emit('notifications/open')
   }
 
-  /** 안 본 끝남과 그 PC 알림을 지운다 — 답 필요·실행 중은 읽음과 무관하다 */
+  /** 안 본 끝남(그 PC 알림)을 지운다 — 답 필요(승인·질문) 점·알림은 읽음과 무관 (카드는 답이 올 때까지 떠 있다) */
   private read(conversationId: string): void {
     const entry = this.entries.get(conversationId)
     this.close(conversationId)

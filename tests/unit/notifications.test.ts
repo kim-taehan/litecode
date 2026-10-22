@@ -87,29 +87,27 @@ describe('route — 앞/뒤 판정 (G1)', () => {
 })
 
 describe('NotificationsService', () => {
-  it('뒤에서 끝나면 PC 알림 — 제목은 대화 제목, 본문은 "프로젝트 · 상태" (답 내용 없음). 점은 안 본 완료, 배지 1', async () => {
+  it('뒤에서 끝나면 PC 알림 없이 점·배지만 — 완료·실패는 앱 토스트로 통일 (이슈 #590)', async () => {
     const { ctx, host, notifications } = await start()
     ctx.emit('llm/turn-started', { sessionId: 'ses_1', directory: '/work/alpha' })
     await notifications.idle()
-    expect(notifications.snapshot()).toEqual({ c1: { project: '/work/alpha', status: 'running' } })
 
     ctx.emit('llm/turn-ended', { ...ended('ses_1', 'done'), error: undefined })
     await notifications.idle()
-    expect(host.shown.map(({ title, body }) => ({ title, body }))).toEqual([{ title: 'API 리팩터링', body: 'billing-service · 끝났습니다' }])
+    expect(host.shown).toEqual([])
     expect(notifications.snapshot()).toEqual({ c1: { project: '/work/alpha', status: 'done' } })
     expect(host.badges.at(-1)).toBe(1)
   })
 
-  it('실패 문구에 provider 오류 원문을 싣지 않는다. 제목 없는 대화는 "새 대화", 목록에 없는 프로젝트는 폴더 이름', async () => {
+  it('뒤에서 승인·질문 대기면 PC 알림은 "승인·질문" 본문 (답 내용 없음) — 완료/실패는 없음', async () => {
     const { ctx, host, notifications } = await start()
-    ctx.emit('llm/turn-ended', { ...ended('ses_2', 'failed'), error: 'HTTP 500 secret-token-xyz' })
-    ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta'))
+    ctx.emit('llm/turn-started', { sessionId: 'ses_1', directory: '/work/alpha' })
+    ctx.emit('llm/attention', { sessionId: 'ses_1', directory: '/work/alpha', kind: 'permission', title: 'bash' })
+    ctx.emit('llm/turn-ended', { ...ended('ses_3', 'done', '/work/beta'), error: undefined })
     await notifications.idle()
-    expect(host.shown.map(({ title, body }) => ({ title, body }))).toEqual([
-      { title: '새 대화', body: 'billing-service · 실패했습니다' },
-      { title: '테스트 고치기', body: 'beta · 끝났습니다' },
-    ])
-    expect(JSON.stringify(host.shown)).not.toContain('secret')
+    expect(host.shown.map(({ title, body }) => ({ title, body }))).toEqual([{ title: 'API 리팩터링', body: 'billing-service · 승인을 기다립니다' }])
+    expect(notifications.snapshot().c1?.status).toBe('attention')
+    expect(notifications.snapshot().c3?.status).toBe('done')
   })
 
   it('앞에서 다른 대화가 끝나면 PC 알림 없이 토스트 + 점', async () => {
@@ -136,16 +134,18 @@ describe('NotificationsService', () => {
     expect(host.badges.at(-1)).toBe(0)
   })
 
-  it('대화마다 최신 하나 — 같은 대화의 새 알림은 이전 것을 닫고, 다른 대화의 알림은 그대로', async () => {
+  it('대화마다 최신 하나 — 같은 대화의 새 승인·질문은 이전 것을닫고, 다른 대화의 알림은 그대로', async () => {
     const { ctx, host, notifications } = await start()
-    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
-    ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta'))
-    ctx.emit('llm/turn-ended', ended('ses_1', 'failed'))
+    ctx.emit('llm/turn-started', { sessionId: 'ses_1', directory: '/work/alpha' })
+    ctx.emit('llm/attention', { sessionId: 'ses_1', directory: '/work/alpha', kind: 'permission', title: 'bash' })
+    ctx.emit('llm/turn-started', { sessionId: 'ses_3', directory: '/work/beta' })
+    ctx.emit('llm/attention', { sessionId: 'ses_3', directory: '/work/beta', kind: 'question', title: 'DB 를 고르세요' })
+    ctx.emit('llm/attention', { sessionId: 'ses_1', directory: '/work/alpha', kind: 'question', title: '브랜치 고르기' })
     await notifications.idle()
     expect(host.shown.map((entry) => [entry.title, entry.body, entry.closed])).toEqual([
-      ['API 리팩터링', 'billing-service · 끝났습니다', true],
-      ['테스트 고치기', 'beta · 끝났습니다', false],
-      ['API 리팩터링', 'billing-service · 실패했습니다', false],
+      ['API 리팩터링', 'billing-service · 승인을 기다립니다', true],
+      ['테스트 고치기', 'beta · 질문에 답을 기다립니다', false],
+      ['API 리팩터링', 'billing-service · 질문에 답을 기다립니다', false],
     ])
     expect(host.badges.at(-1)).toBe(2)
   })
@@ -160,11 +160,11 @@ describe('NotificationsService', () => {
 
   // 설정 > 일반의 "알림" 스위치는 없앴다 (사용자 2026-10-06 — 설정 > 기능의 알림 카드와 겹쳤다). 설정에 그 값 자체가 없다 —
   // 예전에 꺼 둔 값이 파일에 남아 있어도 읽을 때 버린다 (settings.test.ts)
-  it('일반 설정의 알림 값은 보지 않는다 — 기능이 켜져 있으면 PC 알림이 뜬다', async () => {
+  it('일반 설정의 알림 값은 보지 않는다 — 기능이 켜져 있으면 완료는 토스트·점은 남는다', async () => {
     const { ctx, host, notifications, toasts } = await start()
     ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
     await notifications.idle()
-    expect(host.shown).toHaveLength(1)
+    expect(host.shown).toHaveLength(0)
     expect(notifications.snapshot().c1?.status).toBe('done')
     host.foreground = true
     ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta'))
@@ -201,25 +201,28 @@ describe('NotificationsService', () => {
   it('읽음 — 앞에서 그 대화를 열면 안 본 완료와 그 PC 알림이 사라진다. 뒤에서 열려 있던 것은 창이 앞으로 올 때', async () => {
     const { ctx, host, notifications } = await start()
     notifications.view('c1')
-    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
-    ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta'))
+    ctx.emit('llm/turn-started', { sessionId: 'ses_1', directory: '/work/alpha' })
+    ctx.emit('llm/attention', { sessionId: 'ses_1', directory: '/work/alpha', kind: 'question', title: 'DB 를 고르세요' })
     await notifications.idle()
-    expect(notifications.snapshot().c1?.status).toBe('done') // 뒤에서 보던 대화 — 아직 안 봤다
+    expect(notifications.snapshot().c1?.status).toBe('attention') // 승인·질문 대기
 
+    // 창이 앞으로 오면 PC 알림은 닫히지만 — 보고 있는 대화의 승인·질문 대기는 읽음과 무관하다 (카드는 답이 올 때까지 떠 있다)
     host.foreground = true
     notifications.focused()
-    expect(notifications.snapshot().c1).toBeUndefined()
+    expect(notifications.snapshot().c1?.status).toBe('attention')
     expect(host.shown[0]!.closed).toBe(true)
 
-    notifications.view('c3')
-    expect(notifications.snapshot()).toEqual({})
-    expect(host.shown[1]!.closed).toBe(true)
+    ctx.emit('llm/attention-resolved', { sessionId: 'ses_1', directory: '/work/alpha' })
+    await notifications.idle()
+    // 질문·승인 대기 풀림 — 실행 중 턴의 점만 남는다 (대화를 지우거나 턴이 끝나면 지워진다)
+    expect(notifications.snapshot()).toEqual({ c1: { project: '/work/alpha', status: 'running' } })
     expect(host.badges.at(-1)).toBe(0)
   })
 
-  it('PC 알림을 누르면 창을 앞으로 + 열 대상을 적고 화면에 신호. 화면이 한 번 당겨 가면 비운다', async () => {
+  it('PC 알림을 누르면 승인·질문 대화로 이동 (완료/실패는 PC 알림 없음, #590). 화면이 한 번 당겨 가면 비운다', async () => {
     const { ctx, host, notifications, opens } = await start()
-    ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta'))
+    ctx.emit('llm/turn-started', { sessionId: 'ses_3', directory: '/work/beta' })
+    ctx.emit('llm/attention', { sessionId: 'ses_3', directory: '/work/beta', kind: 'permission', title: 'bash' })
     await notifications.idle()
     host.shown[0]!.click()
     expect(host.reveals).toBe(1)
@@ -231,20 +234,26 @@ describe('NotificationsService', () => {
 
   it('대화를 지우거나 프로젝트를 빼면 그 알림·점을 거둔다 (Q8 c). 실행 중인 턴의 점은 남는다', async () => {
     const { ctx, host, notifications } = await start()
-    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
+    ctx.emit('llm/attention', { sessionId: 'ses_1', directory: '/work/alpha', kind: 'permission', title: 'bash' })
     ctx.emit('llm/turn-ended', ended('ses_2', 'done'))
-    ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta'))
+    ctx.emit('llm/attention', { sessionId: 'ses_3', directory: '/work/beta', kind: 'question', title: 'DB 를 골라 주세요' })
     ctx.emit('llm/turn-started', { sessionId: 'ses_3', directory: '/work/beta' })
     await notifications.idle()
+    // c1 PC알림(승인), c2 점(완료), c3 PC알림(질문)
+    expect(notifications.snapshot().c1?.status).toBe('attention')
+    expect(notifications.snapshot().c2?.status).toBe('done')
+    expect(notifications.snapshot().c3?.status).toBe('attention')
 
     ctx.emit('sessions/removed', ['c1'])
-    expect(host.shown[0]!.closed).toBe(true)
-    expect(notifications.snapshot().c1).toBeUndefined()
+    expect(notifications.snapshot()).not.toHaveProperty('c1')
+    expect(host.shown.filter((entry) => !entry.closed)).toHaveLength(1) // c3 승인·질문 PC 알림만 남는다
 
+    // 프로젝트를 목록에서 빼도 (keepLive) 돌고 있거나 답을 기다리는 대화는 남는다 — c3 질문·승인 대기
     ctx.emit('projects/removed', '/work/beta')
-    expect(host.shown[2]!.closed).toBe(true)
-    expect(notifications.snapshot()).toEqual({ c2: { project: '/work/alpha', status: 'done' }, c3: { project: '/work/beta', status: 'running' } })
-    expect(host.shown[1]!.closed).toBe(false)
+    expect(notifications.snapshot()).toEqual({
+      c2: { project: '/work/alpha', status: 'done' },
+      c3: { project: '/work/beta', status: 'attention' },
+    })
   })
 
   it('목록에 없는 엔진 세션의 사건은 무시한다', async () => {
@@ -257,9 +266,10 @@ describe('NotificationsService', () => {
 
   it('서비스를 내리면(앱 종료) 남은 PC 알림을 다 닫는다 — 꺼진 뒤 눌러도 이동 못 하는 알림을 남기지 않는다', async () => {
     const { ctx, host, notifications, fiber } = await start()
-    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
-    ctx.emit('llm/turn-ended', ended('ses_3', 'done', '/work/beta'))
+    ctx.emit('llm/attention', { sessionId: 'ses_1', directory: '/work/alpha', kind: 'permission', title: 'bash' })
+    ctx.emit('llm/attention', { sessionId: 'ses_3', directory: '/work/beta', kind: 'question', title: 'DB 를 골라 주세요' })
     await notifications.idle()
+    expect(host.shown).toHaveLength(2)
     await fiber.dispose()
     expect(host.shown.map((entry) => entry.closed)).toEqual([true, true])
   })
@@ -359,7 +369,7 @@ describe('알림 채널 자 스위치 (notifyChannels, 이슈 #372) — 외부(P
 
   it('도는 중에 밖을 끄면 떠 있던 PC 알림이 닫히고 배지가 지워진다', async () => {
     const { ctx, host, notifications } = await start()
-    ctx.emit('llm/turn-ended', ended('ses_1', 'done'))
+    ctx.emit('llm/attention', { sessionId: 'ses_1', directory: '/work/alpha', kind: 'question', title: 'DB 를 골라 주세요' })
     await notifications.idle()
     expect(host.shown).toHaveLength(1)
     expect(host.badges.at(-1)).toBe(1)
