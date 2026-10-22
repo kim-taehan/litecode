@@ -40,38 +40,41 @@ export function TurnTab({ conversationId, startedAt, directory, title, here, onJ
 
   return (
     <div className="turn-tab" data-state={state}>
-      <div className="turn-tab__head">
-        <span className="turn-tab__dot" aria-hidden="true" />
-        <strong className="turn-tab__title">{head}</strong>
-      </div>
-      {/* 그 턴을 시작한 내 말 — 없으면(첨부만·오래된 기록) 안 본다 */}
-      {detail.userQuery && (
-        <div className="turn-tab__query" role="note">
-          <span className="turn-tab__query-label">{t('turnTab.query')}</span>
-          <span className="turn-tab__query-text">{detail.userQuery}</span>
-        </div>
-      )}
-      {/* 이 턴이 속한 대화 (이슈 #462) — 다른 대화면 눌러 그 대화로 이동, 지금 보는 대화면 화살표 없이 제목만 */}
-      {title !== undefined && title !== '' && (
-        here ? (
-          <div className="turn-tab__conv" role="note">
-            <ChatIcon className="turn-tab__conv-icon" />
-            <span className="turn-tab__conv-label">{t('turnTab.conversation')}</span>
-            <span className="turn-tab__conv-name">{title}</span>
+      {/* 머리 (이슈 #462 시안 C) — 위: 내 질문, 아래: 상태 칩(점+작업 중)과 이 턴이 속한 대화 */}
+      <div className="turn-tab__head turn-tab__head--c">
+        {/* 그 턴을 시작한 내 말 — 없으면(첨부만·오래된 기록) 라벨 없이 질문만 */}
+        {detail.userQuery && (
+          <div className="turn-tab__query" role="note">
+            <span className="turn-tab__query-label">{t('turnTab.query')}</span>
+            <span className="turn-tab__query-text">{detail.userQuery}</span>
           </div>
-        ) : (
-          <button type="button" className="turn-tab__conv turn-tab__conv--other" title={t('turnTab.jumpTo')} aria-label={`${t('turnTab.jumpTo')} — ${title}`} onClick={onJump}>
-            <ChatIcon className="turn-tab__conv-icon" />
-            <span className="turn-tab__conv-label">{t('turnTab.conversation')}</span>
-            <span className="turn-tab__conv-name">{title}</span>
-            <span className="turn-tab__conv-arrow" aria-hidden="true">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 8H12M9 5L12 8L9 11" />
-              </svg>
-            </span>
-          </button>
-        )
-      )}
+        )}
+        <div className="turn-tab__bar">
+          <span className="turn-tab__chip" aria-label={head}>
+            <span className="turn-tab__dot" aria-hidden="true" />
+            <span className="turn-tab__chip-text">{head}</span>
+          </span>
+          {/* 이 턴이 속한 대화 (이슈 #462) — 다른 대화면 눌러 그 대화로 이동, 지금 보는 대화면 화살표 없이 제목만 */}
+          {title !== undefined && title !== '' && (
+            here ? (
+              <div className="turn-tab__conv" role="note">
+                <ChatIcon className="turn-tab__conv-icon" />
+                <span className="turn-tab__conv-name">{title}</span>
+              </div>
+            ) : (
+              <button type="button" className="turn-tab__conv turn-tab__conv--other" title={t('turnTab.jumpTo')} aria-label={`${t('turnTab.jumpTo')} — ${title}`} onClick={onJump}>
+                <ChatIcon className="turn-tab__conv-icon" />
+                <span className="turn-tab__conv-name">{title}</span>
+                <span className="turn-tab__conv-arrow" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2.5 8H12.5M9 4.5L12.5 8L9 11.5" />
+                  </svg>
+                </span>
+              </button>
+            )
+          )}
+        </div>
+      </div>
       <div
         ref={body}
         className="turn-tab__body"
