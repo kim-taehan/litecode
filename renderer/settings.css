@@ -1780,3 +1780,87 @@
   margin-right: 6px;
   vertical-align: -1px;
 }
+
+/* 단축키 페이지 */
+.shortcuts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.shortcuts-page__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.shortcuts-page__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.shortcuts-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcuts-group__label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+}
+
+.shortcuts-group__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 0.5px solid var(--border);
+  gap: 16px;
+}
+
+.shortcut-row:last-child {
+  border-bottom: none;
+}
+
+.shortcut-row__label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.shortcut-row__keys {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.shortcut-row__kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 6px;
+  border: 0.5px solid var(--border-ring);
+  border-radius: 5px;
+  background: var(--surface-inset);
+  font-size: 11px;
+  line-height: 16px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}

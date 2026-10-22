@@ -551,6 +551,36 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // ⌘[ / Ctrl+[ (이전) · ⌘] / Ctrl+] (다음) — 프로젝트 무관, 최근 수정 순 conversationHistory 로 이동 (2026-10-22)
+  const convHistoryRef = useRef<{ history: { id: string; project: string }[]; current: string | undefined }>({ history: [], current: undefined })
+  convHistoryRef.current = {
+    history: sessions.filter((session) => !isBlank(session)).sort((a, b) => b.updatedAt - a.updatedAt).map((s) => ({ id: s.id, project: s.project })),
+    current: active?.id,
+  }
+  const openConvRef = useRef<(project: string, conversationId: string) => void>(() => {})
+  openConvRef.current = (project: string, conversationId: string) => {
+    void openNotice({ project, conversationId })
+  }
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.isComposing || event.altKey || event.shiftKey || event.key !== '[' && event.key !== ']') return
+      if (navigator.platform.startsWith('Mac') ? !event.metaKey : !event.ctrlKey) return
+      if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
+      const { history, current } = convHistoryRef.current
+      if (history.length < 2) return
+      const index = current ? history.findIndex((entry) => entry.id === current) : -1
+      const dir = event.key === ']' ? 1 : -1
+      const nextIndex = index < 0 ? 0 : (index + dir + history.length) % history.length
+      const next = history[nextIndex]
+      if (!next) return
+      event.preventDefault()
+      event.stopPropagation()
+      openConvRef.current(next.project, next.id)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
   // ⌘↑/⌘↓ (2026-10-13 피드백 #3) — 바로 이전/다음 대화로. 사이드바 대화 목록 순서(진행중만 보기·찾기·고정 순) 기준, 끝에서 감돈다
   const listedNavRef = useRef(listed)
   listedNavRef.current = listed
