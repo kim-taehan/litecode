@@ -7,7 +7,7 @@ import { Context, Service } from 'cordis'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { ascendingId, connectionRefused, finishedTool, LlmService, MCP_TOOLS_MARKER, STREAM_IDLE_TIMEOUT_MS, type Attention, type PreTool, type PreToolDecision, type ToolDone, type TurnInfo } from '../../src/services/llm.ts'
 import { interruptedError } from '../../src/services/history.ts'
-import { TODO_SYNC_RULE } from '../../src/services/instructions.ts'
+import { LANGUAGE_RULE, TODO_SYNC_RULE } from '../../src/services/instructions.ts'
 import type { TurnItem } from '../../src/services/turnProgress.ts'
 import { setMainLanguage, tr } from '../../src/i18n.ts'
 import { translate } from '../../shared/i18n/index.ts'
@@ -729,12 +729,12 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
   it('프로젝트 AGENTS.md 와 할 일 동기화 규칙을 매 턴 system 으로 싣는다 (규칙은 지시문 뒤). 지시문이 없으면 규칙만', async () => {
     const { llm } = await start(await fakeOpencode('done'))
     await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'no instructions' })
-    expect(prompts[0]!['system']).toBe(TODO_SYNC_RULE)
+    expect(prompts[0]!['system']).toBe(`${TODO_SYNC_RULE}\n\n${LANGUAGE_RULE}`)
     fs.writeFileSync(path.join(directory, 'AGENTS.md'), '# 규칙\n한국어로 답한다\n')
     try {
       await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'with instructions', sessionId: 'ses_1' })
       await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'every turn', sessionId: 'ses_1' })
-      for (const prompt of prompts.slice(1)) expect(prompt['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\n# 규칙\n한국어로 답한다\n\n\n${TODO_SYNC_RULE}`)
+      for (const prompt of prompts.slice(1)) expect(prompt['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\n# 규칙\n한국어로 답한다\n\n\n${TODO_SYNC_RULE}\n\n${LANGUAGE_RULE}`)
     } finally {
       fs.rmSync(path.join(directory, 'AGENTS.md'))
     }
@@ -751,7 +751,7 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     try {
       items.length = 0
       await turn()
-      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.local.md')}\nmine\n\n\n${TODO_SYNC_RULE}`)
+      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.local.md')}\nmine\n\n\n${TODO_SYNC_RULE}\n\n${LANGUAGE_RULE}`)
       expect(items[0]).toEqual({ kind: 'context', id: `${String(prompts[1]!['messageID'])}:instructions`, text: tr('chat.instructionsLocal', { files: 'AGENTS.local.md' }) })
     } finally {
       fs.rmSync(path.join(directory, 'AGENTS.local.md'))
@@ -763,13 +763,13 @@ describe('레거시 경로 계약 (이슈 #13)', () => {
     const { llm } = await start(await fakeOpencode('done'))
     const turn = (context?: string) => llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', images: [], context })
     await turn('branch: main')
-    expect(prompts[0]!['system']).toBe(`${TODO_SYNC_RULE}\n\nbranch: main`) // 규칙 뒤에 그 턴 맥락
+    expect(prompts[0]!['system']).toBe(`${TODO_SYNC_RULE}\n\n${LANGUAGE_RULE}\n\nbranch: main`) // 규칙 뒤에 그 턴 맥락
     fs.writeFileSync(path.join(directory, 'AGENTS.md'), 'rules\n')
     try {
       await turn('branch: main')
       await turn()
-      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\n${TODO_SYNC_RULE}\n\nbranch: main`)
-      expect(prompts[2]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\n${TODO_SYNC_RULE}`)
+      expect(prompts[1]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\n${TODO_SYNC_RULE}\n\n${LANGUAGE_RULE}\n\nbranch: main`)
+      expect(prompts[2]!['system']).toBe(`Instructions from: ${path.join(directory, 'AGENTS.md')}\nrules\n\n\n${TODO_SYNC_RULE}\n\n${LANGUAGE_RULE}`)
     } finally {
       fs.rmSync(path.join(directory, 'AGENTS.md'))
     }

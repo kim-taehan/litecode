@@ -19,6 +19,31 @@ export function splitTurn(items: readonly TurnItem[]): { work: TurnItem[]; answe
   return { work: [...items.slice(0, cut), ...items.slice(end)], answer: items.slice(cut, end) }
 }
 
+/** 끝나기 전의 잠정 상태: work(접는 작업: think·tool) / interim(진행 중 흘리는 잠정답) / answer(엔진이 준 최종 답).
+ *  deepagents harness 의 `Text | Reasoning | ToolCall | ToolResult` 이벤트 구조와 동일:
+ *  진행 중엔 Text/Reasoning (잠정답) 을 흘리고 ToolCall/ToolResult 는 work.
+ *  - answer: `answerText` 가 쓰는 `splitTurn` 의 answer (엔진 최종 답 fallback 이 안 될 때 쓰임)
+ *  - work:  `splitTurn` 의 work (think·tool·중간 text — 우측 "턴 작업" 탭)
+ *  - interim: `interimText` (= 마지막 도구·생각 뒤 text) — 진행 중 채팅에 흘림
+ */
+export function interimSplit(items: readonly TurnItem[]): { work: TurnItem[]; interim: string[]; answer: TurnItem[] } {
+  const { work, answer } = splitTurn(items)
+  return { work, interim: interimText(items), answer }
+}
+
+/** 도는 턴의 '잠정답' 문자 — `splitTurn` 의 answer 에서 text 줄만.
+ *  deepagents `final_ai_text`: 역순에서 첫 AI 메시지 (= 마지막 도구 이후 text) 와 동일.
+ *  - 진행 중: 마지막 도구·생각 뒤의 text 만 보임
+ *  - 도구 호출: 그 위의 글은 `interimSplit.work` 로 이동 (채팅에 안 보임, 우측 '턴 작업' 탭으로)
+ *  - 턴 종료: `splitTurn.answer` = 최종 답만 남음
+ */
+export function interimText(items: readonly TurnItem[]): string[] {
+  const { answer } = splitTurn(items)
+  return answer
+    .filter((item): item is Extract<TurnItem, { kind: 'text' }> => item.kind === 'text' && item.text.trim() !== '')
+    .map((item) => item.text)
+}
+
 /** 답 글. 답 줄이 다 끝났으면 그 글, 아니면(줄을 못 받았거나 덜 받음) 엔진이 준 답 전체(fallback) */
 export function answerText(answer: readonly TurnItem[], fallback: string): string {
   const texts = answer.filter((item): item is Extract<TurnItem, { kind: 'text' }> => item.kind === 'text')

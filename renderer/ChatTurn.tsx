@@ -7,10 +7,10 @@ import { CompactionMark } from './Compaction.tsx'
 import { takeCompactions } from './compaction.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
-import { answerText, clockTime, formatDuration, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
+import { answerText, clockTime, formatDuration, interimSplit, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
 import { openTurnTab } from './filePreviewStore.ts'
 import { feedCompletedTurn } from './turnDetailStore.ts'
-import { runningLine } from './jobsView.ts'
+import { interimText, runningLine } from './jobsView.ts'
 import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import type { MessageOrigin } from '../shared/contract.ts'
 import { DelegationRow, OriginTag, useDelegation } from './Delegation.tsx'
@@ -30,7 +30,7 @@ import './hooks.css'
 // - 내 말: 오른쪽 연파랑 말풍선 + 아래 시각·복사 아이콘
 // - 답: 말풍선이 아니라 본문 폭 전체의 글. 위에 턴 머리 "완료 · 2초 ⌄" 와 얇은 구분선 — 펼치면 그 턴의 작업 줄(생각·도구·중간 글)
 // - 진행 중: 생각·도구·중간 글 줄은 채팅에 안 쌓고(필터) 맨 아래 파란 "작업 중 · N초 ···" 한 줄만. 전문은 우측 "턴 작업" 탭.
-//   끝나면 머리 아래로 접힌다 (이슈 #416, 피드백 #8 — 중간 글도 진행 중엔 숨김)
+//   답이 될 글(마지막 도구·생각 뒤)은 채팅에 스트리밍 (append-only — 도구가 끼어도 안 사라짐, DeepSeek 하네스). 끝나면 머리 아래로 접힌다
 // 접기 규칙(dsh TurnProcessNodeView): 잘 끝난 턴만 접는다. 실패한 턴은 작업을 펼친 채로 두고 접기 버튼이 없다
 
 // 내 말·답은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도(초안이 App 의 state) 바뀌지 않은 턴은 다시 그리지 않는다
@@ -130,7 +130,9 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다.
   // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
   const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
-  const { work, answer } = running ? { work: [] as TurnItem[], answer: [] } : splitTurn(rest)
+  // 끝나면 splitTurn (답/작업 갈라짐), 진행 중이면 deepagents harness 구조 (work/answer)
+  // `interimSplit` 이 진행 중 갈라짐을, `splitTurn` 이 끝나기 갈라짐을 — 같은 규칙으로
+  const { work, answer } = running ? interimSplit(rest) : splitTurn(rest)
   // 진행 중(이슈 #416) — 생각·도구·중간 글 줄은 채팅에 안 쌓고 한 줄(RunningLine)로, 전문은 우측 "턴 작업" 탭으로.
   // 채팅에는 요약 중(compaction)과, 마지막 도구·생각 뒤의 글(= 답이 될 글)만 흘린다 — 중간 글("Let me…")은 피드백 #8 대로 숨기되
   // 최종 답은 스트리밍한다(이슈 #565 — #534 가 글 줄을 다 숨겨 답이 끝날 때 한꺼번에 나왔다)
@@ -188,15 +190,16 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
             )}
           </div>
         ))}
-      {workFold.mounted && work.length > 0 && (
+      {!running && workFold.mounted && work.length > 0 && (
         <div className="turn__work" {...workFold.fold}>
           {work.map((item) =>
             item.kind === 'compaction' ? <CompactionMark key={item.id} item={item} /> : <WorkRow key={item.id} item={item} directory={directory} turnRunning={running} />,
           )}
         </div>
       )}
-      {/* 진행 중 — 요약 중 줄만 채팅에. 텍스트·생각·도구 줄은 아래 파란 한 줄과 우측 "턴 작업" 탭으로 (이슈 #416, 피드백 #8, #573) */}
-      {liveRows.length > 0 && (
+      {/* 진행 중: work (think + tool) 는 우측 "턴 작업" 탭으로 (이슈 #416)
+       *  interim (text delta) + RunningLine 은 아래 RunningLine 에서 (deepagents harness) */}
+      {running && liveRows.length > 0 && (
         <div className="turn__work">
           {liveRows.map((item) => (
             <CompactionMark key={item.id} item={item} />
@@ -430,6 +433,7 @@ function RunningLine({ items, startedAt, directory, conversationId, userQuery }:
     return () => clearInterval(timer)
   }, [])
   const line = runningLine(items)
+  const interim = interimText(items)
   // 재시도 대기(게이트웨이 500 등)는 지금 하는 일을 덮는 상태 — 사유까지 한 줄로 (이슈 #20 의 진행 줄을 한 줄로 받은 것)
   const retry = [...items].reverse().find((item): item is Extract<TurnItem, { kind: 'retry' }> => item.kind === 'retry' && item.status === 'waiting')
   const summary = retry ? [t('chat.retrying', { attempt: retry.attempt }), retry.message].filter(Boolean).join(' · ') : line?.text ?? t('chat.working')
@@ -454,6 +458,11 @@ function RunningLine({ items, startedAt, directory, conversationId, userQuery }:
   return (
     <div className="turn-running">
       <span className="turn-running__divider" aria-hidden="true" />
+      {interim !== undefined && (
+        <div className="turn-row turn-row--text" data-kind="text">
+          <Markdown text={interim} directory={directory} streaming />
+        </div>
+      )}
       {canOpen ? (
         <button
           type="button"
