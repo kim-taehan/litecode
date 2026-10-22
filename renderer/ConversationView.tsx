@@ -115,7 +115,9 @@ export function ConversationView({
       ))
   }
 
-  /** limit=RECENT_FIRST_LIMIT 으로 이전 페이지만 불러와 앞에 붙인다. 더 있으면 historyMore 가 true 로 남는다 */
+  /** 스크롤 최상단에서 이전 페이를 자동으로 불러온다 (이슈 #599).
+   *  offset=현재 메시지 수, limit=RECENT_FIRST_LIMIT — 이전 페이(10개)만 받아 앞에 붙인다.
+   *  더 이전이 있으면 offset 이 다음 페이를 가리키도록 올라가고, 없으면 멈춘다. */
   function loadEarlier() {
     const id = active.id
     if (loadingRef.current) return
@@ -124,12 +126,12 @@ export function ConversationView({
     firstTurnRef.current = firstTurns[0] ?? null
     priorScrollTopRef.current = element ? element.scrollTop : 0
     loadingRef.current = true
-    void window.litecode.loadConversation(id, RECENT_FIRST_LIMIT).then((loaded) => {
+    void window.litecode.loadConversation(id, { limit: RECENT_FIRST_LIMIT, offset: active.messages.length }).then((loaded) => {
       loadingRef.current = false
       updateSession(id, (session) => ({
         ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
-        ...(loaded.more ? { historyMore: true, hiddenCount: loaded.hiddenCount } : { historyMore: false, hiddenCount: undefined }),
+        ...(loaded.more ? { historyMore: true } : { historyMore: false }),
       }))
     })
   }
@@ -207,11 +209,6 @@ export function ConversationView({
         ) : (
           <>
             {active.messages.length === 0 && <div className="empty">{t('chat.empty')}</div>}
-            {active.historyMore && (
-              <button type="button" className="run-plan" onClick={loadEarlier}>
-                {t('chat.loadMore', { count: active.hiddenCount ?? '' })}
-              </button>
-            )}
           </>
         )}
         {/* 내 말은 말풍선, 답은 본문 폭 전체의 글 + 턴 머리 (ChatTurn.tsx) */}

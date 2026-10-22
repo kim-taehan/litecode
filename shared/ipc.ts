@@ -342,7 +342,7 @@ export interface LitecodeBridge {
   removeConversation(id: string): Promise<void>
   /** 저장된 대화의 말풍선. 작업 폴더가 없으면 엔진에 묻지 않고 missingFolder.
    *  limit 이 있으면 엔진 측에서 최근 N개만 부른다 — 경계가 턴이 아니라면 more=true (앞 턴이 더 있다) */
-  loadConversation(id: string, limit?: number): Promise<History>
+  loadConversation(id: string, query?: { limit?: number; offset?: number }): Promise<History>
   /** 캐럿 자리의 입력 트리거와 후보 — 트리거가 아니면 null. 화면은 어떤 문자가 트리거인지 모른다 (ctx.triggers) */
   queryTrigger(scope: TriggerScope, draft: string, caret: number): Promise<TriggerQuery | null>
   /** 후보 하나를 고른다 (drill: 폴더로 들어가기) */
