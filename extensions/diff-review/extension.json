@@ -1,0 +1,7 @@
+{
+  "name": "diff-review",
+  "version": "0.0.1",
+  "description": "커밋별 diff + blast radius + AI 사이드 이펙트 리뷰",
+  "entry": "index.html",
+  "permissions": ["project", "chat"]
+}
