@@ -266,6 +266,8 @@ const canAlways = (action: string | undefined): boolean => action !== undefined 
 const isGitWrite = (action: string): boolean => GIT_WRITE_TOOLS.some((tool) => action === `litecode_${tool}`)
 /** git 쓰기의 기억 열쇠는 도구 상관없이 하나 — [항상 허용] 한 번에 그 대화의 git 쓰기 전부 허용 (2026-10-12 "왜 4번이냐") */
 const GIT_WRITE_ALLOW_KEY = 'litecode_git_write'
+/** 폴더 밖 접근의 기억 열쇠는 경로 상관없이 하나 — [항상 허용] 한 번에 그 대화의 폴더 밖 전부 허용 (이슈 #591 "왜 folderA, folderB 매번이냐". #242 의 같은 폴더 밖은 한 카드였다) */
+const EXTERNAL_DIR_ALLOW_KEY = 'external_directory'
 
 /** 요청 패턴의 비교 열쇠 — 패턴 목록이 같아야 같은 요청이다 */
 function allowKey(patterns: readonly string[]): string {
@@ -273,10 +275,11 @@ function allowKey(patterns: readonly string[]): string {
 }
 
 /** [항상 허용] 기억 열쇠 — 같은 권한 + 같은 패턴 (2026-10-12). 권한 이름까지 넣는다 — 폴더 밖 패턴과 git 쓰기가 서로 섞이지 않게.
- *  git 쓰기만 도구 상관없이 한 열쇠(그 대화의 git 쓰기 전체를 한 번에 허용) */
+ *  git 쓰기는 도구 상관없이, 폴더 밖 접근은 경로 상관없이 각각 한 열쇠 (2026-10-12 "왜 4번이냐" · 이슈 #591) */
 function rememberKey(action: string, patterns: readonly string[]): string {
-  const name = isGitWrite(action) ? GIT_WRITE_ALLOW_KEY : action
-  return `${name}\u0000${allowKey(patterns)}`
+  if (isGitWrite(action)) return GIT_WRITE_ALLOW_KEY
+  if (action === 'external_directory') return EXTERNAL_DIR_ALLOW_KEY
+  return `${action}\u0000${allowKey(patterns)}`
 }
 
 /** 파일 하나를 다루는 도구의 인자면 그 파일 (절대 경로) — read·write·edit 의 `filePath` */
