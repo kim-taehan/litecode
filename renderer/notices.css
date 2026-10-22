@@ -104,6 +104,66 @@
   background: var(--tooltip-bg);
 }
 
+/* 승인·질문 토스트 — 답 버튼을 싣는다. 보통 토스트(완료 알림)는 버튼이 없어 .toast 로 그대로 */
+.toast--attention {
+  pointer-events: auto;
+}
+
+/* 누르면 대화로 이동하는 본문 (버튼이 싣히면 그 버튼을 눌러 처리할 수도 있다) */
+.toast__open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toast__buttons {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.toast__button {
+  flex: none;
+  padding: 4px 12px;
+  border: 1px solid var(--tooltip-detail);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.toast__button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.toast__button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.toast__button--primary:hover {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+.toast__button--reject:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .toast__text {
   display: flex;
   flex-direction: column;
