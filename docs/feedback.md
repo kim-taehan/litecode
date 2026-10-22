@@ -2,6 +2,9 @@
 
 데스크탑 사용 중 보고한 문제와 불편함. 기록 + 코드 조사만 한다 — 수정은 안 한다. 뒤에 몰아서 다룬다.
 
+> 2026-10-22: 대화 목록이 길어지는 게 부담스럽다는 이유로 "최근 10개 먼저 보기" 가 들어갔는데,
+> 스크롤로 자연스럽게 앞을 보게 하는 편이 더 자연스럽단 피드백. #599 로 이어서 푼다.
+
 ## 형식
 - `## YYYY-MM-DD #N — 짧은 제목` 부터 시작
 - `- Where: ` 어떤 화면/어떤 동작에서 (사용자가 말한 그대로)
@@ -133,3 +136,24 @@
 - Expect: 창이 줄어도 미니맵은 늘 보인다 (사용자 결정 2026-10-21)
 - Status: done (2026-10-21, fix_577_minimap_always, PR → dev)
 - Fix: 2026-10-21 — `renderer/chat.css` 의 `@container (max-width: 900px) { .minimap { display: none; } }` 제거. 채팅 칸(`.chat-pane`, `container-type: inline-size`) 폭이 900px 이하면 숨기던 규칙이라, 창을 줄이거나 사이드바·오른쪽 패널을 넓히면 채팅 칸 900px 미만으로 떨어져 미니맵이 사라졌다.
+
+## 2026-10-22 #599 — "이전 N개 보기" 버튼 → 스크롤 최상단에서 자동으로 한 페이지 더
+
+- Where: 채팅 — 오래된 대화가 있으면 "이전 N개 보기" 버튼. 현재는 클릭하면 **전체**가 아니라 최근 N=10개만 다시 불러와도 된다는 점 (이슈 #599).
+- What: "버튼이 아닌 스크롤이 최상단으로 가면 자동으로 갱신되게" — "이전 N개 보기" 버튼 대신, 스크롤이 최상단(약 40px) 근처에 오면 자동으로 한 페이지만 더 본다 (사용자 결정, 2026-10-22)
+- Expect: 스크롤로 자연스럽게 앞 턴을 볼 수 있게 + "이전 N개"의 실질적 개수가 보이는 숫자와 같은 페이지만 불러 온다
+- Status: open (2026-10-22, fix_599_earlier_turns 브랜치 작업 중)
+
+### 조사
+- 위치:
+  - `renderer/ConversationView.tsx:115-131` — `loadEarlier()`: 원래 `loadConversation(id)` (limit 없이 전체). 이제 `RECENT_FIRST_LIMIT=10` 으로 한 페이지만. 스크롤 `handler`(:136-152) 가 `nearTop(< 40px)` 만 되면 `loadEarlier()` 를 부름 — 버튼이 아닌 이벤트로 트리거
+  - `renderer/ConversationView.tsx:153-169` — 로딩 후 새 첫 내 말(`.user-turn` 첫 개)이 이전 첫 내 말과 같은 y 가 되게 스크롤 오프셋 보정. `loadingRef` 로 중복 로딩 방지
+  - `renderer/ConversationView.tsx:26-32` — 상단 "이전 N개 보기" 표시 줄 (`.main__load-more`) — 스크롤 자동 로드에도 같은 문구로 보임
+  - `renderer/App.tsx:387-397` — 첫 로딩 (대화 열 때) 이 `RECENT_FIRST_LIMIT=10` 이라 더 있으면 `historyMore=true`
+  - `src/services/llm/service.ts:574-591` — `history()`: limit 가 있으면 첫 내 말 턴 경계(:578-581)로 잘라 중간 턴이 안 섞이게; `visible.length===0 && raw.length>=limit` 이면 `more: true, hiddenCount: limit`
+  - `renderer/session.ts:27-33` — `Session` 의 `historyMore`·`hiddenCount` 필드
+  - `shared/contract.ts:246` — `History` 의 `hiddenCount` 필드
+  - `renderer/chatState.ts:93-95` — `applyHistory()`
+  - i18n: `shared/i18n/ko.ts:112`('위까지 내리면 이전 10개가 더 보인다'), `en.ts:107`('Scroll up for 10 earlier turns')
+- 메커니즘: (1) `RECENT_FIRST_LIMIT` 을 `ConversationView` 로 이관해 `App`·`loadEarlier` 가 공용. (2) 스크롤 이벤트 + `nearTop` 검사 = 자동 한 페이지만. (3) 로딩 후 `firstTurnRef` 이전 첫 내 말 → new first turn 으로 보정. (4) `service.ts::history()` 가 limit 의 첫 메시지가 `user` 가 아님 (중간 턴) 이면 첫 `user` 경계로 잘라 중간 턴이 보이지 않게. 그 페이지만이 `user` 라면 `visible=[]` → `more`/`hiddenCount` 로 이전이 있음을 알리고 그 수가 `limit`(=10) 이 아니라 `raw.length - (0)` 인데, `raw` 이미 limit 개라 그대로
+- 판정: 코드에서 확인됨 — `more: true` 와 `hiddenCount` 가 페이지만(최대 10)으로 정확히 알려야 하므로, `visible=[]` 인 경우에도 `more`/`hiddenCount: limit`(=10) 을 그대로 쓰고, `visible.length>0` 이면 경계로 잘아 표시

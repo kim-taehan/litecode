@@ -43,7 +43,7 @@ import { feedTurnSnapshot } from './turnDetailStore.ts'
 import { useTerminalKeys } from './useTerminalKeys.ts'
 import { useSessionNav } from './useSessionNav.ts'
 import { Sidebar } from './Sidebar.tsx'
-import { ConversationView } from './ConversationView.tsx'
+import { ConversationView, RECENT_FIRST_LIMIT } from './ConversationView.tsx'
 import { Composer } from './Composer.tsx'
 
 export type { Session } from './session.ts'
@@ -384,8 +384,7 @@ export function App() {
   }, [active?.project])
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history).
-  // 첫 로딩은 최근 RECENT_FIRST_LIMIT 개로 빠르게 — 더 있으면 "이전 N개 보기" 로 전체를 다시 본다
-  const RECENT_FIRST_LIMIT = 10
+  // 첫 로딩은 최근 RECENT_FIRST_LIMIT 개로 빠르게 — 더 있으면 "이전 N개 보기" 로 페이지만 더 본다
   useEffect(() => {
     if (active?.history !== 'unloaded') return
     const id = active.id

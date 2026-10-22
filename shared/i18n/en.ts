@@ -104,7 +104,7 @@ export const en = {
   'chat.loading': 'Loading…',
   'chat.empty': 'How can I help?',
   'chat.missingFolder': 'Folder not found: {dir}',
-  'chat.loadMore': 'Show earlier {count} turns',
+  'chat.loadMore': 'Scroll up for 10 earlier turns',
   'chat.completedIn': 'Done · {duration}',
   'chat.completed': 'Done',
   'chat.failedAfter': 'Failed · {duration}',

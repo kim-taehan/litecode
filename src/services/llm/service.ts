@@ -556,8 +556,8 @@ export class LlmService extends Service {
     *  500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 계속 500 이다 (01c Q5). 재시택 뒤에도 내용은
     *  그대로 온다 — 이벤트 재생 대신 조립된 메시지 목록을 쓴다. 돌고 있는지는 GET /session/status (돌고 있는 세션만 실린다 — 01w).
     *  hidden 은 말풍선으로 안 그릴 엔진 메시지 id — addContext 로 넣은 `!` 카드 본문 (카드는 앱이 따로 그린다).
-    *  limit=N 이면 엔진 측에서 최근 N개만 온다 — 첫 메시지가 user 가 아닌(턴이 잘려 중간에서) 경우 more=true 로 표시.
-    *  전체를 다시 불러오려면 limit 없이 다시 부른다 */
+     *  limit=N 으면 최근 N개만 (턴 경계 user 로 자른다 — 더 있으면 그 메시지부터 안 보이고 more=true.
+     *  더 이전을 보려면 limit=N 으로 다시 부르거나 limit 없이 전체를 부른다 */
   async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set(), limit?: number): Promise<History> {
     const folder = await this.engineFolder(directory)
     if ('error' in folder) return folder.missing ? { messages: [], missingFolder: true } : { messages: [], error: folder.error }
@@ -571,11 +571,16 @@ export class LlmService extends Service {
       // 레거시 전환 전에 쌓인 기록(신규 세대)이 먼저다 — 그 뒤에 레거시로 이어 쓴 기록 (migrate.ts, #21)
       const previous = (await readPreviousMessages(conn, sessionId)).filter((message) => !message.id || !hidden.has(message.id))
       const children = await subtaskMessages(conn, raw, workdir)
-      const visible = raw.filter((message) => !hidden.has(message.info.id))
-      // limit 이면 user 턴 경계를 안 넘어야 해서, 첫 메시지 user 가 아니면 (턴이 잘린다) 더 있나(more) 가 된다
-      const firstIsTurnStart = visible[0]?.info.role === 'user'
-      const more = limit !== undefined && raw.length >= limit
-      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)], ...(more && !firstIsTurnStart && { more: true, hiddenCount: raw.length }) }
+      let visible = raw.filter((message) => !hidden.has(message.info.id))
+      // limit=N 으면 턴 경계(user)로 자르기 — 더 있으면 그 메시지부터 안 보이는 (more)
+      if (limit !== undefined) {
+        // 턴 경계(user) 로 자른다 — user 이전(턴 중간)부터는 안 보이고 그 뒤부터 보게 한다
+        const boundary = visible.findIndex((message) => message.info.role === 'user')
+        if (boundary > 0) visible = visible.slice(boundary)
+        else if (boundary === 0 && visible.length >= (limit ?? 0)) visible = []
+      }
+      const more = visible.length === 0 && raw.length >= (limit ?? 0)
+      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)], ...(more && { more: true, hiddenCount: limit ?? 0 }) }
     } catch (error) {
       return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
     }

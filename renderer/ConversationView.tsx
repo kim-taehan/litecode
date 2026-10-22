@@ -1,4 +1,4 @@
-import { Fragment, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { Fragment, useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import type { Attention, AttentionAnswer, AttentionTarget, HistoryMessage, Mode, PickedAttachment, TurnItem } from '../shared/ipc.ts'
 import type { FeatureId } from '../shared/features.ts'
 import { planEnded, switchedMode, applyHistory } from './chatState.ts'
@@ -22,6 +22,10 @@ import type { Session } from './session.ts'
 // 답·내 말(ChatTurn.tsx)은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도 props 가 같으면 턴을 다시 그리지 않는다.
 // 그래서 턴에 넘기는 "없음" 배열과 답 보내기 함수는 매번 새로 만들지 않는다
 const NO_ITEMS: readonly TurnItem[] = []
+
+/** 대화 처음 열 때·"이전 N개 보기" (스크롤 최상단 자동 로드) 에서 한 번에 불러 오는 메시지의 최대 개수.
+ *  더 이전이 있으면 more=true·hiddenCount 로 표시해 스크롤 한 번 더 하면 다음 페이지가 보인다 */
+export const RECENT_FIRST_LIMIT = 10
 const answerAttention = (request: Attention, answer: AttentionAnswer, target?: AttentionTarget) =>
   window.litecode.replyAttention(request.sessionId, request.id, answer, target)
 
@@ -64,6 +68,9 @@ interface ConversationViewProps {
   /** "이전 N개 보기" — 전체를 다시 불러온다 */
   updateSession(id: string, recipe: (session: Session) => Session): void
 }
+
+/** 스크롤 최상단 근처(40px 미만) — Minimap の nearBottom 과 방향만 반대. 새 턴이 그 사이에 오면 그대로 둔다 */
+const nearTop = (element: HTMLElement): boolean => element.scrollTop < 40
 
 /** 지금 대화의 머리 줄·탭과 본문(말풍선·`!` 카드·도는 턴 또는 Trajectory). 상태는 App 이 쥐고 여기는 그리기만 한다 */
 export function ConversationView({
@@ -108,19 +115,57 @@ export function ConversationView({
       ))
   }
 
-  /** "이전 N개 보기" — limit=N 으로 일부만 불러온 대화의 머리. 전체를 다시 불러온다 */
+  /** limit=RECENT_FIRST_LIMIT 으로 이전 페이지만 불러와 앞에 붙인다. 더 있으면 historyMore 가 true 로 남는다 */
   function loadEarlier() {
     const id = active.id
-    updateSession(id, (session) => ({ ...session, history: 'loading' }))
-    void window.litecode.loadConversation(id).then((loaded) =>
+    if (loadingRef.current) return
+    const element = listRef.current
+    const firstTurns = element ? [...element.querySelectorAll<HTMLElement>('.user-turn')] : []
+    firstTurnRef.current = firstTurns[0] ?? null
+    priorScrollTopRef.current = element ? element.scrollTop : 0
+    loadingRef.current = true
+    void window.litecode.loadConversation(id, RECENT_FIRST_LIMIT).then((loaded) => {
+      loadingRef.current = false
       updateSession(id, (session) => ({
         ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
-        historyMore: false,
-        hiddenCount: undefined,
-      })),
-    )
+        ...(loaded.more ? { historyMore: true, hiddenCount: loaded.hiddenCount } : { historyMore: false, hiddenCount: undefined }),
+      }))
+    })
   }
+
+  // 스크롤 최상단(nearTop)까지 올리면 자동으로 한 페이지만 더 불러온다 (이슈 #599).
+  // 로딩 중 중복 로딩은 loadingRef 로 막고, 로딩 후 새 첫 내 말이 안에 보이게 스크롤 오프셋 보정한다
+  const loadingRef = useRef(false)
+  /** 로딩 전 첫 내 말 — 로딩 후 .user-turn 첫 개(새 페이지만의 첫 내 말)와 같은 y 가 되게 스크롤 보정 */
+  const firstTurnRef = useRef<HTMLElement | null>(null)
+  /** 이전 스크롤 위치 — 새 페이지만이 그 위에 붙었다면 그 위치를 유지 */
+  const priorScrollTopRef = useRef(0)
+  useEffect(() => {
+    const element = listRef.current
+    if (!element || !active.historyMore || active.history !== 'loaded') return
+    const handler = () => {
+      if (nearTop(element)) loadEarlier()
+    }
+    element.addEventListener('scroll', handler, { passive: true })
+    return () => element.removeEventListener('scroll', handler)
+  }, [listRef, active.history, active.historyMore])
+  // 새 첫 내 말이 그려지면 로딩 전 스크롤 위치와 같은 y 에 보정 — 이전 첫 내 말과 새 첫 내 말이 겹치면 그 자리가
+  useEffect(() => {
+    const element = listRef.current
+    if (!element || !firstTurnRef.current) return
+    const priorScrollTop = priorScrollTopRef.current
+    const old = firstTurnRef.current
+    firstTurnRef.current = null
+    priorScrollTopRef.current = 0
+    if (!priorScrollTop) return
+    requestAnimationFrame(() => {
+      const newFirst = element.querySelector<HTMLElement>('.user-turn')
+      if (!newFirst) return
+      const targetTop = newFirst.getBoundingClientRect().top - element.getBoundingClientRect().top
+      if (Math.abs(targetTop - priorScrollTop) > 4) element.scrollTop = priorScrollTop - targetTop
+    })
+  }, [listRef, active.messages])
 
   return (
     <>
