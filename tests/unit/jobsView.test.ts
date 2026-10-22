@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Subtask, TurnItem } from '../../shared/ipc.ts'
-import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, quietMinutes, recentLines, runningLine, VISIBLE_ROWS } from '../../renderer/jobsView.ts'
+import { capRows, compactTokens, elapsed, jobList, lastLine, leadJob, quietMinutes, recentLines, runningLine, runningPhase, VISIBLE_ROWS } from '../../renderer/jobsView.ts'
 
 const subtask = (id: string, status: Subtask['status'], items: TurnItem[] = []): Subtask => ({ kind: 'subtask', id, agent: 'general', description: id, status, items })
 
@@ -74,6 +74,57 @@ describe('runningLine — 스트리밍 한 줄에 보일 지금 하는 일 (이�
     // 설명도 에이전트도 없으면 건너뛴다
     const empty = { ...subtask('c', 'running'), agent: '', description: '' }
     expect(runningLine([empty])).toBeUndefined()
+  })
+})
+
+describe('runningPhase — 진행 줄의 지금 상태별 문구 (#605)', () => {
+  it('맨 뒤 활성 줄의 종류로: 답 글 > 생각 > 도구 > 하위 작업', () => {
+    expect(runningPhase([{ kind: 'text', id: '1', text: '…', done: false }])).toEqual({ kind: 'writing' })
+    expect(runningPhase([{ kind: 'think', id: '1', text: '…', done: false }])).toEqual({ kind: 'thinking' })
+    expect(runningPhase([{ kind: 'tool', id: '1', name: 'bash', status: 'running', summary: 'test' }])).toEqual({ kind: 'tool', name: 'bash' })
+    expect(runningPhase([{ kind: 'tool', id: '1', name: 'bash', status: 'preparing' }])).toEqual({ kind: 'tool', name: 'bash' })
+    expect(runningPhase([subtask('b', 'running')])).toEqual({ kind: 'subtask' })
+    expect(runningPhase([subtask('b', 'queued')])).toEqual({ kind: 'subtask' })
+  })
+
+  it('MCP 도구는 "서버/도구" 이름 (jobLine 과 같은 규칙)', () => {
+    expect(runningPhase([{ kind: 'tool', id: '1', name: 'raw', status: 'running', mcp: { server: 'srv', tool: 'do' } }])).toEqual({ kind: 'tool', name: 'srv/do' })
+  })
+
+  it('끝난 줄은 건너뛰고 활성 것만 — 아무도 없으면 undefined (채팅은 "딥다이빙 중" 으로)', () => {
+    expect(
+      runningPhase([
+        { kind: 'think', id: '1', text: 'x', done: true },
+        { kind: 'text', id: '2', text: 'y', done: true },
+        { kind: 'tool', id: '3', name: 'bash', status: 'done' },
+        subtask('b', 'done'),
+      ]),
+    ).toBeUndefined()
+    expect(runningPhase([])).toBeUndefined()
+  })
+
+  it('먼저 끝난 생각 뒤를 도는 도구가 지금 하는 일', () => {
+    const items: TurnItem[] = [
+      { kind: 'think', id: '1', text: 'x', done: true },
+      { kind: 'tool', id: '2', name: 'edit', status: 'running', summary: 'a.ts' },
+    ]
+    expect(runningPhase(items)).toEqual({ kind: 'tool', name: 'edit' })
+  })
+
+  it('재시도 대기(게이트웨이 500 등)는 사유까지 (문구는 화면이 붙인다)', () => {
+    expect(
+      runningPhase([
+        { kind: 'text', id: '1', text: 'y', done: true },
+        { kind: 'retry', id: '2', attempt: 1, message: '500', status: 'waiting' },
+      ]),
+    ).toEqual({ kind: 'retry', attempt: 1, message: '500' })
+    // 재시도가 끝난 뒤(active 줄 없음)는 다시 undefined
+    expect(
+      runningPhase([
+        { kind: 'retry', id: '2', attempt: 1, message: '500', status: 'done' },
+        { kind: 'text', id: '1', text: 'y', done: true },
+      ]),
+    ).toBeUndefined()
   })
 })
 

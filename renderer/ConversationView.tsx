@@ -21,8 +21,8 @@ import type { Session } from './session.ts'
 // 그래서 턴에 넘기는 "없음" 배열과 답 보내기 함수는 매번 새로 만들지 않는다
 const NO_ITEMS: readonly TurnItem[] = []
 
-/** 대화 처음 열 때·"이전 N개 보기" (스크롤 최상단 자동 로드) 에서 한 번에 불러 오는 메시지의 최대 개수.
- *  더 이전이 있으면 more=true·hiddenCount 로 표시해 스크롤 한 번 더 하면 다음 페이지가 보인다 */
+/** 대화 처음 열 때(최근 페이를 빠르게)·스크롤 최상단 자동 로딩에서 한 번에 불러 오는 메시지의 최대 개수.
+ *  더 이전 페이가 있으면 more=true + offset 커서가 오고, 스크롤 한 번 더 하면 그 커서로 다음 페이지가 보인다 (이슈 #599) */
 export const RECENT_FIRST_LIMIT = 10
 const answerAttention = (request: Attention, answer: AttentionAnswer, target?: AttentionTarget) =>
   window.litecode.replyAttention(request.sessionId, request.id, answer, target)
@@ -96,9 +96,9 @@ export function ConversationView({
       ))
   }
 
-  /** 스크롤 최상단에서 이전 페이를 자동으로 불러온다 (이슈 #599).
-   *  offset=현재 메시지 수, limit=RECENT_FIRST_LIMIT — 이전 페이(10개)만 받아 앞에 붙인다.
-   *  더 이전이 있으면 offset 이 다음 페이를 가리키도록 올라가고, 없으면 멈춘다. */
+  /** 스크롤 최상단에서 이전(더 오래된) 페이를 자동으로 불러온다 (이슈 #599).
+   *  offset=active.historyOffset — 서비스가 History.offset 으로 준 커서(끝에서부터 이미 보여 준 엔진 메시지 수). client 는 세지 않는다.
+   *  페이를 앞에 붙이고, 더 이전이 있으면 커서를 갱신하고, 없으면(historyMore=false) 멈춘다. */
   function loadEarlier() {
     const id = active.id
     if (loadingRef.current) return
@@ -107,12 +107,12 @@ export function ConversationView({
     firstTurnRef.current = firstTurns[0] ?? null
     priorScrollTopRef.current = element ? element.scrollTop : 0
     loadingRef.current = true
-    void window.litecode.loadConversation(id, { limit: RECENT_FIRST_LIMIT, offset: active.messages.length }).then((loaded) => {
+    void window.litecode.loadConversation(id, { limit: RECENT_FIRST_LIMIT, offset: active.historyOffset ?? 0 }).then((loaded) => {
       loadingRef.current = false
       updateSession(id, (session) => ({
         ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
-        ...(loaded.more ? { historyMore: true } : { historyMore: false }),
+        ...(loaded.more ? { historyMore: true, historyOffset: loaded.offset ?? 0 } : { historyMore: false, historyOffset: 0 }),
       }))
     })
   }

@@ -73,10 +73,11 @@ afterAll(async () => {
 const replies = () => page.locator('.bubble--assistant')
 const running = () => page.locator('.turn[data-state="running"]')
 const lastTurn = () => page.locator('.turn').last()
-/** 진행 중 턴의 한 줄 (이슈 #416) — 지금 하는 일 + 경과 초. 누르면 우측 "턴 작업" 탭 */
+/** 진행 중 턴의 한 줄 (이슈 #416·#605) — 지금 하는 일의 상태별 문구 + "· N초" */
 const runningLine = () => running().locator('.turn-running__line')
 const workTab = () => page.locator('.turn-tab')
-const seconds = async () => Number(/(\d+)초/.exec((await page.locator('.turn-running__seconds').textContent()) ?? '')?.[1] ?? NaN)
+const runningSummary = () => runningLine().locator('.turn-running__summary').textContent().catch(() => '')
+const seconds = async () => Number(/· (\d+)초$/.exec((await runningSummary()) ?? '')?.[1] ?? NaN)
 
 async function type(text: string): Promise<void> {
   await page.getByPlaceholder('메시지를 입력하세요…').fill(text)
@@ -93,9 +94,9 @@ describe('채팅 답 모양·진행 표시', () => {
     await type('[think] 생각 테스트')
     // 생각 첫 조각은 전역 스트림(reasoning.delta)에만 온다 — 세션 SSE 만이면 생각이 끝날 때(THINK_MS×2 뒤)에야 글이 생긴다.
     // 한 줄의 요약도 같은 조각으로 채워진다 (이슈 #416 — 생각·도구 줄은 채팅에 안 쌓고 탭으로)
-    await expect.poll(() => runningLine().locator('.turn-running__summary').textContent().catch(() => ''), { timeout: 15_000 }).toBe('Planning the answer line one')
+    await expect.poll(runningSummary, { timeout: 15_000 }).toMatch(/^생각하는 중 · \d+(분 \d+)?초$/)
     expect(await running().locator('.turn-row').count()).toBe(0) // 채팅엔 줄이 쌓이지 않는다
-    expect(await page.locator('.turn-running__seconds').textContent()).toMatch(/\d+초/)
+    expect(await runningSummary()).toMatch(/· \d+(분 \d+)?초$/)
     expect(await replies().count()).toBe(0) // 답은 끝난 뒤에야 답 자리에
 
     // 한 줄을 누르면 우측 탭 — 생각 줄이 실시간 (아직 끝 안 난 채로)
@@ -123,10 +124,10 @@ describe('채팅 답 모양·진행 표시', () => {
     expect(await done.locator('.turn-row__body').textContent()).toContain('Second paragraph of thought.')
   })
 
-  it('[bash:sleep 2]: 진행 중 "bash fake" 한 줄의 초가 올라가고 우측 탭의 도구 줄이 실행 중 → 끝나면 탭 줄은 완료, 채팅은 접혀 펼치면 완료 표시', async () => {
+  it('[bash:sleep 2]: 진행 중 "bash 실행 중 · N초" 문구의 초가 올라가고 우측 탭의 도구 줄이 실행 중 → 끝나면 탭 줄은 완료, 채팅은 접혀 펼치면 완료 표시', async () => {
     const before = await replies().count()
     await type('[bash:sleep 2]')
-    await expect.poll(() => runningLine().locator('.turn-running__summary').textContent().catch(() => ''), { timeout: 15_000 }).toBe('bash fake')
+    await expect.poll(runningSummary, { timeout: 15_000 }).toMatch(/^bash 실행 중 · \d+(분 \d+)?초$/)
     const first = await seconds()
     await expect.poll(seconds, { timeout: 3_000 }).toBeGreaterThan(first)
 

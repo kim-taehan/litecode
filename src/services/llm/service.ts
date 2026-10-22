@@ -556,8 +556,8 @@ export class LlmService extends Service {
     *  500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 계속 500 이다 (01c Q5). 재시택 뒤에도 내용은
     *  그대로 온다 — 이벤트 재생 대신 조립된 메시지 목록을 쓴다. 돌고 있는지는 GET /session/status (돌고 있는 세션만 실린다 — 01w).
     *  hidden 은 말풍선으로 안 그릴 엔진 메시지 id — addContext 로 넣은 `!` 카드 본문 (카드는 앱이 따로 그린다).
-    *  query { limit, offset }: 전체 메시지(오래된 것부터)에서 offset 이 다음 페이를 가리키고, limit 개의 페이를 준다.
-    *  더 이전이 있으면 more=true — 화면이 스크롤 최상단에서 자동으로 offset += limit 으로 다음 페이를 불러온다.
+    *  페이는 최신 우선: 첫 로딩(offset 없음) = 최근 limit 개, History.offset 이 더 이전 페이 커서(끝에서부터 이미 보여 준 엔진 메시지 수).
+    *  화면이 그 커서를 query.offset 으로 그대로 넘기면 스크롤 최상단에서 이전 페이를 불러온다 — client 는 메시지 개수를 세지 않는다. 더 이전이 있으면 more=true + 커서를 준다.
     *  페이는 user 턴 경계에서 자른다 — 턴 중간을 잘리지 않는다.
     *  hidden(카드가 싣는 `!` 본문)은 말풍선에서 안 보인다 — 페이 계산에도 안 쓴다. */
   async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set(), query?: { limit?: number; offset?: number }): Promise<History> {
@@ -577,23 +577,30 @@ export class LlmService extends Service {
       const running = sessionId in ((await status.json()) as Record<string, unknown>)
       // 레거시 전환 전에 쌓은 기록(신규 세대)이 먼저다 — 그 뒤에 레거시로 이어 쓴 기록 (migrate.ts, #21)
       const previous = (await readPreviousMessages(conn, sessionId)).filter((message) => !message.id || !hidden.has(message.id))
-      // 페이: 전체(오래된 것부터)에서 offset ~ offset+limit 을 슬라이스, user 턴 경계에서 맞춘다
+      // 페이: 최신 쪽부터 — offset 은 끝에서부터 이미 보여 준 엔진 메시지 수(커서). 이번 페이는 [end-limit, end) (all 은 오래된 것부터)
       let visible = all
       let more = false
+      let nextOffset = 0
+      let reachesHead = true
       if (pageSize !== undefined) {
-        const start = offset
-        const end = offset + pageSize
-        visible = all.slice(start, end)
-        const remaining = all.length - end
-        more = remaining > 0
-        // 턴 경계: 페이 첫 메시지가 user 가 아니면 그 앞 user 로 맞춰서 페이를 자른다
-        if (more && visible.length > 0) {
-          const boundary = visible.findIndex((message) => message.info.role === 'user')
-          if (boundary > 0) visible = visible.slice(boundary)
+        const end = Math.max(0, all.length - offset)
+        const start = Math.max(0, end - pageSize)
+        let cut = start
+        // 턴 경계: 페이 첫 메시지가 user 가 아니면 페이 안의 첫 user 로 정정한다 — 그 앞 턴의 꼬리는 이전 페이에 둔다.
+        // 이미 역사 시작(start=0)이면 자르지 않는다 (첫 메시지가 user 가 아니어도 그 앞은 없다)
+        if (start > 0) {
+          const boundary = all.slice(start, end).findIndex((message) => message.info.role === 'user')
+          if (boundary > 0) cut = start + boundary
         }
+        visible = all.slice(cut, end)
+        more = cut > 0
+        nextOffset = all.length - cut
+        reachesHead = cut === 0
       }
       const children = await subtaskMessages(conn, visible, workdir)
-      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)], ...(more && { more: true }) }
+      // 레거시 기록(전환 전)은 역사 시작에 이르는 페이(가장 오래된 페이·전체 로딩)에만 붙인다 — 페이마다 붙이면 스크롤 로딩마다 중복된다
+      const legacy = reachesHead ? previousHistory(previous, modeOf) : []
+      return { messages: [...legacy, ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)], ...(more && { more: true, offset: nextOffset }) }
     } catch (error) {
       return { error: tr('error.historyLoad', { message: (error as Error).message }), messages: [] }
     }
