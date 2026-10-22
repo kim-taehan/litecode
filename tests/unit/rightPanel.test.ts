@@ -19,8 +19,6 @@ import {
   terminalIdOf,
   terminalTabKey,
   toggleFullscreen,
-  turnTabKey,
-  openTurnTab,
   getPanelState,
 } from '../../renderer/filePreviewStore.ts'
 import { buildHtmlDocument, HTML_PREVIEW_CSP } from '../../renderer/htmlPreview.ts'
@@ -301,32 +299,5 @@ describe('비교 보기 (A/B)', () => {
     openFilePreview('/cmp2', 'p.ts')
     expect(read()!.compare).toBeUndefined()
     expect(read()!.directory).toBe('/cmp2')
-  })
-})
-
-// "턴 작업" 탭 (이슈 #416) — 같은 이름의 탭은 하나뿐 (이슈 #456): 새 턴이 오면 열렸던 탭의 자리에 그 열쇠로 바뀐다
-describe('턴 탭', () => {
-  const turn = (conversationId: string, startedAt: number) => turnTabKey(conversationId, startedAt)
-
-  it('새 턴을 열면 기존 턴 탭의 열쇠가 자리에 바뀐다 — 새 탭은 안 생기고 다른 탭은 그대로', () => {
-    openFilePreview('/turn', 'a.ts')
-    openTurnTab('/turn', 'c1', 1_000)
-    expect(read()).toMatchObject({ directory: '/turn', open: true, tabs: ['a.ts', turn('c1', 1_000)], active: turn('c1', 1_000) })
-    openTurnTab('/turn', 'c1', 2_000)
-    expect(read()!.tabs).toEqual(['a.ts', turn('c1', 2_000)])
-    expect(read()!.active).toBe(turn('c1', 2_000))
-    closeFilePreview()
-  })
-
-  it('턴 탭이 없으면 마지막에 열고, 닫으면 다른 탭만 남는다', () => {
-    openFilePreview('/turn2', 'a.ts')
-    openTurnTab('/turn2', 'c2', 1)
-    expect(read()!.tabs).toEqual(['a.ts', turn('c2', 1)])
-    openTurnTab('/turn2', 'c2', 2)
-    expect(read()!.tabs).toEqual(['a.ts', turn('c2', 2)])
-    closeTab(turn('c2', 2))
-    expect(read()!.tabs).toEqual(['a.ts'])
-    expect(read()!.active).toBe('a.ts')
-    closeFilePreview()
   })
 })

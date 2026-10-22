@@ -3,7 +3,7 @@ import type { HistoryMessage } from '../../shared/contract.ts'
 import { stopFeedback } from '../../shared/hooks.ts'
 import type { TurnItem } from '../../shared/ipc.ts'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
-import { answerText, clockTime, formatDuration, interimSplit, interimText, looksLikePath, minimapTurns, minimapTurnDetails, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
+import { answerText, clockTime, formatDuration, formatTokens, interimSplit, interimText, looksLikePath, minimapTurns, minimapTurnDetails, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
 
 // 답 한 턴의 화면 모양 — 진행 줄 쌓기, 작업/답 가르기, 줄 글자
 
@@ -186,36 +186,30 @@ describe('minimapTurns', () => {
 })
 
 describe('minimapTurnDetails', () => {
-  // 이슈 #575 — 마커 클릭 시 우측 "턴 작업" 탭에 보낼 데이터: 그 턴(내 말)의 startedAt·진행 줄. 뒤를 이은 어시스턴트 응답이 있으면 끝난 턴
-
   const msg = (patch: Partial<HistoryMessage>): HistoryMessage => ({ ...patch } as HistoryMessage)
-  const item: TurnItem = { kind: 'text', id: 'a', text: 'done', done: true }
 
-  it('끝난 턴이면 내 말 시 + 뒤 어시스턴트의 진행 줄·모든 정보가 붙는다', () => {
+  it('끝난 턴이면 내 말 텍스트를 남긴다', () => {
     const details = minimapTurnDetails(
       [
         msg({ role: 'user', text: '질문', at: 100 }),
-        msg({ role: 'assistant', text: '답', items: [item], duration: 2_000, error: undefined }),
+        msg({ role: 'assistant', text: '답' }),
       ],
       'c-1',
     )
-    expect(details).toEqual([{ text: '질문', startedAt: 100, conversationId: 'c-1', items: [item], duration: 2_000, failed: false }])
+    expect(details).toEqual([{ text: '질문' }])
   })
 
-  it('마지막 내 말 뒤에 어시스턴트 반응이 없으면 진행 중 — 줄이 비고 시작만 남는다', () => {
+  it('마지막 내 말 뒤에 어시스턴트 반응이 없으면 진행 중 — 텍스트만 남는다', () => {
     const [only] = minimapTurnDetails([msg({ role: 'user', text: '첫 말', at: 5 })], 'c-1')
-    expect(only).toEqual({ text: '첫 말', startedAt: 5, conversationId: 'c-1', items: [], failed: false })
+    expect(only).toEqual({ text: '첫 말' })
   })
 
-  it('실패·중단·거절 응답은 그대로 전한다', () => {
+  it('글 없이 첨부만 보낸 턴은 파일 이름이 이름표다', () => {
     const details = minimapTurnDetails(
-      [
-        msg({ role: 'user', text: '질문', at: 100 }),
-        msg({ role: 'assistant', text: '', items: [item], error: 'boom', interrupted: true, declined: true }),
-      ],
+      [msg({ role: 'user', text: '', attachments: [{ name: 'a.png' }, { name: 'b.txt' }] } as HistoryMessage)],
       'c-1',
     )
-    expect(details[0]).toMatchObject({ failed: true, interrupted: true, declined: true })
+    expect(details).toEqual([{ text: 'a.png, b.txt' }])
   })
 
   it('턴 끝 훅이 보낸 글은 줄에 안 들어간다 (minimapTurns 와 같은 닻)', () => {
@@ -230,5 +224,19 @@ describe('minimapTurnDetails', () => {
         'c-1',
       ).map((t) => t.text),
     ).toEqual(['a'])
+  })
+})
+
+describe('formatTokens', () => {
+  it('토큰 수를 짧은 표기로 — 행동 줄의 "95.4K tok" 숫자', () => {
+    expect(formatTokens(95)).toBe('95')
+    expect(formatTokens(1_234)).toBe('1.2K')
+    expect(formatTokens(95_412)).toBe('95.4K')
+    expect(formatTokens(1_234_567)).toBe('1.2M')
+  })
+
+  it('사용량 라벨은 한국어·영어에 있다', () => {
+    expect(ko('chat.usage', { count: '95.4K' })).toBe('사용량 95.4K tok')
+    expect(en('chat.usage', { count: '95.4K' })).toBe('Usage 95.4K tok')
   })
 })

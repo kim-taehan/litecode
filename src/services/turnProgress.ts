@@ -348,7 +348,7 @@ const TASK_CANCELLED = 'Task cancelled'
 export const REJECTED_WITH_FEEDBACK = 'The user rejected permission to use this specific tool call with the following feedback:'
 
 /** 스텝 토큰 합 — 하위 작업 줄에 보이는 값 (dsh ui-subagent: 네 갈래를 더한다) */
-function tokenTotal(tokens: EnginePart['tokens']): number {
+export function tokenTotal(tokens: EnginePart['tokens']): number {
   return (tokens?.input ?? 0) + (tokens?.output ?? 0) + (tokens?.reasoning ?? 0) + (tokens?.cache?.read ?? 0) + (tokens?.cache?.write ?? 0)
 }
 

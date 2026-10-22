@@ -2,7 +2,6 @@ import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'r
 import type { ChatEvent } from '../shared/ipc.ts'
 import { applyChat, withStoredTitles } from './chatState.ts'
 import { fromConversation, type Session } from './session.ts'
-import { feedTurnEnded, feedTurnItem, feedTurnStarted } from './turnDetailStore.ts'
 
 interface ChatEventsOptions {
   setSessions: Dispatch<SetStateAction<Session[]>>
@@ -23,8 +22,6 @@ export function useChatEvents({ setSessions, setFresh, sessionsRef, updateSessio
     const apply = (event: ChatEvent & { data: { cid: string } }) => updateSession(event.data.cid, (session) => applyChat(session, event))
     const offs = [
       window.litecode.onTurnStarted((data) => {
-        // 우측 "턴 작업" 탭(이슈 #416) 에도 같은 턴을 이어 붙인다
-        feedTurnStarted(data.cid, data.message.at ?? Date.now(), data.message.text || undefined)
         // 보는 대화의 턴일 때만 — 다른 대화의 턴이 지금 읽던 자리를 맨 아래로 끌고 가지 않게
         follow(data.cid)
         // 화면이 모르는 대화의 턴 — 화면 밖(짝지은 폰)에서 새로 만든 대화다. 메인이 저장한 목록 정보로 목록에 넣는다.
@@ -37,12 +34,10 @@ export function useChatEvents({ setSessions, setFresh, sessionsRef, updateSessio
         apply({ event: 'turn.started', data })
       }),
       window.litecode.onTurnProgress((cid, item) => {
-        feedTurnItem(cid, item)
         apply({ event: 'turn.progress', data: { cid, item } })
       }),
       window.litecode.onTurnAttention((cid, requests) => apply({ event: 'turn.attention', data: { cid, requests } })),
       window.litecode.onTurnEnded((data) => {
-        feedTurnEnded(data.cid, data.message)
         apply({ event: 'turn.ended', data })
       }),
       window.litecode.onTurnInterjected((data) => apply({ event: 'turn.interjected', data })),
