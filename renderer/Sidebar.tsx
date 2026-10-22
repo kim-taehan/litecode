@@ -164,7 +164,9 @@ export function Sidebar({
       const firstUnpinned = visible.find((s) => !s.pinned)
       if (firstUnpinned) {
         if (wsSettings.groupBy === 'date') {
-          labels.set(firstUnpinned.id, firstUnpinned.updatedAt >= startOfToday ? 'today' : 'earlier')
+          if (firstUnpinned.updatedAt >= startOfToday) labels.set(firstUnpinned.id, 'today')
+          const firstEarlier = visible.find((s) => !s.pinned && s.updatedAt < startOfToday)
+          if (firstEarlier) labels.set(firstEarlier.id, 'earlier')
         } else if (wsSettings.groupBy === 'status' || wsSettings.groupBy === 'unread') {
           const isProgress = (s: (typeof visible)[number]) => {
             const st = notices.state[s.id]?.status
