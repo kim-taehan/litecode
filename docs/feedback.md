@@ -167,3 +167,19 @@
 - Expect: 첫 로딩 = 최신 N 개, 스크롤 최상단에서 더 이전 페이가 순서대로 (겹침·누락 없이) 이어 보임
 - Status: open (2026-10-22, feat_605_deepagents_harness 에서 수정, 커밋 대기)
 - Fix: 2026-10-22 — 페이징을 서비스 쪽 커서로: `query.offset` = 끝(최신)에서부터 이미 보여 준 엔진 메시지 수. `service.ts::history()` 가 `end = all.length - offset`, `start = end - limit` 로 페이를 자르고(페이가 user 턴 경계에서 끊기지 않게, 역사 시작이면 그대로), `History.offset = all.length - cut` 으로 다음 페이 커서를 돌려준다. client(App 첫 로딩·`loadEarlier`) 는 그 커서를 그대로 되돌려 client 세기 없음. 레거시 기록(`previousHistory`) 은 역사 시작에 이르는 페이에만 붙여 페이마다 중복 안 됨. 더 이상 안 쓰는 `hiddenCount`(contract·session)·버튼 시대 `chat.loadMore` i18n 키 제거.
+
+## 2026-10-22 #607 — 대화 열면 페이지네이션(최근 10개) 제거 — 전체 히스토리 로드
+
+- Where: 채팅 — 기존 대화 열 때·스크롤 최상단 자동 로딩 (#599/#602/#606 에 추가된 페이지네이션)
+- What: "그건 관련된 로직 다 지워. 여기 창만 해도 10턴 넘게 대화 했는데 다시 열었을 때 3턴만 보이고 있어." — 최근 N=10 **엔진 메시지** 가 최근 턴 약 3개에 불과해, 긴 대화를 다시 열면 3턴만 보여 사용자 경험에 부적합 (사용자 결정 2026-10-22: 페이지네이션을 계속 고치지 않고 **전체 로드로 갈음**)
+- Expect: 기존 대화 열면 전체 히스토리가 한 번에 렌더링 (페이지네이션·스크롤 최상단 자동 로딩 관련 로직 전부 제거)
+- Status: done (2026-10-22, fix_607_history_full_load, PR → dev)
+- Fix: 2026-10-22 — 페이지네이션 관련 로직을 전부 지우고 `history()` 가 전체 목록을 한 번에 돌려준다.
+  - `shared/contract.ts` — `History` 의 `more?`·`offset?` 필드 제거
+  - `src/services/llm/service.ts::history()` — `query? {limit,offset}` 파라미터·페이 slicing(end/start/턴 경계 cut)·more/nextOffset 모두 제거. 항상 `all`(전체)을 `historyMessages` 로 조립하고, 레거시 기록(`previousHistory`) 을 역사 시작(가장 오래된 것)에 붙인다
+  - `src/services/sessions.ts::history(id)` — `query?` 파라미터와 `ctx.llm.history(..., query)` 전달 제거
+  - `electron/main.ts` / `electron/preload.cts` / `shared/ipc.ts` — `LOAD_CONVERSATION`·`loadConversation` 의 `query` 인수 제거 (id only)
+  - `renderer/session.ts` — `Session` 의 `historyMore?`·`historyOffset?` 필드 제거 (`history` 상태만 유지)
+  - `renderer/ConversationView.tsx` — `RECENT_FIRST_LIMIT` 상수·`nearTop`·`loadEarlier()`·스크롤 리스너(`useEffect`)+`loadingRef`/`firstTurnRef`/`priorScrollTopRef`·스크롤 오프셋 보정 `useEffect`·`updateSession` prop·`applyHistory`/`useEffect`/`useRef` import 제거
+  - `renderer/App.tsx` — `RECENT_FIRST_LIMIT` import 제거, 첫 로딩 `useEffect` 가 `loadConversation(id)` (전체) 로 바꾸고 `historyMore`/`historyOffset` 설정 제거, `ConversationView` 에 `updateSession` prop 제거
+  - 테스트: 페이 관련 테스트 없음 (unit + live 모두 무변경 통과), typecheck clean

@@ -42,7 +42,7 @@ import { useChatEvents } from './useChatEvents.ts'
 import { useTerminalKeys } from './useTerminalKeys.ts'
 import { useSessionNav } from './useSessionNav.ts'
 import { Sidebar } from './Sidebar.tsx'
-import { ConversationView, RECENT_FIRST_LIMIT } from './ConversationView.tsx'
+import { ConversationView } from './ConversationView.tsx'
 import { Composer } from './Composer.tsx'
 
 export type { Session } from './session.ts'
@@ -370,16 +370,15 @@ export function App() {
   }, [active?.project])
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history).
-  // 첫 로딩은 최근 RECENT_FIRST_LIMIT 개로 빠르게 — 더 있으면 스크롤 최상단에서 자동으로 페이지만 더 본다
+  // 전체를 한 번에 로드한다 — 페이지네이션은 지웠다 (#607)
   useEffect(() => {
     if (active?.history !== 'unloaded') return
     const id = active.id
     updateSession(id, (session) => ({ ...session, history: 'loading' }))
-    void window.litecode.loadConversation(id, { limit: RECENT_FIRST_LIMIT, offset: 0 }).then((loaded) =>
+    void window.litecode.loadConversation(id).then((loaded) =>
       updateSession(id, (session) => ({
         ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
-        ...(loaded.more ? { historyMore: true, historyOffset: loaded.offset ?? 0 } : { historyMore: false, historyOffset: 0 }),
       })),
     )
   }, [active?.id, active?.history])
@@ -877,7 +876,6 @@ export function App() {
               chosen={chosen}
               send={send}
               shareShell={shareShell}
-              updateSession={updateSession}
             />
 
             {/* 추론 과정(trajectory) 은 읽기 전용 기록 보기 — 입력 카드(채팅창)는 숨기고 대화 탭에서 다시 보인다 (이슈 #364) */}
