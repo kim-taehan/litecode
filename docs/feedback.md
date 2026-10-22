@@ -112,6 +112,7 @@
 - Fix 2 (2026-10-21, #565): 사용자 "최종 답도 스트리밍되지 않고 있어" — #534 가 글 줄을 다 숨겨 답이 끝날 때 한꺼번에 나왔다. 진행 중에도 마지막 도구·생각 뒤의 글(`turnView.ts liveAnswer` — splitTurn 과 같은 규칙)은 흘린다. 도구 앞 중간 글은 계속 숨김
 - Fix 3 (2026-10-21, #573): 사용자 "중간 답도 보여지다가 사라지잖아" — `liveAnswer` 로 흘리던 글이 도구 호출 시 "중간 글"로 전환되며 채팅에서 사라져 혼란. 진행 중 채팅에는 compaction 줄만, 텍스트(중간 글 포함)는 우측 "턴 작업" 탭에만. `liveAnswer` 제거
 - Fix 4 (2026-10-22, DeepSeek 하네스 append-only): 사용자 "딥시크처럼 구성하자" — DeepSeek CLI 의 방식: 진행 중에도 마지막 도구·생각 뒤의 글을 채팅에 스트리밍하되 **append-only** (도구가 끼어도 그 위의 글이 안 사라짐). `turnView.ts: liveAnswer` → `interimText` (string[] 반환, join 시 '\n\n' 으로 이어 붙임). `ChatTurn.tsx:138` `liveAnswerTexts = interimText(rest)` → `.turn__work` 에 단일 Markdown 블록으로 렌더링. 중간 글(도구 앞 text)은 계속 우측 "턴 작업" 탭에만. 끝난 턴(`splitTurn`)은 영향 없음
+- Fix 5 (2026-10-22, #605): 사용자 "진행 줄 문구를 지금 하는 일(상태)에 맞게 여러 문구로" — 진행 줄(RunningLine)이 항상 "딥다이빙 중" 을 쓰던 게 아니라 맨 뒤에서 제일 최근 **활성 줄**의 종류별 문구로. `jobsView.ts: runningPhase` (items 역순 스캔: 재시도 대기 > 답 글(text 미완료) > 생각(think 미완료) > 도구 준비·실행 > 하위 작업 대기·준비·실행, 없으면 undefined → 기본 "딥다이빙 중"). `ChatTurn.tsx: RunningLine` — base 문구: 재시도는 "재시도 중 (n번째) · 사유"(기존, 접미사 없이) / `{도구명} 실행 중`(MCP 는 `서버/도구`) / "생각하는 중" / "답 작성 중" / "하위 작업 실행 중", 그 외 공통 "· {경과}" 접미사. `items` 을 `liveAfterWork` → `rest`(마지막 활성 줄 판정을 위해 전체). i18n: `chat.deepDivingFor` 제거(경과 접미사는 화면이 붙여 공통화), `chat.composing`·`chat.runningTool`·`chat.subtaskWorking` 추가(ko/en/zh). 라이브 테스트 기대 문구 ko 로(`tests/live/chat-layout.live`·`jobs.live`)
 
 ### 조사
 - 위치:
@@ -158,3 +159,11 @@
   - i18n: `shared/i18n/ko.ts:112`('위까지 내리면 이전 10개가 더 보인다'), `en.ts:107`('Scroll up for 10 earlier turns')
 - 메커니즘: (1) `RECENT_FIRST_LIMIT` 을 `ConversationView` 로 이관해 `App`·`loadEarlier` 가 공용. (2) 스크롤 이벤트 + `nearTop` 검사 = 자동 한 페이지만. (3) 로딩 후 `firstTurnRef` 이전 첫 내 말 → new first turn 으로 보정. (4) `service.ts::history()` 가 limit 의 첫 메시지가 `user` 가 아님 (중간 턴) 이면 첫 `user` 경계로 잘라 중간 턴이 보이지 않게. 그 페이지만이 `user` 라면 `visible=[]` → `more`/`hiddenCount` 로 이전이 있음을 알리고 그 수가 `limit`(=10) 이 아니라 `raw.length - (0)` 인데, `raw` 이미 limit 개라 그대로
 - 판정: 코드에서 확인됨 — `more: true` 와 `hiddenCount` 가 페이지만(최대 10)으로 정확히 알려야 하므로, `visible=[]` 인 경우에도 `more`/`hiddenCount: limit`(=10) 을 그대로 쓰고, `visible.length>0` 이면 경계로 잘아 표시
+
+## 2026-10-22 #606 — 히스토리 페이징이 반대 방향 (첫 로딩에 가장 오래된 페이)
+
+- Where: 채팅 — 긴 대화 처음 열 때·스크롤 최상단 자동 로딩 (#602 에서 추가된 `history()` 페이징)
+- What: "3턴 대화가 1턴만 보인다" — #602 페이징이 #1: 첫 로딩 `offset=0, limit=10` 이 `all.slice(0,10)` 으로 **가장 오래된** 10개를 가져와 첫 페이에 오래된 턴만 보여 주는 문제, #2: `loadEarlier` 가 client 가 세운 메시지 수를 offset 으로 쓰다 보니 불러온 페이가 이미 본 것 **뒤(더 최신)** 쪽이어서 앞에 붙이면 순서가 뒤집히고 다음 페이 offset 이 흘러내리는 문제
+- Expect: 첫 로딩 = 최신 N 개, 스크롤 최상단에서 더 이전 페이가 순서대로 (겹침·누락 없이) 이어 보임
+- Status: open (2026-10-22, feat_605_deepagents_harness 에서 수정, 커밋 대기)
+- Fix: 2026-10-22 — 페이징을 서비스 쪽 커서로: `query.offset` = 끝(최신)에서부터 이미 보여 준 엔진 메시지 수. `service.ts::history()` 가 `end = all.length - offset`, `start = end - limit` 로 페이를 자르고(페이가 user 턴 경계에서 끊기지 않게, 역사 시작이면 그대로), `History.offset = all.length - cut` 으로 다음 페이 커서를 돌려준다. client(App 첫 로딩·`loadEarlier`) 는 그 커서를 그대로 되돌려 client 세기 없음. 레거시 기록(`previousHistory`) 은 역사 시작에 이르는 페이에만 붙여 페이마다 중복 안 됨. 더 이상 안 쓰는 `hiddenCount`(contract·session)·버튼 시대 `chat.loadMore` i18n 키 제거.

@@ -117,6 +117,31 @@ export function runningLine(items: readonly TurnItem[]): JobLine | undefined {
   return undefined
 }
 
+/** 진행 줄(RunningLine) 문구의 지금 상태 (#605) — 맨 뒤에서 제일 최근 활성 줄:
+ *  재시도 대기 > 답 글이 흐르는 중 > 생각 중 > 도구 준비·실행 > 하위 작업 대기·준비·실행.
+ *  활성 줄이 없으면(단계 사이) undefined — 화면은 기본 "딥다이빙 중" */
+export type RunningPhase =
+  | { kind: 'retry'; attempt: number; message: string }
+  | { kind: 'writing' }
+  | { kind: 'thinking' }
+  | { kind: 'tool'; name: string }
+  | { kind: 'subtask' }
+
+export function runningPhase(items: readonly TurnItem[]): RunningPhase | undefined {
+  for (let at = items.length - 1; at >= 0; at--) {
+    const item = items[at]!
+    if (item.kind === 'retry' && item.status === 'waiting') return { kind: 'retry', attempt: item.attempt, message: item.message }
+    if (item.kind === 'text' && !item.done) return { kind: 'writing' }
+    if (item.kind === 'think' && !item.done) return { kind: 'thinking' }
+    if (item.kind === 'tool' && (item.status === 'running' || item.status === 'preparing')) {
+      // MCP 도구는 jobLine 과 같이 "서버/도구" (runningLine 의 예전 이름 규칙)
+      return { kind: 'tool', name: item.mcp ? `${item.mcp.server}/${item.mcp.tool}` : item.name }
+    }
+    if (item.kind === 'subtask' && (item.status === 'queued' || item.status === 'preparing' || item.status === 'running')) return { kind: 'subtask' }
+  }
+  return undefined
+}
+
 /** 백그라운드 작업 줄의 훑어보기 한 줄 (#325) — 실패·중단 사유가 있으면 그것, 아니면 마지막 활동(생각·도구·응답 글의 첫 줄). 없으면 undefined */
 export function peekLine(item: Subtask): JobLine | undefined {
   if (item.error) return { id: 'error', text: item.error, mono: false, state: 'error' }

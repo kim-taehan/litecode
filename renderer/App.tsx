@@ -379,7 +379,7 @@ export function App() {
       updateSession(id, (session) => ({
         ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
-        ...(loaded.more && { historyMore: true }),
+        ...(loaded.more ? { historyMore: true, historyOffset: loaded.offset ?? 0 } : { historyMore: false, historyOffset: 0 }),
       })),
     )
   }, [active?.id, active?.history])

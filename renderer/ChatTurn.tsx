@@ -8,7 +8,7 @@ import { takeCompactions } from './compaction.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
 import { answerText, clockTime, formatDuration, formatTokens, interimSplit, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
-import { runningLine } from './jobsView.ts'
+import { runningPhase } from './jobsView.ts'
 import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import type { MessageOrigin } from '../shared/contract.ts'
 import { DelegationRow, OriginTag, useDelegation } from './Delegation.tsx'
@@ -212,7 +212,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
       )}
       {running &&
         attention.map((request) => <AttentionCard key={request.id} request={request} onAnswer={(answer, target) => onAnswer?.(request, answer, target) ?? Promise.resolve()} />)}
-      {running && <RunningLine items={liveAfterWork} startedAt={startedAt} />}
+      {running && <RunningLine items={rest} startedAt={startedAt} />}
     </div>
   )
 })
@@ -404,7 +404,7 @@ function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory
   )
 }
 
-/** 진행 중 맨 아래 한 줄 (이슈 #416) — 지금 하는 일(마지막 생각·도구·하위 작업 줄) + 보낸 시각부터 경과 + 움직이는 점.
+/** 진행 중 맨 아래 한 줄 (이슈 #416·#605) — 지금 하는 일의 상태별 문구 + 보낸 시각부터 경과 + 움직이는 점.
  *  시계는 이 줄만 다시 그린다 (dsh RunningStatus) */
 function RunningLine({ items, startedAt }: { items: readonly TurnItem[]; startedAt?: number }) {
   const t = useT()
@@ -413,18 +413,23 @@ function RunningLine({ items, startedAt }: { items: readonly TurnItem[]; started
     const timer = setInterval(() => setNow(Date.now()), 1_000)
     return () => clearInterval(timer)
   }, [])
-  const line = runningLine(items)
-  // 재시도 대기(게이트웨이 500 등)는 지금 하는 일을 덮는 상태 — 사유까지 한 줄로 (이슈 #20 의 진행 줄을 한 줄로 받은 것)
-  const retry = [...items].reverse().find((item): item is Extract<TurnItem, { kind: 'retry' }> => item.kind === 'retry' && item.status === 'waiting')
-  // "Deep diving for 26s …" — 경과 시간이 문장 안에 붙고, 끝이 움직이는 점 세 개
+  // 지금 하는 일(상태)에 맞는 문구 (#605) — 재시도 대기 > 답 작성 > 생각 > 도구 > 하위 작업, 사이사이는 "딥다이빙 중"
+  const phase = runningPhase(items)
   const elapsed = startedAt !== undefined ? formatDuration(t, now - startedAt) : undefined
-  const summary = retry
-    ? [t('chat.retrying', { attempt: retry.attempt }), retry.message].filter(Boolean).join(' · ')
-    : line?.text !== undefined
-      ? line.text
-      : elapsed !== undefined
-        ? t('chat.deepDivingFor', { duration: elapsed })
-        : t('chat.deepDiving')
+  const base =
+    phase === undefined
+      ? t('chat.deepDiving')
+      : phase.kind === 'retry'
+        ? [t('chat.retrying', { attempt: phase.attempt }), phase.message].filter(Boolean).join(' · ')
+        : phase.kind === 'tool'
+          ? t('chat.runningTool', { name: phase.name })
+          : phase.kind === 'thinking'
+            ? t('chat.thinking')
+            : phase.kind === 'writing'
+              ? t('chat.composing')
+              : t('chat.subtaskWorking')
+  // "딥다이빙 중 · 1분 5초" — 경과 시간이 문장 안에. 재시도는 사유만 (접미사 없이)
+  const summary = phase?.kind === 'retry' || elapsed === undefined ? base : `${base} · ${elapsed}`
   return (
     <div className="turn-running">
       <span className="turn-running__divider" aria-hidden="true" />

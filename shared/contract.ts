@@ -244,10 +244,10 @@ export interface History {
   missingFolder?: boolean
   /** 불러오지 못한 사유 */
   error?: string
-  /** limit=N 으로 일부만 불러온 것 — true 면 앞에 안 보이는 턴이 있다 ("이전 {N}개 보기" 로 전체를 다시 부른다) */
+  /** limit=N 으로 최근 페이만 불러온 것 — true 면 더 이전 턴이 있다 (offset 커서로 이어 본다) */
   more?: boolean
-  /** 더 불러올 엔진 메시지는 이 개수만 (화면은 N 개의 턴으로 보여 준다) */
-  hiddenCount?: number
+  /** 더 이전 페이 커서 — 끝(최신)에서부터 이미 보여 준 엔진 메시지 수. history() 를 다시 부를 때 query.offset 으로 넘긴다 */
+  offset?: number
 }
 
 /** 끝난 명령 하나 */
