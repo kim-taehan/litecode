@@ -55,6 +55,8 @@ export function App() {
   const features = useFeatures()
   const featuresRef = useRef(features)
   featuresRef.current = features
+  const tRef = useRef(t)
+  tRef.current = t
   /** Trajectory 탭 — 설정 > 기능의 추론 과정이 켜져야 보인다 */
   const trajectoryOn = features.has('trajectory')
   const terminalOn = features.has('terminal')
@@ -199,6 +201,8 @@ export function App() {
   const mode = active?.mode ?? settings.defaultMode
   /** 알림 — 메인이 쥔 대화별 상태(점)와 앞일 때의 토스트. 지금 보는 대화를 메인에 알린다 */
   const notices = useNotices(active?.id, features.has('notifications'), sessions)
+  const noticesRef = useRef(notices)
+  noticesRef.current = notices
   /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다. 알림 기능과 무관하다 — 대화별 pending 으로 센다 (backgroundView.ts) */
   const running = runningIn(sessions, project?.path)
   const listed = pinnedFirst(visible)
@@ -569,7 +573,19 @@ export function App() {
       if (history.length < 2) return
       const index = current ? history.findIndex((entry) => entry.id === current) : -1
       const dir = event.key === ']' ? 1 : -1
-      const nextIndex = index < 0 ? 0 : (index + dir + history.length) % history.length
+      const nextIndex = index < 0 ? 0 : index + dir
+      if (nextIndex < 0) {
+        event.preventDefault()
+        event.stopPropagation()
+        noticesRef.current.say(tRef.current('notify.alreadyLast'))
+        return
+      }
+      if (nextIndex >= history.length) {
+        event.preventDefault()
+        event.stopPropagation()
+        noticesRef.current.say(tRef.current('notify.alreadyFirst'))
+        return
+      }
       const next = history[nextIndex]
       if (!next) return
       event.preventDefault()

@@ -718,6 +718,8 @@ export const ko = {
   'notify.attention': '답 필요',
   'notify.toasts': '알림',
   'notify.conversationGone': '대화가 지워졌습니다',
+  'notify.alreadyFirst': '이 대화가 가장 최근입니다',
+  'notify.alreadyLast': '이 대화가 가장 오래됐습니다',
   'notify.deviceConnected': '{name} 연결됨 — {via}',
   // 설정 > 모델
   'models.title': '모델',
