@@ -109,7 +109,7 @@ export const ko = {
   'chat.loading': '불러오는 중…',
   'chat.empty': '무엇을 도와드릴까요?',
   'chat.missingFolder': '폴더가 없습니다: {dir}',
-  'chat.loadMore': '이전 {count}개 보기',
+  'chat.loadMore': '위까지 내리면 이전 10개가 더 보인다',
   'chat.completedIn': '완료 · {duration}',
   'chat.completed': '완료',
   'chat.failedAfter': '실패 · {duration}',
