@@ -11,9 +11,9 @@ import { translate } from '../../shared/i18n/index.ts'
 
 vi.mock('../../renderer/settingsStore.ts', () => ({ useT: () => (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('ko', key, vars) }))
 
-// "프로젝트 폴더 밖 접근" 카드의 [항상 허용] (이슈 #242) + git 쓰기 도구 (2026-10-12). 엔진에는 늘 once 만 간다 —
-// 엔진의 always 는 그 폴더의 모든 대화에 걸린다(01z 1-3). 앱이 기억한다: 그 대화(엔진 세션) + 그 권한 + 그 패턴의 요청은
-// 카드 없이 once, 이미 떠 있는 같은 권한·패턴 카드도 함께 푼다. git 쓰기는 MCP 도구가 늘 patterns:["*"] 라 대화 전체다.
+// "프로젝트 폴더 밖 접근" 카드의 [항상 허용] (이슈 #242, #591) + git 쓰기 도구 (2026-10-12). 엔진에는 늘 once 만 간다 —
+// 엔진의 always 는 그 폴더의 모든 대화에 걸린다(01z 1-3). 앱이 기억한다: 그 대화(엔진 세션)의 폴더 밖 접근 전체(경로 상관없이 #591)
+// 와 git 쓰기 전체 — 그 요청은 카드 없이 once, 이미 떠 있는 같은 카드도 함께 푼다.
 // opencode 는 승인에 필요한 것만 흉내 낸 HTTP 서버다 (모양은 turnEvents.test.ts 의 가짜와 같다 — 01w 실측). 세션은 POST /session 마다 ses_1, ses_2 …
 
 const PROXY = 'http://proxy.invalid/v1'
@@ -147,6 +147,7 @@ async function start(url: string): Promise<LlmService> {
 
 const outside = (id: string, pattern: string): Ask => ({ id, permission: 'external_directory', patterns: [pattern] })
 const A = '/Users/me/litecode/*'
+const B = '/Users/me/scratch/*'
 const C = '/Users/me/other/*'
 
 /** 한 턴을 돌린다 — onCards 는 카드 목록이 바뀔 때마다. 화면에 뜬 카드 id 를 모두 모은다 */
@@ -180,15 +181,15 @@ const allowOnce = (llm: LlmService) => {
   }
 }
 
-describe('항상 허용 — 폴더 밖 접근 (이슈 #242)', () => {
-  it('같은 패턴 카드 둘 → 항상 허용 한 번에 둘 다 풀린다. 이후 같은 패턴은 카드 없이 once, 다른 패턴·다른 권한 이름은 그대로 카드. 엔진에 가는 답은 늘 once', async () => {
+describe('항상 허용 — 폴더 밖 접근 (이슈 #242, #591)', () => {
+  it('다른 폴더 카드 둘 → [항상 허용] 한 번에 폴더 밖 접근 전체가 풀린다(경로 상관없이 #591). 다른 권한 이름(읽기)은 그대로 카드. 엔진에 가는 답은 늘 once', async () => {
     const llm = await start(await fakeOpencode())
     const later = allowOnce(llm)
     let always = false
     const result = await runTurn(
       llm,
       [
-        [outside('per_a', A), outside('per_b', A), outside('per_c', C), { id: 'per_d', permission: 'read', patterns: [A] }],
+        [outside('per_a', A), outside('per_b', B), outside('per_c', C), { id: 'per_d', permission: 'read', patterns: [A] }],
         [outside('per_e', A), outside('per_f', C)],
       ],
       (cards) => {
@@ -196,14 +197,16 @@ describe('항상 허용 — 폴더 밖 접근 (이슈 #242)', () => {
         if (!always) {
           if (!['per_a', 'per_b', 'per_c', 'per_d'].every((id) => ids.includes(id))) return
           always = true
-          void llm.reply('ses_1', 'per_a', 'always').then(() => later(cards.filter((card) => card.id === 'per_c' || card.id === 'per_d')))
+          // [항상 허용] — 그 대화의 폴더 밖 접근 모두(다른 폴더 카드 포함) 카드 없이 once 로 푼다
+          void llm.reply('ses_1', 'per_a', 'always').then(() => later(cards.filter((card) => card.id === 'per_d')))
           return
         }
-        later(cards.filter((card) => card.id !== 'per_a' && card.id !== 'per_b'))
+        later(cards.filter((card) => card.id === 'per_d'))
       },
     )
     expect(result.ok).toBe(true)
-    expect([...result.shown].sort()).toEqual(['per_a', 'per_b', 'per_c', 'per_d', 'per_f'])
+    // [항상 허용] 이후 — 같은 폴더(per_e)·다른 폴더(per_f) 전부 카드 없이, 읽기(per_d)만 카드
+    expect([...result.shown].sort()).toEqual(['per_a', 'per_b', 'per_c', 'per_d'])
     expect(replies.map((entry) => entry.split(' ')[0]).sort()).toEqual(['per_a', 'per_b', 'per_c', 'per_d', 'per_e', 'per_f'])
     expect(new Set(replies.map((entry) => entry.slice(entry.indexOf(' ') + 1)))).toEqual(new Set(['{"reply":"once"}']))
   })
@@ -214,12 +217,12 @@ describe('항상 허용 — 폴더 밖 접근 (이슈 #242)', () => {
       if (cards[0]) void llm.reply(cards[0].sessionId, cards[0].id, 'always')
     })
     expect(first).toMatchObject({ ok: true, sessionId: 'ses_1' })
-    // 같은 대화의 다음 턴 — 카드 없이
-    const again = await runTurn(llm, [[outside('per_b', A)]], () => {}, 'ses_1')
+    // 같은 대화의 다음 턴 — 다른 폴더(B)도 카드 없이 (#591)
+    const again = await runTurn(llm, [[outside('per_b', B)]], () => {}, 'ses_1')
     expect(again.ok).toBe(true)
     expect(again.shown.size).toBe(0)
-    // 다른 대화 — 카드
-    const other = await runTurn(llm, [[outside('per_x', A)]], allowOnce(llm))
+    // 다른 대화 — 카드 (역시 다른 폴더)
+    const other = await runTurn(llm, [[outside('per_x', B)]], allowOnce(llm))
     expect(other).toMatchObject({ ok: true, sessionId: 'ses_2' })
     expect([...other.shown]).toEqual(['per_x'])
     expect(replies).toEqual(['per_a {"reply":"once"}', 'per_b {"reply":"once"}', 'per_x {"reply":"once"}'])
@@ -271,7 +274,7 @@ describe('승인 카드의 [항상 허용] 버튼 (이슈 #242)', async () => {
   it('폴더 밖 접근 카드에는 [항상 허용] 과 한 줄 설명이 있다', () => {
     const html = render(card('external_directory'))
     expect(html).toContain('>항상 허용</button>')
-    expect(html).toContain('이 대화에서 다시 묻지 않습니다')
+    expect(html).toContain('이 대화에서는 다시 묻지 않습니다')
     expect(html).toContain('>한 번 허용</button>')
   })
 

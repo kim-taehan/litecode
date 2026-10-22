@@ -346,7 +346,7 @@ export const ko = {
   'approval.other': '{action} 권한을 요청합니다',
   'approval.allowOnce': '한 번 허용',
   'approval.allowAlways': '항상 허용',
-  'approval.allowAlwaysNote': '이 대화에서 다시 묻지 않습니다',
+  'approval.allowAlwaysNote': '이 대화에서는 다시 묻지 않습니다',
   'approval.reject': '거절',
   'approval.sendError': '답을 보내지 못했습니다: {reason}',
   'question.waiting': '질문에 답해 주세요',
