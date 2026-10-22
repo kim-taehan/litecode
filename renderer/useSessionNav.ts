@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
-// 세션 이동 (2026-10-13 피드백 #3) — ⌘↑/⌘↓ (Windows·Linux 는 Ctrl) 로 바로 이전/다음 대화로 건너뛴다.
-// 터미널 탭(useTerminalKeys)·⌘F(ChatFind) 과 같은 전역 키 규칙: alt 는 무시, 판(aria-modal) 이 떠 있으면 물러남,
+// 세션 이동 (2026-10-13 피드백 #3) — ⌘↑/⌘↓ (Windows·Linux 는 Ctrl) 로 바로 이전/다음 대화로.
+// 터미널 탭(useTerminalKeys)·⌘F(ChatFind) 과 같은 전역 키 규칙: alt 는 무시, 판(aria-modal) 이 뜨면 물러남,
 // 컴포저·파일 미리보기 외의 글 칸 포커스는 그 칸의 커서 이동. 캡처 단계 + preventDefault·stopPropagation.
 export function useSessionNav({ onStep }: { onStep(dir: 1 | -1): void }): void {
   const stepRef = useRef(onStep)

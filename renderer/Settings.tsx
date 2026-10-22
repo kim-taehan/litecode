@@ -5,6 +5,7 @@ import { engineModelKeys } from '../shared/engineModelId.ts'
 import { GeneralPage } from './GeneralSettings.tsx'
 import { FeaturesPage } from './FeaturesSettings.tsx'
 import { MobilePage } from './MobileSettings.tsx'
+import { ShortcutsPage } from './ShortcutsPage.tsx'
 import { useFeatures } from './featuresStore.ts'
 import { useT } from './settingsStore.ts'
 import { COMPACTION_MIN_THRESHOLD, isLowContext } from './compaction.ts'
@@ -25,7 +26,7 @@ import './settings.css'
 // dsh 와 다른 점: "모델 가져오기" 는 고르는 창 없이 없는 id 만 목록에 더한다(00_request 성공 기준 4).
 // 처음 여는 페이지는 모델이다 — 일반 페이지가 생기기 전부터 설정 버튼이 모델을 열었다(실물 테스트가 그 동작을 지킨다). dsh 는 일반을 먼저 연다
 
-type Page = 'general' | 'models' | 'features' | 'mobile'
+type Page = 'general' | 'models' | 'features' | 'mobile' | 'shortcuts'
 
 interface SettingsModalProps {
   providers: ProviderSummary[]
@@ -58,6 +59,16 @@ function PuzzleIcon() {
   return (
     <svg className="settings-nav__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
       <path d="M2.5 5.5H5.2A1.6 1.6 0 1 1 8.4 5.5H11V8.1A1.6 1.6 0 1 1 11 11.3V13.5H2.5Z" />
+    </svg>
+  )
+}
+
+/** 16px 키보드 — 단축키 메뉴 */
+function KeyboardIcon() {
+  return (
+    <svg className="settings-nav__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.5" y="4.5" width="13" height="7" rx="1.5" />
+      <path d="M4 7h.01M7 7h.01M10 7h.01M4 9.5h8" />
     </svg>
   )
 }
@@ -100,6 +111,7 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
     { id: 'general', label: t('settings.nav.general'), icon: <GearIcon /> },
     { id: 'models', label: t('settings.nav.models'), icon: <DataIcon /> },
     { id: 'features', label: t('settings.nav.features'), icon: <PuzzleIcon /> },
+    { id: 'shortcuts', label: t('settings.nav.shortcuts'), icon: <KeyboardIcon /> },
     ...(mobileOn ? [{ id: 'mobile' as const, label: t('settings.nav.mobile'), icon: <PhoneIcon /> }] : []),
   ]
   // 모바일 페이지를 보다가 그 기능을 끄면(다른 창·설정 파일) 일반으로 돌아간다
@@ -144,6 +156,8 @@ export function SettingsModal({ providers, onProvidersChange, onClose }: Setting
                 <FeaturesPage />
               ) : shown === 'mobile' ? (
                 <MobilePage />
+              ) : shown === 'shortcuts' ? (
+                <ShortcutsPage />
               ) : (
                 <ModelsPage providers={providers} onProvidersChange={onProvidersChange} />
               )}
