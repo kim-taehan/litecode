@@ -20,6 +20,7 @@ import type {
 import { DEFAULT_LANGUAGE, isBuiltinLanguage } from '../../shared/i18n/index.ts'
 import { setMainLocalePack } from '../i18n.ts'
 import { changedFiles } from './extensions/changes.ts'
+import { analyzeCommit, getCommits, requestReview } from './extensions/diffReview.ts'
 import { ExtensionData } from './extensions/data.ts'
 import { EXTENSION_LIMITS } from './extensions/limits.ts'
 import { isExtensionId } from './extensions/manifest.ts'
@@ -128,6 +129,9 @@ const METHODS = new Map<string, ExtensionPermission | null>([
   ['server.analyze', 'server'],
   ['server.log', 'server'],
   ['chat.compose', 'chat'],
+  ['diff.commits', 'project'],
+  ['diff.analyze', 'project'],
+  ['diff.review', 'chat'],
 ])
 
 type CallFailure = { ok: false; error: ExtensionCallError; origin?: string }
@@ -335,6 +339,33 @@ export class ExtensionsService extends Service {
         case 'server.project':
         case 'server.analyze':
           return await this.analysis(id, manifest, method, params, project)
+        case 'diff.commits': {
+          if (!project) return fail('no-project')
+          const p = typeof params === 'object' && params !== null ? (params as { limit?: number }) : {}
+          const limit = Math.min(Math.max(p.limit ?? 10, 1), 50)
+          const result = await getCommits(this.options.git ?? 'git', project.directory, limit)
+          if (!result.ok) return fail(result.error === 'git-unavailable' ? 'git-unavailable' : result.error === 'not-a-repo' ? 'not-a-repo' : 'git-failed')
+          return done(result.commits)
+        }
+        case 'diff.analyze': {
+          if (!project) return fail('no-project')
+          const p = typeof params === 'object' && params !== null ? (params as { commit?: string }) : {}
+          const commit = p.commit
+          if (!commit || typeof commit !== 'string') return fail('params-invalid')
+          const result = await analyzeCommit(this.options.git ?? 'git', project.directory, commit)
+          if (!result.ok) return fail('git-failed')
+          return done(result.analysis)
+        }
+        case 'diff.review': {
+          if (!project) return fail('no-project')
+          const p = typeof params === 'object' && params !== null ? (params as { commit?: string; context?: unknown }) : {}
+          const commit = p.commit
+          const context = p.context
+          if (!commit || typeof commit !== 'string' || !context || typeof context !== 'object') return fail('params-invalid')
+          const result = await requestReview(this.options.git ?? 'git', project.directory, commit, context as never)
+          if (!result.ok) return fail('git-failed')
+          return done(result.review)
+        }
         default:
           return await this.project(method, params, project)
       }
