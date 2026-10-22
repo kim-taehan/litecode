@@ -81,6 +81,8 @@ export function Composer({
       <QueueDock
         items={active.queue ?? []}
         sources={active.queueSources}
+        canSteer={!!active.pending}
+        onSteer={() => void window.litecode.steerQueue(active.id)}
         onDrop={(index) => void window.litecode.dropQueued(active.id, index)}
         onRestore={() => {
           void window.litecode.takeQueue(active.id).then((taken) => taken && restoreQueued(active.id, taken))

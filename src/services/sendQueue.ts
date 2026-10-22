@@ -56,12 +56,13 @@ export class SendQueues {
     return true
   }
 
-  /** 입력창으로 되돌리기 — 그 출처가 쌓은 것을 합쳐 주고 대기열에서 뺀다. 붙잡힌 것도 풀린다 */
-  take(id: string, origin: ChatOrigin = 'user'): QueuedSend | undefined {
+  /** 입력창으로 되돌리기 — 그 출처가 쌓은 것을 합쳐 주고 대기열에서 뺀다. 붙잡힌 것도 풀린다. `'person'` 이면 사람이 친 것 전부(데스크탑 + 짝지은 폰) */
+  take(id: string, origin: ChatOrigin | 'person' = 'user'): QueuedSend | undefined {
+    const isMine = origin === 'person' ? fromPerson : (item: QueuedSend) => originOf(item) === origin
     const current = this.items(id)
-    const mine = current.filter((item) => originOf(item) === origin)
+    const mine = current.filter(isMine)
     if (mine.length === 0) return undefined
-    const rest = current.filter((item) => originOf(item) !== origin)
+    const rest = current.filter((item) => !isMine(item))
     // 다른 사람(데스크탑 화면·짝지은 폰)의 글이 남아 있으면 계속 붙잡는다 — 그 사람이 자기 입력창으로 되돌릴 것이다
     if (!rest.some(fromPerson)) this.holds.delete(id)
     this.set(id, rest)

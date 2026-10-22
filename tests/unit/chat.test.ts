@@ -869,8 +869,9 @@ describe('ChatService — 요약 (/compact)', () => {
   })
 })
 
-// 도는 턴에 끼워 넣기 (이슈 #250) — 사람이 친 글(데스크탑·폰)은 대기열 대신 그 턴에 끼워 넣는다 (ctx.llm.reserve → send). 다른 대화의 지시·
-// 앱이 이어 보낸 것·요약 턴은 지금처럼 대기열. 말풍선은 'chat/turn-interjected', 그때까지의 진행 줄은 그 앞의 답으로 얼린다
+// 도는 턴에 끼워 넣기 — 스티어 (이슈 #250) — 사람이 친 글(데스크탑·폰)은 턴 도는 중에는 늘 대기열로 가고, 스티어(steer) 한 번에
+// 그 전부(데스크탑 + 폰)를 하나로 합쳐 그 턴에 끼워 넣는다 (ctx.llm.reserve → send). 다른 대화의 지시·앱이 이어 보낸 것·요약 턴은 그냥 대기열.
+// 말풍선은 'chat/turn-interjected', 그때까지의 진행 줄은 그 앞의 답으로 얼린다
 describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
   async function steering() {
     const started = await start()
@@ -882,11 +883,13 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
   const text = (id: string, body: string): TurnItem => ({ kind: 'text', id, text: body, done: true })
   const tool: TurnItem = { kind: 'tool', id: 'x1', name: 'bash', status: 'running' }
 
-  it('사람이 친 글은 대기열이 아니라 도는 턴에 간다 — 그 턴의 모드로 말풍선(interjected)을 내고, 엔진엔 그 턴 자리로 보낸다', async () => {
+  it('사람이 친 글은 대기열로 쌓이고, 스티어가 도는 턴에 끼워 넣는다 — 그 턴의 모드로 말풍선(interjected)을 내고, 엔진엔 그 턴 자리로 보낸다', async () => {
     const { chat, llm, first, of, names } = await steering()
     first.progress(tool)
-    expect(await chat.send('c1', input('B 말', { mode: 'build', model: { providerId: 'gw', modelId: 'm2' } }))).toEqual({ state: 'interjected' })
-    expect(names()).not.toContain('queue.changed')
+    expect(await chat.send('c1', input('B 말', { mode: 'build', model: { providerId: 'gw', modelId: 'm2' } }))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(1)
+    expect(names()).toContain('queue.changed')
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     expect(chat.queued('c1')).toBe(0)
     const said = of('turn.interjected')[0]!
     expect(said).toMatchObject({ cid: 'c1', message: { role: 'user', text: 'B 말', mode: 'plan', interjected: true } })
@@ -901,7 +904,8 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
     const { chat, first, ended } = await steering()
     first.progress(tool)
     first.progress(text('a', 'A 중간 '))
-    await chat.send('c1', input('B 말'))
+    expect(await chat.send('c1', input('B 말'))).toEqual({ state: 'queued' })
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     const finished: TurnItem = { ...tool, status: 'done' } as TurnItem
     first.progress(finished)
     first.progress(text('b', 'B 에 답함'))
@@ -919,48 +923,66 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
     const texts: string[] = []
     ctx.on('chat/after-turn', (turn) => void texts.push(turn.text))
     first.progress(text('a', 'A 글'))
-    await chat.send('c1', input('B 말'))
+    expect(await chat.send('c1', input('B 말'))).toEqual({ state: 'queued' })
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     first.progress(text('b', 'B 답'))
     first.finish({ text: 'A 글B 답' })
     await ended(1)
     expect(texts).toEqual(['B 답'])
   })
 
-  it('폰(device:)이 친 글도 끼워 넣는다', async () => {
-    const { chat } = await steering()
-    expect(await chat.send('c1', input('폰에서', { origin: 'device:d1' }))).toEqual({ state: 'interjected' })
+  it('데스크탑 글과 폰(device:) 글은 대기열에 함께 쌓이고, 스티어 한 번에 하나의 말풍선(줄 잇기)으로 끼워 넣는다', async () => {
+    const { chat, llm, of } = await steering()
+    expect(await chat.send('c1', input('데스크톱에서'))).toEqual({ state: 'queued' })
+    expect(await chat.send('c1', input('폰에서', { origin: 'device:d1' }))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(2)
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
+    expect(chat.queued('c1')).toBe(0)
+    expect(of('turn.interjected')[0]!.message).toMatchObject({ role: 'user', text: '데스크톱에서\n폰에서', interjected: true })
+    expect(llm.reserved).toHaveLength(1)
+    await until(() => llm.reserved[0]!.sent !== undefined)
+    expect(llm.reserved[0]!.sent).toMatchObject({ prompt: '데스크톱에서\n폰에서' })
   })
 
-  it('다른 대화의 지시·앱이 이어 보낸 것(hook)은 끼워 넣지 않고 대기열에 — 자리를 잡지도 않는다', async () => {
+  it('다른 대화의 지시·앱이 이어 보낸 것(hook)은 끼워 넣지 않고 대기열에 — 스티어도 안 건드린다', async () => {
     const { chat, llm } = await steering()
     expect(await chat.send('c1', input('지시', { origin: 'session:c9', from: { conversationId: 'c9', title: '다른 대화' } }))).toEqual({ state: 'queued' })
     expect(await chat.send('c1', input('이어서', { origin: 'hook' }))).toEqual({ state: 'queued' })
     expect(chat.queued('c1')).toBe(2)
+    expect(chat.steer('c1')).toEqual({ steered: 0 })
+    expect(chat.queued('c1')).toBe(2)
     expect(llm.reserved).toEqual([])
   })
 
-  it('요약(/compact) 턴 중에 친 글은 대기열에 — 엔진이 그 턴에 자리를 주지 않는다', async () => {
+  it('요약(/compact) 턴 중에 친 글은 대기열에, 스티어도 끼워 넣지 못한다 — 엔진이 그 턴에 자리를 주지 않아 그대로 대기열', async () => {
     const { chat, llm, first, ended } = await steering()
     first.finish()
     await ended(1)
     expect(await chat.compact('c1')).toEqual({ ok: true })
     expect(await chat.send('c1', input('요약 뒤 질문'))).toEqual({ state: 'queued' })
+    expect(chat.steer('c1')).toEqual({ steered: 0 })
+    expect(chat.queued('c1')).toBe(1)
     await until(() => llm.compacts.length === 1)
     llm.compacts[0]!.finish()
   })
 
-  it('엔진이 아직 턴을 안 받았거나 멈추는 중이면 대기열로 (지금까지와 같다)', async () => {
+  it('엔진이 아직 턴을 안 받았거나 멈추는 중이면 대기열로 (지금까지와 같다) — 스티어도 끼워 넣지 못하고 그대로 대기열', async () => {
     const { chat, llm } = await steering()
     llm.steerable = false
     expect(await chat.send('c1', input('아직'))).toEqual({ state: 'queued' })
+    expect(chat.steer('c1')).toEqual({ steered: 0 })
+    expect(chat.queued('c1')).toBe(1)
     llm.steerable = true
     chat.stop('c1')
     expect(await chat.send('c1', input('멈춘 뒤'))).toEqual({ state: 'queued' })
+    expect(chat.steer('c1')).toEqual({ steered: 0 })
+    expect(chat.queued('c1')).toBe(2)
   })
 
   it('답을 못 받은 끼워 넣은 말(거절·중지)은 입력창으로 되돌리지 않고 턴 끝에 unanswered 로 알린다', async () => {
     const { chat, first, of, ended } = await steering()
     await chat.send('c1', input('B 말'))
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     const said = of('turn.interjected')[0]!.message
     first.finish({ declined: true, unanswered: [said.id!] })
     expect(await ended(1)).toMatchObject({ outcome: 'done', unanswered: [said.id], message: { declined: true } })
@@ -976,9 +998,11 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
       else send.context.push('B 맥락')
     })
     await chat.send('c1', input('B 말'))
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     await until(() => llm.reserved[0]?.sent !== undefined)
     expect(llm.reserved[0]!.sent).toMatchObject({ prompt: 'B 말', context: 'B 맥락' })
     await chat.send('c1', input('막을 말'))
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     await until(() => llm.reserved[1]?.cancelled === true)
     expect(llm.reserved[1]!.sent).toBeUndefined()
     expect(of('queue.changed').at(-1)).toMatchObject({ items: ['막을 말'], held: true })
@@ -995,6 +1019,7 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
     await fs.writeFile(file, '# 메모')
     chat.allowAttachments([file])
     await chat.send('c1', input('이것도 봐', { project: root, attachments: [{ kind: 'file', path: file, name: 'notes.md', size: 6 }] }))
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     const said = of('turn.interjected')[0]!.message
     expect(said).toMatchObject({ text: '이것도 봐', attachments: [{ kind: 'file', name: 'notes.md', size: 6 }] })
     await until(() => llm.reserved[0]?.sent !== undefined)
@@ -1006,6 +1031,7 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
   it('고르지 않은 첨부면 보내지 않는다 — 그 말은 답 없음', async () => {
     const { chat, llm, first, ended } = await steering()
     await chat.send('c1', input('몰래', { project: root, attachments: [{ kind: 'file', path: '/etc/passwd', name: 'passwd', size: 1 }] }))
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
     await until(() => llm.reserved[0]?.cancelled === true)
     first.finish()
     expect((await ended(1)).unanswered).toEqual([llm.reserved[0]!.messageId])

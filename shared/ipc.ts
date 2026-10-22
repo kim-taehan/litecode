@@ -57,6 +57,8 @@ export const Channel = {
   TAKE_QUEUE: 'chat:take-queue',
   /** 대기열에서 다른 대화가 보낸 줄 하나를 뺀다 (이슈 #55) */
   DROP_QUEUED: 'chat:drop-queued',
+  /** 대기열의 사람이 친 글(데스크탑 + 짝지은 폰)을 하나로 합쳐 도는 턴에 끼워 넣는다 (스티어, 이슈 #250) */
+  STEER_QUEUE: 'chat:steer-queue',
   CHAT_SNAPSHOT: 'chat:snapshot',
   /** 메인 → 화면 (ChatEventMap['turn.started']) — 턴이 시작됐다: 그 턴의 내 말과 저장된 목록 정보 */
   TURN_STARTED: 'chat:turn-started',
@@ -278,8 +280,8 @@ export interface LitecodeBridge {
   removeProvider(id: string): Promise<ProviderSummary[]>
   /** 메인 프로세스가 `GET {baseURL}/models` 로 묻는다. 키는 입력한 것, 없으면 id 의 저장된 키 */
   fetchProviderModels(draft: { id?: string; baseURL: string; apiKey?: string }): Promise<ModelCatalogEntry[]>
-  /** 그 대화에 보낸다 (ctx.chat, 이슈 #52) — 바로 돌아온다: 'sent'(턴이 시작됐다), 'interjected'(도는 턴에 끼워 넣었다 — 말풍선은
-   *  onTurnInterjected, 이슈 #250) 또는 'queued'(엔진이 그 턴을 아직 안 받았거나 멈추는 중이라 대기열에 쌓였다 — 턴이 끝나면 메인이 합쳐 보낸다). 내 말·진행 줄·답은 onTurnStarted·onTurnProgress·onTurnEnded 로 온다. 제목·저장·통계 합산은 메인이 한다.
+  /** 그 대화에 보낸다 (ctx.chat, 이슈 #52) — 바로 돌아온다: 'sent'(턴이 시작됐다) 또는 'queued'(턴이 도는 중이라 대기열에 쌓였다 —
+   *  턴이 끝나면 메인이 합쳐 보낸다, 사람이 친 글도 여기로만 가고 스티어(steerQueue)가 그 턴에 끼워 넣는다). 내 말·진행 줄·답은 onTurnStarted·onTurnProgress·onTurnEnded 로 온다. 제목·저장·통계 합산은 메인이 한다.
    *  input.project 는 아직 저장 안 된 새 대화가 만들어질 폴더. display 를 주면 다시 열었을 때 text 대신 그 글이 말풍선에 보인다 (`/` 명령: text 는
    *  풀어 쓴 template). mode·model 은 이 턴부터 그 대화의 것이 된다.
    *  attachments 는 붙인 파일·이미지 (pickAttachments 가 준 것만 — 그 밖의 경로는 거절). 메인이 읽는다: 이미지는 엔진에 이미지로, 글 파일은
@@ -290,6 +292,9 @@ export interface LitecodeBridge {
   /** 대기열의 "빼기" (이슈 #55) — 다른 대화가 보낸 줄 하나를 뺀다 (index 는 onQueueChanged 의 items 자리). 사람이 친 줄은 못 뺀다(되돌리기는
    *  takeQueue). 뺐으면 true */
   dropQueued(conversationId: string, index: number): Promise<boolean>
+  /** 스티어 (이슈 #250) — 대기열의 사람이 친 글(데스크탑 + 짝지은 폰)을 하나로 합쳐 도는 턴에 끼워 넣는다 (말풍선은 onTurnInterjected).
+   *  도는 턴이 없거나 끼울 수 없거나 사람 글이 없으면 { steered: 0 } */
+  steerQueue(conversationId: string): Promise<{ steered: number }>
   /** 메인이 쥔 지금 모습 — 대화마다 도는 턴(내 말·진행 줄·승인 카드)과 대기열. 화면이 (다시) 뜰 때 한 번 받고 그 뒤는 이벤트로 */
   chatSnapshot(): Promise<ChatSnapshot>
   onTurnStarted(listener: (event: ChatEventMap['turn.started']) => void): () => void

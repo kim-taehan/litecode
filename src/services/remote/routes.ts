@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import { tr } from '../../i18n.ts'
 import { emptyChatView, withHistory } from '../../../shared/chatReducer.ts'
-import type { ChatOrigin } from '../../../shared/chat.ts'
+import type { ChatOrigin, QueuedSend } from '../../../shared/chat.ts'
 import type { Conversation, History } from '../../../shared/contract.ts'
 import { DEFAULT_MODE, isMode, type Mode } from '../../../shared/modes.ts'
 import {
@@ -160,16 +160,20 @@ export function remoteRoutes(host: RouteHost): Record<string, Route> {
       const model = picked && keepThinking(host, conversation.model, picked)
       const draft = host.drafts.get(cid)
       const origin: ChatOrigin = `device:${device.id}`
-      const sending = host.ctx.chat
-        .send(cid, {
-          text,
-          origin,
-          ...(input?.mode !== undefined && { mode: input.mode as Mode }),
-          ...(model && { model }),
-          // 아직 저장 안 된 새 대화 — 만들 때 정한 프로젝트·모델·모드로 시작한다
-          ...(draft && { project: draft.project, model: model ?? draft.model, mode: (input?.mode as Mode | undefined) ?? draft.mode }),
-        })
-        .then(({ state }): SendMessageResponse => ({ state }))
+      // 데스크탑은 이제 사람이 친 글이 대기열로만 가지만, 폰은 도는 턴에 자동으로 끼워 넣는 것을 유지한다 (이슈 #250) —
+      // 끼워 넣을 수 없으면 send(대기열·새 턴)로
+      const item: QueuedSend = {
+        text,
+        origin,
+        ...(input?.mode !== undefined && { mode: input.mode as Mode }),
+        ...(model && { model }),
+        // 아직 저장 안 된 새 대화 — 만들 때 정한 프로젝트·모델·모드로 시작한다
+        ...(draft && { project: draft.project, model: model ?? draft.model, mode: (input?.mode as Mode | undefined) ?? draft.mode }),
+      }
+      const interjected: SendMessageResponse = { state: 'interjected' }
+      const sending: Promise<SendMessageResponse> = host.ctx.chat.interject(cid, item)
+        ? Promise.resolve(interjected)
+        : host.ctx.chat.send(cid, item).then(({ state }): SendMessageResponse => ({ state }))
       host.sent.set(key, sending)
       for (const old of [...host.sent.keys()].slice(0, Math.max(0, host.sent.size - SENT_MEMORY))) host.sent.delete(old)
       try {

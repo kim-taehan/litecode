@@ -48,6 +48,27 @@
   color: var(--text);
 }
 
+/* 스티어 (이슈 #250) — 도는 턴에 대기열의 사람이 친 글을 끼워 넣는 판 */
+.queue-dock__steer {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.queue-dock__steer:hover,
+.queue-dock__steer:focus-visible {
+  background: var(--fill-hover);
+}
+
 .queue-dock__list {
   max-height: 180px;
   overflow-y: auto;

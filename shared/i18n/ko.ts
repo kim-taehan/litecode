@@ -360,6 +360,7 @@ export const ko = {
   'question.reject': '거절',
   'composer.queued': '대기 중 {count}개',
   'composer.queueRestore': '입력창으로 되돌리기',
+  'composer.steer': '끼워 넣기',
   'composer.queueList': '답이 끝나면 보낼 메시지',
   'composer.stop': '답변 중지',
   'composer.stopTitle': '답변 중지 (Esc 두 번)',

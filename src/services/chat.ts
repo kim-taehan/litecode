@@ -166,13 +166,12 @@ export class ChatService extends Service {
     return !!model && !!resolveModelKey(this.ctx.providers.get(model.providerId)?.models ?? [], model.modelId)?.model.imageInput
   }
 
-  /** 보낸다. 그 대화의 턴이 도는 중이면 사람이 친 글은 그 턴에 끼워 넣고('interjected', 이슈 #250), 그 밖(다른 대화의 지시·끼워 넣을 수 없을 때·
-   *  붙잡힌 대기열이 있을 때)은 대기열에 쌓는다 — 턴이 끝나면 합쳐 간다.
+  /** 보낸다. 그 대화의 턴이 도는 중이면(대기열이 있을 때 포함) 대기열에 쌓는다 — 턴이 끝나면 합쳐 간다. 도는 중 사람이 친 글도 대기열로 가고
+   *  ("끼워 넣기" 는 이길로 오지 않으며, 화면의 스티어(steer)가 그 턴에 끼워 넣는다 — 이슈 #250)
    *  아니면 대화를 저장하고(새 대화면 첫 메시지로 제목) 'chat/turn-started' 를 낸 뒤 돌아온다 — 답은 이벤트로 온다 ('chat/turn-ended').
    *  저장 안 된 대화인데 project 가 없거나 모델을 모르면 던진다 */
   async send(cid: string, input: QueuedSend): Promise<SendResult> {
     const item = clean(input)
-    if (this.interject(cid, item)) return { state: 'interjected' }
     if (this.queues.submit(cid, item, this.turns.has(cid))) return { state: 'queued' }
     const turn = this.open(cid, item.origin ?? 'user')
     const ready = await this.begin(cid, item, turn, false)
@@ -253,6 +252,17 @@ export class ChatService extends Service {
   /** 대기열에서 다른 대화가 보낸 줄 하나를 뺀다 (index 는 'chat/queue-changed' 의 items 자리). 사람이 친 줄은 못 뺀다 — 뺐으면 true */
   dropQueued(cid: string, index: number): boolean {
     return this.queues.drop(cid, index)
+  }
+
+  /** 스티어 (이슈 #250) — 대기열의 사람이 친 글(데스크탑 + 짝지은 폰)을 하나로 합쳐 도는 턴에 끼워 넣는다.
+   *  도는 턴이 없거나 붙잡힌 대기열이거나 사람 글이 없으면 { steered: 0 }. 끼울 수 없으면 처음 대기열로 되돌려 그대로 { steered: 0 } */
+  steer(cid: string): { steered: number } {
+    if (this.queues.held(cid) || !this.turns.get(cid)) return { steered: 0 }
+    const merged = this.queues.take(cid, 'person')
+    if (!merged) return { steered: 0 }
+    if (this.interject(cid, merged)) return { steered: 1 }
+    this.queues.prepend(cid, merged)
+    return { steered: 0 }
   }
 
   /** 그 대화의 도는 턴 — 누가 시작했나(origin)·사람의 답을 기다리나(waiting). 안 돌면 undefined */
@@ -580,8 +590,9 @@ export class ChatService extends Service {
 
   /** 사람이 친 글을 도는 턴에 끼워 넣는다 (이슈 #250) — 끼웠으면 true. 사람 글이 아니거나(다른 대화의 지시·'hook'), 턴이 아직 시작 전이거나
    *  멈추는 중이거나 붙잡힌 대기열이 있거나, 엔진이 그 턴에 자리를 안 주면(아직 안 받음·요약 턴·이미 끝남) false — 부른 쪽이 대기열로.
-   *  자리를 잡으면 곧바로 말풍선을 낸다(그때까지의 진행 줄은 그 앞의 답으로 얼린다). 보내기는 뒤에서 (deliver) */
-  private interject(cid: string, item: QueuedSend): boolean {
+   *  자리를 잡으면 곧바로 말풍선을 낸다(그때까지의 진행 줄은 그 앞의 답으로 얼린다). 보내기는 뒤에서 (deliver).
+   *  스티어(steer)와 짝지은 폰의 자동 끼워 넣기(원격 루트)가 쓴다 */
+  interject(cid: string, item: QueuedSend): boolean {
     const turn = this.turns.get(cid)
     const asked = turn?.message?.id
     if (!turn || !asked || !turn.conversation || !fromPerson(item.origin) || turn.stop.signal.aborted || this.queues.held(cid)) return false

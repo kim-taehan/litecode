@@ -318,6 +318,8 @@ function chatBridge(ctx: Context): void {
   handle(ctx, Channel.PIN_CONVERSATION, async (_event, id: string, pinned: boolean) => ctx.chat.pin(String(id), pinned === true))
   handle(ctx, Channel.TAKE_QUEUE, async (_event, conversationId: string) => ctx.chat.takeQueue(String(conversationId)))
   handle(ctx, Channel.DROP_QUEUED, async (_event, conversationId: string, index: number) => ctx.chat.dropQueued(String(conversationId), Number(index)))
+  // 스티어 (이슈 #250) — 대기열의 사람이 친 글(데스크탑 + 짝지은 폰)을 하나로 합쳐 도는 턴에 끼워 넣는다
+  handle(ctx, Channel.STEER_QUEUE, async (_event, conversationId: string) => ctx.chat.steer(String(conversationId)))
   handle(ctx, Channel.CHAT_SNAPSHOT, async () => ctx.chat.snapshot())
   handle(ctx, Channel.STOP_TURN, async (_event, conversationId: string) => ctx.chat.stop(String(conversationId)))
   handle(ctx, Channel.COMPACT_CHAT, async (_event, conversationId: string) => ctx.chat.compact(String(conversationId)))

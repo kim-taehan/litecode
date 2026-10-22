@@ -344,6 +344,7 @@ export const en = {
   'question.reject': 'Reject',
   'composer.queued': '{count} queued',
   'composer.queueRestore': 'Move back to input',
+  'composer.steer': 'Steer',
   'composer.queueList': 'Messages to send when the reply ends',
   'composer.stop': 'Stop reply',
   'composer.stopTitle': 'Stop reply (Esc Esc)',
