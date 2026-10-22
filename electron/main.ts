@@ -236,7 +236,7 @@ function bootstrap(ctx: Context): void {
     }))
   })
   handle(ctx, Channel.REMOVE_CONVERSATION, async (_event, id: string) => ctx.sessions.remove(id))
-  handle(ctx, Channel.LOAD_CONVERSATION, async (_event, id: string) => ctx.sessions.history(id))
+  handle(ctx, Channel.LOAD_CONVERSATION, async (_event, id: string, limit?: number) => ctx.sessions.history(id, limit))
   handle(ctx, Channel.QUERY_TRIGGER, async (_event, scope: TriggerScope, draft: string, caret: number) => ctx.triggers.query(scope, draft, caret))
   handle(ctx, Channel.PICK_TRIGGER, async (_event, scope: TriggerScope, char: string, id: string, action: 'pick' | 'drill') =>
     ctx.triggers.pick(scope, char, id, action),

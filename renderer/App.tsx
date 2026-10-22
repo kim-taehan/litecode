@@ -30,7 +30,7 @@ import { onCompose, type ComposeRequest } from './composeRequest.ts'
 import { changeDraft, draftOf, restoreInto, withoutDrafts, type Draft, type Drafts } from './drafts.ts'
 import { questionDrafts } from './Attention.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
-import { matchesTitle, pinnedFirst } from './sessionListView.ts'
+import { pinnedFirst } from './sessionListView.ts'
 import { useHoverCard } from './hoverCard.tsx'
 import { Rail } from './Rail.tsx'
 import { MissingConversations } from './MissingConversations.tsx'
@@ -129,7 +129,7 @@ export function App() {
       const live = await window.litecode.chatSnapshot()
       for (const session of stored) {
         const turn = live[session.id]?.turn
-        if (turn) feedTurnSnapshot(session.id, turn.startedAt, turn.progress)
+        if (turn) feedTurnSnapshot(session.id, turn.startedAt, turn.progress, turn.message?.text || undefined)
       }
       setSessions(stored.map((session) => applyLive(session, live[session.id])))
       const list = await window.litecode.listProjects()
@@ -201,12 +201,7 @@ export function App() {
   const notices = useNotices(active?.id, features.has('notifications'))
   /** 지금 프로젝트에서 도는 대화 — "진행 중 N" 을 누르면 목록이 이것만 보인다. 알림 기능과 무관하다 — 대화별 pending 으로 센다 (backgroundView.ts) */
   const running = runningIn(sessions, project?.path)
-  const [runningOnly, setRunningOnly] = useState(false)
-  /** 대화 목록 위 찾기 칸의 글 (이슈 #79) — 제목으로 거른다. "진행 중" 필터와 함께 걸린다. 고정한 대화가 위 */
-  const [titleQuery, setTitleQuery] = useState('')
-  const listed = pinnedFirst(
-    (runningOnly && running.length > 0 ? visible.filter((session) => running.includes(session.id)) : visible).filter((session) => matchesTitle(titleOf(session), titleQuery)),
-  )
+  const listed = pinnedFirst(visible)
   /** 대화 안 찾기가 찾는 중 (이슈 #79) — 접힌 작업 줄이 숨긴 채 그려진다 (ChatFind.tsx) */
   const [finding, setFinding] = useState(false)
   /** 답변 중지 — 입력창 ■·행 ■·Esc 두 번 (이슈 #3). 대기열은 보내지 않고 입력창으로 되돌린다 */
@@ -388,15 +383,18 @@ export function App() {
     }
   }, [active?.project])
 
-  // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history)
+  // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history).
+  // 첫 로딩은 최근 RECENT_FIRST_LIMIT 개로 빠르게 — 더 있으면 "이전 N개 보기" 로 전체를 다시 본다
+  const RECENT_FIRST_LIMIT = 10
   useEffect(() => {
     if (active?.history !== 'unloaded') return
     const id = active.id
     updateSession(id, (session) => ({ ...session, history: 'loading' }))
-    void window.litecode.loadConversation(id).then((loaded) =>
+    void window.litecode.loadConversation(id, RECENT_FIRST_LIMIT).then((loaded) =>
       updateSession(id, (session) => ({
         ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
+        ...(loaded.more && { historyMore: true, hiddenCount: loaded.hiddenCount }),
       })),
     )
   }, [active?.id, active?.history])
@@ -773,10 +771,7 @@ export function App() {
           onExpand={() => setLayout((now) => ({ ...now, hidden: false }))}
           onNewChat={startNewChat}
           onSwitch={toggleSwitcher}
-          onRunning={() => {
-            setLayout((now) => ({ ...now, hidden: false }))
-            setRunningOnly(true)
-          }}
+          onRunning={() => setLayout((now) => ({ ...now, hidden: false }))}
           onSettings={() => setSettingsOpen(true)}
         />
       )}
@@ -792,10 +787,6 @@ export function App() {
         notices={notices}
         sessions={sessions}
         running={running}
-        runningOnly={runningOnly}
-        setRunningOnly={setRunningOnly}
-        titleQuery={titleQuery}
-        setTitleQuery={setTitleQuery}
         listed={listed}
         active={active}
         setActiveIds={setActiveIds}
@@ -859,6 +850,7 @@ export function App() {
               chosen={chosen}
               send={send}
               shareShell={shareShell}
+              updateSession={updateSession}
             />
 
             {/* 추론 과정(trajectory) 은 읽기 전용 기록 보기 — 입력 카드(채팅창)는 숨기고 대화 탭에서 다시 보인다 (이슈 #364) */}

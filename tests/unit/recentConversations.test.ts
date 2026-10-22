@@ -21,7 +21,7 @@ describe('recentRows — 고정한 대화 우선, 그 뒤 최신순', () => {
 
   it('최대 10개 — 그보다 오래된 것은 잘린다', () => {
     const many = Array.from({ length: 15 }, (_, i) => session('/w/shop-web', `c-${i}`, i * 1_000))
-    const rows = recentRows(many, P)
+    const rows = recentRows(many, P, '')
     expect(rows).toHaveLength(10)
     expect(rows[0]?.title).toBe('c-14')
     expect(rows[9]?.title).toBe('c-5')

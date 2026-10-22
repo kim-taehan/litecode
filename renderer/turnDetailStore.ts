@@ -11,6 +11,8 @@ export interface TurnDetail {
   items: TurnItem[]
   /** 보낸 시각(ms) — 채팅 도는 턴의 sentAt 과 같은 값 */
   startedAt: number
+  /** 그 턴을 시작한 내 말 — 없으면(첨부만·오래된 기록) 안 본다 */
+  userQuery?: string
   /** 턴이 끝나면 있다 */
   endedAt?: number
   /** 끝난 턴의 걸린 시간(ms) */
@@ -51,9 +53,9 @@ function put(detail: TurnDetail, key: string): void {
 }
 
 /** 턴 시작 — 보낸 시각(message.at)이 열쇠의 시간. 이미 있으면 그대로 둔다(같은 시각이면 같은 턴) */
-export function feedTurnStarted(conversationId: string, startedAt: number): void {
+export function feedTurnStarted(conversationId: string, startedAt: number, userQuery?: string): void {
   active.set(conversationId, startedAt)
-  if (!entries.has(keyOf(conversationId, startedAt))) put({ items: [], startedAt }, keyOf(conversationId, startedAt))
+  if (!entries.has(keyOf(conversationId, startedAt))) put({ items: [], startedAt, ...(userQuery && { userQuery }) }, keyOf(conversationId, startedAt))
 }
 
 /** 진행 줄 하나 — 같은 id 면 통째로 바꾼다. 도는 턴을 모르면(시작 이벤트 전·끝난 뒤) 버린다 */
@@ -89,9 +91,9 @@ export function feedTurnEnded(
 }
 
 /** 메인이 쥔 지금 모습 — 화면이 (재)뜰 때 도는 턴을 이어 넣는다 (App 의 chatSnapshot) */
-export function feedTurnSnapshot(conversationId: string, startedAt: number, items: readonly TurnItem[]): void {
+export function feedTurnSnapshot(conversationId: string, startedAt: number, items: readonly TurnItem[], userQuery?: string): void {
   active.set(conversationId, startedAt)
-  put({ items: [...items], startedAt }, keyOf(conversationId, startedAt))
+  put({ items: [...items], startedAt, ...(userQuery && { userQuery }) }, keyOf(conversationId, startedAt))
 }
 
 /** 끝난 턴의 기록을 보충한다 — 상한 밖으로 걷힌 오래된 턴을 사용자가 열 때 채팅의 items 로 넣는다. 이미 있으면 그대로 둔다 */
@@ -99,7 +101,7 @@ export function feedCompletedTurn(
   conversationId: string,
   startedAt: number,
   items: readonly TurnItem[],
-  meta?: { duration?: number; failed?: boolean; interrupted?: boolean; declined?: boolean },
+  meta?: { duration?: number; failed?: boolean; interrupted?: boolean; declined?: boolean; userQuery?: string },
 ): void {
   const key = keyOf(conversationId, startedAt)
   if (entries.has(key)) return
@@ -112,6 +114,7 @@ export function feedCompletedTurn(
       ...(meta?.failed === true && { failed: true }),
       ...(meta?.interrupted === true && { interrupted: true }),
       ...(meta?.declined === true && { declined: true }),
+      ...(meta?.userQuery && { userQuery: meta.userQuery }),
     },
     key,
   )
@@ -119,6 +122,14 @@ export function feedCompletedTurn(
 
 export function turnDetail(conversationId: string, startedAt: number): TurnDetail | undefined {
   return entries.get(keyOf(conversationId, startedAt))
+}
+
+/** 열려 있는 턴 탭에 내 말을 보탠다 — openTurnTab 이 userQuery 를 줄 때 */
+export function feedTurnQuery(conversationId: string, startedAt: number, userQuery: string): void {
+  const key = keyOf(conversationId, startedAt)
+  const existing = entries.get(key)
+  if (existing === undefined || existing.userQuery) return
+  put({ ...existing, userQuery }, key)
 }
 
 function subscribe(listener: () => void): () => void {

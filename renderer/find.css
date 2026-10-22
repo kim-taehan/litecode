@@ -166,42 +166,7 @@
   background: var(--border-light);
 }
 
-/* 제목찾기 칸 오른쪽의 "최근 대화" 토글 (2026-11-01 피드백) — 입력 높이에 맞춘 정사각 버튼 */
-.sidebar__session-search {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-}
-
-.sidebar__session-search .session-search {
-  flex: 1;
-  margin: 0 0 6px 12px;
-}
-
-.recent-toggle {
-  flex: none;
-  width: 34px;
-  height: 28px;
-  margin: 0 12px 6px 0;
-  display: grid;
-  place-items: center;
-  border: 0.5px solid var(--border-strong);
-  border-radius: 10px;
-  background: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.recent-toggle:hover {
-  background: var(--fill-hover);
-  color: var(--text);
-}
-
-.recent-toggle[aria-pressed='true'] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-text);
-}
+/* "최근 대화" 토글 — Workspaces 헤더의 돋보기로 옮겼고(2026-10-22) .sidebar__session-search 로 남아 있던 것은 없다 */
 
 /* 최근 대화 팝오버 — 진입 버튼 아래(fixed, 버튼 rect 좌표). 빠른 열기 패널과 같은 모달(블러) 바탕.
  *  시안 A: 행마다 프로젝트명(작은 라벨) + 대화 제목 · 오른쪽 시간 */
@@ -230,7 +195,7 @@
   line-height: 18px;
   font-family: inherit;
   color: var(--text);
-  background: var(--fill-hover);
+  background: transparent;
 }
 
 .recent-pop__search::placeholder {
@@ -246,6 +211,18 @@
   overflow-y: auto;
 }
 
+.recent-pop__group {
+  padding: 8px 12px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+.recent-pop__group:first-child {
+  padding-top: 4px;
+}
+
 .recent-pop__empty {
   padding: 12px 8px;
   font-size: 12px;
@@ -255,16 +232,18 @@
 
 .recent-pop__row {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
   width: 100%;
-  margin: 0 4px 2px;
-  padding: 5px 8px;
+  height: 32px;
+  margin: 0 4px 1px;
+  padding: 0 8px 0 14px;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   background: none;
   text-align: left;
   cursor: pointer;
+  font-size: 13px;
+  line-height: 20px;
   color: var(--text);
 }
 
@@ -274,30 +253,14 @@
   outline: none;
 }
 
-/* 1줄 — 프로젝트 이름 (프로젝트 전환을 알려주는 라벨) */
-.recent-pop__proj {
-  max-width: 100%;
-  overflow: hidden;
-  font-size: 10.5px;
-  line-height: 14px;
-  color: var(--text-tertiary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 그룹 헤더 바로 아래 첫 행(두 번째 그룹부터) — 띄움 */
+.recent-pop__row--spaced {
+  margin-top: 8px;
 }
 
-/* 현재 프로젝트 — 라벨을 진하게 + ✓ 로 구분 (여기서 열림) */
-.recent-pop__proj--now {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.recent-pop__proj-check {
-  margin-right: 3px;
-  color: var(--accent);
-}
-
-/* 2줄 — 대화 제목 + 오른쪽 시간 */
+/* 1줄 — 대화 제목 + 오른쪽 시간 */
 .recent-pop__main {
+  flex: 1;
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -307,16 +270,167 @@
 .recent-pop__title {
   flex: 1;
   overflow: hidden;
-  font-size: 12.5px;
-  font-weight: 500;
-  line-height: 17px;
+  font-size: 13px;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .recent-pop__time {
   flex: none;
-  font-size: 10.5px;
-  line-height: 17px;
-  color: var(--text-caption);
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--text-tertiary);
+}
+
+/* 워크스페이스 설정 팝오버 — 슬라이더 버튼 아래(fixed, 버튼 rect 좌표) */
+.ws-pop {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--menu);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-radius: 16px;
+  box-shadow: var(--shadow-prominent);
+}
+
+.ws-pop__header {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ws-pop__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.ws-pop__row:hover,
+.ws-pop__row--expanded {
+  background: var(--fill-hover);
+}
+
+.ws-pop__label {
+  flex: 1;
+}
+
+.ws-pop__value {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.ws-pop__caret {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.ws-pop__menupair {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ws-pop__menupair .ws-pop__row {
+  flex: 1;
+}
+
+.ws-pop__menu {
+  position: absolute;
+  top: -4px;
+  left: calc(100% + 4px);
+  z-index: 82;
+  display: none;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 5px;
+  background: var(--menu);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-radius: 12px;
+  box-shadow: var(--shadow-prominent);
+}
+
+.ws-pop__menu--open {
+  display: flex;
+}
+
+.ws-pop__option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.ws-pop__option:hover {
+  background: var(--fill-hover);
+}
+
+.ws-pop__option--on {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.ws-pop__check {
+  flex: none;
+  width: 14px;
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.ws-pop__check {
+  flex: none;
+  width: 14px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.ws-pop__divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border);
+}
+
+.ws-pop__reset {
+  margin-top: 4px;
+  padding: 8px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: left;
+}
+
+.ws-pop__reset:hover {
+  background: var(--fill-hover);
+  color: var(--text);
 }

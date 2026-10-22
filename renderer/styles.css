@@ -436,7 +436,47 @@ button {
   line-height: 20px;
 }
 
-/* find.css 의 .sidebar__session-search 를 재사용 (2026-10-22 라벨 줄 제거 후) */
+/* 새 대화 버튼 아래 'Workspaces' 섹션 헤더 — 제목 왼쪽 + 검색·설정 아이콘 오른쪽 */
+.sidebar__workspaces {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 16px 2px 16px;
+}
+
+.sidebar__workspaces-label {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.sidebar__workspaces-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.sidebar__workspaces-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sidebar__workspaces-action:hover {
+  background: var(--fill-elevated);
+  color: var(--text);
+}
 
 /* 행은 사이드바 12px 에서 시작, 오른쪽은 5px 스크롤바 자리(gutter)를 두고 12 에 맞춘다 */
 .sidebar__sessions {
@@ -449,31 +489,29 @@ button {
   gap: 2px;
 }
 
-/* 5px 스크롤바 — 포인터가 사이드바 밖이면 감춘다 (dsh scrollbar.css) */
-.sidebar__sessions::-webkit-scrollbar {
-  width: 5px;
+/* 날짜 구분 라벨 (사용자 2026-10-22) — dsh section header 스타일 */
+.session-group__label {
+  padding: 10px 4px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-tertiary);
 }
 
-.sidebar__sessions::-webkit-scrollbar-thumb {
-  border-radius: 5px;
-  background: transparent;
+/* 그룹화 없음: 고정/비고정 사이 구분선 */
+.session-group__sep {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
 }
 
-.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-}
-
-.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-hover);
-}
-
-/* [더보기]/[접기] — 스크롤 안, 마지막 행 뒤에 (이슈 #568). 텍스트 링크 스타일, 보라색× (2026-10-22) */
+/* [더보기]/[접기] — 스크롤 안, 마지막 행 뒤에 (이슈 #568) */
 .conversation-list__more-bar {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin: 2px 12px;
+  margin: 2px 0;
   padding: 8px 0;
   border: 0.5px solid var(--border-ring);
   border-radius: 10px;
@@ -493,6 +531,24 @@ button {
   font-size: 11.5px;
   font-weight: 400;
   color: var(--text-tertiary);
+}
+
+/* 5px 스크롤바 — 포인터가 사이드바 밖이면 감춘다 (dsh scrollbar.css) */
+.sidebar__sessions::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sidebar__sessions::-webkit-scrollbar-thumb {
+  border-radius: 5px;
+  background: transparent;
+}
+
+.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+}
+
+.sidebar:hover .sidebar__sessions::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
 }
 
 /* 목록 끝 24px 페이드 — 마지막 행이 발치 줄에 툭 잘리지 않게 */

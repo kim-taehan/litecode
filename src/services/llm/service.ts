@@ -553,16 +553,18 @@ export class LlmService extends Service {
   }
 
   /** 지난 대화의 말풍선. directory 는 그 세션의 작업 폴더 — 없으면 opencode 에 묻지 않는다: 폴더가 없어진 세션은 내용 요청이
-   *  500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 계속 500 이다 (01c Q5). 재시작 뒤에도 내용은
-   *  그대로 온다 — 이벤트 재생 대신 조립된 메시지 목록을 쓴다. 돌고 있는지는 GET /session/status (돌고 있는 세션만 실린다 — 01w).
-   *  hidden 은 말풍선으로 안 그릴 엔진 메시지 id — addContext 로 넣은 `!` 카드 본문 (카드는 앱이 따로 그린다) */
-  async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set()): Promise<History> {
+    *  500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 계속 500 이다 (01c Q5). 재시택 뒤에도 내용은
+    *  그대로 온다 — 이벤트 재생 대신 조립된 메시지 목록을 쓴다. 돌고 있는지는 GET /session/status (돌고 있는 세션만 실린다 — 01w).
+    *  hidden 은 말풍선으로 안 그릴 엔진 메시지 id — addContext 로 넣은 `!` 카드 본문 (카드는 앱이 따로 그린다).
+    *  limit=N 이면 엔진 측에서 최근 N개만 온다 — 첫 메시지가 user 가 아닌(턴이 잘려 중간에서) 경우 more=true 로 표시.
+    *  전체를 다시 불러오려면 limit 없이 다시 부른다 */
+  async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set(), limit?: number): Promise<History> {
     const folder = await this.engineFolder(directory)
     if ('error' in folder) return folder.missing ? { messages: [], missingFolder: true } : { messages: [], error: folder.error }
     const { workdir } = folder
     try {
       const conn = await this.ctx.engine.connection()
-      const raw = await engineMessages(conn, sessionId, workdir)
+      const raw = await engineMessages(conn, sessionId, workdir, limit)
       const status = await fetch(`${conn.url}/session/status?${at(workdir)}`, { headers: conn.headers })
       if (!status.ok) throw new Error(tr('error.activeSessions', { status: status.status }))
       const running = sessionId in ((await status.json()) as Record<string, unknown>)
@@ -570,7 +572,10 @@ export class LlmService extends Service {
       const previous = (await readPreviousMessages(conn, sessionId)).filter((message) => !message.id || !hidden.has(message.id))
       const children = await subtaskMessages(conn, raw, workdir)
       const visible = raw.filter((message) => !hidden.has(message.info.id))
-      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)] }
+      // limit 이면 user 턴 경계를 안 넘어야 해서, 첫 메시지 user 가 아니면 (턴이 잘린다) 더 있나(more) 가 된다
+      const firstIsTurnStart = visible[0]?.info.role === 'user'
+      const more = limit !== undefined && raw.length >= limit
+      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)], ...(more && !firstIsTurnStart && { more: true, hiddenCount: raw.length }) }
     } catch (error) {
       return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
     }

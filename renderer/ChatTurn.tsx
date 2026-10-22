@@ -115,6 +115,8 @@ interface AssistantTurnProps {
   running?: boolean
   startedAt?: number
   conversationId?: string
+  /** 그 턴을 시작한 내 말 — "턴 작업" 탭에 보인다 */
+  userQuery?: string
   /** 파일 언급 칩을 찾을 프로젝트 */
   directory: string
   /** 진행 중 턴이 기다리는 승인·질문 — 작업 줄 아래 카드로 */
@@ -124,7 +126,7 @@ interface AssistantTurnProps {
 
 const NO_ATTENTION: readonly Attention[] = []
 
-export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, conversationId, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
+export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, running = false, startedAt, conversationId, userQuery, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
   // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다.
   // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
   const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
@@ -152,8 +154,8 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   const canOpenPanel = !running && items.length > 0 && conversationId !== undefined && startedAt !== undefined
   const openPanel = () => {
     if (conversationId === undefined || startedAt === undefined) return
-    feedCompletedTurn(conversationId, startedAt, items, { duration, failed, interrupted, declined })
-    openTurnTab(directory, conversationId, startedAt)
+    feedCompletedTurn(conversationId, startedAt, items, { duration, failed, interrupted, declined, userQuery })
+    openTurnTab(directory, conversationId, startedAt, userQuery)
   }
 
   return (
@@ -225,7 +227,7 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
       )}
       {running &&
         attention.map((request) => <AttentionCard key={request.id} request={request} onAnswer={(answer, target) => onAnswer?.(request, answer, target) ?? Promise.resolve()} />)}
-      {running && <RunningLine items={items} startedAt={startedAt} directory={directory} conversationId={conversationId} />}
+      {running && <RunningLine items={items} startedAt={startedAt} directory={directory} conversationId={conversationId} userQuery={userQuery} />}
     </div>
   )
 })
@@ -420,7 +422,7 @@ function SubtaskRow({ item, directory, turnRunning }: { item: Subtask; directory
 
 /** 진행 중 맨 아래 한 줄 (이슈 #416) — 지금 하는 일(마지막 생각·도구·하위 작업 줄) + 보낸 시각부터 경과 + 움직이는 점.
  *  누르면 우측 패널의 "턴 작업" 탭이 열려 전체 진행을 실시간으로 보인다. 시계는 이 줄만 다시 그린다 (dsh RunningStatus) */
-function RunningLine({ items, startedAt, directory, conversationId }: { items: readonly TurnItem[]; startedAt?: number; directory: string; conversationId?: string }) {
+function RunningLine({ items, startedAt, directory, conversationId, userQuery }: { items: readonly TurnItem[]; startedAt?: number; directory: string; conversationId?: string; userQuery?: string }) {
   const t = useT()
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -458,7 +460,7 @@ function RunningLine({ items, startedAt, directory, conversationId }: { items: r
           className="turn-running__line"
           title={t('turnTab.showAll')}
           aria-label={t('turnTab.showAll')}
-          onClick={() => canOpen && openTurnTab(directory, conversationId, startedAt!)}
+          onClick={() => canOpen && openTurnTab(directory, conversationId, startedAt!, userQuery)}
         >
           {inner}
         </button>
