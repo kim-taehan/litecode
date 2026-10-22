@@ -16,7 +16,6 @@ import {
   isFileTab,
   isTaskTab,
   isTerminalTab,
-  isTurnTab,
   openExtensionTab,
   onFilesSearch,
   openFilePreview,
@@ -29,8 +28,6 @@ import {
   taskIdOf,
   terminalIdOf,
   toggleFullscreen,
-  TURN_PREFIX,
-  turnRefOf,
   usePanelState,
   type PanelState,
 } from './filePreviewStore.ts'
@@ -49,7 +46,6 @@ import { PuzzleIcon } from './PuzzleIcon.tsx'
 import { useT } from './settingsStore.ts'
 import { menuExtensions, TabAddMenu } from './TabAddMenu.tsx'
 import { TaskTab } from './TaskTab.tsx'
-import { TurnTab } from './TurnTab.tsx'
 import { taskTitle } from './taskTabView.ts'
 import { findTask, useTaskMap } from './tasksStore.ts'
 import { TerminalView } from './TerminalView.tsx'
@@ -84,18 +80,12 @@ function readWidth(): number {
 
 export interface FilePreviewPanelProps {
   directory?: string
-  /** “턴 작업” 탭(이슈 #462) — 그 턴의 대화 제목을 알려 주는 것. 없으면 대화 줄을 안 그린다 */
-  titleFor?: (conversationId: string) => string
-  /** 지금 보고 있는 대화 — “턴 작업” 탭의 대화 줄이 화살표를 안 띄울 판정 */
-  activeConversationId?: string
-  /** 그 대화로 이동(알림 열기와 같은 길) */
-  onOpenConversation?: (conversationId: string) => void
 }
 
 /** 지금 보는 대화의 프로젝트 패널일 때만 그린다 — 프로젝트를 옮기면 숨긴다.
  *  패널이 닫혀 있어도 늘 마운트돼 있어서 확장 목록(이슈 #511)을 여기서 듣는다: 꺼졌거나·삭제됐거나·상태가 정상이 아닌 확장의 탭을 닫고,
  *  설정 화면의 [열기]가 탭을 열 자리(지금 프로젝트)를 알린다 */
-export function FilePreviewPanel({ directory, titleFor, activeConversationId, onOpenConversation }: FilePreviewPanelProps) {
+export function FilePreviewPanel({ directory }: FilePreviewPanelProps) {
   const state = usePanelState()
   const extensions = useExtensions()
   const stale = !!state?.open && state.directory !== directory
@@ -105,7 +95,7 @@ export function FilePreviewPanel({ directory, titleFor, activeConversationId, on
   // 바뀜 이벤트만 — 첫 읽기 전의 빈 목록으로 탭을 닫지 않게
   useEffect(() => window.litecode.onExtensionsChanged(closeExtensionTabs), [])
   return state?.open && !stale ? (
-    <Panel state={state} extensions={extensions} titleFor={titleFor} activeConversationId={activeConversationId} onOpenConversation={onOpenConversation} />
+    <Panel state={state} extensions={extensions} />
   ) : null
 }
 
@@ -145,10 +135,7 @@ function CompareIcon() {
 function Panel({
   state,
   extensions,
-  titleFor,
-  activeConversationId,
-  onOpenConversation,
-}: { state: PanelState; extensions: readonly ExtensionSummary[] } & Omit<FilePreviewPanelProps, 'directory'>) {
+}: { state: PanelState; extensions: readonly ExtensionSummary[] }) {
   const t = useT()
   const [width, setWidth] = useState(readWidth)
   const root = useRef<HTMLElement>(null)
@@ -162,8 +149,6 @@ function Panel({
   // 기능이 꺼지면(셸도 다 끝났다) 터미널 탭은 보이지 않는다
   const tabs = terminalOn ? allTabs : allTabs.filter((key) => !isTerminalTab(key))
   const active = state.active === GIT_TAB && !gitOn ? undefined : isTerminalTab(state.active) && !terminalOn ? undefined : state.active
-  // 고른 “턴 작업” 탭의 열쇠 (이슈 #462) — 대화 줄(제목·이동)에 쓴다
-  const turnRef = isTurnTab(active) ? turnRefOf(active) : undefined
   // 비교 보기 (이슈 #424) — 비교하는 파일 탭 둘 다 남아 있을 때만 (닫거나 프로젝트를 옮기면 저장소가 먼저 지운다 — 여기서는 안전망)
   const compare =
     state.compare && isFileTab(state.compare.a) && isFileTab(state.compare.b) && allTabs.includes(state.compare.a) && allTabs.includes(state.compare.b)
@@ -291,40 +276,6 @@ function Panel({
                   onAuxClick={(event) => event.button === 1 && closeTab(key)}
                 >
                   <TaskIcon className="file-preview__tab-icon" />
-                  <span className="file-preview__tab-title">{name}</span>
-                  <button
-                    type="button"
-                    className="file-preview__tab-close"
-                    aria-label={t('filePreview.closeTab', { name })}
-                    title={t('filePreview.closeTab', { name })}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      closeTab(key)
-                    }}
-                  >
-                    <CrossIcon size={12} />
-                  </button>
-                </div>
-              )
-            }
-            const turnRef = turnRefOf(key)
-            if (turnRef !== undefined) {
-              const name = t('turnTab.tab')
-              return (
-                <div
-                  key={key}
-                  role="tab"
-                  tabIndex={0}
-                  className="file-preview__tab file-preview__tab--turn"
-                  aria-selected={active === key}
-                  title={name}
-                  aria-label={name}
-                  data-turn={key.slice(TURN_PREFIX.length)}
-                  onClick={() => selectTab(key)}
-                  onKeyDown={(event) => activateOnKey(event, () => selectTab(key))}
-                  onAuxClick={(event) => event.button === 1 && closeTab(key)}
-                >
-                  <TurnTabIcon className="file-preview__tab-icon" />
                   <span className="file-preview__tab-title">{name}</span>
                   <button
                     type="button"
@@ -493,17 +444,6 @@ function Panel({
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
       )}
       {active !== undefined && isTaskTab(active) && <TaskTab key={active} taskId={taskIdOf(active)!} directory={directory} />}
-      {turnRef !== undefined && active !== undefined && (
-        <TurnTab
-          key={active}
-          conversationId={turnRef.conversationId}
-          startedAt={turnRef.startedAt}
-          directory={directory}
-          title={titleFor?.(turnRef.conversationId)}
-          here={activeConversationId === turnRef.conversationId}
-          onJump={onOpenConversation ? () => onOpenConversation(turnRef.conversationId) : undefined}
-        />
-      )}
       {/* 확장 탭 (이슈 #511) — 연 것은 모두 마운트해 두고 고른 것만 보인다(다른 탭에 갔다 와도 iframe 안 상태가 그대로). 탭을 닫으면 iframe 도 사라진다.
           버전이 바뀌면(업그레이드) key 가 바뀌어 새 HTML 로 다시 그린다 */}
       {tabs.map((key) => {
@@ -512,7 +452,7 @@ function Panel({
         const extension = extensions.find((item) => item.id === id)
         return <ExtensionTab key={extensionFrameKey(id, extension?.version)} id={id} name={extension?.name ?? id} hidden={active !== key} directory={directory} />
       })}
-      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isTurnTab(active) && !isExtensionTab(active) && active !== GIT_TAB && (
+      {active !== undefined && !isTerminalTab(active) && !isTaskTab(active) && !isExtensionTab(active) && active !== GIT_TAB && (
         <CompareSplit compare={compare} directory={directory} active={active} jump={jump} tabs={tabs} />
       )}
     </aside>
@@ -1228,15 +1168,6 @@ function TaskIcon({ className = 'file-preview__icon' }: { className?: string }) 
       <circle cx="3.5" cy="8" r="0.9" fill="currentColor" stroke="none" />
       <circle cx="3.5" cy="11.5" r="0.9" fill="currentColor" stroke="none" />
       <path d="M6.5 4.5H13M6.5 8H13M6.5 11.5H11" />
-    </svg>
-  )
-}
-
-/** "턴 작업" 탭 — 번개 (이슈 #416, 대화 진행 중 줄의 아이콘과 같은 번개) */
-function TurnTabIcon({ className = 'file-preview__icon' }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8 1L9.6 6.4L15 8L9.6 9.6L8 15L6.4 9.6L1 8L6.4 6.4Z" />
     </svg>
   )
 }

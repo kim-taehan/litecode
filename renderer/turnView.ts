@@ -23,7 +23,7 @@ export function splitTurn(items: readonly TurnItem[]): { work: TurnItem[]; answe
  *  deepagents harness 의 `Text | Reasoning | ToolCall | ToolResult` 이벤트 구조와 동일:
  *  진행 중엔 Text/Reasoning (잠정답) 을 흘리고 ToolCall/ToolResult 는 work.
  *  - answer: `answerText` 가 쓰는 `splitTurn` 의 answer (엔진 최종 답 fallback 이 안 될 때 쓰임)
- *  - work:  `splitTurn` 의 work (think·tool·중간 text — 우측 "턴 작업" 탭)
+ *  - work:  `splitTurn` 의 work (think·tool·중간 text — 채팅의 `turn__work` 블록)
  *  - interim: `interimText` (= 마지막 도구·생각 뒤 text) — 진행 중 채팅에 흘림
  */
 export function interimSplit(items: readonly TurnItem[]): { work: TurnItem[]; interim: string[]; answer: TurnItem[] } {
@@ -34,7 +34,7 @@ export function interimSplit(items: readonly TurnItem[]): { work: TurnItem[]; in
 /** 도는 턴의 '잠정답' 문자 — `splitTurn` 의 answer 에서 text 줄만.
  *  deepagents `final_ai_text`: 역순에서 첫 AI 메시지 (= 마지막 도구 이후 text) 와 동일.
  *  - 진행 중: 마지막 도구·생각 뒤의 text 만 보임
- *  - 도구 호출: 그 위의 글은 `interimSplit.work` 로 이동 (채팅에 안 보임, 우측 '턴 작업' 탭으로)
+ *  - 도구 호출: 그 위의 글은 `interimSplit.work` 로 이동 (채팅에 안 보임)
  *  - 턴 종료: `splitTurn.answer` = 최종 답만 남음
  */
 export function interimText(items: readonly TurnItem[]): string[] {
@@ -94,23 +94,22 @@ export function clockTime(at: number): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+/** 토큰 수의 짧은 표기 — 95412 → "95.4K", 1234567 → "1.2M" (답 행동 줄의 "사용량 95.4K tok" 숫자) */
+export function formatTokens(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`
+  return String(count)
+}
+
 /** 인라인 코드가 파일 경로처럼 보이는가 — 실제 파일인지는 메인이 판정한다 (fileMentions.ts). 여기서는 물을 후보만 줄인다 */
 export function looksLikePath(token: string): boolean {
   if (!token || token.length > 300 || /\s/.test(token)) return false
   return token.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(token)
 }
 
-/** 미니맵 줄 하나 — 이름표(툴팁)와, 마커 클릭 시 우측 "턴 작업" 탭을 열려면 그 턴의 보낸 시각·끝난 답.
- *  `startedAt` 이 없으면 안 열려 (그 전 내 말에 시각이 없는 오래된 기록) */
+/** 미니맵 줄 하나 — 이름표(툴팁) */
 export interface MinimapTurn {
   text: string
-  startedAt: number
-  conversationId: string
-  items: TurnItem[]
-  duration?: number
-  failed: boolean
-  interrupted?: boolean
-  declined?: boolean
 }
 
 /** 미니맵 줄의 이름표 — 대화 칸의 `.user-turn` 닻과 순서로 짝짓는다 (Minimap.tsx). 턴 끝 훅이 이어 보낸 글은 말풍선이 아니라
@@ -119,26 +118,14 @@ export function minimapTurns(messages: readonly HistoryMessage[], conversationId
   return minimapTurnDetails(messages, conversationId).map((turn) => turn.text)
 }
 
-/** 미니맵 줄마다 그 턴의 이름표와 우측 "턴 작업" 탭에 쓸 데이터. 줄은 여전히 `.user-turn` (내 말)과 순서로 짝짓고,
- *  줄 당 하나씩 그 뒤의 첫 어시스턴트 응답을 이어 붙인다. 이어 붙인 응답이 있으면 끝난 턴 — 보낸 시각(user 의 at)·items·모든 정보.
- *  없으면(진행 중·첫 내 말) startedAt 없음 — 마커는 스크롤만 한다 (Minimap.tsx) */
+/** 미니맵 줄마다 그 턴의 이름표. 줄은 여전히 `.user-turn` (내 말)과 순서로 짝짓는다 (Minimap.tsx) */
 export function minimapTurnDetails(messages: readonly HistoryMessage[], conversationId: string): MinimapTurn[] {
   const turns: MinimapTurn[] = []
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i]!
     if (message.role !== 'user' || stopFeedbackReason(message.text) !== undefined) continue
-    // 다음 인덱스만 그 "턴"의 응답; 그 뒤에 또 다른 user 가 오면 새로운 턴이므로 거기서 끊는다
-    const next = messages[i + 1]
-    const answer = next && next.role === 'assistant' ? next : undefined
     turns.push({
       text: message.text || (message.attachments ?? []).map((item) => item.name).join(', '),
-      startedAt: message.at ?? 0,
-      conversationId,
-      items: answer?.items ?? [],
-      ...(answer && answer.duration !== undefined && { duration: answer.duration }),
-      failed: !!answer?.error,
-      ...(answer?.interrupted === true && { interrupted: true }),
-      ...(answer?.declined === true && { declined: true }),
     })
   }
   return turns

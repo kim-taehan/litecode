@@ -16,11 +16,11 @@ const render = (props: { failed?: boolean; interrupted?: boolean }) =>
   renderToStaticMarkup(createElement(AssistantTurn, { items: [read], text: '⚠️ 멈췄습니다', directory: '/p', ...props }))
 
 describe('중단된 턴의 작업 줄 접힘 (#516)', () => {
-  it('중단 턴은 작업 줄이 접혀 있고 머리가 접기 버튼이다', () => {
+  it('중단 턴은 작업 줄이 접혀 있고 머리가 접기 버튼이다 (숨겨진 채 DOM 에 남는다 — 대화 안 찾기, 이슈 #79)', () => {
     const html = render({ failed: true, interrupted: true })
-    expect(html).not.toContain('class="turn__work"')
+    expect(html).toContain('class="turn__work" hidden="" data-find-fold=""')
     expect(html).toContain('aria-expanded="false"')
-    expect(html).not.toContain('/p/a.ts')
+    expect(html).not.toContain('>Read<span')
   })
 
   it('진짜 실패 턴은 예전처럼 작업 줄을 펼쳐 둔다', () => {

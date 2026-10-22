@@ -158,6 +158,22 @@ describe('historyMessages (레거시 기록)', () => {
     expect(historyMessages([user('a'), assistant('', { time: { created: 2 } })], true)[1]!.duration).toBeUndefined()
   })
 
+  it('답에 그 턴의 토큰 합과 완료 시각을 싣는다 — 스텝 토큰을 더하고, 끝났으면 마지막 완료 시각' + ' (행동 줄의 사용량·시각)', () => {
+    const step1 = assistant('', { time: { created: 1_100, completed: 1_500 }, tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 5, write: 1 } } })
+    const step2 = assistant('done', { time: { created: 1_600, completed: 3_000 }, tokens: { input: 3, output: 7 } })
+    const answer = historyMessages([user('q', { time: { created: 1_000 } }), step1, step2], false)[1]!
+    expect(answer).toMatchObject({ tokens: 28, finishedAt: 3_000, duration: 2_000 })
+  })
+
+  it('토큰이 없는 기록엔 tokens 가 없다. 중단(마지막 스텝 안 끝남)이면 완료 시각도 없다 (duration 과 같은 규칙)', () => {
+    const answer = historyMessages([user('a'), assistant('c')], false)[1]!
+    expect('tokens' in answer).toBe(false)
+    expect(answer.finishedAt).toBe(3)
+    const stopped = historyMessages([user('a'), assistant('', { time: { created: 2 } })], false)[1]!
+    expect(stopped.finishedAt).toBeUndefined()
+    expect(stopped.interrupted).toBe(true)
+  })
+
   it('내 말에 그 턴의 모드를 싣는다 — 레거시는 user 메시지마다 agent 가 남는다. 모르는 에이전트는 없음', () => {
     const messages = historyMessages(
       [user('a', { agent: 'build' }), assistant('1'), user('b', { agent: 'plan' }), assistant('2'), user('c', { agent: 'litecode-ask' }), assistant('3'), user('d', { agent: 'explore' })],

@@ -101,9 +101,9 @@ describe('화면', () => {
   const row = (todos: readonly TodoItem[]) => renderToStaticMarkup(createElement(TodoRow, { todos }))
   const failedTurn = (items: TurnItem[]) => renderToStaticMarkup(createElement(AssistantTurn, { items, text: '⚠️ bad', failed: true, directory: '/p' }))
 
-  it('대화 안: 진행 중이면 줄은 우측 "턴 작업" 탭으로 — 채팅엔 한 줄. 줄 자체는 "할 일 · 완료 1/3"', () => {
+  it('대화 안: 진행 중이면 도구 줄(할 일 포함) 채팅에 표시 — deepagents harness work 줄', () => {
     const html = turn(write('m:p1', list))
-    expect(html).not.toContain('data-kind="todo"') // 줄은 탭으로 (이슈 #416)
+    expect(html).toContain('data-kind="todo"') // work 줄 채팅에 보임
     expect(html).toContain('turn-running__line')
     const todoRow = row(list)
     expect(todoRow).toContain('data-kind="todo"')

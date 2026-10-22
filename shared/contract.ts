@@ -228,6 +228,10 @@ export interface HistoryMessage {
   items?: TurnItem[]
   /** assistant: 그 턴에 걸린 시간(ms) — user 보낸 시각부터 마지막 스텝 완료까지. 끝나지 않았으면 없다 */
   duration?: number
+  /** assistant: 그 턴에 쓴 토큰 합 (입력 + 출력 + 추론 + 캐시) — step-finish 합. 엔진이 안 주면 없다 */
+  tokens?: number
+  /** assistant: 답 완료 시각(ms) — user.at 과 쌍. 마지막 스텝이 완료됐을 때만 있다 (duration 과 같은 규칙) */
+  finishedAt?: number
   /** assistant: 끊겨서 끝났다 (error 는 interruptedError()) — 실패와 가른다 */
   interrupted?: boolean
   /** assistant: 승인·질문을 거절해 끝났다 */

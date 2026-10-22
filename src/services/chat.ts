@@ -221,6 +221,7 @@ export class ChatService extends Service {
       items: turn.progress,
       duration: Date.now() - turn.startedAt,
       ...(result.interrupted && { interrupted: true }),
+      ...(!result.interrupted && { finishedAt: Date.now() }),
     }
     this.turns.delete(cid)
     this.ctx.emit('chat/turn-ended', { cid, message, outcome: result.ok ? 'done' : result.interrupted ? 'interrupted' : 'failed', ...(stored && { conversation: stored }) })
@@ -468,6 +469,7 @@ export class ChatService extends Service {
         usage: result.usage ? addTurn(entry.usage as ChatUsage | undefined, result.usage) : entry.usage,
       }))
       .catch(() => undefined)
+    const usage = result.usage?.tokens
     const message: HistoryMessage = {
       role: 'assistant',
       text: answer,
@@ -476,6 +478,8 @@ export class ChatService extends Service {
       duration: Date.now() - turn.startedAt,
       ...(result.interrupted && { interrupted: true }),
       ...(result.declined && { declined: true }),
+      ...(usage && { tokens: usage.input + usage.output + usage.reasoning + usage.cacheRead + usage.cacheWrite }),
+      ...(!result.interrupted && { finishedAt: Date.now() }),
     }
     this.turns.delete(cid)
     this.ctx.emit('chat/turn-ended', {

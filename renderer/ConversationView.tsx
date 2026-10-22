@@ -5,8 +5,6 @@ import { planEnded, switchedMode, applyHistory } from './chatState.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
 import { Minimap } from './Minimap.tsx'
 import { minimapTurnDetails, type MinimapTurn } from './turnView.ts'
-import { openTurnTab } from './filePreviewStore.ts'
-import { feedCompletedTurn } from './turnDetailStore.ts'
 import { ScrollToBottom } from './ScrollToBottom.tsx'
 import type { findModel } from './modelChoice.ts'
 import { Trajectory } from './Trajectory.tsx'
@@ -34,15 +32,6 @@ function precedingUserAt(messages: readonly HistoryMessage[], index: number): nu
   for (let i = index - 1; i >= 0; i--) {
     const message = messages[i]
     if (message && message.role === 'user' && message.at !== undefined) return message.at
-  }
-  return undefined
-}
-
-/** 그 assistant 턴을 바로 앞선 내 말 — 없으면(첨부만·오래된 기록) undefined */
-function precedingUserText(messages: readonly HistoryMessage[], index: number): string | undefined {
-  for (let i = index - 1; i >= 0; i--) {
-    const message = messages[i]
-    if (message && message.role === 'user') return message.text || undefined
   }
   return undefined
 }
@@ -90,14 +79,6 @@ export function ConversationView({
   shareShell,
   updateSession,
 }: ConversationViewProps) {
-  /** 미니맵 줄 클릭 — 그 턴으로 스크롤(Minimap)은 한 뒤 우측 "턴 작업" 탭을 연다 (이슈 #575).
-   *  끝난 턴은 채팅 items 로 기록을 보충해 오래된 턴도 보이고, 진행 중 턴(시작 시각만)은 실시간 저장소만 본다 */
-  function openMinimapTurn(turn: MinimapTurn) {
-    if (turn.startedAt === undefined) return
-    if (turn.items.length > 0) feedCompletedTurn(turn.conversationId, turn.startedAt, turn.items, { duration: turn.duration, failed: turn.failed, interrupted: turn.interrupted, declined: turn.declined, userQuery: turn.text })
-    openTurnTab(active.project, turn.conversationId, turn.startedAt, turn.text)
-  }
-
   /** 그 자리의 `!` 카드들 (실행한 순서) */
   function shellCards(session: Session, at: (position: number) => boolean) {
     if (session.history === 'unloaded' || session.history === 'loading') return [] // 자리를 셀 말풍선이 아직 없다
@@ -230,10 +211,10 @@ export function ConversationView({
                 interrupted={message.interrupted}
                 declined={message.declined}
                 duration={message.duration}
+                tokens={message.tokens}
+                finishedAt={message.finishedAt}
                 directory={active.project}
-                conversationId={active.id}
                 startedAt={precedingUserAt(active.messages, index)}
-                userQuery={precedingUserText(active.messages, index)}
               />
             )}
           </Fragment>
@@ -261,7 +242,6 @@ export function ConversationView({
             items={active.progress ?? NO_ITEMS}
             text=""
             startedAt={active.sentAt}
-            conversationId={active.id}
             directory={active.project}
             attention={active.attention}
             onAnswer={answerAttention}
@@ -271,7 +251,7 @@ export function ConversationView({
         </div>
       </div>
       </FindingProvider>
-      <Minimap scroller={listRef} turns={minimapTurnDetails(active.messages, active.id)} onTurnOpen={openMinimapTurn} />
+      <Minimap scroller={listRef} turns={minimapTurnDetails(active.messages, active.id)} />
       <ScrollToBottom scroller={listRef} following={following} />
       </div>
       )}

@@ -70,6 +70,17 @@
 }
 .turn__copy:hover { color: var(--text); background: var(--fill-hover); }
 
+/* 사용량·시각 — 행동 줄 오른쪽 끝. 내 말의.meta(.user-turn__meta)와 같은 12px 캡션.
+   복사 버튼은 왼쪽 그대로, 이 묶음이 행의 오른쪽으로 밀린다 */
+.turn__meta-facts {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+  color: var(--text-caption);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .turn {
   display: flex;
   flex-direction: column;
@@ -88,7 +99,7 @@
   border: none;
   border-bottom: 0.5px solid var(--border);
   background: none;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font: inherit;
   text-align: left;
 }
@@ -100,7 +111,7 @@ button.turn__head:hover { color: var(--text); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: calc(var(--chat-font-size, 14px) - 1px);
+  font-size: var(--chat-font-size, 14px);
   line-height: 24px;
 }
 
@@ -130,19 +141,19 @@ button.turn__head:hover { color: var(--text); }
 .turn__head-panel:hover { color: var(--text); background: var(--bg-hover); }
 .turn__head-panel:focus-visible { opacity: 1; outline: 1px solid var(--accent); outline-offset: 1px; }
 
-/* 작업 줄 — 줄 사이 6px, 답과는 12px (dsh) */
+/* 작업 줄 — 줄 사이 10px, 답과는 12px (dsh) */
 .turn__work {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   margin-bottom: 12px;
 }
 .turn[data-state='running'] .turn__work { margin-bottom: 0; }
 
 .turn-row {
   min-width: 0;
-  color: var(--text-tertiary);
-  font-size: calc(var(--chat-font-size, 14px) - 1px);
+  color: var(--text-secondary);
+  font-size: var(--chat-font-size, 14px);
 }
 
 .turn-row__line {
@@ -257,6 +268,7 @@ button.turn-row__line:disabled { cursor: default; }
   font-size: calc(var(--chat-font-size, 14px) - 2px);
   line-height: 22px;
 }
+.turn[data-state='running'] .turn__work + .turn-running { margin-top: 2px; }
 
 .turn-running__divider {
   display: none;
@@ -267,47 +279,39 @@ button.turn-row__line:disabled { cursor: default; }
 }
 .turn__work + .turn-running .turn-running__divider { display: block; }
 
-/* 진행 중 한 줄의 내용 (이슈 #416) — 누르면 우측 "턴 작업" 탭이 열린다 */
+/* 진행 중 한 줄의 내용 — 글은 왼쪽, 움직이는 점은 오른쪽 끝 */
 .turn-running__line {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
   min-width: 0;
-  padding: 1px 6px 1px 2px;
-  border: none;
-  border-radius: 6px;
-  background: none;
   color: inherit;
   font: inherit;
-  text-align: left;
 }
-button.turn-running__line { cursor: pointer; }
-button.turn-running__line:hover { background: var(--fill-hover); }
-button.turn-running__line:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* 실시간 느낌 — 딥시크식 샤이머: 밝은 밴드가 글자 위를 스쳐 지나가는 흐르는 그라디언트 */
 .turn-running__summary {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   mask-image: linear-gradient(to right, black calc(100% - 48px), transparent);
+  background: linear-gradient(90deg,
+    var(--accent) 35%,
+    color-mix(in srgb, var(--accent) 35%, white) 50%,
+    var(--accent) 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: turn-running-flow 2s linear infinite;
 }
 
-.turn-running__dot {
+.turn-running__dots {
   flex: none;
-  width: 2px;
-  height: 2px;
-  margin: 0 2px;
-  border-radius: 1px;
-  background: currentColor;
+  margin-left: 2px;
 }
-
-.turn-running__seconds {
-  flex: none;
-  font-variant-numeric: tabular-nums;
-}
-
 .turn-running__dots span {
   animation: turn-dot 1.2s infinite;
   opacity: 0.25;
@@ -325,11 +329,18 @@ button.turn-running__line:focus-visible { outline: 2px solid var(--accent); outl
   50% { opacity: 0.55; }
 }
 
+/* 타일 200% 기준으로 한 주기 4W 이동 = 그라디언트 반복의 정확히 2배이므로 끊김 없는 루프 (양 끝 색이 --accent 로 같아야 한다) */
+@keyframes turn-running-flow {
+  from { background-position: 200% center; }
+  to { background-position: -200% center; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .turn__chevron { transition: none; }
   .turn-row[data-live] .turn-row__title,
   .turn-row[data-live] .turn-row__summary,
   .turn-running__dots span { animation: none; opacity: 1; }
+  .turn-running__summary { animation: none; background-position: center; }
 }
 
 /* 대화 열 — dsh ConversationRoot 의 --dsh-chat-content-width: clamp(680px, 본문 폭 × 0.64, 920px). 입력 카드(styles.css .composer__box)는

@@ -111,6 +111,7 @@
 - Fix: 2026-10-20 — `ChatTurn.tsx:132-134` `liveRows` 필터를 `kind: 'compaction'` 만으로 좁혀서 진행 중 채팅에 중간 글(text) 줄이 안 보이게 함. 채팅에는 파란 진행 줄(RunningLine) + compaction 알림만. 전문은 우측 "턴 작업" 탭(TurnTab.tsx) 그대로. 끝난 턴(`splitTurn`)은 영향 없음
 - Fix 2 (2026-10-21, #565): 사용자 "최종 답도 스트리밍되지 않고 있어" — #534 가 글 줄을 다 숨겨 답이 끝날 때 한꺼번에 나왔다. 진행 중에도 마지막 도구·생각 뒤의 글(`turnView.ts liveAnswer` — splitTurn 과 같은 규칙)은 흘린다. 도구 앞 중간 글은 계속 숨김
 - Fix 3 (2026-10-21, #573): 사용자 "중간 답도 보여지다가 사라지잖아" — `liveAnswer` 로 흘리던 글이 도구 호출 시 "중간 글"로 전환되며 채팅에서 사라져 혼란. 진행 중 채팅에는 compaction 줄만, 텍스트(중간 글 포함)는 우측 "턴 작업" 탭에만. `liveAnswer` 제거
+- Fix 4 (2026-10-22, DeepSeek 하네스 append-only): 사용자 "딥시크처럼 구성하자" — DeepSeek CLI 의 방식: 진행 중에도 마지막 도구·생각 뒤의 글을 채팅에 스트리밍하되 **append-only** (도구가 끼어도 그 위의 글이 안 사라짐). `turnView.ts: liveAnswer` → `interimText` (string[] 반환, join 시 '\n\n' 으로 이어 붙임). `ChatTurn.tsx:138` `liveAnswerTexts = interimText(rest)` → `.turn__work` 에 단일 Markdown 블록으로 렌더링. 중간 글(도구 앞 text)은 계속 우측 "턴 작업" 탭에만. 끝난 턴(`splitTurn`)은 영향 없음
 
 ### 조사
 - 위치:

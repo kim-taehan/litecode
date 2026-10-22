@@ -1,6 +1,6 @@
 import { MODE_AGENT } from './engine.ts'
 import { MODES, type Mode } from '../../shared/modes.ts'
-import { messageItems, type EngineMessageInfo, type EnginePart, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
+import { messageItems, tokenTotal, type EngineMessageInfo, type EnginePart, type McpToolResolver, type SubtaskHistory, type TurnItem } from './turnProgress.ts'
 import { instructionsNote } from './instructions.ts'
 import { turnError } from './contextOverflow.ts'
 import { tr } from '../i18n.ts'
@@ -55,8 +55,13 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
     return reply
   }
   const finishedAt = (completed: number | undefined, reply: HistoryMessage): void => {
-    if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
-    else delete reply.duration // 마지막 스텝이 안 끝났다
+    if (completed !== undefined && sentAt !== undefined) {
+      reply.duration = completed - sentAt
+      reply.finishedAt = completed
+    } else {
+      delete reply.duration // 마지막 스텝이 안 끝났다
+      delete reply.finishedAt
+    }
   }
   for (const message of raw) {
     const { info, parts } = message
@@ -112,6 +117,9 @@ export function historyMessages(raw: readonly EngineMessage[], running: boolean,
     const reply = currentReply()
     reply.text += parts.filter((part) => part.type === 'text' && !part.synthetic).map((part) => part.text ?? '').join('')
     reply.items = [...(reply.items ?? []), ...messageItems(parts, root, mcp, children)]
+    // 턴 사용량 — 스텝 토큰을 답에 누적한다 (요약 답은 안 센다 — 하위 작업 줄과 같은 규칙). user 가 오면 새 답이라 자연스럽게 리셋
+    const stepTokens = tokenTotal(info.tokens)
+    if (stepTokens > 0) reply.tokens = (reply.tokens ?? 0) + stepTokens
     lastStep = message
     finishedAt(info.time?.completed, reply)
     if (info.error?.name === 'MessageAbortedError') Object.assign(reply, { error: tr('error.stopped'), interrupted: true })
