@@ -3,7 +3,7 @@ import type { HistoryMessage } from '../../shared/contract.ts'
 import { stopFeedback } from '../../shared/hooks.ts'
 import type { TurnItem } from '../../shared/ipc.ts'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
-import { answerText, clockTime, formatDuration, looksLikePath, minimapTurns, minimapTurnDetails, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
+import { answerText, clockTime, formatDuration, interimSplit, interimText, looksLikePath, minimapTurns, minimapTurnDetails, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
 
 // 답 한 턴의 화면 모양 — 진행 줄 쌓기, 작업/답 가르기, 줄 글자
 
@@ -46,6 +46,77 @@ describe('splitTurn·answerText', () => {
     expect(work.map((item) => item.id)).toEqual(['b', 'h1', 'h2', 'h3'])
     expect(answer.map((item) => item.id)).toEqual(['c'])
     expect(answerText(answer, 'all')).toBe('final')
+  })
+})
+
+describe('interimText (append-only 잠정답) — DeepSeek 하네스 방식', () => {
+  it('마지막 도구·생각 뒤의 text 줄만 — 그 앞의 중간 글은 안 든다', () => {
+    // [think, mid-text, tool, final-text] → 마지막 도구가 있는 'tool' 뒤에 'final-text'만 보임
+    expect(interimText([think('t1'), text('a', 'mid'), tool('b'), text('c', 'final')])).toEqual(['final'])
+  })
+
+  it('글만 있으면 전부, 빈 줄은 뺀다', () => {
+    expect(interimText([text('a', 'final')])).toEqual(['final'])
+    expect(interimText([text('a', 'final'), text('b', '  ')])).toEqual(['final'])
+  })
+
+  it('도구가 끼어도 그 위의 글이 안 사라진다 (append-only) — [text, tool, text] 둘 다 보임', () => {
+    // [text-mid, tool, text-final] → tool 이후의 text-only 가 'final'
+    // DeepSeek 방식: tool 앞의 'mid' 는 보이지 않음 (work 로 이동)
+    // 다만 tool 뒤의 'final' 이 보임
+    expect(interimText([text('a', 'mid'), tool('b'), text('c', 'final')])).toEqual(['final'])
+  })
+
+  it('도구 사이 text 를 여러 번 보낸다 — [text1, tool, text2] → second 만', () => {
+    expect(interimText([text('a', 'first'), tool('b'), text('c', 'second')])).toEqual(['second'])
+  })
+
+  it('도구 없이 글만 여러 줄이면 전부 보임 (분할 경계가 없으므로 전부 답)', () => {
+    expect(interimText([text('a', '1'), text('b', '2')])).toEqual(['1', '2'])
+  })
+
+  it('생각·도구 모두 없으면 마지막 text 만', () => {
+    expect(interimText([text('only', 'hello')])).toEqual(['hello'])
+  })
+
+  it('hook 줄은 건너뛴다 (splitTurn 의 규칙) — [tool, hook, text] → text', () => {
+    const hook = (id: string): TurnItem => ({ kind: 'hook', id, event: 'Stop', command: 'x', outcome: 'passed', seconds: 1 })
+    expect(interimText([tool('b'), hook('h1'), text('c', 'ans')])).toEqual(['ans'])
+  })
+})
+
+describe('interimSplit (deepagents harness 구조 동일)', () => {
+  it('work = splitTurn 의 work (think·tool·중간 text), interim = interimText, answer = splitTurn 의 answer', () => {
+    const items = [think('t1'), text('a', 'mid'), tool('b'), text('c', 'final')]
+    const { work, interim, answer } = interimSplit(items)
+    expect(work.map((item) => item.id)).toEqual(['t1', 'a', 'b'])
+    expect(interim).toEqual(['final'])
+    expect(answer.map((item) => item.id)).toEqual(['c'])
+  })
+
+  it('글만: work 없음, interim = 전부, answer = 전부', () => {
+    const items = [text('a', '1'), text('b', '2')]
+    const { work, interim, answer } = interimSplit(items)
+    expect(work).toEqual([])
+    expect(interim).toEqual(['1', '2'])
+    expect(answer.map((item) => item.id)).toEqual(['a', 'b'])
+  })
+
+  it('도구만: work = tool, interim / answer 없음', () => {
+    const items = [tool('b')]
+    const { work, interim, answer } = interimSplit(items)
+    expect(work.map((item) => item.id)).toEqual(['b'])
+    expect(interim).toEqual([])
+    expect(answer).toEqual([])
+  })
+
+  it('hook 줄 — splitTurn 규칙 그대로: hook 만 있으면 work', () => {
+    const hook = (id: string): TurnItem => ({ kind: 'hook', id, event: 'Stop', command: 'x', outcome: 'passed', seconds: 1 })
+    const items = [tool('b'), hook('h1'), text('c', 'ans')]
+    const { work, interim, answer } = interimSplit(items)
+    expect(work.map((item) => item.id)).toEqual(['b', 'h1'])
+    expect(interim).toEqual(['ans'])
+    expect(answer.map((item) => item.id)).toEqual(['c'])
   })
 })
 

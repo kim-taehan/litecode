@@ -82,6 +82,25 @@ export function lastLine(items: readonly TurnItem[]): JobLine | undefined {
   return recentLines(items, 1)[0]
 }
 
+/** 스트리밍 중인 잠정답 — 마지막 도구·생각 줄 이후 누적된 text 줄 (deepagents harness: final_ai_text).
+ *  도구·생각 줄이면 그 뒤의 글만. 없으면 전체. 글이 없으면 undefined */
+export function interimText(items: readonly TurnItem[]): string | undefined {
+  let base = 0
+  for (let at = items.length - 1; at >= 0; at--) {
+    const item = items[at]!
+    if (item.kind === 'tool' || item.kind === 'think') {
+      base = at + 1
+      break
+    }
+  }
+  const parts: string[] = []
+  for (let at = base; at < items.length; at++) {
+    const item = items[at]!
+    if (item.kind === 'text' && item.text.trim()) parts.push(item.text.trim())
+  }
+  return parts.length > 0 ? parts.join('\n\n') : undefined
+}
+
 /** 스트리밍 한 줄(이슈 #416) 에 보일 지금 하는 일 — lastLine 과 비슷하되 하위 작업 줄도 본다
  *  (하위 작업만 도는 턴은 생각·도구 줄이 없어도 그 설명으로). 없으면 undefined */
 export function runningLine(items: readonly TurnItem[]): JobLine | undefined {

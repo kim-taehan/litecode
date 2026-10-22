@@ -24,6 +24,12 @@ export const TODO_SYNC_RULE =
   'then (2) start the next item. This is not optional — the UI depends on it to show progress. ' +
   'Every time you change what you are doing, update the list first.'
 
+/** intermediate text(중간 진행 문장 — 도구 호출 전후로 쓰는 "Let me…" 같은 글)도 한국어로 (사용자 결정 2026-10-22).
+ *  최종 답은 AGENTS.md 의 "항상 한국어로" 로만 충분하지만, 중간 진행 문장은 모델이 도구 설명 언어(영어)를 쓰는 경향이 있어 별도 규칙 */
+export const LANGUAGE_RULE =
+  'LANGUAGE RULE (MANDATORY): ALL text output — including intermediate progress sentences, tool-call descriptions, and thinking summaries — ' +
+  'must be in KOREAN (한국어). Only code, file names, variable names, and commit messages stay in English.'
+
 const NAMES = ['AGENTS.md', 'CLAUDE.md']
 const LOCAL_NAMES = ['AGENTS.local.md', 'CLAUDE.local.md']
 /** 사슬 전체(이어 붙인 결과)의 UTF-8 바이트 상한 — 잘림 표시는 이 밖에 붙는다 */
