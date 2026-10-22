@@ -695,6 +695,8 @@ export const en = {
   'notify.attention': 'Needs you',
   'notify.toasts': 'Notifications',
   'notify.conversationGone': 'This conversation was deleted',
+  'notify.alreadyFirst': 'This is the most recent conversation',
+  'notify.alreadyLast': 'This is the oldest conversation',
   'notify.deviceConnected': '{name} connected — {via}',
   'models.title': 'Models',
   'models.hint': 'Set up the gateways (OpenAI compatible) that provide models.',
