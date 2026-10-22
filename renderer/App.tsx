@@ -388,16 +388,16 @@ export function App() {
   }, [active?.project])
 
   // 저장된 대화를 처음 열면 내용을 엔진에서 부른다. 폴더가 없으면 엔진에 묻지 않고 "폴더가 없습니다" (ctx.llm.history).
-  // 첫 로딩은 최근 RECENT_FIRST_LIMIT 개로 빠르게 — 더 있으면 "이전 N개 보기" 로 페이지만 더 본다
+  // 첫 로딩은 최근 RECENT_FIRST_LIMIT 개로 빠르게 — 더 있으면 스크롤 최상단에서 자동으로 페이지만 더 본다
   useEffect(() => {
     if (active?.history !== 'unloaded') return
     const id = active.id
     updateSession(id, (session) => ({ ...session, history: 'loading' }))
-    void window.litecode.loadConversation(id, RECENT_FIRST_LIMIT).then((loaded) =>
+    void window.litecode.loadConversation(id, { limit: RECENT_FIRST_LIMIT, offset: 0 }).then((loaded) =>
       updateSession(id, (session) => ({
         ...applyHistory(session, [...loaded.messages, ...(loaded.error ? [{ role: 'assistant' as const, text: `⚠️ ${loaded.error}` }] : [])]),
         history: loaded.missingFolder ? 'missing' : 'loaded',
-        ...(loaded.more && { historyMore: true, hiddenCount: loaded.hiddenCount }),
+        ...(loaded.more && { historyMore: true }),
       })),
     )
   }, [active?.id, active?.history])

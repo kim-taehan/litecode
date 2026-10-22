@@ -556,44 +556,48 @@ export class LlmService extends Service {
     *  500 이고, 한 번 실패한 경로는 폴더를 되살려도 opencode 를 재시작할 때까지 계속 500 이다 (01c Q5). 재시택 뒤에도 내용은
     *  그대로 온다 — 이벤트 재생 대신 조립된 메시지 목록을 쓴다. 돌고 있는지는 GET /session/status (돌고 있는 세션만 실린다 — 01w).
     *  hidden 은 말풍선으로 안 그릴 엔진 메시지 id — addContext 로 넣은 `!` 카드 본문 (카드는 앱이 따로 그린다).
-      *  limit=N 으면 최근 N개만 (더 있으면 more=true·hiddenCount; 더 이전은 limit=N 으로 다시 부르거나 전체로).
-      *  더 있으면 버튼 앞(턴)으로 자르는 경계는 보이는 쪽의 첫 user 턴 */
-  async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set(), limit?: number): Promise<History> {
+    *  query { limit, offset }: 전체 메시지(오래된 것부터)에서 offset 이 다음 페이를 가리키고, limit 개의 페이를 준다.
+    *  더 이전이 있으면 more=true — 화면이 스크롤 최상단에서 자동으로 offset += limit 으로 다음 페이를 불러온다.
+    *  페이는 user 턴 경계에서 자른다 — 턴 중간을 잘리지 않는다.
+    *  hidden(카드가 싣는 `!` 본문)은 말풍선에서 안 보인다 — 페이 계산에도 안 쓴다. */
+  async history(directory: string, sessionId: string, hidden: ReadonlySet<string> = new Set(), query?: { limit?: number; offset?: number }): Promise<History> {
     const folder = await this.engineFolder(directory)
-    if ('error' in folder) return folder.missing ? { messages: [], missingFolder: true } : { messages: [], error: folder.error }
+    if ('error' in folder) return folder.missing ? { missingFolder: true, messages: [] } : { error: folder.error, messages: [] }
     const { workdir } = folder
     try {
       const conn = await this.ctx.engine.connection()
-      const raw = await engineMessages(conn, sessionId, workdir, limit)
+      const limit = query?.limit
+      const offset = query?.offset ?? 0
+      const pageSize = limit && limit > 0 ? limit : undefined
+      // 전체 메시지를 한 번에 받아 페이 slicing 을 정확히 한다 (엔진 API 가 limit 만 지원하고 offset/페이지링 을 안 해줌)
+      const allRaw = await engineMessages(conn, sessionId, workdir)
+      const all = allRaw.filter((message) => !hidden.has(message.info.id))
       const status = await fetch(`${conn.url}/session/status?${at(workdir)}`, { headers: conn.headers })
-      if (!status.ok) throw new Error(tr('error.activeSessions', { status: status.status }))
+      if (!status.ok) throw new Error(tr('error.historyLoad', { message: `HTTP ${status.status}` }))
       const running = sessionId in ((await status.json()) as Record<string, unknown>)
-      // 레거시 전환 전에 쌓인 기록(신규 세대)이 먼저다 — 그 뒤에 레거시로 이어 쓴 기록 (migrate.ts, #21)
+      // 레거시 전환 전에 쌓은 기록(신규 세대)이 먼저다 — 그 뒤에 레거시로 이어 쓴 기록 (migrate.ts, #21)
       const previous = (await readPreviousMessages(conn, sessionId)).filter((message) => !message.id || !hidden.has(message.id))
-      const children = await subtaskMessages(conn, raw, workdir)
-      // limit=N 으면 엔진이 최근 N개만 준다 (raw). 더 이전이 있나 (more) 는 limit+1 개를 불러 확인한다:
-      // limit+1 개가 왔으면 진짜 더 이전이 있다(버튼 보임), limit 개 이하면 끝이다. (01w: 더 있나 부를 때만 안다)
-      // 더 이전이 있으면 그 뒤로 보이는 메시지의 첫 user 턴 경계에서 자른다 — 그 앞(턴 중간)은 안 보인다.
-      // hidden(카드가 싣는 `!` 본문)은 말풍선에서 안 보인다 — 경계·계산에도 안 쓴다.
-      let visible = raw.filter((message) => !hidden.has(message.info.id))
+      // 페이: 전체(오래된 것부터)에서 offset ~ offset+limit 을 슬라이스, user 턴 경계에서 맞춘다
+      let visible = all
       let more = false
-      let hiddenCount: number | undefined
-      if (limit !== undefined) {
-        const next = limit > 0
-          ? (await engineMessages(conn, sessionId, workdir, limit + 1).catch(() => raw)).filter((message) => !hidden.has(message.info.id))
-          : visible
-        more = next.length > visible.length
-        if (more) {
+      if (pageSize !== undefined) {
+        const start = offset
+        const end = offset + pageSize
+        visible = all.slice(start, end)
+        const remaining = all.length - end
+        more = remaining > 0
+        // 턴 경계: 페이 첫 메시지가 user 가 아니면 그 앞 user 로 맞춰서 페이를 자른다
+        if (more && visible.length > 0) {
           const boundary = visible.findIndex((message) => message.info.role === 'user')
-          visible = boundary > 0 ? visible.slice(boundary) : visible
-          hiddenCount = next.length - visible.length
+          if (boundary > 0) visible = visible.slice(boundary)
         }
       }
-      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)], ...(more && { more: true, hiddenCount: hiddenCount ?? 0 }) }
+      const children = await subtaskMessages(conn, visible, workdir)
+      return { messages: [...previousHistory(previous, modeOf), ...historyMessages(visible, running, workdir, this.mcpTool(workdir), children)], ...(more && { more: true }) }
     } catch (error) {
-      return { messages: [], error: tr('error.historyLoad', { message: (error as Error).message }) }
+      return { error: tr('error.historyLoad', { message: (error as Error).message }), messages: [] }
     }
-  }
+   }
 
   /** 레거시 기록 그대로 (오래된 것부터) — Trajectory 탭이 읽는다. workdir 는 realDirectory 를 거친 세션 폴더 (?directory= 에 쓴다) */
   async readMessages(workdir: string, sessionId: string): Promise<EngineMessage[]> {
