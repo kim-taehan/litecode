@@ -29,7 +29,7 @@ import './hooks.css'
 // - 답: 말풍선이 아니라 본문 폭 전체의 글. 위에 턴 머리 "완료 · 2초 ⌄" 와 얇은 구분선 — 펼치면 그 턴의 작업 줄(생각·도구·중간 글)
 // - 진행 중: 생각·도구·중간 글 줄은 채팅에 순서대로 흘리고, 마지막 도구·생각 뒤에 남은 줄은 맨 아래 추상화 한 줄(RunningLine)로.
 //   답이 될 글(마지막 도구·생각 뒤)은 채팅에 스트리밍 (append-only — 도구가 끼어도 안 사라짐, DeepSeek 하네스). 끝나면 머리 아래로 접힌다
-// 접기 규칙(dsh TurnProcessNodeView): 잘 끝난 턴만 접는다. 실패한 턴은 작업을 펼친 채로 두고 접기 버튼이 없다
+// 접기 규칙: 끝난 턴(완료·실패·중단·거절)은 전부 기본 접힘 — 최종 답(실패면 ⚠️ 사유)만 남기고, 머리 버튼으로 작업 줄(생각·도구·중간 글)을 펼친다 (중단 #516, 실패 #614)
 
 // 내 말·답은 memo 다 — 입력창에 글자를 칠 때마다 App 이 다시 그려져도(초안이 App 의 state) 바뀌지 않은 턴은 다시 그리지 않는다
 // (dsh "바뀌지 않은 형제는 다시 그리지 않는다"). App 은 이 둘에 매번 새로 만든 배열·함수를 넘기지 않는다
@@ -134,12 +134,11 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   const work = running ? rest.slice(0, lastWorkEnd) : splitTurn(rest).work
   const answer = running ? [] : splitTurn(rest).answer
   const liveAfterWork = running ? rest.slice(lastWorkEnd) : []
-  // 진짜 실패만 작업 줄을 펼쳐 둔다. 중단(사용자 stop·엔진 재시작)은 failed 의 한 갈래지만 완료처럼 접힌다 (이슈 #516)
-  const unfolded = failed && !interrupted
-  const foldable = !running && !unfolded && work.length > 0
+  // 끝난 턴(완료·실패·중단·거절)은 전부 완료처럼 기본 접힌다 — 최종 답(실패면 ⚠️ 사유)만 남고 작업 줄은 머리(버튼)로 펼친다 (중단 #516, 실패 #614)
+  const foldable = !running && work.length > 0
   const [open, setOpen] = useState(false)
   const t = useT()
-  const showWork = running || unfolded || open
+  const showWork = running || open
   // 접힌 작업 줄도 대화 안 찾기(이슈 #79)에 걸리게 — 찾는 동안에는 숨긴 채 그려 두고, 일치가 그 안이면 펼친다 (ChatFind.tsx)
   const workFold = useFindFold(showWork, () => setOpen(true))
   /** 답의 마크다운 원문 — 그리는 글이자 "답 복사" 가 복사하는 글 */

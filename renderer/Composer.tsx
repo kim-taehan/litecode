@@ -15,7 +15,6 @@ import { AttachmentChips } from './Attachments.tsx'
 import { pasteIntent } from './dropPaste.ts'
 import { QueueDock } from './QueueDock.tsx'
 import { TodoDock } from './Todo.tsx'
-import { JobsDock, useBackgroundTasks } from './Jobs.tsx'
 import { StopIcon } from './stopTurn.tsx'
 import { browseHistory, sentTexts } from './inputHistory.ts'
 import { canWrite, type Session } from './session.ts'
@@ -70,14 +69,10 @@ export function Composer({
   attachFiles,
   addAttachments,
 }: ComposerProps) {
-  const backgroundTasks = useBackgroundTasks(active.id)
   return (
     <div className="composer">
       {/* AI 의 지금 할 일 목록 (이슈 #83) — 남은 일이 있을 때만. 대화를 바꾸면 접힌다 (key) */}
       <TodoDock key={active.id} messages={active.messages} progress={active.progress} running={!!active.pending} />
-      {/* 작업 목록 (이슈 #295, 머리 버튼 #32 를 대신한다) — 하위 작업이 있는 턴만, 누르면 그 자리에서 목록. 턴이 끝나도 새 턴 전까지 끝난 작업을 남긴다.
-          key 는 같은 부모의 TodoDock(key=대화 id)과 겹치면 안 된다 — 겹치면 React 가 옛 줄을 안 지운다 (#295 에서 머리 버튼으로 실측) */}
-      <JobsDock key={`jobs-${active.id}`} items={active.progress} pending={!!active.pending} startedAt={active.sentAt} background={backgroundTasks} directory={active.project} />
       <QueueDock
         items={active.queue ?? []}
         sources={active.queueSources}
