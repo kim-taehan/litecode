@@ -10,6 +10,12 @@ release/
 .claude/worktrees/
 .claude/
 shots/
+# 도구 세션 캐시
+.omc/
+# /design 스킬이 루트에 만드는 시안
+/mock-*.html
+# 개인 문서 (레포 외)
+성과등록_초안.md
 # 모바일 앱(mobile/) 생성물 — prebuild 한 네이티브 프로젝트는 커밋하지 않는다
 mobile/dist/
 mobile/.expo/

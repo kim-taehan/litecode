@@ -90,11 +90,15 @@ Electron 렌더러 (React)           Electron 메인 프로세스
 - 플러그인 뼈대는 [Cordis](https://github.com/cordiverse/cordis) — `ctx.<key>` 로 서비스가
   등록되고, `inject` 로 의존성을 선언하면 뜨는 순서를 자동으로 맞춰 준다.
 
-상세: [`docs/cordis-services.md`](docs/cordis-services.md) (서비스 목록·의존) ·
+상세: [`docs/architecture.md`](docs/architecture.md) (구조 전체 — 서비스·부팅·IPC·패키징) ·
+[`docs/cordis-services.md`](docs/cordis-services.md) (서비스 목록·의존) ·
 [`docs/opencode-protocol.md`](docs/opencode-protocol.md) (프로토콜 실측 기록) ·
 [`docs/status.md`](docs/status.md) (조각별 상태)
 
 ## 개발
+
+전제: **Node 22+**. 앱을 실제로 돌리려면 사내 LLM 게이트웨이가 필요(설정 → 모델),
+이슈 → 브랜치 → PR 워크플로와 문서 지도는 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 npm install
