@@ -69,6 +69,12 @@ import { SessionTools } from '../src/services/appMcp/tools/sessions.ts'
 import { ConversationTools } from '../src/services/appMcp/tools/conversation.ts'
 import { MakeTools } from '../src/services/appMcp/tools/make.ts'
 import { TaskTools } from '../src/services/appMcp/tools/tasks.ts'
+import { GoalTools } from '../src/services/appMcp/tools/goalTools.ts'
+import { PlanTools } from '../src/services/appMcp/tools/planTools.ts'
+import { GoalService } from '../src/services/goals.ts'
+import { GoalRoundDriver } from '../src/services/goalDriver.ts'
+import { PlanReviewService } from '../src/services/planReview.ts'
+import { AppCommandsService } from '../src/services/appCommands.ts'
 import { GitService } from '../src/services/git.ts'
 import { GitTools } from '../src/services/appMcp/tools/git.ts'
 import { SonarqubeTools } from '../src/services/appMcp/tools/sonarqube.ts'
@@ -205,6 +211,12 @@ mounted.push(ctx.plugin(SessionsService, {
 // 입력창 트리거 — 등록소 하나에 플러그인 셋이 effect 로 등록한다. 하나를 내리면 그 문자는 평범한 글자가 된다.
 // 등록소는 바탕이다(등록된 트리거가 없으면 모든 입력이 평범한 글). `@`·`/`·`!` 는 기능 묶음으로 ctx.features 가 올린다 (아래)
 mounted.push(ctx.plugin(TriggerRegistry))
+// 목표·계획 (이슈 #626, dsh goal·plan 이식) — 대화의 목표는 goals.json 이벤트 로그, 라운드 드라이버는 턴 앞뒤 확장점만 쓴다
+mounted.push(ctx.plugin(GoalService, { file: path.join(userData, 'goals.json') }))
+mounted.push(ctx.plugin(GoalRoundDriver))
+mounted.push(ctx.plugin(PlanReviewService))
+// `/goal`·`/plan` 앱 명령의 본문 — 화면(슬래시·버튼)은 입력식과 결과 줄만 든다
+mounted.push(ctx.plugin(AppCommandsService))
 
 /** IPC 핸들러를 되돌릴 수 있게 건다 — 의존 서비스가 다시 올라와 bootstrap 이 다시 돌면, Cordis 가 먼저 이것을 풀어
  *  "이미 등록된 핸들러" 오류 없이 다시 건다 (Cordis 원칙: 모든 등록은 effect 로) */
@@ -347,6 +359,32 @@ function chatBridge(ctx: Context): void {
 chatBridge.inject = ['chat']
 mounted.push(ctx.plugin(ChatService))
 mounted.push(ctx.plugin(chatBridge))
+
+// 목표·계획 (이슈 #626) — 채널만 잇는다: 앱 명령은 ctx.appCommands 가, 목표는 ctx.goals 가, 검토는 ctx.planReview 가 쓴다
+function goalPlanBridge(ctx: Context): void {
+  handle(ctx, Channel.RUN_APP_COMMAND, async (_event, conversationId: string, command: unknown, args?: unknown) => {
+    const name = command === 'goal' || command === 'plan' ? command : undefined
+    if (!name) throw new Error('Unknown app command')
+    return await ctx.appCommands.run(String(conversationId), name, typeof args === 'string' ? args : undefined)
+  })
+  handle(ctx, Channel.GOAL_VIEW, async (_event, conversationId: string) => ctx.goals.view(String(conversationId)))
+  ctx.on('goal/changed', (cid, view) => broadcast(Channel.GOAL_CHANGED, cid, view))
+  ctx.on('plan/review', (card) => broadcast(Channel.PLAN_REVIEW, card))
+  ctx.on('plan/review-answered', (id) => broadcast(Channel.PLAN_REVIEW_ANSWERED, id))
+  // 화면의 답은 응답이 없으니 on(핸들러 해제 없음 — 전역 이벤트)
+  ctx.effect(() => {
+    const listener = (_event: unknown, id: unknown, decision: unknown, feedback?: unknown): void => {
+      if (typeof id !== 'string') return
+      ctx.planReview.answer(id, decision === 'approve' ? 'approve' : 'revise', typeof feedback === 'string' && feedback.trim() ? feedback.trim() : undefined)
+    }
+    ipcMain.on(Channel.PLAN_REVIEW_ANSWER, listener)
+    return () => ipcMain.removeListener(Channel.PLAN_REVIEW_ANSWER, listener)
+  })
+  // 지워진 대화의 대기 검토는 닫는다 (도구는 앱이 살아 있는 동안만 돈다)
+  ctx.on('sessions/removed', (ids: string[]) => ids.forEach((id) => ctx.planReview.drop(id)))
+}
+goalPlanBridge.inject = ['appCommands', 'goals', 'planReview']
+mounted.push(ctx.plugin(goalPlanBridge))
 // 자동 대화 제목 (이슈 #215) — 설정(autoTitle)이 켜져 있으면 첫 턴 뒤 제목을 AI 가 짧게 정리한다. 턴 이벤트만 듣는다 (끄면 듣고도 안 묻는다)
 mounted.push(ctx.plugin(autoTitle))
 // 명령으로 바뀐 파일 (이슈 #213) — 턴 앞뒤 git 스냅숏의 차이를 턴 끝 진행 줄로 (고친 파일 카드가 합친다)
@@ -820,6 +858,8 @@ const features: FeatureDefinition[] = [
       ctx.plugin(ConversationTools) // 앱 MCP 의 new_conversation — 질문이 바뀌면 이 프로젝트의 새 대화로 이어 가기 (이슈 #415)
       ctx.plugin(MakeTools) // 앱 MCP 의 만들기 도구 셋 — 스킬·MCP 서버·훅, 저장 위치는 앱이 정한다 (이슈 #145)
       ctx.plugin(TaskTools) // 앱 MCP 의 task_start — 백그라운드 하위 작업, 내장 task 를 대신한다 (이슈 #319)
+      ctx.plugin(GoalTools) // 앱 MCP 의 get_goal·create_goal·update_goal — 대화의 목표 (이슈 #626)
+      ctx.plugin(PlanTools) // 앱 MCP 의 exit_plan_mode — 계획 검토 카드 (이슈 #626)
       ctx.plugin(DelegationService) // 프로젝트 간 지시의 대상·자격·전송 — 세션 도구와 Projects 탭의 단일 결정지 (이슈 #55·#341)
       ctx.plugin(ForwardSkillService, { appDir: path.join(userData, 'opencode', 'skills') }) // 내장 /forward 스킬 — 기능이 꺼지면 스킬도 함께 사라진다 (이슈 #341)
       ctx.plugin(appMcpBridge)

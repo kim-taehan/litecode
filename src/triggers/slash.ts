@@ -15,7 +15,9 @@ import { tr } from '../i18n.ts'
 // 앱 명령(이슈 #144, 사용자 결정 2026-10-06 — 둘뿐이다)은 맨 위 "앱" 그룹이고 엔진에 보내지 않는다: 화면이 결과를 받아 그 동작을 한다.
 // 이름이 겹치면 앱 명령 > 엔진 명령 > 스킬. 인자를 받지 않는다 — 인자가 있으면 무시하지 않고 막고 알린다.
 
-const APP_COMMANDS: readonly { name: AppCommand; detail: 'trigger.app.compact' | 'trigger.app.clear' }[] = [
+const APP_COMMANDS: readonly { name: AppCommand; detail: 'trigger.app.goal' | 'trigger.app.plan' | 'trigger.app.compact' | 'trigger.app.clear'; args?: boolean }[] = [
+  { name: 'goal', detail: 'trigger.app.goal', args: true },
+  { name: 'plan', detail: 'trigger.app.plan', args: true },
   { name: 'compact', detail: 'trigger.app.compact' },
   { name: 'clear', detail: 'trigger.app.clear' },
 ]
@@ -60,7 +62,12 @@ export function SlashTrigger(ctx: Context): void {
         const match = /^\/(\S*)\s*([\s\S]*)$/.exec(line)
         const name = match?.[1] ?? ''
         const app = APP_COMMANDS.find((entry) => entry.name === name)
-        if (app) return match![2]!.trim() ? { kind: 'error', message: tr('error.commandNoArgs', { name }) } : { kind: 'app', command: app.name }
+        if (app) {
+          const rest = match![2]!.trim()
+          // compact·clear 는 인자를 안 받고, goal·plan 은 인자(목표·메시지)를 받는다 (이슈 #626)
+          if (rest && !app.args) return { kind: 'error', message: tr('error.commandNoArgs', { name }) }
+          return rest ? { kind: 'app', command: app.name, args: rest } : { kind: 'app', command: app.name }
+        }
         const command = name ? (await ctx.llm.listCommands(scope.directory)).find((entry) => entry.name === name) : undefined
         if (command) return { kind: 'send', text: expandTemplate(command.template, match![2]!.trim()), display: line }
         const skill = name ? (await listSkills(scope.directory)).find((entry) => entry.name === name) : undefined

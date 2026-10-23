@@ -1,5 +1,5 @@
 import { Fragment, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import type { Attention, AttentionAnswer, AttentionTarget, HistoryMessage, Mode, PickedAttachment, TurnItem } from '../shared/ipc.ts'
+import type { Attention, AttentionAnswer, AttentionTarget, HistoryMessage, Mode, PickedAttachment, PlanReviewCard, TurnItem } from '../shared/ipc.ts'
 import type { FeatureId } from '../shared/features.ts'
 import { planEnded, switchedMode } from './chatState.ts'
 import { AssistantTurn, UserMessage } from './ChatTurn.tsx'
@@ -9,6 +9,8 @@ import { ScrollToBottom } from './ScrollToBottom.tsx'
 import type { findModel } from './modelChoice.ts'
 import { Trajectory } from './Trajectory.tsx'
 import { ShellCard } from './ShellCard.tsx'
+import { PlanReviewCard as PlanReviewCardView } from './GoalDock.tsx'
+import type { CommandLine } from './commandLine.ts'
 import type { Translate } from './settingsStore.ts'
 import { JobsHeader, useBackgroundTasks } from './Jobs.tsx'
 import { OpenInButton } from './OpenInButton.tsx'
@@ -52,6 +54,11 @@ interface ConversationViewProps {
   chosen: ReturnType<typeof findModel>
   send(command?: { text: string; display?: string; attachments?: PickedAttachment[] }, opts?: { mode?: Mode }): void
   shareShell(target: Session, cardId: string): Promise<string | undefined>
+  /** 앱 명령 줄 (이슈 #626) — 엔진에 안 간 내 말과 그 결과. 임시(리로드면 없다) */
+  commandLines?: readonly CommandLine[]
+  /** 계획 검토 카드 (이슈 #626) — 이 대화가 계획 검토를 기다리면 */
+  planReview?: PlanReviewCard
+  onPlanAnswer(id: string, decision: 'approve' | 'revise', feedback?: string): void
 }
 
 /** 지금 대화의 머리 줄·탭과 본문(말풍선·`!` 카드·도는 턴 또는 Trajectory). 상태는 App 이 쥐고 여기는 그리기만 한다 */
@@ -70,6 +77,9 @@ export function ConversationView({
   chosen,
   send,
   shareShell,
+  commandLines,
+  planReview,
+  onPlanAnswer,
 }: ConversationViewProps) {
   // 그 대화의 백그라운드 작업 (#319) — 머리의 작업 트리거(Jobs.tsx)에서 도는 것 + 끝난 것을 센다
   const backgroundTasks = useBackgroundTasks(active.id)
@@ -178,6 +188,22 @@ export function ConversationView({
           </button>
         )}
         {shellCards(active, (position) => position === active.messages.length)}
+        {/* 앱 명령 줄 (이슈 #626) — /goal·/plan 처럼 엔진에 안 간 내 말(에코)과 그 결과. 도는 턴 앞에 붙인다 */}
+        {(commandLines?.length ?? 0) > 0 &&
+          commandLines?.map((line) => (
+            <div key={line.id} className="command-line">
+              <div className="command-line__echo">{line.echo}</div>
+              <pre className="command-line__result">{line.result}</pre>
+            </div>
+          ))}
+        {/* 계획 검토 카드 (이슈 #626) — 승인·계속 계획. 답하면 main 이 카드를 닫아 준다 */}
+        {planReview && (
+          <PlanReviewCardView
+            t={t}
+            plan={planReview.plan}
+            onAnswer={(decision: 'approve' | 'revise', feedback?: string) => onPlanAnswer(planReview.id, decision, feedback)}
+          />
+        )}
         {active.pending && (
           <AssistantTurn
             key="running"

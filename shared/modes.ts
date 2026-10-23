@@ -3,7 +3,9 @@
 // plan: 읽기·검색만 / build: opencode 기본(편집·명령 허용, 폴더 밖·.env 는 묻는다) / ask: 편집·명령·웹마다 묻는다 / full: 다 묻지 않는다
 
 import { browserToolKind } from './browser.ts'
+import { GOAL_CREATE_TOOL, GOAL_GET_TOOL, GOAL_UPDATE_TOOL } from './goal.ts'
 import { GIT_READ_TOOLS, GIT_WRITE_TOOLS } from './git.ts'
+import { PLAN_EXIT_TOOL } from './plan.ts'
 
 export const MODES = ['plan', 'build', 'ask', 'full'] as const
 export type Mode = (typeof MODES)[number]
@@ -64,6 +66,13 @@ export function modePermission(mode: Mode, permission: string, opts: { resources
     }
     // git 도구 (이슈 #290) — 읽기는 네 모드 모두 묻지 않고, 쓰기는 전체 권한을 빼고 계획 밖 모두 묻는다 (전체 권한 자동허용 2026-10-12).
     // 하위 작업은 못 쓴다 (engineConfig.ts 와 같은 표)
+    // 목표 도구 (이슈 #626, dsh tool-goal) — 읽기(get)는 네 모드 모두 묻지 않고, 쓰기(create·update)는 하위 작업·계획에 없고,
+    // 매번 묻기는 카드(독립 라운드를 시작하는 일), 기본·전체 권한은 allow. engineConfig.ts MCP_TOOL_RULES 와 같은 표
+    if (permission === GOAL_GET_TOOL) return child ? 'deny' : 'allow'
+    if (permission === GOAL_CREATE_TOOL || permission === GOAL_UPDATE_TOOL) return child || mode === 'plan' ? 'deny' : asking ? 'ask' : 'allow'
+    // 계획 검토 도구 (이슈 #626, dsh: 계획이 비활성이든 도구는 늘 등록되고 — 아닌 모드에서 부르면 실패) —
+    // 승인 카드가 곧 확인이라 매번 묻기에서도 묻지 않는다. 하위 작업에 없다
+    if (permission === PLAN_EXIT_TOOL) return child ? 'deny' : 'allow'
     if (GIT_READ_PERMISSIONS.includes(permission)) return child ? 'deny' : 'allow'
     if (GIT_WRITE_PERMISSIONS.includes(permission)) return child || mode === 'plan' ? 'deny' : mode === 'full' ? 'allow' : 'ask'
     if (permission === APP_SEND_TOOL || permission === APP_MAKE_TOOL || permission === APP_NEW_CONVERSATION_TOOL) return child || mode === 'plan' ? 'deny' : 'ask'

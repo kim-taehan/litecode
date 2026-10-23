@@ -16,6 +16,13 @@ const GIT_WRITE_ASK = { litecode_git_stage: 'ask', litecode_git_commit: 'ask', l
 const GIT_WRITE_ALLOW = Object.fromEntries(Object.keys(GIT_WRITE_ASK).map((name) => [name, 'allow']))
 const GIT_DENY = Object.fromEntries([...Object.keys(GIT_READ_ALLOW), ...Object.keys(GIT_WRITE_ASK)].map((name) => [name, 'deny']))
 
+// 목표·계획 검토 도구 (#626) — 읽기·검토는 네 모드 allow, 쓰기는 build·full, 전역·하위 작업·계획 쓰기는 deny
+const GOAL_READ_ALLOW = { litecode_get_goal: 'allow' }
+const GOAL_WRITE_ALLOW = { litecode_create_goal: 'allow', litecode_update_goal: 'allow' }
+const GOAL_DENY = { litecode_get_goal: 'deny', litecode_create_goal: 'deny', litecode_update_goal: 'deny' }
+const PLAN_EXIT_ALLOW = { litecode_exit_plan_mode: 'allow' }
+const PLAN_EXIT_DENY = { litecode_exit_plan_mode: 'deny' }
+
 // 스킬 (이슈 #7). 엔진 설정 모양은 레거시 실측(2026-10-02, opencode 1.18.18, 가짜 LLM 이 받은 요청)을 지킨다:
 // - OPENCODE_DISABLE_PROJECT_CONFIG 가 프로젝트 .opencode/skills 를 끄므로 skills.paths 로 되살린다. Claude 경로는 스위치를 켰을 때만
 // - 내장 customize-opencode 는 전역 deny 만으로는 litecode-full("*":allow)에서 되살아난다 → 에이전트마다 맨 뒤에도
@@ -28,7 +35,7 @@ describe('engineConfig — 스킬', () => {
   it('켬(Claude 끔): 프로젝트 .opencode/skills 를 paths 로 되살리고, customize-opencode 는 전역·에이전트마다 맨 뒤 deny', () => {
     const config = engineConfig([], proxy, { skills: { enabled: true, claude: false } })
     expect(config.skills).toEqual({ paths: ['.opencode/skills', '.opencode/skill'] })
-    expect(config.permission).toEqual({ task: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_new_conversation: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
+    expect(config.permission).toEqual({ task: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_new_conversation: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, ...GOAL_DENY, ...PLAN_EXIT_DENY, webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
     const agent = config.agent as Agents
     expect(Object.keys(agent).sort()).toEqual(Object.keys(ENGINE_AGENTS).sort())
     for (const [name, { permission }] of Object.entries(agent)) {
@@ -38,7 +45,7 @@ describe('engineConfig — 스킬', () => {
         ['websearch', 'deny'],
       ]) // 웹 도구 규칙은 그대로
     }
-    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, litecode_sonarqube_check: 'allow', webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
+    expect(agent[MODE_AGENT.full]!.permission).toEqual({ '*': 'allow', task: 'deny', litecode_send_to_project: 'ask', litecode_read_project: 'allow', litecode_new_conversation: 'ask', litecode_create: 'ask', litecode_present: 'allow', ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, litecode_sonarqube_check: 'allow', ...GOAL_WRITE_ALLOW, ...GOAL_READ_ALLOW, ...PLAN_EXIT_ALLOW, webfetch: 'deny', websearch: 'deny', skill: { 'customize-opencode': 'deny' } })
   })
 
   it('Claude 켬: ~/.claude/skills·.claude/skills 를 뒤에 더한다', () => {
@@ -55,14 +62,14 @@ describe('engineConfig — 스킬', () => {
 
   it('웹 도구를 켜도 스킬 규칙은 남는다 (전역 permission 은 하위 작업 규칙 + skill)', () => {
     const config = engineConfig([], proxy, { webTools: true, skills: { enabled: true, claude: false } })
-    expect(config.permission).toEqual({ task: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_new_conversation: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, skill: { 'customize-opencode': 'deny' } })
+    expect(config.permission).toEqual({ task: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_new_conversation: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, ...GOAL_DENY, ...PLAN_EXIT_DENY, skill: { 'customize-opencode': 'deny' } })
     expect((config.agent as Agents)[MODE_AGENT.ask]!.permission).toMatchObject({ webfetch: 'ask', skill: { 'customize-opencode': 'deny' } })
   })
 
   it('skills 를 안 주면 스킬 규칙을 안 넣는다 (예전 모양 그대로)', () => {
     const config = engineConfig([], proxy)
     expect(config).not.toHaveProperty('skills')
-    expect(config.permission).toEqual({ task: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_new_conversation: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, webfetch: 'deny', websearch: 'deny' })
+    expect(config.permission).toEqual({ task: 'deny', litecode_send_to_project: 'deny', litecode_read_project: 'deny', litecode_new_conversation: 'deny', litecode_create: 'deny', litecode_present: 'deny', ...GIT_DENY, ...GOAL_DENY, ...PLAN_EXIT_DENY, webfetch: 'deny', websearch: 'deny' })
   })
 })
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AttachmentKind, Mode, OpenTarget, PickedAttachment, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
+import type { AttachmentKind, GoalView, Mode, OpenTarget, PickedAttachment, PlanReviewCard, Project, ProviderSummary, QueuedSend } from '../shared/ipc.ts'
 import { titleFrom } from '../shared/chat.ts'
 import { applyHistory, applyLive } from './chatState.ts'
 import { focusComposerInput } from './composerFocus.ts'
@@ -45,6 +45,8 @@ import { useSessionNav } from './useSessionNav.ts'
 import { Sidebar } from './Sidebar.tsx'
 import { ConversationView } from './ConversationView.tsx'
 import { Composer } from './Composer.tsx'
+import { GoalDock } from './GoalDock.tsx'
+import type { CommandLine } from './commandLine.ts'
 
 export type { Session } from './session.ts'
 
@@ -117,6 +119,12 @@ export function App() {
   sessionsRef.current = sessions
   /** 다른 대화의 지시로 새로 생긴 대화 — 사이드바에 "새로 생김" 으로 보이고 한 번 열면 빠진다 (이슈 #55). 화면이 떠 있는 동안만 기억한다 */
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
+  /** 목표 스트립 (이슈 #626) — 대화 id → 현재 목표. onGoalChanged 로 갱신, 대화로 갈 때 초깃값 (변경 없는 목표는 이벤트가 안 오므로) */
+  const [goalViews, setGoalViews] = useState<Record<string, GoalView | undefined>>({})
+  /** 계획 검토 카드 (이슈 #626) — 카드 id → 카드. 승인·거절·대화 삭제면 main 이 닫아 준다 (onPlanReviewAnswered) */
+  const [planReviews, setPlanReviews] = useState<Record<string, PlanReviewCard>>({})
+  /** 앱 명령 줄 (이슈 #626) — 엔진에 안 간 내 말(명령 에코)과 그 결과 줄. 임시: 이번 실행 동안만 */
+  const [commandLog, setCommandLog] = useState<Record<string, CommandLine[]>>({})
 
   useEffect(() => {
     void window.litecode.listProviders().then(setProviders)
@@ -144,6 +152,44 @@ export function App() {
       if (loaded.current) void pullPendingOpen()
     })
     return offOpen
+  }, [])
+
+  // 목표·계획 (이슈 #626) — 목표 변경·계획 검토 카드에 한 번씩 구독 (모든 대화의 것, 화면이 conversationId 로 거른다)
+  useEffect(() => {
+    const offGoal = window.litecode.onGoalChanged((cid, view) => {
+      setGoalViews((prev) => ({ ...prev, [cid]: view }))
+    })
+    const offReview = window.litecode.onPlanReview((card) => {
+      setPlanReviews((prev) => ({ ...prev, [card.id]: card }))
+    })
+    const offAnswered = window.litecode.onPlanReviewAnswered((id) => {
+      setPlanReviews((prev) => {
+        if (!(id in prev)) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    })
+    const offConversations = window.litecode.onConversationsChanged(({ removed }) => {
+      if (removed.length === 0) return
+      setCommandLog((prev) => {
+        let changed = false
+        const next = { ...prev }
+        for (const id of removed) {
+          if (next[id]) {
+            delete next[id]
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    })
+    return () => {
+      offGoal()
+      offReview()
+      offAnswered()
+      offConversations()
+    }
   }, [])
 
   /** 보관 개수를 넘어 지워진 대화는 화면에서도 뺀다 */
@@ -293,6 +339,14 @@ export function App() {
   useAppMcp(features.has('appMcp'), active?.project, (directory, id) => {
     openTerminalTab(directory, id, { quiet: true })
   })
+  /** 앱 명령 (이슈 #626) — 메인이 돌려 결과 줄을 준다. 메시지를 안 보낸 명령은 그 대화의 명령 줄로 기록한다 (리로드 하면 없다) */
+  async function runAppCommandFor(cid: string, command: 'goal' | 'plan', args?: string): Promise<void> {
+    const result = await window.litecode.runAppCommand(cid, command, args)
+    if (!result.sent) {
+      const echo = args ? `/${command} ${args}` : `/${command}`
+      setCommandLog((prev) => ({ ...prev, [cid]: [...(prev[cid] ?? []), { id: crypto.randomUUID(), echo, result: result.text }] }))
+    }
+  }
   const trigger = useTriggers({
     directory: active?.project,
     conversation: active?.id,
@@ -300,14 +354,41 @@ export function App() {
     setDraft,
     onSend: (text, display) => send({ text, display }),
     onShell: (_directory, command) => void runShell(command),
-    onApp: async (command) => {
+    onApp: async (command, args) => {
       if (command === 'clear') return void startNewChat()
       if (!active) return undefined
+      if (command === 'goal' || command === 'plan') {
+        try {
+          await runAppCommandFor(active.id, command, args)
+          return undefined
+        } catch (error) {
+          return (error as Error).message
+        }
+      }
       // 아직 한 번도 안 보낸 대화(메인에 없다)도 메인이 "요약할 내용이 없다" 로 답한다
       const started = await window.litecode.compactChat(active.id)
       return started.ok ? undefined : started.error
     },
   })
+  // 대화로 갈 때 목표 초깃값 (이슈 #626) — 변경 없으면 이벤트가 안 오므로
+  useEffect(() => {
+    const id = active?.id
+    if (!id) return
+    let live = true
+    void window.litecode.goalView(id).then((view) => {
+      if (!live) return
+      setGoalViews((prev) => ({ ...prev, [id]: view }))
+    })
+    return () => {
+      live = false
+    }
+  }, [active?.id])
+  /** 지금 대화의 계획 검토 카드 (이슈 #626) — 그 대화의 카드가 있으면 대화 끝에 그린다 */
+  const planReview = useMemo(() => {
+    const cid = active?.id
+    if (!cid) return undefined
+    return Object.values(planReviews).find((card) => card.cid === cid)
+  }, [planReviews, active?.id])
   // 세션 이동에 입력창 포커스 (이슈 #374) — 사이드바 대화 행 클릭·⌘↑/⌘↓·알림으로 대화 열기, 어느 길로 오든
   // 키가 옛 화면에 남아 있으면 마우스를 다시 대야 하므로 입력창에게 건다. 첫 출현(앱 기동)은 이동이 아니라서 그대로 둔다.
   // 판(aria-modal)·프로젝트 빠른 열기가 열려 있으면 포커스를 가져가지 않는다 — ⌘N·⌘↑/⌘↓ 과 같은 전역 키 규칙.
@@ -884,7 +965,21 @@ export function App() {
               chosen={chosen}
               send={send}
               shareShell={shareShell}
+              commandLines={commandLog[active.id]}
+              planReview={planReview}
+              onPlanAnswer={(id, decision, feedback) => window.litecode.answerPlanReview(id, decision, feedback)}
             />
+
+            {/* 목표 스트립 (이슈 #626) — 목표가 있는 대화의 입력 카드 위 줄. 버튼은 /goal 명령으로 */}
+            {!(trajectoryOn && view === 'trajectory') && goalViews[active.id] && (
+              <GoalDock
+                t={t}
+                goal={goalViews[active.id]!}
+                onCommand={(action) => {
+                  void runAppCommandFor(active.id, 'goal', action).catch(() => undefined)
+                }}
+              />
+            )}
 
             {/* 추론 과정(trajectory) 은 읽기 전용 기록 보기 — 입력 카드(채팅창)는 숨기고 대화 탭에서 다시 보인다 (이슈 #364) */}
             {!(trajectoryOn && view === 'trajectory') && (
