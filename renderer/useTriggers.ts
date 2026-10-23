@@ -17,8 +17,9 @@ export interface TriggerOptions {
   onSend(text: string, display: string): void
   /** `!`: 그 폴더에서 command 를 돌려 대화에 결과 카드로 */
   onShell(directory: string, command: string): void
-  /** 앱 명령 (`/compact`·`/clear`) — 못 했으면 그 글을 준다 (입력은 그대로 두고 한 줄로 알린다) */
-  onApp(command: AppCommand): Promise<string | undefined>
+  /** 앱 명령 (`/compact`·`/clear`) — 못 했으면 그 글을 준다 (입력은 그대로 두고 한 줄로 알린다).
+   *  goal·plan (이슈 #626) 은 인자를 받는다 */
+  onApp(command: AppCommand, args?: string): Promise<string | undefined>
 }
 
 export interface Triggers {
@@ -145,7 +146,7 @@ export function useTriggers({ directory, conversation, draft, setDraft, onSend, 
       onShell(result.directory, result.command)
     } else if (result.kind === 'app') {
       // setDraft 는 이 그리기의 대화에 묶여 있다 — `/clear` 로 새 대화로 넘어간 뒤에도 친 대화의 입력을 비운다
-      void onApp(result.command).then((problem) => (problem ? setNotice(problem) : setDraft('')))
+      void onApp(result.command, result.args).then((problem) => (problem ? setNotice(problem) : setDraft('')))
     } else setNotice(result.message)
   }
 

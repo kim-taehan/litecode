@@ -7,6 +7,8 @@ import { engineLimit } from '../../shared/outputLimit.ts'
 import { engineModelId, engineModelKeys } from '../../shared/engineModelId.ts'
 import { PROJECT_SKILLS_DIR } from '../../shared/skills.ts'
 import { GIT_READ_TOOLS, GIT_WRITE_TOOLS } from '../../shared/git.ts'
+import { GOAL_CREATE_TOOL, GOAL_GET_TOOL, GOAL_UPDATE_TOOL } from '../../shared/goal.ts'
+import { PLAN_EXIT_TOOL } from '../../shared/plan.ts'
 
 // ctx.engine 이 생성하는 opencode.json 의 규칙 표와 순수 생성 함수 (이슈 #183 에서 engine.ts 에서 옮겼다 — 본문은 그대로).
 // 프로세스 수명·키 프록시·재시작·자식 env 는 engine.ts 에 있다. 바깥은 지금도 engine.ts 의 재내보내기로 이 이름들을 받는다
@@ -27,7 +29,10 @@ const BUILD_PROMPT =
 const PLAN_PROMPT = [
   'You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools.',
   'Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode.',
-  'Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.',
+  'Answer with a concrete step-by-step plan.',
+  // 계획 검토 카드 (이슈 #626, dsh exit_plan_mode): 계획이 끝나면 도구가 사용자가 승인(→ 실행 모드로 전환)·추가 계획(→ 피드백)을 고르게 한다
+  'When the plan is complete, present it with the litecode_exit_plan_mode tool — the complete plan as markdown starting with a # heading. ' +
+    'The user will approve (the mode switches back and you carry out the plan from your next step) or ask for changes (their feedback comes back in the tool result; revise and present again).',
 ].join(' ')
 // 하위 작업(레거시 task, 이슈 #31 실측 2026-10-02): 자식 세션은 **부모 모드의 권한을 물려받지 않는다** — 자식 세션 권한은 task deny 하나뿐이고 하위 에이전트
 // (general·explore) 자기 규칙으로 돈다. 그래서 매번 묻기에서 general 이 bash 를 묻지 않고 실행했고(1/1), explore 도 레거시에선 bash 가 있어(도구 목록 실측)
@@ -162,6 +167,15 @@ const SEND_TOOLS_DENY = { litecode_send_to_project: 'deny', litecode_read_projec
 const MAKE_TOOLS_ASK = { litecode_create: 'ask' }
 const MAKE_TOOLS_DENY = { litecode_create: 'deny' }
 const LIST_TOOL_ALLOW = { litecode_list_projects: 'allow' }
+// 목표·계획 검토 도구 (이슈 #626, dsh tool-goal·plan-mode) — send(present) 도구와 같은 모양: 전역 deny 로 하위 작업(general·explore)·
+// 모르는 에이전트에서 빼고 모드 에이전트마다 개별 allow. 계획 쓰기 도구는 계획 모드에서 안 본다(`*_*: deny`). 목표 읽기(get)는 읽기 전용이라
+// 계획 포함 네 모드 모두. 검토도구(exit_plan_mode)는 승인 카드가 곧 확인이므로 매번 묻기에서도 묻지 않는다. 매번 묻기의 create/update 만은
+// wildcard ask 가 카드 (독립 라운드를 시작하는 일이므로 자동허용이 안 된다)
+const GOAL_READ_ALLOW = { [GOAL_GET_TOOL]: 'allow' }
+const GOAL_WRITE_ALLOW = { [GOAL_CREATE_TOOL]: 'allow', [GOAL_UPDATE_TOOL]: 'allow' }
+const GOAL_TOOLS_DENY = { [GOAL_GET_TOOL]: 'deny', [GOAL_CREATE_TOOL]: 'deny', [GOAL_UPDATE_TOOL]: 'deny' }
+const PLAN_EXIT_ALLOW = { [PLAN_EXIT_TOOL]: 'allow' }
+const PLAN_EXIT_DENY = { [PLAN_EXIT_TOOL]: 'deny' }
 /** SonarQube 재검사 (이슈 #563) — 고친 파일을 내장 서버로 다시 분석하고 남은 이슈를 읽는다. 프로젝트 파일을 바꾸지 않아 묻지 않는다(계획에서도), 하위 작업은 기본 규칙(묻기) */
 const SONAR_CHECK_ALLOW = { litecode_sonarqube_check: 'allow' }
 // git 도구 (이슈 #290, 시안의 권한표): 읽기(status·diff·log·branches)는 결과물 선언과 같은 모양 — 네 모드 모두 묻지 않는다(계획·매번 묻기 포함).
@@ -174,13 +188,16 @@ const GIT_WRITE_ASK = gitRules(GIT_WRITE_TOOLS, 'ask')
 const GIT_WRITE_ALLOW = gitRules(GIT_WRITE_TOOLS, 'allow')
 const GIT_TOOLS_DENY = gitRules([...GIT_READ_TOOLS, ...GIT_WRITE_TOOLS], 'deny')
 const MCP_TOOL_RULES: Record<string, Record<string, string>> = {
-  plan: { '*_*': 'deny', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...SONAR_CHECK_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
-  [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...NEW_CONVERSATION_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ASK, ...SONAR_CHECK_ALLOW },
-  [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...SONAR_CHECK_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
+  // 계획: 읽기 목표(get)·검토 도구(exit_plan_mode)만 — 쓰기 목표 도구는 `*_*: deny` 그대로 안 보임 (이슈 #626)
+  plan: { '*_*': 'deny', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...READ_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...SONAR_CHECK_ALLOW, ...GOAL_READ_ALLOW, ...PLAN_EXIT_ALLOW, external_directory: 'ask', doom_loop: 'ask' },
+  // 기본: 목표 쓰기·읽기 묻지 않는다 (프로젝트 파일 밖 앱 상태 — dsh 도 묻지 않는다), 검토 도구는 계획 모드에서만 쓰이니 allow
+  [MODE_AGENT.build]: { ...SEND_TOOLS_ASK, ...NEW_CONVERSATION_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ASK, ...SONAR_CHECK_ALLOW, ...GOAL_WRITE_ALLOW, ...GOAL_READ_ALLOW, ...PLAN_EXIT_ALLOW },
+  // 매번 묻기: wildcard ask 가 전역 deny 를 되살려 create/update 가 카드 — 읽고 검토(승인 카드가 곧 확인)만 묻지 않는다
+  [MODE_AGENT.ask]: { '*_*': 'ask', litecode_open: 'allow', ...LIST_TOOL_ALLOW, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...SONAR_CHECK_ALLOW, ...GOAL_READ_ALLOW, ...PLAN_EXIT_ALLOW, plan_enter: 'deny', plan_exit: 'deny' },
   // 전체 권한은 git 쓰기도 묻지 않는다 (2026-10-12) — 기본·매번 묻기는 카드. 새 대화 도구는 git 씩과 달리 전체 권한에서도 카드 (이슈 #415)
-  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...NEW_CONVERSATION_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, ...SONAR_CHECK_ALLOW },
-  // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31)
-  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...MAKE_TOOLS_DENY, ...GIT_TOOLS_DENY, ...SEND_TOOLS_DENY, ...NEW_CONVERSATION_DENY },
+  [MODE_AGENT.full]: { ...SEND_TOOLS_ASK, ...NEW_CONVERSATION_ASK, ...MAKE_TOOLS_ASK, ...PRESENT_ALLOW, ...GIT_READ_ALLOW, ...GIT_WRITE_ALLOW, ...SONAR_CHECK_ALLOW, ...GOAL_WRITE_ALLOW, ...GOAL_READ_ALLOW, ...PLAN_EXIT_ALLOW },
+  // 매번 묻기의 하위 작업도 MCP 도구를 묻는다 — 하위 에이전트는 부모 모드 규칙을 안 물려받는다 (#31). 목표·검토 도구는 하위 작업에 없다
+  [SUBAGENT_ASK]: { '*_*': 'ask', plan_enter: 'deny', plan_exit: 'deny', ...PRESENT_DENY, ...MAKE_TOOLS_DENY, ...GIT_TOOLS_DENY, ...SEND_TOOLS_DENY, ...NEW_CONVERSATION_DENY, ...GOAL_TOOLS_DENY, ...PLAN_EXIT_DENY },
 }
 
 // 브라우저 도구 (`chrome_*`, 이슈 #147 — 실측·권고 _workspace/01aj_playwright_mcp.md §4, 도구 갈래는 shared/browser.ts). ctx.browser 가 동봉한
@@ -399,7 +416,7 @@ export function engineConfig(
     : Object.fromEntries(Object.entries(agents).map(([name, def]) => [name, { ...def, permission: withWebDenied(def.permission) }]))
   // 스킬 규칙은 skills 를 줄 때만 (ctx.engine 은 늘 준다) — 끔이면 도구째, 켬이면 내장 customize-opencode 만 뺀다. 웹 도구 규칙 뒤, 맨 끝
   const skillRule = extra.skills && (extra.skills.enabled ? HIDDEN_SKILLS : 'deny')
-  const permission = { ...TASK_DENY, ...SEND_TOOLS_DENY, ...NEW_CONVERSATION_DENY, ...MAKE_TOOLS_DENY, ...PRESENT_DENY, ...GIT_TOOLS_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
+  const permission = { ...TASK_DENY, ...SEND_TOOLS_DENY, ...NEW_CONVERSATION_DENY, ...MAKE_TOOLS_DENY, ...PRESENT_DENY, ...GIT_TOOLS_DENY, ...GOAL_TOOLS_DENY, ...PLAN_EXIT_DENY, ...(!extra.webTools && WEB_TOOLS_DENY), ...(skillRule && { skill: skillRule }) }
   const ruled: Record<string, { permission: Permission }> = skillRule
     ? Object.fromEntries(Object.entries(agent).map(([name, def]) => [name, { ...def, permission: withLast(def.permission, 'skill', skillRule) as Permission }]))
     : agent

@@ -4,6 +4,7 @@
 // **여기에 Node·Electron·opencode 를 아는 코드를 넣지 않는다** — 값을 만드는 쪽(opencode 형식 → 이 모양)은 서비스 파일에 그대로 있다.
 
 import type { HookEvent, HookOutcome } from './hooks.ts'
+import type { GoalView } from './goal.ts'
 import type { Mode } from './modes.ts'
 import type { SkillSource } from './skills.ts'
 
@@ -216,6 +217,10 @@ export interface HistoryMessage {
   at?: number
   /** user: 이 턴을 돌린 모드 (그 턴 답의 에이전트, 없으면 앞서 바꾼 에이전트) — 화면이 모드가 바뀐 자리에 구분선을 긋는다 */
   mode?: Mode
+  /** user: 앱 명령(명령 플레인)의 에코 — 엔진에 안 간 내 말. `commandEcho` 로 그린다 (이슈 #626). 리로드 후엔 없다 */
+  commandEcho?: { name: string }
+  /** assistant: 앱 명령의 결과 줄 — `commandEcho` 내 말의 쌍. 엔진에 안 갔다 (이슈 #626). 리로드 후엔 없다 */
+  commandResult?: string
   /** user: 이 메시지에 붙인 파일·이미지 칩 (이슈 #44) */
   attachments?: Attachment[]
   /** user: 사람이 친 글이 아니라 다른 대화가 보낸 지시다 (이슈 #55) — 화면이 "다른 대화에서 온 지시" 딱지를 단다 */
@@ -278,6 +283,8 @@ export interface Conversation {
   model?: { providerId: string; modelId: string }
   /** 이 대화의 모드 (입력창 칩). 없으면 새 대화 기본 모드(설정)를 따른다 — 보낼 때 ctx.llm 이 엔진 세션의 에이전트를 맞춘다 */
   mode?: Mode
+  /** 계획 모드 진입 직전의 non-plan 모드 — `/plan off`·검토 동의가 돌아가는 자리 (이슈 #626, dsh planBack) */
+  planBack?: Mode
   /** 화면이 턴마다 더한 통계 합계 — 모양은 화면(renderer/stats.ts)이 정하고 여기는 그대로 보관한다 */
   usage?: unknown
   /** 엔진 메시지 id → 말풍선에 보일 글. `/` 명령처럼 보낸 본문(풀어 쓴 template)과 사용자가 친 글이 다른 입력만 (label) */

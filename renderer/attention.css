@@ -319,6 +319,136 @@
   cursor: default;
 }
 
+/* 목표 스트립 (이슈 #626) — 입력 카드 위 한 줄: 점(상태)·목표·라운드·단계 + 다음 명령 버튼 */
+.goal-dock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.goal-dock__dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.goal-dock__dot[data-phase='paused'] { background: var(--warn); }
+.goal-dock__dot[data-phase='blocked'] { background: var(--danger); }
+.goal-dock__dot[data-phase='complete'] { background: var(--text-tertiary); }
+
+.goal-dock__objective {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.goal-dock__meta {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.goal-dock__button {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.goal-dock__button:hover { background: var(--fill-hover); }
+.goal-dock__button--muted:hover { border-color: var(--danger); color: var(--danger); }
+
+/* 계획 검토 카드 (이슈 #626) — litecode_exit_plan_mode 도구가 띄운 완성 계획 + 승인·계속 계획 */
+.plan-review {
+  margin: 12px 0 16px;
+  border: 0.5px solid var(--warn-border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 14px 16px 16px;
+}
+
+.plan-review__title {
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.plan-review__plan {
+  max-height: 420px;
+  overflow: auto;
+  border: 0.5px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.plan-review__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.plan-review__revise {
+  display: flex;
+  flex: 1;
+  min-width: 220px;
+  gap: 6px;
+}
+
+.plan-review__feedback {
+  flex: 1;
+  height: 30px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.plan-review__feedback:focus { outline: 1px solid var(--accent); }
+
+/* 앱 명령 줄 (이슈 #626) — /goal·/plan 처럼 엔진에 안 간 내 말(에코)과 결과 */
+.command-line {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--fill-hover);
+  font-size: 12px;
+}
+
+.command-line__echo {
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.command-line__result {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+
 /* 전체 권한 확인 — 설정 모달 위에도 뜬다 */
 .confirm-mask {
   position: fixed;

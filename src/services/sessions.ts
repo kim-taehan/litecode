@@ -106,7 +106,7 @@ export class SessionsService extends Service {
 
   /** 저장된 대화의 몇 필드만 고친다 — 고친 대화를 준다 (저장 안 된 대화면 undefined). 읽기-고치기-쓰기가 한 줄 안이라, 통째로 save 할 때처럼
    *  그 사이 다른 쪽이 적은 값을 덮지 않는다: ctx.chat 은 턴 끝에 시각·통계를, 화면은 고른 모델·모드를 적는다 (이슈 #52) */
-  async patch(id: string, change: (entry: Conversation) => Partial<Pick<Conversation, 'updatedAt' | 'model' | 'mode' | 'usage' | 'engineSessionId'>>): Promise<Conversation | undefined> {
+  async patch(id: string, change: (entry: Conversation) => Partial<Pick<Conversation, 'updatedAt' | 'model' | 'mode' | 'planBack' | 'usage' | 'engineSessionId'>>): Promise<Conversation | undefined> {
     const stored = await this.update((stored) => ({
       ...stored,
       conversations: stored.conversations.map((entry) => (entry.id === id ? pick({ ...entry, ...change(entry) }) : entry)),
@@ -341,8 +341,8 @@ function dropping(conversations: Conversation[], orphans: string[], removed: Con
 }
 
 /** 아는 필드만 남긴다 — 화면이 말풍선 등을 실어 보내도 파일에는 목록 정보만 */
-function pick({ id, project, engineSessionId, title, renamed, pinned, updatedAt, model, mode, usage, labels, attachments, origins, shells }: Conversation): Conversation {
-  return { id, project, engineSessionId, title, ...(renamed === true && { renamed }), ...(pinned === true && { pinned }), updatedAt, model, mode: isMode(mode) ? mode : undefined, usage, labels, attachments, origins, shells }
+function pick({ id, project, engineSessionId, title, renamed, pinned, updatedAt, model, mode, planBack, usage, labels, attachments, origins, shells }: Conversation): Conversation {
+  return { id, project, engineSessionId, title, ...(renamed === true && { renamed }), ...(pinned === true && { pinned }), updatedAt, model, mode: isMode(mode) ? mode : undefined, ...(isMode(planBack) && planBack !== 'plan' && { planBack }), usage, labels, attachments, origins, shells }
 }
 
 function isConversation(value: unknown): value is Conversation {

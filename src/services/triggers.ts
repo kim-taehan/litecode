@@ -41,7 +41,8 @@ export interface TriggerCandidate {
   drill?: boolean
 }
 
-export type AppCommand = 'compact' | 'clear'
+/** 앱이 돌리는 명령 — compact·clear 는 인자를 안 받고, goal·plan 은 인자를 받는다 (이슈 #626) */
+export type AppCommand = 'compact' | 'clear' | 'goal' | 'plan'
 
 export type TriggerResult =
   /** 구간을 text 로 바꾸고 메뉴를 닫는다 */
@@ -52,8 +53,9 @@ export type TriggerResult =
   | { kind: 'send'; text: string; display: string }
   /** 그 폴더에서 command 를 한 번 돌려 결과 카드로 — 화면이 대화에 카드를 붙이고 메인(ctx.shell)이 돌린다. 맥락에는 안 들어간다 */
   | { kind: 'shell'; directory: string; command: string }
-  /** 앱 명령 (이슈 #144) — 화면이 받아서 그 동작을 한다: compact = 지금 대화 요약(ctx.chat.compact), clear = 새 대화 */
-  | { kind: 'app'; command: AppCommand }
+  /** 앱 명령 — 화면이 받아서 그 동작을 한다: compact = 지금 대화 요약(ctx.chat.compact), clear = 새 대화.
+   *  goal·plan (이슈 #626) 은 메인(ctx.appCommands)이 돌려 결과 줄을 준다 — 인자를 받는 것은 goal·plan 이다 */
+  | { kind: 'app'; command: AppCommand; args?: string }
   /** 막고 알린다 (모르는 명령 등) */
   | { kind: 'error'; message: string }
 

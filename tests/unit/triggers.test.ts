@@ -244,12 +244,14 @@ describe('/ 앱 명령', () => {
     ctx.plugin(SlashTrigger)
     await settle()
     const all = (await triggers.query(scope, '/', 1))!.candidates
-    expect(all.slice(0, 2).map(({ label, icon, group }) => ({ label, icon, group }))).toEqual([
+    expect(all.slice(0, 4).map(({ label, icon, group }) => ({ label, icon, group }))).toEqual([
+      { label: '/goal', icon: 'app', group: tr('trigger.group.app') },
+      { label: '/plan', icon: 'app', group: tr('trigger.group.app') },
       { label: '/compact', icon: 'app', group: tr('trigger.group.app') },
       { label: '/clear', icon: 'app', group: tr('trigger.group.app') },
     ])
-    expect(all[0]!.detail).toBe(tr('trigger.app.compact'))
-    expect(all[2]!.group).toBe(tr('trigger.group.commands'))
+    expect(all[0]!.detail).toBe(tr('trigger.app.goal'))
+    expect(all[4]!.group).toBe(tr('trigger.group.commands'))
     expect((await triggers.query(scope, '/co', 3))!.candidates.map((entry) => entry.label)).toEqual(['/compact'])
     expect(await triggers.pick(scope, '/', 'compact', 'pick')).toEqual({ kind: 'insert', text: '/compact ' })
   })
@@ -272,6 +274,11 @@ describe('/ 앱 명령', () => {
     expect(await triggers.submit(scope, '/clear ')).toEqual({ kind: 'app', command: 'clear' })
     expect(await triggers.submit(scope, '/compact 짧게 해줘')).toEqual({ kind: 'error', message: tr('error.commandNoArgs', { name: 'compact' }) })
     expect(await triggers.submit(scope, '/clear all')).toEqual({ kind: 'error', message: tr('error.commandNoArgs', { name: 'clear' }) })
+    // goal·plan 은 인자(목표·메시지)를 받는다 (이슈 #626)
+    expect(await triggers.submit(scope, '/goal')).toEqual({ kind: 'app', command: 'goal' })
+    expect(await triggers.submit(scope, '/goal 로그인 화면을 완성해라')).toEqual({ kind: 'app', command: 'goal', args: '로그인 화면을 완성해라' })
+    expect(await triggers.submit(scope, '/plan')).toEqual({ kind: 'app', command: 'plan' })
+    expect(await triggers.submit(scope, '/plan 로그인 화면만 먼저')).toEqual({ kind: 'app', command: 'plan', args: '로그인 화면만 먼저' })
   })
 })
 
@@ -303,7 +310,7 @@ describe('/ 스킬', () => {
     ctx.plugin(SkillsService)
     await settle()
     const candidates = (await triggers.query(scope, '/', 1))?.candidates ?? []
-    expect(candidates.map((entry) => `${entry.group}:${entry.label}`)).toEqual(['앱:/compact', '앱:/clear', '명령:/init', '명령:/hi', '스킬:/proj-only', '스킬:/review-pr'])
+    expect(candidates.map((entry) => `${entry.group}:${entry.label}`)).toEqual(['앱:/goal', '앱:/plan', '앱:/compact', '앱:/clear', '명령:/init', '명령:/hi', '스킬:/proj-only', '스킬:/review-pr'])
     expect(candidates.at(-1)).toMatchObject({ icon: 'skill', detail: 'review a PR' })
     expect(await triggers.pick(scope, '/', 'review-pr', 'pick')).toEqual({ kind: 'insert', text: '/review-pr ' })
     await fs.rm(dir, { recursive: true, force: true })
@@ -329,7 +336,7 @@ describe('/ 스킬', () => {
   it('스킬 기능이 꺼져 있으면(ctx.skills 없음) 후보도 실행도 없다', async () => {
     const { triggers, dir } = await withSkills()
     await settle()
-    expect((await triggers.query(scope, '/', 1))?.candidates.map((entry) => entry.label)).toEqual(['/compact', '/clear', '/init', '/hi'])
+    expect((await triggers.query(scope, '/', 1))?.candidates.map((entry) => entry.label)).toEqual(['/goal', '/plan', '/compact', '/clear', '/init', '/hi'])
     expect(await triggers.submit(scope, '/review-pr x')).toEqual({ kind: 'error', message: '모르는 명령입니다: /review-pr' })
     await fs.rm(dir, { recursive: true, force: true })
   })

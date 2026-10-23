@@ -60,7 +60,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
   },
   "agent": {
     "plan": {
-      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. When the plan is complete, present it with the litecode_exit_plan_mode tool — the complete plan as markdown starting with a # heading. The user will approve (the mode switches back and you carry out the plan from your next step) or ask for changes (their feedback comes back in the tool result; revise and present again).",
       "permission": {
         "edit": "deny",
         "bash": "deny",
@@ -75,6 +75,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_log": "allow",
         "litecode_git_branches": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "external_directory": "ask",
         "doom_loop": "ask",
         "webfetch": "deny",
@@ -104,6 +106,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "ask",
         "litecode_git_pull": "ask",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "webfetch": "deny",
         "websearch": "deny",
         "chrome_*": "ask",
@@ -151,6 +157,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_log": "allow",
         "litecode_git_branches": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "plan_enter": "deny",
         "plan_exit": "deny",
         "webfetch": "deny",
@@ -192,6 +200,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "allow",
         "litecode_git_pull": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "webfetch": "deny",
         "websearch": "deny",
         "chrome_*": "ask",
@@ -247,6 +259,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_send_to_project": "deny",
         "litecode_read_project": "deny",
         "litecode_new_conversation": "deny",
+        "litecode_get_goal": "deny",
+        "litecode_create_goal": "deny",
+        "litecode_update_goal": "deny",
+        "litecode_exit_plan_mode": "deny",
         "webfetch": "deny",
         "websearch": "deny",
         "chrome_*": "deny"
@@ -270,6 +286,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     "litecode_git_switch": "deny",
     "litecode_git_push": "deny",
     "litecode_git_pull": "deny",
+    "litecode_get_goal": "deny",
+    "litecode_create_goal": "deny",
+    "litecode_update_goal": "deny",
+    "litecode_exit_plan_mode": "deny",
     "webfetch": "deny",
     "websearch": "deny",
     "chrome_*": "deny"
@@ -339,7 +359,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
   },
   "agent": {
     "plan": {
-      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. When the plan is complete, present it with the litecode_exit_plan_mode tool — the complete plan as markdown starting with a # heading. The user will approve (the mode switches back and you carry out the plan from your next step) or ask for changes (their feedback comes back in the tool result; revise and present again).",
       "permission": {
         "edit": "deny",
         "bash": "deny",
@@ -360,6 +380,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_diff": "ask",
         "litecode_git_log": "ask",
         "litecode_git_branches": "ask",
+        "litecode_get_goal": "ask",
+        "litecode_exit_plan_mode": "ask",
         "litecode_open": "ask",
         "litecode_list_projects": "ask",
         "litecode_sonarqube_check": "ask",
@@ -388,6 +410,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "ask",
         "litecode_git_pull": "ask",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "webfetch": "deny",
         "websearch": "deny",
         "skill": "deny",
@@ -450,6 +476,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_diff": "ask",
         "litecode_git_log": "ask",
         "litecode_git_branches": "ask",
+        "litecode_get_goal": "ask",
+        "litecode_exit_plan_mode": "ask",
         "litecode_open": "ask",
         "litecode_list_projects": "ask",
         "litecode_sonarqube_check": "ask",
@@ -490,6 +518,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "allow",
         "litecode_git_pull": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "webfetch": "deny",
         "websearch": "deny",
         "skill": "deny",
@@ -553,6 +585,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_send_to_project": "deny",
         "litecode_read_project": "deny",
         "litecode_new_conversation": "deny",
+        "litecode_get_goal": "deny",
+        "litecode_create_goal": "deny",
+        "litecode_update_goal": "deny",
+        "litecode_exit_plan_mode": "deny",
         "webfetch": "deny",
         "websearch": "deny",
         "skill": "deny",
@@ -587,6 +623,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_switch": "deny",
         "litecode_git_push": "deny",
         "litecode_git_pull": "deny",
+        "litecode_get_goal": "deny",
+        "litecode_create_goal": "deny",
+        "litecode_update_goal": "deny",
+        "litecode_exit_plan_mode": "deny",
         "chrome_*": "deny"
       }
     },
@@ -617,6 +657,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     "litecode_git_switch": "deny",
     "litecode_git_push": "deny",
     "litecode_git_pull": "deny",
+    "litecode_get_goal": "deny",
+    "litecode_create_goal": "deny",
+    "litecode_update_goal": "deny",
+    "litecode_exit_plan_mode": "deny",
     "webfetch": "deny",
     "websearch": "deny",
     "skill": "deny",
@@ -687,7 +731,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
   },
   "agent": {
     "plan": {
-      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. When the plan is complete, present it with the litecode_exit_plan_mode tool — the complete plan as markdown starting with a # heading. The user will approve (the mode switches back and you carry out the plan from your next step) or ask for changes (their feedback comes back in the tool result; revise and present again).",
       "permission": {
         "edit": "deny",
         "bash": "deny",
@@ -702,6 +746,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_log": "allow",
         "litecode_git_branches": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "external_directory": "ask",
         "doom_loop": "ask",
         "webfetch": "deny",
@@ -734,6 +780,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "ask",
         "litecode_git_pull": "ask",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "webfetch": "deny",
         "websearch": "deny",
         "skill": {
@@ -784,6 +834,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_log": "allow",
         "litecode_git_branches": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "plan_enter": "deny",
         "plan_exit": "deny",
         "webfetch": "deny",
@@ -828,6 +880,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "allow",
         "litecode_git_pull": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "webfetch": "deny",
         "websearch": "deny",
         "skill": {
@@ -886,6 +942,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_send_to_project": "deny",
         "litecode_read_project": "deny",
         "litecode_new_conversation": "deny",
+        "litecode_get_goal": "deny",
+        "litecode_create_goal": "deny",
+        "litecode_update_goal": "deny",
+        "litecode_exit_plan_mode": "deny",
         "webfetch": "deny",
         "websearch": "deny",
         "skill": {
@@ -912,6 +972,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     "litecode_git_switch": "deny",
     "litecode_git_push": "deny",
     "litecode_git_pull": "deny",
+    "litecode_get_goal": "deny",
+    "litecode_create_goal": "deny",
+    "litecode_update_goal": "deny",
+    "litecode_exit_plan_mode": "deny",
     "webfetch": "deny",
     "websearch": "deny",
     "skill": {
@@ -990,7 +1054,7 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
   },
   "agent": {
     "plan": {
-      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. The user will switch to an execution mode to carry it out.",
+      "prompt": "You are an AI coding agent in plan mode. Help the user plan software engineering tasks by inspecting the workspace with read-only tools. Do not modify files or run commands — editing, shell and web fetch tools are unavailable in this mode. Answer with a concrete step-by-step plan. When the plan is complete, present it with the litecode_exit_plan_mode tool — the complete plan as markdown starting with a # heading. The user will approve (the mode switches back and you carry out the plan from your next step) or ask for changes (their feedback comes back in the tool result; revise and present again).",
       "permission": {
         "edit": "deny",
         "bash": "deny",
@@ -1007,6 +1071,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_log": "allow",
         "litecode_git_branches": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "external_directory": "ask",
         "doom_loop": "ask",
         "skill": {
@@ -1037,6 +1103,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "ask",
         "litecode_git_pull": "ask",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "skill": {
           "customize-opencode": "deny"
         },
@@ -1089,6 +1159,8 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_log": "allow",
         "litecode_git_branches": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "plan_enter": "deny",
         "plan_exit": "deny",
         "skill": {
@@ -1131,6 +1203,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_git_push": "allow",
         "litecode_git_pull": "allow",
         "litecode_sonarqube_check": "allow",
+        "litecode_create_goal": "allow",
+        "litecode_update_goal": "allow",
+        "litecode_get_goal": "allow",
+        "litecode_exit_plan_mode": "allow",
         "skill": {
           "customize-opencode": "deny"
         },
@@ -1191,6 +1267,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
         "litecode_send_to_project": "deny",
         "litecode_read_project": "deny",
         "litecode_new_conversation": "deny",
+        "litecode_get_goal": "deny",
+        "litecode_create_goal": "deny",
+        "litecode_update_goal": "deny",
+        "litecode_exit_plan_mode": "deny",
         "skill": {
           "customize-opencode": "deny"
         },
@@ -1228,6 +1308,10 @@ exports[`engineConfig — 생성한 opencode.json 전체 (#183 이동 전후 같
     "litecode_git_switch": "deny",
     "litecode_git_push": "deny",
     "litecode_git_pull": "deny",
+    "litecode_get_goal": "deny",
+    "litecode_create_goal": "deny",
+    "litecode_update_goal": "deny",
+    "litecode_exit_plan_mode": "deny",
     "skill": {
       "customize-opencode": "deny"
     },

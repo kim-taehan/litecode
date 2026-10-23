@@ -14,6 +14,8 @@ import type { OpenInApp } from '../src/services/openIn.ts'
 import type { FilePreview, HtmlAsset } from '../src/services/filePreview.ts'
 import type { DirectoryListing } from '../src/services/fileTree.ts'
 import type { FeatureId, FeatureStatuses } from './features.ts'
+import type { GoalView } from './goal.ts'
+import type { PlanReviewCard } from './plan.ts'
 import type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 import type { McpServerInput, McpServerSummary, McpTestResult } from '../src/services/mcp.ts'
 import type { McpToolSelection } from './mcpTools.ts'
@@ -37,6 +39,8 @@ export type { OpenInApp } from '../src/services/openIn.ts'
 export type { FilePreview, HtmlAsset } from '../src/services/filePreview.ts'
 export type { DirectoryEntry, DirectoryListing } from '../src/services/fileTree.ts'
 export type { FeatureId, FeatureReason, FeatureStatus, FeatureStatuses, FeatureSwitches } from './features.ts'
+export type { GoalEvent, GoalLog, GoalPhase, GoalRef, GoalSnapshot, GoalView } from './goal.ts'
+export type { PlanReviewCard } from './plan.ts'
 export type { SkillInfo, SkillScope } from '../src/services/skills.ts'
 export type { SkillSource } from './skills.ts'
 export type { McpScope, McpServerInput, McpServerSummary, McpTestResult, McpVarSummary } from '../src/services/mcp.ts'
@@ -115,6 +119,18 @@ export const Channel = {
   REPLY_ATTENTION: 'chat:reply-attention',
   STOP_TURN: 'chat:stop',
   COMPACT_CHAT: 'chat:compact',
+  /** 앱 명령 `/goal`·`/plan` (이슈 #626) — 메인(ctx.appCommands)이 돌려 결과 줄을 준다 (sent = 그 명령이 메시지를 보냈다) */
+  RUN_APP_COMMAND: 'chat:app-command',
+  /** 그 대화의 현재 목표 (ctx.goals, 이슈 #626) — 없으면 undefined */
+  GOAL_VIEW: 'goal:view',
+  /** 메인 → 화면 (cid, GoalView | undefined) — 그 대화의 목표가 바뀌었다 (이슈 #626) */
+  GOAL_CHANGED: 'goal:changed',
+  /** 메인 → 화면 (PlanReviewCard) — 계획 검토가 시작됐다 (이슈 #626) */
+  PLAN_REVIEW: 'plan:review',
+  /** 화면 → 메인 (id, 'approve' | 'revise', feedback?) — 계획 검토의 답 (이슈 #626) */
+  PLAN_REVIEW_ANSWER: 'plan:review-answer',
+  /** 메인 → 화면 (id) — 그 계획 검토가 끝났다 (이슈 #626) */
+  PLAN_REVIEW_ANSWERED: 'plan:review-answered',
   STOP_SUBTASK: 'chat:stop-subtask',
   /** 백그라운드 하위 작업 전부 (대화 id → 작업, 이슈 #319) — 화면이 (다시) 뜰 때 한 번 */
   TASK_SNAPSHOT: 'chat:tasks-snapshot',
@@ -384,6 +400,19 @@ export interface LitecodeBridge {
   /** `/compact` — 그 대화를 요약해 컨텍스트를 줄인다. 요약은 한 턴처럼 돈다 (onTurnStarted → 요약 줄 onTurnProgress → onTurnEnded, 멈춤은 stopTurn).
    *  턴이 도는 중이거나 아직 한 번도 안 보낸 대화면 시작하지 않고 그 사유를 준다 */
   compactChat(conversationId: string): Promise<{ ok: true } | { ok: false; error: string }>
+  /** `/goal`·`/plan` 앱 명령 (이슈 #626) — 메인(ctx.appCommands)이 파싱·실행하고 결과 줄(사람 글)을 준다. sent 는 그 명령이
+   *  메시지를 보냈는지 — 보낸 것은 말풍선이므로 화면은 결과 줄만 그린다 */
+  runAppCommand(conversationId: string, command: 'goal' | 'plan', args?: string): Promise<{ text: string; sent?: boolean }>
+  /** 그 대화의 현재 목표 (이슈 #626) — 없으면 undefined. 갱신은 onGoalChanged */
+  goalView(conversationId: string): Promise<GoalView | undefined>
+  /** 그 대화의 목표가 바뀌었다 (변경·clear) — view 가 없으면 clear (이슈 #626). 해제 함수를 준다 */
+  onGoalChanged(listener: (conversationId: string, view: GoalView | undefined) => void): () => void
+  /** 계획 검토 카드가 시작됐다 — 화면이 그 대화의 입력 자리를 카드로 대체한다 (이슈 #626). 해제 함수를 준다 */
+  onPlanReview(listener: (card: PlanReviewCard) => void): () => void
+  /** 계획 검토의 답 — approve(승인, 모드는 planBack 으로) / revise(계속 계획, feedback 과 함께 도구가 실패) (이슈 #626) */
+  answerPlanReview(id: string, decision: 'approve' | 'revise', feedback?: string): void
+  /** 그 계획 검토가 끝났다 (승인·계속 계획·대화 삭제) — 화면이 카드를 닫는다 (이슈 #626). 해제 함수를 준다 */
+  onPlanReviewAnswered(listener: (id: string) => void): () => void
   /** 도는 턴의 하위 작업 하나만 멈춘다 (subtaskId = 그 하위 작업 진행 줄의 id) — 턴은 이어 간다. 도는 턴의 하위 작업이 아니면 false */
   stopSubtask(subtaskId: string): Promise<boolean>
   /** 백그라운드 하위 작업 (이슈 #319) — 대화 id → 작업 줄(진행 줄의 하위 작업 줄과 같은 모양). 중지는 stopSubtask 에 그 id */
