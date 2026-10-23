@@ -205,3 +205,16 @@
 - Expect: 완료 턴("완료 · N초 ⌄" 기본 접힘)처럼 실패 턴도 끝난 뒤 기본 접힘 — 최종 답변(실패면 `⚠️ 사유`)만 보이고, 턴 머리를 눌러야 생각·도구·중간 글 줄이 보임 (사용자 결정 2026-10-23: 기본 상태를 접힌 채)
 - Status: done (2026-10-23)
 - Fix: 2026-10-23 — `ChatTurn.tsx` `AssistantTurn` 의 `unfolded = failed && !interrupted` 제거, 접기 규칙을 `foldable = !running && work.length > 0` 로 — 끝난 턴(완료·실패·중단·거절)이 전부 기본 접히고 머리 버튼으로 작업 줄을 펼친다(중단 #516 에 실패가 합류). 접힌 작업 줄은 DOM 에 hidden 으로 유지(대화 안 찾기 #79). 머리의 붉은 색·접기 문구는 기존 CSS·i18n 그대로. 단위 `tests/unit/interruptedFold.test.ts`.
+
+## 2026-10-23 #619 — 작업은 끝났는데 모델이 할 일 완료를 표시하지 않음 — dock 이 0/N 에 멈춘다
+
+- Where: 채팅 — 입력 카드 위의 할 일 dock(스크린샷 첨부 — "할 일 0/8 · 멈춤: renderer/Jobs.tsx → rewrite…", 10 turns 205 steps)
+- What: "이게 작업이 마무리되었거든 근데 모델에서 할일 완료를 안해주는데 이런현상의 너무 자주 일어나서" (2026-10-23)
+- Expect: 작업이 끝났으면 할 일 목록도 끝나 표시되어야 한다 — 모델이 갱신을 빼먹어도 앱이 도와주길
+- Status: done (2026-10-23)
+- Fix: 2026-10-23 — `src/services/todoGuard.ts`(+ 순수 로직 `todoSync.ts`) 필수 묶음. 남은 항목이 있는 목록을 **성공한** todowrite 로 쓴뒤(eponch), 모델이 그 외 도구를 실행에 넣은 **8번째·32번째**에 `ctx.llm.remind` 로 모델에게만 한 줄(합성 글 — 말풍선·기록에 사람 말로 남지 않음, repeatGuard #284 과 같은 길). 모델이 다시 todowrite 을 쓰면 epoch 초기화(그 epoch 상한 2회). 실패한 todowrite(틀린 인자)·하위 작업 도구는 안 센다. 계획 모드도 todowrite 이 허락돼 같은 규칙. `shared/features.ts` `FEATURES`·`FIXED` + `electron/main.ts` 배선, 단위 `tests/unit/todoGuard.test.ts`.
+
+### 조사
+- 위치: 할 일 목록은 성공한 `todowrite` 줄의 `metadata.todos` 만이 정본(`src/services/turnProgress.ts:446-461` — "틀린 인자도 running 에 실린 뒤 error, 그때 엔진 목록은 안 바뀐다" 주석). 시스템 프롬프트의 `TODO_SYNC_RULE`(`instructions.ts:21`, #406)은 작은 모델이 지키지 않음(실측: 도구 134회 동안 0/7, #406) → dock 이 `renderer/todoView.ts` 기준 0/N 에 멈춤. 턴이 안 돌면 active 항복은 "멈춤" 표시로만 보여 `renderer/Todo.tsx:105-110`
+- 메커니즘: 턴 도는 중 `llm/tool-started`(running, callID 마다 한 번 — `llm/follow.ts:97-101`)로 실행 진입을 세고, `llm/tool-done`(error 없음)의 todowrite 에서 epoch 를 바꾼다. 재촉은 `ctx.llm.remind`(`llm/service.ts:130` — 도는 턴에만, 합성 user)
+- 판정: 코드에서 확인됨 — 모델이 todowrite 을 빼먹는 동안 앱 측 억제가 전무(시스템 프롬프트 1줄만이 전부)

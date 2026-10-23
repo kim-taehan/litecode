@@ -47,6 +47,7 @@ import { canSealKeys } from './keyStorage.ts'
 import { OpenInService } from '../src/services/openIn.ts'
 import { UpdatesService } from '../src/services/updates.ts'
 import { RepeatGuardService } from '../src/services/repeatGuard.ts'
+import { TodoGuardService } from '../src/services/todoGuard.ts'
 import { FeaturesService, type FeatureDefinition } from '../src/services/features.ts'
 import { HooksService } from '../src/services/hooks.ts'
 import { hooksBridge } from '../src/services/hooks/bridge.ts'
@@ -867,6 +868,9 @@ const features: FeatureDefinition[] = [
   },
   // 같은 도구 반복 알림 (이슈 #284) — 기본 켜짐. 'llm/tool-done' 을 듣고 연속 3·5·8번째에 ctx.llm.remind 로 모델에게만 한 줄. 끄면 알림만 사라진다
   { id: 'repeatGuard', service: 'repeatGuard', plugin: (ctx) => void ctx.plugin(RepeatGuardService) },
+  // 할 일 동기화 재촉 (이슈 #619) — 필수(늘 켜짐, repeatGuard 와 같은 길). 남은 항목이 있는 todowrite 이후 다른 도구 8번째·32번째 실행 진입에
+  // ctx.llm.remind 로 모델에게만 한 줄. todowrite 을 다시 쓰면 epoch 가 처음부터. 목록이 없으면(안 쓴 턴) 아무 일도 없다
+  { id: 'todoGuard', service: 'todoGuard', plugin: (ctx) => void ctx.plugin(TodoGuardService) },
   {
     // Git (이슈 #290) — 기본 꺼짐. 시스템 git 을 인자 배열로 띄운다(인증 창 없음). AI 도구(litecode_git_*)는 데스크탑 MCP 가 켜져 있을 때만 뜬다 —
     // GitTools 가 appMcp 를 inject 하므로 꺼져 있으면 그 플러그인만 기다리고, Git 탭·알약은 그대로 쓴다 (FEATURE_REQUIRES 에 넣지 않았다)

@@ -101,7 +101,7 @@ async function start(bundles: FeatureDefinition[] = definitions()): Promise<{ ct
 /** 걸린 채널 (정렬) */
 const channels = () => [...ipc.handlers.keys()].sort()
 /** 기본으로 걸리는 채널 — 알림은 기본 꺼짐, 훅은 필수 (#302) */
-const ALL = ['appMcp:x', 'at:x', 'bang:x', 'hooks:x', 'mcp:x', 'openIn:x', 'repeatGuard:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'trajectory:load']
+const ALL = ['appMcp:x', 'at:x', 'bang:x', 'hooks:x', 'mcp:x', 'openIn:x', 'repeatGuard:x', 'shell:x', 'skills:x', 'slash:x', 'terminal:x', 'todoGuard:x', 'trajectory:load']
 
 beforeEach(async () => {
   ipc = new FakeIpc()
