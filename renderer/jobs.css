@@ -1,4 +1,4 @@
-/* 작업 목록 — 입력 카드 위 한 줄과 그 자리에서 펼치는 목록 (이슈 #295, 머리 버튼 #32 를 대신한다). 색은 토큰만 */
+/* 작업 목록 — 대화 머리의 "작업 N" 트리거 + 그 아래 드롭다운 (이슈 #610, dsh ui-jobs 모양 — #32 머리 버튼·#295 입력 카드 위 자리를 대신한다). 색은 토큰만 */
 
 .jobs__spinner {
   animation: jobs-spin 1s linear infinite;
@@ -10,18 +10,177 @@
   }
 }
 
-/* 한 작업 = 한 줄 (이슈 #295 시안 G) — "● 종류 · 제목 · 시간·토큰", 오른쪽에 중지·⌄. */
-.jobs__list {
+/* 머리의 트리거 — 대화 제목 뒤, "이 열림"·"오른쪽 패널" 버튼 앞. 머리 줄은 드래그 영역이므로
+   버튼의 no-drag 은 styles.css 의 :is(button, …) 규칙이 맡는다 */
+.jobs-header {
+  position: relative;
+  flex: none;
+  margin-left: 12px;
+}
+
+.jobs-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.jobs-trigger:hover,
+.jobs-trigger[aria-expanded='true'] {
+  background: var(--fill-hover);
+  color: var(--text-secondary);
+}
+
+.jobs-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.jobs-trigger .jobs__spinner {
+  flex: none;
+  color: var(--accent);
+}
+
+/* 다 끝났으면 도는 고리 대신 회색 체크 */
+.jobs-trigger__done {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.jobs-trigger__label {
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-trigger__chevron {
+  flex: none;
+  color: var(--text-caption);
+  transition: transform 120ms ease;
+}
+
+.jobs-trigger[aria-expanded='true'] .jobs-trigger__chevron {
+  transform: rotate(180deg);
+}
+
+/* 드롭다운 — 트리거 아래로 자란다. 창이 낮으면 안에서 스크롤,
+   오른쪽을 넘으면 --shift 로 트리거 오른편 정렬 */
+.jobs-menu {
+  box-sizing: border-box;
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 1px;
+  width: 500px;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: min(480px, calc(100vh - 84px));
+  margin: 0;
+  padding: 3px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--menu);
+  backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: var(--shadow-lv3);
+  font-weight: 400;
 }
 
+.jobs-menu--shift {
+  left: auto;
+  right: 0;
+  width: auto;
+  min-width: min(320px, calc(100vw - 32px));
+}
+
+/* 섹션 표제 — "진행 중" 이라거나 "끝난 작업 N"(접기·지우기). 위선 하나씩 */
+.jobs-menu__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 4px 4px 0;
+  padding: 3px 2px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.jobs-menu__section:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.jobs-menu__fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.jobs-menu__fold:hover {
+  background: var(--fill-hover);
+  color: var(--text-secondary);
+}
+
+.jobs-menu__fold svg {
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.jobs-menu__fold[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+/* "지우기" — 끝난 작업을 메뉴에서 숨긴다 (저장은 그대로, 새 턴 전까지) */
+.jobs-menu__clear {
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-caption);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.jobs-menu__clear:hover {
+  background: var(--fill-hover);
+  color: var(--danger);
+}
+
+/* 한 작업 = 한 줄 (시안 G) — "● 종류 · 제목 · 시간·토큰", 오른쪽에 중지·⌄. */
 .jobs__row {
   border-radius: 8px;
   font-size: 13px;
 }
 
+/* 도는 줄은 카드 바탕, 펼친 줄도 */
+.jobs__row--live,
 .jobs__row[data-open] {
   background: var(--fill-hover);
 }
@@ -35,6 +194,10 @@
 
 .jobs__row[data-job='subtask'] .jobs__line:hover {
   background: var(--fill-hover);
+}
+
+.jobs__row--live[data-job='subtask'] .jobs__line:hover {
+  background: var(--fill-active);
 }
 
 .jobs__cells {
@@ -120,7 +283,7 @@ button.jobs__cells:focus-visible {
 .jobs__row[data-quiet] .jobs__dot { border-color: var(--warn); background: var(--warn); }
 
 /* 중지·⌄ — 줄에 마우스를 올리거나 포커스가 있거나 펼쳤을 때만. 터치(hover 없음)에선 늘.
-   폭을 늘 잡아 둔다(84 = 중지 버튼 + ⌄ + 오른쪽 8) — 중지가 없는 줄(메인·준비 중·끝난 것)도 시간 칸이 같은 자리에 오게 */
+   폭을 늘 잡아 둔다(84 = armed 상태 중지 버튼 "■ 중지" + ⌄ + 오른쪽 8) — 중지가 없는 줄(메인·준비 중·끝난 것)도 시간 칸이 같은 자리에 오게 */
 .jobs__actions {
   display: inline-flex;
   align-items: center;
@@ -143,18 +306,23 @@ button.jobs__cells:focus-visible {
   .jobs__actions { opacity: 1; }
 }
 
+/* 중지 — 멈추기까지 2 단계: 유태(idle)는 아이콘만, 첫 클릭이 armed(붉게 "중지"), 두 번째가 실제. pending 은 "중지하는 중…" */
 .jobs__stop {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-secondary);
+  background: transparent;
+  color: var(--text-tertiary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 20px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -166,12 +334,31 @@ button.jobs__cells:focus-visible {
 
 .jobs__stop:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 .jobs__stop:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* armed — "중지" 로 강조, 두 번째 클릭이 실제 중지 */
+.jobs__stop--armed {
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+.jobs__stop--armed:hover {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+/* failed — "중지 실패"를 4s 동안. pending 은 disabled + opacity 로만 */
+.jobs__stop--failed {
+  padding: 0 8px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
 }
 
 .jobs__chevron {
@@ -215,30 +402,6 @@ button.jobs__cells:focus-visible {
   gap: 0;
 }
 
-/* "+N개 더 보기" · "접기" — 점 칸 다음(8 + 14 + 8)에서 시작 */
-.jobs__more {
-  align-self: flex-start;
-  height: 28px;
-  padding: 0 8px 0 30px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-tertiary);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.jobs__more:hover,
-.jobs__more:focus-visible {
-  color: var(--text);
-}
-
-.jobs__more:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
 /* 펼친 하위 작업 — 점 칸 다음(8 + 14 + 8)에서 시작 */
 .jobs__detail {
   display: flex;
@@ -271,137 +434,9 @@ button.jobs__cells:focus-visible {
   color: var(--text-caption);
 }
 
-.jobs__finished-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 6px 4px 0;
-  padding: 8px 6px 2px;
-  border-top: 1px solid var(--border-light);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-}
-
-.jobs__fold {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-
-.jobs__fold:hover {
-  background: var(--fill-hover);
-}
-
-.jobs__fold[aria-expanded='true'] svg {
-  transform: rotate(180deg);
-}
-
 .jobs__detail > .jobs__full {
   color: var(--text);
   font-weight: 500;
   overflow-wrap: anywhere;
   white-space: normal;
-}
-
-/* 입력 카드 위 작업 줄 (이슈 #295) — 판 치수·글자는 할 일 줄(todo.css .todo-dock)과 같다. 할 일 → 작업 → 대기열 → 카드 */
-.jobs-dock {
-  box-sizing: border-box;
-  width: calc(100% - 32px);
-  max-width: calc(clamp(712px, calc((100% + 32px) * 0.64 + 32px), 952px) - 32px);
-  margin-bottom: -3px;
-  padding: 2px 0 5px;
-  border: 0.5px solid var(--border);
-  border-bottom: none;
-  border-radius: 16px 16px 0 0;
-  background: var(--menu);
-  backdrop-filter: blur(20px);
-}
-
-/* 위에 할 일 판이 있으면 이어 붙게 작업 줄의 위 모서리를, 아래 대기열이 있으면 대기열의 위 모서리를 편다 */
-.todo-dock + .jobs-dock,
-.jobs-dock + .queue-dock {
-  border-radius: 0;
-}
-
-.jobs-dock__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  height: 32px;
-  padding: 0 12px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.jobs-dock__head:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-  border-radius: 8px;
-}
-
-.jobs-dock__head .jobs__spinner {
-  flex: none;
-  color: var(--accent);
-}
-
-/* 다 끝났으면 도는 고리 대신 회색 체크 */
-.jobs-dock__done {
-  flex: none;
-  color: var(--text-tertiary);
-}
-
-.jobs-dock__title {
-  flex: none;
-  color: var(--text);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.jobs-dock__lead {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.jobs-dock__time {
-  flex: none;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.jobs-dock__chevron {
-  flex: none;
-  transition: transform 100ms ease;
-}
-
-.jobs-dock__head[aria-expanded='true'] .jobs-dock__chevron {
-  transform: rotate(180deg);
-}
-
-/* 펼친 목록 — 그 자리에서 위로 자란다. 창이 낮으면 안에서 스크롤 */
-.jobs-dock__body {
-  max-height: min(320px, 40vh);
-  overflow-y: auto;
-  padding: 2px 6px 4px;
 }

@@ -10,6 +10,7 @@ import type { findModel } from './modelChoice.ts'
 import { Trajectory } from './Trajectory.tsx'
 import { ShellCard } from './ShellCard.tsx'
 import type { Translate } from './settingsStore.ts'
+import { JobsHeader, useBackgroundTasks } from './Jobs.tsx'
 import { OpenInButton } from './OpenInButton.tsx'
 import { ConversationMenu } from './Report.tsx'
 import { RightPanelButton } from './FilePreview.tsx'
@@ -70,6 +71,8 @@ export function ConversationView({
   send,
   shareShell,
 }: ConversationViewProps) {
+  // 그 대화의 백그라운드 작업 (#319) — 머리의 작업 트리거(Jobs.tsx)에서 도는 것 + 끝난 것을 센다
+  const backgroundTasks = useBackgroundTasks(active.id)
   /** 그 자리의 `!` 카드들 (실행한 순서) */
   function shellCards(session: Session, at: (position: number) => boolean) {
     if (session.history === 'unloaded' || session.history === 'loading') return [] // 자리를 셀 말풍선이 아직 없다
@@ -91,6 +94,9 @@ export function ConversationView({
     <>
       <div className="main__header">
         {titleOf(active)}
+        {/* 작업 목록 (이슈 #610, dsh ui-jobs 모양 — #32 머리 버튼 + #295 입력 카드 위 줄을 대신한다) —
+            하위 작업이 있는 턴만. 턴이 끝나도 새 턴 전까지 끝난 작업을 남긴다. 대화를 바꾸면 key 로 잊는다 */}
+        <JobsHeader key={`jobs-${active.id}`} items={active.progress} pending={!!active.pending} startedAt={active.sentAt} background={backgroundTasks} directory={active.project} />
         {features.has('openIn') && <OpenInButton directory={active.project} />}
         <RightPanelButton directory={active.project} />
         {/* 더 보기 ⋯ — 대화 내보내기 (이슈 #177) */}
