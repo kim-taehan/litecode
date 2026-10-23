@@ -200,6 +200,24 @@ describe('확장 켜기 (settings.extensions, 이슈 #482)', () => {
   })
 })
 
+describe('답 도는 중 바로 끼워 넣기 (settings.steerOnSend, 이슈 #611)', () => {
+  it('없으면 꺼짐(undefined). boolean 만 저장되고 파일에 남는다', async () => {
+    const { settings } = await service({ file })
+    expect(settings.get().steerOnSend).toBeUndefined()
+    expect(settings.set({ steerOnSend: true }).steerOnSend).toBe(true)
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).steerOnSend).toBe(true)
+    expect(settings.set({ steerOnSend: false }).steerOnSend).toBe(false)
+    expect(() => settings.set({ steerOnSend: 'yes' as never }), "'yes'").toThrow()
+    expect(() => settings.set({ steerOnSend: 1 as never }), '1').toThrow()
+  })
+
+  it('파일을 손으로 고쳐 잘못된 값이면 그 값만 없앤다(꺼짐)', async () => {
+    await fs.writeFile(file, JSON.stringify({ language: 'ko', steerOnSend: 'yes' }))
+    const { settings } = await service({ file })
+    expect(settings.get()).toEqual({ language: 'ko', appearance: 'light', fontSize: 14, defaultMode: 'build' })
+  })
+})
+
 describe('다른 앱에서 열기 기본 앱 (settings.openInApp)', () => {
   it('처음엔 없다(목록 첫 앱), 고르면 settings.json 에 남고 다시 읽힌다. 문자열이 아니면 거절', async () => {
     const { settings } = await service({ file })

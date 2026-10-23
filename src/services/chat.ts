@@ -24,8 +24,9 @@ import type { Attention, AttentionAnswer, AttentionTarget, Conversation, History
 // - 엔진을 모른다: 턴은 ctx.llm.chat 으로만 돌리고, 목록 정보는 ctx.sessions 에 적는다
 // - 대화마다 한 턴씩: 도는 중에 온 보내기는 대기열에 쌓이고, 턴이 끝나면(실패·중단이어도) 출처가 같은 것끼리 합쳐 다음 턴으로 간다.
 //   사용자가 멈춘 턴(stop)은 대기열을 붙잡는다 — 보내지 않고 화면이 입력창으로 되돌린다(takeQueue)
-// - 끼워 넣기 (이슈 #250): 사람이 친 글(데스크탑·폰)은 도는 턴이 있으면 대기열 대신 그 턴에 끼워 넣는다(ctx.llm.reserve) — 엔진의 다음 스텝이
-//   읽는다. 말풍선은 'chat/turn-interjected', 그때까지의 진행 줄은 그 앞의 답으로 얼린다. 엔진이 그 턴을 아직 안 받았거나 멈추는 중이면 대기열.
+// - 끼워 넣기 (이슈 #250): 사람이 친 글(폰은 항상, 데스크탑은 "바로 끼워 넣기" 설정 #611 켠 때)은 도는 턴이 있으면 대기열 대신
+//   그 턴에 끼워 넣는다(ctx.llm.reserve) — 엔진의 다음 스텝이 읽는다. 말풍선은 'chat/turn-interjected', 그때까지의 진행 줄은 그 앞의 답으로 얼린다.
+//   엔진이 그 턴을 아직 안 받았거나 멈추는 중이면 대기열.
 //   다른 대화의 지시·앱이 이어 보낸 것('hook')·요약 턴은 지금처럼 대기열이다
 // - 이벤트는 shared/chat.ts 의 ChatEventMap (shared/remote.ts 와 같은 모양) — Cordis 이름은 `chat/<이름>`
 // - 알림(ctx.notifications)은 그대로 ctx.llm 의 'llm/turn-*' 를 듣는다
@@ -166,13 +167,16 @@ export class ChatService extends Service {
     return !!model && !!resolveModelKey(this.ctx.providers.get(model.providerId)?.models ?? [], model.modelId)?.model.imageInput
   }
 
-  /** 보낸다. 그 대화의 턴이 도는 중이면(대기열이 있을 때 포함) 대기열에 쌓는다 — 턴이 끝나면 합쳐 간다. 도는 중 사람이 친 글도 대기열로 가고
-   *  ("끼워 넣기" 는 이길로 오지 않으며, 화면의 스티어(steer)가 그 턴에 끼워 넣는다 — 이슈 #250)
+  /** 보낸다. 그 대화의 턴이 도는 중이면(대기열이 있을 때 포함) 대기열에 쌓는다 — 턴이 끝나면 합쳐 간다. 도는 중 사람이 친 글도 기본은 대기열이고,
+   *  "바로 끼워 넣기"(설정 > 일반, 이슈 #611) 를 켜 두었다면 보낸 즉시 그 턴에 끼워 넣는다(스티어, #250) — 끼울 곳(엔진 자리)이 없으면 그대로 대기열
    *  아니면 대화를 저장하고(새 대화면 첫 메시지로 제목) 'chat/turn-started' 를 낸 뒤 돌아온다 — 답은 이벤트로 온다 ('chat/turn-ended').
    *  저장 안 된 대화인데 project 가 없거나 모델을 모르면 던진다 */
   async send(cid: string, input: QueuedSend): Promise<SendResult> {
     const item = clean(input)
-    if (this.queues.submit(cid, item, this.turns.has(cid))) return { state: 'queued' }
+    if (this.queues.submit(cid, item, this.turns.has(cid))) {
+      if (fromPerson(item.origin) && this.ctx.get('settings')?.get().steerOnSend === true && this.steer(cid).steered > 0) return { state: 'interjected' }
+      return { state: 'queued' }
+    }
     const turn = this.open(cid, item.origin ?? 'user')
     const ready = await this.begin(cid, item, turn, false)
     if (ready) void this.run(cid, item, turn, ready)

@@ -148,9 +148,10 @@ async function start(limit?: number) {
   const ctx = new Context()
   ctx.plugin(FakeLlm)
   ctx.plugin(FakeProviders)
+  ctx.plugin(SettingsService, { defaults: { language: 'ko' } }) // 파일 없는 메모리 — "바로 끼워 넣기"(steerOnSend) 시험이 쓴다
   ctx.plugin(SessionsService, { file: path.join(root, 'sessions.json'), limit })
   ctx.plugin(ChatService)
-  const ready = await new Promise<Context>((resolve) => ctx.inject(['chat', 'sessions', 'llm'], resolve))
+  const ready = await new Promise<Context>((resolve) => ctx.inject(['chat', 'sessions', 'llm', 'settings'], resolve))
   const events: Recorded[] = []
   ctx.on('chat/turn-started', (data) => void events.push(['turn.started', data]))
   ctx.on('chat/turn-progress', (data) => void events.push(['turn.progress', data]))
@@ -1032,9 +1033,75 @@ describe('ChatService — 도는 턴에 끼워 넣기 (이슈 #250)', () => {
     const { chat, llm, first, ended } = await steering()
     await chat.send('c1', input('몰래', { project: root, attachments: [{ kind: 'file', path: '/etc/passwd', name: 'passwd', size: 1 }] }))
     expect(chat.steer('c1')).toEqual({ steered: 1 })
-    await until(() => llm.reserved[0]?.cancelled === true)
+    await until(() => llm.reserved[0]!.cancelled === true)
     first.finish()
     expect((await ended(1)).unanswered).toEqual([llm.reserved[0]!.messageId])
+  })
+})
+
+// "답 도는 중 바로 끼워 넣기" (설정 > 일반, 이슈 #611) — 켜면 사람이 친 글은 보내는 즉시 도는 턴에 끼워 들어간다(스티어 #250의
+// 자동판). 꺼면( 기본은 꺼짐) 지금까지처럼 대기열에 선다. 사람이 아닌 출처(다른 대화의 지시·'hook')·끼울 자리가 없는(엔진이 턴을
+// 아직 안 받았거나 멈추는 중) 때는 설정과 상관없이 대기열
+describe('ChatService — 답 도는 중 보낸 메시지 바로 끼워 넣기 (steerOnSend, 이슈 #611)', () => {
+  async function steeringOn(on: boolean) {
+    const started = await start()
+    started.ctx.settings.set({ steerOnSend: on })
+    started.llm.steerable = true
+    await started.chat.send('c1', input('A 일', { mode: 'plan' }))
+    const first = await started.turn(1)
+    return { ...started, first }
+  }
+  const tool: TurnItem = { kind: 'tool', id: 'x1', name: 'bash', status: 'running' }
+
+  it('켠 뒤 사람이 친 글은 보내기 직전에 끼워 넣는다 — 스티어 버튼을 안 눌러도 말풍선(interjected)이 나고 엔진엔 그 턴 자리로', async () => {
+    const { chat, llm, first, of } = await steeringOn(true)
+    first.progress(tool)
+    expect(await chat.send('c1', input('B 말'))).toEqual({ state: 'interjected' })
+    expect(chat.queued('c1')).toBe(0)
+    const said = of('turn.interjected')[0]!
+    expect(said).toMatchObject({ cid: 'c1', message: { role: 'user', text: 'B 말', mode: 'plan', interjected: true } })
+    expect(llm.reserved).toHaveLength(1)
+    expect(llm.reserved[0]).toMatchObject({ turn: first.messageId, messageId: said.message.id })
+    await until(() => llm.reserved[0]!.sent !== undefined)
+    expect(llm.reserved[0]!.sent).toMatchObject({ prompt: 'B 말', images: [] })
+    expect(llm.calls).toHaveLength(1) // 새 턴이 아니라 그 턴의 자리
+  })
+
+  it('폰(device:) 글도 사람이 친 글이라 끼워 넣는다', async () => {
+    const { chat, llm } = await steeringOn(true)
+    expect(await chat.send('c1', input('폰에서', { origin: 'device:d1' }))).toEqual({ state: 'interjected' })
+    expect(chat.queued('c1')).toBe(0)
+    expect(llm.reserved).toHaveLength(1)
+    await until(() => llm.reserved[0]!.sent !== undefined)
+    expect(llm.reserved[0]!.sent).toMatchObject({ prompt: '폰에서' })
+  })
+
+  it('꺼져 있으면(기본) 지금까지 그대로 — 대기열에 서고 스티어가 끼워 넣는다', async () => {
+    const { chat } = await steeringOn(false)
+    expect(await chat.send('c1', input('B 말'))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(1)
+    expect(chat.steer('c1')).toEqual({ steered: 1 })
+    expect(chat.queued('c1')).toBe(0)
+  })
+
+  it('사람이 아닌 출처(다른 대화의 지시·앱이 이어 보낸 것)는 켜 있어도 대기열에 — 스티어도 안 건드린다', async () => {
+    const { chat } = await steeringOn(true)
+    expect(await chat.send('c1', input('지시', { origin: 'session:c9', from: { conversationId: 'c9', title: '다른 대화' } }))).toEqual({ state: 'queued' })
+    expect(await chat.send('c1', input('이어서', { origin: 'hook' }))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(2)
+    expect(chat.steer('c1')).toEqual({ steered: 0 })
+    expect(chat.queued('c1')).toBe(2)
+  })
+
+  it('끼울 자리가 없으면(엔진이 턴을 아직 안 받았거나 멈추는 중) 설정과 상관없이 대기열에 그대로 있다', async () => {
+    const { chat, llm } = await steeringOn(true)
+    llm.steerable = false
+    expect(await chat.send('c1', input('아직'))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(1)
+    llm.steerable = true
+    chat.stop('c1') // 멈춘 턴은 대기열을 붙잡는다 — 붙잡힌 대기열은 화면이 되돌려 주면 그 차례
+    expect(await chat.send('c1', input('멈춘 뒤'))).toEqual({ state: 'queued' })
+    expect(chat.queued('c1')).toBe(2)
   })
 })
 

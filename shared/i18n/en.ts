@@ -642,6 +642,8 @@ export const en = {
   'settings.fontSize.decrease': 'Decrease font size',
   'settings.autoTitle': 'Auto-title conversations',
   'settings.autoTitle.description': 'AI writes a short title for each conversation (one more request to the model after the first answer — uses a few tokens)',
+  'settings.steerOnSend': 'Steer messages sent while an answer is running',
+  'settings.steerOnSend.description': 'A message sent while a turn is running is injected into that turn right away (steer) instead of waiting in the queue. If it cannot be injected it stays queued',
   'settings.maxRunningTasks': 'Sub-tasks running at once',
   'settings.maxRunningTasks.description': 'How many background sub-tasks run at the same time in a conversation. The rest wait and start when one ends — keep it low if your gateway queues concurrent requests',
   'settings.updateUrl': 'Update check address',

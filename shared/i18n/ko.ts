@@ -662,6 +662,8 @@ export const ko = {
   'settings.fontSize.decrease': '글자 크기 줄이기',
   'settings.autoTitle': '대화 제목 자동 정리',
   'settings.autoTitle.description': '대화 제목을 AI 가 짧게 정리합니다(첫 답이 끝난 뒤 모델에 한 번 더 요청 — 토큰을 조금 씁니다)',
+  'settings.steerOnSend': '답 도는 중에 보낸 메시지 바로 끼워 넣기',
+  'settings.steerOnSend.description': '답이 도는 중에 보낸 메시지는 대기열 대신 바로 그 턴에 끼워 넣습니다(스티어). 끼울 곳이 없으면 대기열로 갑니다',
   'settings.maxRunningTasks': '동시에 실행할 하위 작업',
   'settings.maxRunningTasks.description': '대화마다 한 번에 실행할 백그라운드 하위 작업 수입니다. 나머지는 대기했다가 앞 작업이 끝나면 시작합니다 — 게이트웨이가 동시 요청을 줄 세우면 작게 두세요',
   'settings.updateUrl': '업데이트 확인 주소',

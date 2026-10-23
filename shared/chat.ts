@@ -43,10 +43,9 @@ export interface QueuedSend {
 }
 
 export interface SendResult {
-  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중(또는 앞에 쌓인 것이 있어) 그 대화 대기열에 들어갔다 — 사람이 친 글도 이제 대기열로만 가고,
-   *  끼워 넣기는 스티어(steer)·짝지은 폰(원격 루트)이 한다.
+  /** sent: 바로 턴이 됐다. queued: 턴이 도는 중(또는 앞에 쌓인 것이 있어) 그 대화 대기열에 들어갔다.
    *  interjected: 사람이 친 글을 도는 턴에 끼워 넣었다 — 그 턴의 다음 스텝이 읽는다 (이슈 #250, 말풍선은 'turn.interjected').
-   *  ctx.chat.send 는 이제 'interjected' 를 반환하지 않는다 — 짝지은 폰 메시지만(원격 루트가 interject 를 먼저 시도) */
+   *  ctx.chat.send 는 "답 도는 중 바로 끼워 넣기"(설정 > 일반, 이슈 #611) 를 켰을 때, 짝지은 폰 메시지는 원격 루트가 interject 를 먼저 시도해 */
   state: 'sent' | 'queued' | 'interjected'
 }
 

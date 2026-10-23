@@ -43,6 +43,8 @@ export interface Settings {
   speechLanguage?: SpeechLanguage
   /** "대화 제목을 AI 가 짧게 정리" (설정 > 일반, 이슈 #215) — 첫 턴이 잘 끝나면 모델에 한 번 더 물어 제목을 바꾼다 (autoTitle.ts). 없으면 꺼짐 */
   autoTitle?: boolean
+  /** "답 도는 중에 보낸 메시지를 바로 끼워 넣기" (설정 > 일반, 이슈 #611) — true 면 턴 도는 중 사람이 친 글은 보내는 즉시 도는 턴에 끼워 넣는다(ctx.chat.steer, #250). 없으면 꺼짐(대기열에 선 뒤 턴 끝나면 그 차례) */
+  steerOnSend?: boolean
   /** 새 버전 확인 주소 (설정 > 일반, 기능 `updates`, 이슈 #273) — 비었거나 없으면 기본값(shared/updates.ts DEFAULT_UPDATE_URL) */
   updateUrl?: string
   /** 사이드바의 새 버전 알림을 닫은 버전(릴리즈 태그) — 같은 버전은 다시 안 띄운다 */
@@ -88,6 +90,7 @@ const valid: { [K in keyof Settings]-?: (value: unknown) => value is Settings[K]
   trayNoticeShown: (value): value is boolean => typeof value === 'boolean',
   speechLanguage: isSpeechLanguage,
   autoTitle: (value): value is boolean => typeof value === 'boolean',
+  steerOnSend: (value): value is boolean => typeof value === 'boolean',
   updateUrl: isUpdateUrl,
   dismissedUpdate: (value): value is string => typeof value === 'string',
   maxRunningTasks: isRunningTaskLimit,

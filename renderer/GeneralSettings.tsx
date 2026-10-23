@@ -185,6 +185,24 @@ export function GeneralPage() {
         </button>
       </div>
 
+      {/* 답 도는 중에 보낸 메시지 바로 끼워 넣기 (이슈 #611, 기본 꺼짐) — 켜면 사람이 친 글이 보낸 즉시 도는 턴에 끼워 들어가고(스티어, #250), 꺼면 대기열에 선다 */}
+      <div className="settings-row" data-setting="steerOnSend">
+        <div className="settings-row__text">
+          <div className="settings-row__title">{t('settings.steerOnSend')}</div>
+          <div className="settings-row__description">{t('settings.steerOnSend.description')}</div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          className="settings-switch"
+          aria-checked={settings.steerOnSend === true}
+          aria-label={t('settings.steerOnSend')}
+          onClick={() => save({ steerOnSend: settings.steerOnSend !== true })}
+        >
+          <span className="settings-switch__thumb" />
+        </button>
+      </div>
+
       {/* 동시에 실행할 하위 작업 (이슈 #321) — 대화마다. 나머지는 대기로 줄 선다. 바꾸면 다음에 시작하는 작업부터(대기 중인 것은 새 수로 시작) */}
       {tasksOn && (
         <div className="settings-row" data-setting="maxRunningTasks">
