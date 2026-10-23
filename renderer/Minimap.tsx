@@ -21,10 +21,13 @@ export function Minimap({ scroller, turns }: { scroller: RefObject<HTMLElement |
       frame.current = requestAnimationFrame(() => {
         const top = element.getBoundingClientRect().top
         const line = top + element.clientHeight / 3
+        const marks = anchors(element)
         let index = 0
-        anchors(element).forEach((anchor, at) => {
+        marks.forEach((anchor, at) => {
           if (anchor.getBoundingClientRect().top <= line) index = at
         })
+        // 맨 아래에 붙어 있으면(마지막 턴의 답이 짧아 1/3 선을 못 넘을 때 — 미니맵 클릭이 맨 아래에서 끝나도) "지금" 은 마지막 턴
+        if (index < marks.length - 1 && nearBottom(element)) index = marks.length - 1
         setActive(index)
       })
     }

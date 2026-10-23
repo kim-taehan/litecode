@@ -202,6 +202,21 @@ describe('채팅 답 모양·진행 표시', () => {
     await expect.poll(() => marks.last().getAttribute('aria-current')).toBe('true')
   })
 
+  it('미니맵: 마지막 턴의 답이 짧아 1/3 선을 못 넘으면에도 맨 아래에 붙어 있으면 그 줄이 진하다', async () => {
+    const marks = page.locator('.minimap__mark')
+    const before = await replies().count()
+    await type('짧은 줄바꿈 없는 답')
+    await waitReply(before)
+    // 재현 조건 — 마지막 내 말 닻이 여전히 1/3 선 아래(뒤 답이 짧아)이고 칸은 맨 아래에 붙어 있다
+    const crossed = await page.locator('.user-turn').last().evaluate((element) => {
+      const scroller = element.closest('.main__messages')!
+      return element.getBoundingClientRect().top <= scroller.getBoundingClientRect().top + scroller.clientHeight / 3
+    })
+    expect(crossed).toBe(false)
+    expect(await page.locator('.main__messages').evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(40)
+    await expect.poll(() => marks.last().getAttribute('aria-current')).toBe('true')
+  })
+
   it('상단: 제목 밑 대화/추론 과정 탭(테스트 언어 ko) — 고른 탭은 파란 밑줄', async () => {
     const chat = page.getByRole('tab', { name: '대화' })
     expect(await chat.getAttribute('aria-selected')).toBe('true')
@@ -244,7 +259,7 @@ describe('채팅 답 모양·진행 표시', () => {
     await app.close()
     await launch()
     await page.locator('.session-item', { hasText: '[think] 생각 테스트' }).click()
-    await expect.poll(() => replies().count(), { timeout: 15_000 }).toBe(5)
+    await expect.poll(() => replies().count(), { timeout: 15_000 }).toBe(6)
 
     const heads = page.locator('.turn__head')
     expect(await heads.first().textContent()).toMatch(/^완료 · \d+초$/)
