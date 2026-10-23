@@ -17,7 +17,6 @@ import {
   isTaskTab,
   isTerminalTab,
   openExtensionTab,
-  onFilesSearch,
   openFilePreview,
   panelTakesFocus,
   openFilesTab,
@@ -438,7 +437,7 @@ function Panel({
           </button>
         </span>
       </div>
-      {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} />}
+      {filesVisited.current && <FilesView directory={directory} hidden={active !== undefined} filesSearch={state.filesSearch} />}
       {active === GIT_TAB && <GitPanel directory={directory} gitSub={state.gitSub} />}
       {active !== undefined && isTerminalTab(active) && (
         <TerminalView key={active} directory={directory} terminalId={terminalIdOf(active)!} focus={state.focus} quiet={!!state.quiet} />
@@ -562,7 +561,7 @@ function CompareMenu({ candidates, onPick }: { candidates: string[]; onPick(key:
 
 type Level = 'loading' | Extract<DirectoryListing, { status: 'ok' }> | 'failed'
 
-function FilesView({ directory, hidden }: { directory: string; hidden: boolean }) {
+function FilesView({ directory, hidden, filesSearch }: { directory: string; hidden: boolean; filesSearch?: number }) {
   const t = useT()
   const [levels, setLevels] = useState<Record<string, Level>>({})
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
@@ -587,16 +586,18 @@ function FilesView({ directory, hidden }: { directory: string; hidden: boolean }
     list('')
   }, [directory])
 
-  // ⌘P — 파일 찾기 신호 (이슈 #528)
-  useEffect(
-    () =>
-      onFilesSearch(() => {
-        setFilter('')
-        setExpanded(new Set())
-        requestAnimationFrame(() => searchRef.current?.focus())
-      }),
-    [],
-  )
+  // ⌘P — 파일 찾기 (이슈 #528) — store 의 filesSearch seq 가 오르면 검색 칸 비우고 포커스.
+  // 원샷 리스너(onFilesSearch) 로는 패널이 닫혀 있을 때(여기가 미마운트) 신호가 통째로 손실돼 포커스가
+  // 안 잡혔다 → store 의 seq 를 prop 으로 받아 마운트 직후에도 처리(버튼·⌘B 로 연 경우는 closeFilePreview 가
+  // seq 를 비우므로 포커스 못 가져간다). 같은 seq 는 한 번만.
+  const handledSearch = useRef(0)
+  useEffect(() => {
+    if (filesSearch === undefined || filesSearch === handledSearch.current) return
+    handledSearch.current = filesSearch
+    setFilter('')
+    setExpanded(new Set())
+    searchRef.current?.focus()
+  }, [filesSearch])
 
   /** 다시 읽기 — 루트와 펼친 폴더를 보이는 목록은 둔 채 다시 묻는다 (dsh 처럼 나무를 비우지 않는다) */
   function reload(): void {
