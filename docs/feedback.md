@@ -231,3 +231,16 @@
 - 위치: `renderer/App.tsx:463,477,492,523,550` (⌘K·⌘N·⌘P·⌘B·⌘[·⌘] — 전부 `event.key` 문자 판정) · `renderer/useTerminalKeys.ts:17,21,26` (⌘T·⌘[·⌘] — 같은 구조)
 - 메커니즘: 두벌식 입력 체계에서 물리 P 키의 `event.key` 가 `'p'` 대신 `'ㅍ'` 으로 오면 판정 미달로 핸들러가 `return` — ⌘P 요청 자체가 안 나감. ⌘, 콤마 물리 키가 `event.key='.'` 으로 오는 같은 문제(이미 `event.code` 로 대응)
 - 판정: 실측으로 확인 — 영문(ABC) 입력 체계에서 ⌘P 는 정상(검색 칸 포커스), 두벌식에서 미동작
+
+## 2026-10-23 #624 — ⌘P(파일 찾기)를 인텔리제이 스타일 팝업으로
+
+- Where: 전역 — ⌘P 파일 찾기 (한국어(두벌식) 입력 체계, #622 에 `event.code` 로 고친 뒤에도 사용자 보고로 미동작)
+- What: "안된다고 그냥 command + p 누르면 팝업을 띄우자" / "인텔리제이처럼" / "그리고 거기서 선택하면 우측 패널에 그 파일 여는 걸로 하자" (2026-10-23)
+- Expect: 인텔리제이 "Go to File" 스타일 — ⌘P 는 창 상단 중앙 팝업(검색 칸 즉시 포커스, 타이핑이 곧 필터), Enter·클릭으로 고른 파일은 우측 패널 파일 탭으로
+- Status: done (2026-10-23)
+- Fix: 2026-10-23 — "패널 검색 칸 포커스" 방향 폐기. `renderer/FileQuickOpen.tsx` 신규(상단 중앙 팝업 — ⌘K 프로젝트 퀵오픈 뼈대, 매칭 글자 진하게, ↑/↓·Enter·Home/End·Esc·바깥 클릭, 닫으면 포커스 입력창), `shared/fileMatch.ts matchFiles` 신규(이전 `fileIndex.pathsContaining` 을 shared 로 이전 — `@` 메뉴와 같은 규칙), `window.litecode.listProjectFiles` 신규 IPC(메인 `rg --files`, 5s 캐시 — `fileIndex.ts`). ⌘P 핸들러(App.tsx)가 팝업을 열고(다른 모달이 열려 있으면 패스), 고르면 `openFilePreview` 로 우측 패널 파일 탭. 쓸모 없어진 `requestFilesSearch`·`filesSearch` seq 메커니즘(이전 #528·#617) 통째로 제거(store·FilesView·테스트).
+
+### 조사
+- 위치: `renderer/App.tsx` ⌘P 핸들러(이전 `requestFilesSearch(dir)`) · `renderer/filePreviewStore.ts` (`requestFilesSearch`·`filesSearch` seq) · `renderer/FilePreview.tsx` FilesView (seq → 검색 칸 포커스) — 전부 제거
+- 메커니즘: 옛 방식은 "패널 Files 탭 검색 칸에 포커스" — 사용자 체감에서 기대(팝업)가 아니었고, 두벌식에서 여전히 안 된다고 보고. 새 방식은 입력기·패널 상태와 무관하게 창 위에 직접 띄운 팝업이라 그 결함이 구조적으로 사라짐
+- 판정: 사용자 결정(2026-10-23) — "인텔리제이처럼" 팝업으로

@@ -246,6 +246,93 @@ button {
   width: min(520px, calc(100vw - 32px), calc(100vw - var(--po-left) - 16px));
 }
 
+/* 파일 퀵오픈 (⌘P, 이슈 #624) — 상단 중앙, 프로젝트 퀵오픈과 같은 뼈대. 팝업은 다른 모달 위에 올릴 수 있다 */
+.file-quick {
+  position: fixed;
+  top: max(72px, 10vh);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  width: min(560px, calc(100vw - 32px));
+  padding: 6px;
+  background: var(--menu);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-radius: 16px;
+  box-shadow: var(--shadow-prominent);
+}
+
+.file-quick__search {
+  width: 100%;
+  height: 36px;
+  margin: 0 4px 4px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 18px;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+}
+
+.file-quick__search:focus {
+  outline: none;
+}
+
+/* 프로젝트 퀵오픈과 달리 상단 헤딩이 없고 첫 행이 바로 결과 — 그래서 상단 여백 줄여 */
+.file-quick__list {
+  max-height: min(420px, 56vh);
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.file-quick__empty {
+  padding: 16px 12px;
+  font-size: 14px;
+  color: var(--text-caption);
+  text-align: center;
+}
+
+.file-quick__row {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border: none;
+  border-radius: 9px;
+  font-size: 14px;
+  line-height: 20px;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  cursor: default;
+}
+
+.file-quick__row:hover {
+  background: var(--fill-hover);
+}
+
+.file-quick__row--selected {
+  background: var(--fill-hover);
+}
+
+.file-quick__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 마디 구분 — 폴더(경로)는 흐리게, 파일명(마지막 마디)은 밝게 → 매칭 글자는 그 안에서 진하게 */
+.file-quick__dir {
+  color: var(--text-caption);
+}
+
+.file-quick__path b {
+  font-weight: 600;
+}
+
 .project-open__search {
   width: 100%;
   height: 36px;

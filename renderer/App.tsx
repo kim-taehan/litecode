@@ -8,7 +8,7 @@ import { findModel, initialModel, type ModelRef } from './modelChoice.ts'
 import { SettingsModal } from './Settings.tsx'
 import { RemotePairPrompt } from './MobileSettings.tsx'
 import { useTriggers } from './useTriggers.ts'
-import { closeFilePreview, getPanelState, openTerminalTab, requestFilesSearch, revealPanel, terminalIdOf } from './filePreviewStore.ts'
+import { closeFilePreview, getPanelState, openFilePreview, openTerminalTab, revealPanel, terminalIdOf } from './filePreviewStore.ts'
 import { useAppMcp } from './useAppMcp.ts'
 import { useGitWatch } from './gitStore.ts'
 import type { ShellCardView } from './ShellCard.tsx'
@@ -35,6 +35,7 @@ import { useHoverCard } from './hoverCard.tsx'
 import { Rail } from './Rail.tsx'
 import { MissingConversations } from './MissingConversations.tsx'
 import { ProjectQuickOpen } from './ProjectQuickOpen.tsx'
+import { FileQuickOpen } from './FileQuickOpen.tsx'
 import { canWrite, fromConversation, isBlank, newSession, toConversation, withBlankFor, withSessionFor, type Session } from './session.ts'
 import { useSidebarLayout } from './useSidebarLayout.ts'
 import { useLastModel } from './useLastModel.ts'
@@ -74,9 +75,11 @@ export function App() {
    *  activeIds 와 다르다: 그쪽은 이번 실행 동안만이고 빈 새 대화도 가리킨다 */
   const [lastViewed, setLastViewed] = useState<Record<string, string>>({})
   const [switching, setSwitching] = useState(false)
-  /** ⌘K 반복 (#375·#379) — 빠른 열기가 열려 있을 때 ⌘K 마다 1씩 올려 패널의 강조(선택 행)가 다음 프로젝트로.
+  /** ⌘K 반복 (#375·#379) — 빠른 열기가 열려 있을 때 ⌘K 마 다 1씩 올려 패널의 강조(선택 행)가 다음 프로젝트로.
    *  Enter 로 확정(고른 프로젝트를 열고 닫는다)까지 하면 실제 전환 */
   const [cycle, setCycle] = useState(0)
+  /** ⌘P 파일 퀵오픈 (이슈 #624) — 인텔리제이 "Go to File" 스타일 팝업. 고르면 오른쪽 패널 파일 탭으로 */
+  const [fileQuickOpen, setFileQuickOpen] = useState(false)
   /** 폴더를 고르거나 여는 중 — 한 번에 하나만 (dsh ui-workspace) */
   const [picking, setPicking] = useState(false)
   /** 프로젝트를 못 열었을 때의 사유 — 팝오버와 첫 실행 안내에 보인다 */
@@ -485,15 +488,19 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // ⌘P / Ctrl+P — 파일 찾기 (이슈 #528). 오른쪽 패널 Files 탭의 검색 칸에 포커스.
+  // ⌘P / Ctrl+P — 파일 퀵오픈 (이슈 #624, 전엔 #528·#617 검색 칸 포커스). 인텔리제이 "Go to File" 스타일:
+  // 창 상단 중앙에서 파일명 검색, Enter 로 고른 파일을 오른쪽 패널 파일 탭으로. 다른 모달이 열려 있으면 그쪽을 방해하지 않는다.
+  // event.code (물리 키) 로 확인 — 두벌식(한글) 입력기에서는 event.key 가 'ㅍ' 이라 key 로 쓰면 누르지 않은 셈 (#622).
   const projectPathRef = useRef(project?.path)
   projectPathRef.current = project?.path
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.code !== 'KeyP') return
+      if (!projectPathRef.current) return
+      // 설정·프로젝트 퀵오픈 같은 모달이 열려 있으면 그 키가 먼저 쓸 수 있게
+      if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
       event.preventDefault()
-      const dir = projectPathRef.current
-      if (dir) requestFilesSearch(dir)
+      setFileQuickOpen(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -917,6 +924,19 @@ export function App() {
       {/* 폰의 짝짓기 요청 — 설정을 닫아도 뜬다 (이슈 #56) */}
       <RemotePairPrompt on={features.has('remote')} />
       {quickOpen}
+      {fileQuickOpen && project?.path && (
+        <FileQuickOpen
+          directory={project.path}
+          onPick={(path) => {
+            setFileQuickOpen(false)
+            openFilePreview(project.path, path)
+          }}
+          onClose={(focusComposer) => {
+            setFileQuickOpen(false)
+            if (focusComposer) focusComposerInput()
+          }}
+        />
+      )}
       <Toasts items={notices.toasts} onOpen={(target) => void openNotice(target)} onDismiss={notices.dismiss} onAnswer={notices.answer} />
     </div>
   )

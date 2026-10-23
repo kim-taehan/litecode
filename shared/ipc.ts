@@ -130,6 +130,7 @@ export const Channel = {
   /** 메인 → 화면 (absolute) — 보고 있는 미리보기 파일이 디스크에서 바뀌었다 (라이브 갱신) */
   PREVIEW_CHANGED: 'preview:changed',
   LIST_DIRECTORY: 'chat:list-directory',
+  LIST_PROJECT_FILES: 'chat:list-project-files',
   RUN_SHELL: 'shell:run',
   STOP_SHELL: 'shell:stop',
   /** 메인 → 화면 (runId, chunk) */
@@ -405,6 +406,8 @@ export interface LitecodeBridge {
   onPreviewChanged(listener: (absolute: string) => void): () => void
   /** 오른쪽 패널 Files 탭 — 프로젝트 안 폴더 한 단계(relative '' = 루트). 밖을 가리키는 링크는 빠지고, 등록 안 된 폴더·밖이면 unavailable */
   listDirectory(directory: string, relative: string): Promise<DirectoryListing>
+  /** 파일 퀵오픈(⌘P, #624) — 등록한 프로젝트의 전체 파일 목록(프로젝트 기준 상대 경로, rg --files — .gitignore 준수, 5s 캐시) */
+  listProjectFiles(directory: string): Promise<string[]>
   /** `!명령` — 그 대화의 프로젝트 폴더에서 한 번 돌리고, 끝나면 그 대화에 카드로 저장한 것을 준다. runId 는 화면이 정한다(출력 조각을
    *  onShellData 로 받으려고). position 은 대화 안 자리(앞 말풍선 수). 결과는 대화 맥락에 안 들어간다 */
   runShell(conversationId: string, runId: string, directory: string, command: string, position: number): Promise<ShellCard>

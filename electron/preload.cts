@@ -66,6 +66,7 @@ const Channel = {
   PREVIEW_UNWATCH: 'preview:unwatch',
   PREVIEW_CHANGED: 'preview:changed',
   LIST_DIRECTORY: 'chat:list-directory',
+  LIST_PROJECT_FILES: 'chat:list-project-files',
   RUN_SHELL: 'shell:run',
   STOP_SHELL: 'shell:stop',
   SHELL_DATA: 'shell:data',
@@ -256,6 +257,7 @@ const bridge: LitecodeBridge = {
   unwatchPreview: (directory, token) => ipcRenderer.invoke(Channel.PREVIEW_UNWATCH, directory, token),
   onPreviewChanged: (listener) => listen(Channel.PREVIEW_CHANGED, listener),
   listDirectory: (directory, relative) => ipcRenderer.invoke(Channel.LIST_DIRECTORY, directory, relative),
+  listProjectFiles: (directory) => ipcRenderer.invoke(Channel.LIST_PROJECT_FILES, directory),
   runShell: (conversationId, runId, directory, command, position) =>
     ipcRenderer.invoke(Channel.RUN_SHELL, conversationId, runId, directory, command, position),
   stopShell: (runId) => ipcRenderer.invoke(Channel.STOP_SHELL, runId),
