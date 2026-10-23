@@ -34,6 +34,7 @@ import { DesignSkillService } from '../src/services/designSkill.ts'
 import { existingFiles, projectFile } from '../src/services/fileMentions.ts'
 import { previewFile, readHtmlAssets, type FilePreview, type HtmlAsset } from '../src/services/filePreview.ts'
 import { listDirectory, type DirectoryListing } from '../src/services/fileTree.ts'
+import { projectFiles } from '../src/services/fileIndex.ts'
 import { SettingsService, type Settings } from '../src/services/settings.ts'
 import { NotificationsService } from '../src/services/notifications.ts'
 import { recordingHost, systemHost, type NotifyTestRecord, type WindowAccess } from './notificationHost.ts'
@@ -285,6 +286,12 @@ function bootstrap(ctx: Context): void {
   handle(ctx, Channel.LIST_DIRECTORY, async (_event, directory: string, relative: string): Promise<DirectoryListing> => {
     const registered = await ctx.projects.has(directory)
     return registered ? listDirectory(directory, relative) : { status: 'unavailable' }
+  })
+  // 파일 퀵오픈(⌘P, #624) — 등록한 프로젝트의 전체 파일 목록만. rg 가 없으면 빈 목록(팝업은 아무것도 안 보여)
+  handle(ctx, Channel.LIST_PROJECT_FILES, async (_event, directory: string): Promise<string[]> => {
+    const rg = bundledRg()
+    if (!rg || !(await ctx.projects.has(directory))) return []
+    return projectFiles(directory, rg)
   })
   handle(ctx, Channel.GET_SETTINGS, async () => ctx.settings.get())
   handle(ctx, Channel.SET_SETTINGS, async (_event, patch: Partial<Settings>) => ctx.settings.set(patch))

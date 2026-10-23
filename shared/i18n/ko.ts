@@ -204,6 +204,11 @@ export const ko = {
   'markdown.image': '이미지',
   'markdown.imageHidden': '이미지는 표시하지 않습니다: {url}',
   'markdown.previewFile': '{file} — 미리보기',
+  // 파일 퀵오픈 (⌘P, 이슈 #624) — 인텔리제이 'Go to File' 스타일 전체 프로젝트 팝업
+  'fileQuick.label': '파일 열기',
+  'fileQuick.search': '파일 이름으로 찾기…',
+  'fileQuick.loading': '파일 목록 읽는 중…',
+  'fileQuick.noMatch': '맞는 파일이 없습니다',
   // 파일 미리보기 패널 (이슈 #17)
   'filePreview.label': '파일 미리보기',
   'filePreview.resize': '미리보기 폭',
@@ -225,7 +230,7 @@ export const ko = {
   'filePreview.tabs': '열린 파일',
   'filePreview.files': '파일',
   'filePreview.filesLabel': '프로젝트 파일',
-  'filePreview.searchPlaceholder': '파일 찾기… ⌘P',
+  'filePreview.searchPlaceholder': '파일 찾기…',
   'filePreview.searchClear': '찾는 말 지우기',
   'filePreview.noMatches': '맞는 파일이 없습니다',
   'filePreview.closeTab': '{name} 닫기',

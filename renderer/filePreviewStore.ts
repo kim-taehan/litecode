@@ -24,9 +24,6 @@ export interface PanelState {
   jump?: { key: string; line: number; seq: number }
   /** Git 탭을 열며 고르라고 한 하위 탭 (이슈 #290) — seq 가 오를 때마다 그 하위 탭으로 */
   gitSub?: { sub: 'changes' | 'log'; seq: number }
-  /** 파일 찾기 (이슈 #528 — ⌘P) — Files 탭의 검색 칸에 포커스. ⌘P 마다 seq 가 오른다.
-   *  원샷 리스너가 아니라 seq — 패널이 닫혀 있어 FilesView 가 마운트되지 않았어도 (재)마운트 때 받아 포커스 잡는다 (gitSub 와 같은 길) */
-  filesSearch?: number
   /** 비교 보기 (이슈 #424) — 파일 탭 두 개를 위아래 50/50. 하나를 닫거나 다른 탭을 고르면 지워진다 */
   compare?: { a: string; b: string }
 }
@@ -209,16 +206,6 @@ export function openFilesTab(directory: string): void {
   set({ ...state, open: true, active: undefined, focus: state.focus + 1, quiet: false })
 }
 
-// ── 파일 찾기 (이슈 #528) — ⌘P 신호 ──
-
-/** 파일 찾기를 요청한다 — Files 탭을 열고, filesSearch seq 를 올려 FilesView 가 검색 칸에 포커스를 잡게 한다.
- *  원샷 리스너(onFilesSearch) 로는 패널이 닫혀 있을 때(FilesView 미마운트) 신호가 통째로 손실돼 포커스가 안 잡혔다 —
- *  Git 탭의 gitSub 처럼 상태에 seq 를 써 마운트 시점에 받아낸다 */
-export function requestFilesSearch(directory: string): void {
-  const state = base(directory)
-  set({ ...state, open: true, active: undefined, focus: state.focus + 1, quiet: false, filesSearch: (state.filesSearch ?? 0) + 1 })
-}
-
 /** 닫았던 패널을 그대로 다시 연다 — 처음이면 Files 탭 */
 export function revealPanel(directory: string): void {
   const state = base(directory)
@@ -250,10 +237,9 @@ export function toggleFullscreen(): void {
   if (current) set({ ...current, fullscreen: !current.fullscreen })
 }
 
-/** 패널을 숨긴다 (탭은 남는다). 전체 화면은 푼다. filesSearch(seq) 도 비운다 — 패널을 닫은 뒤
- *  버튼·⌘B 로 다시 열 때는 Files 탭만 열고 검색 칸 포커스(⌘P 전용) 는 가져가지 않게 */
+/** 패널을 숨긴다 (탭은 남는다). 전체 화면은 푼다 */
 export function closeFilePreview(): void {
-  if (current?.open) set({ ...current, open: false, fullscreen: false, filesSearch: undefined })
+  if (current?.open) set({ ...current, open: false, fullscreen: false })
 }
 
 function subscribe(listener: () => void): () => void {

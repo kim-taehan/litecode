@@ -13,7 +13,6 @@ import {
   openTerminalTab,
   startCompare,
   panelTakesFocus,
-  requestFilesSearch,
   revealPanel,
   selectTab,
   tabKey,
@@ -300,38 +299,5 @@ describe('비교 보기 (A/B)', () => {
     openFilePreview('/cmp2', 'p.ts')
     expect(read()!.compare).toBeUndefined()
     expect(read()!.directory).toBe('/cmp2')
-  })
-})
-
-// 파일 찾기 (이슈 #528) — ⌘P: Files 탭으로 열고 filesSearch seq 를 올린다. 원샷 리스너가 아니라 seq 인 이유:
-// 패널이 닫혀 있을 때(FilesView 미마운트) 요청이 통째로 손실됐고, 닫히면 seq 를 비워 버튼·⌘B 로 다시 열 때는
-// ⌘P 신호가 아닌 걸로 만든다 (filesSearch prop 으로 받는 쪽은 FilePreview.tsx FilesView)
-describe('파일 찾기 (⌘P, issue #528)', () => {
-  it('requestFilesSearch — Files 탭으로 열고, seq 와 포커스를 올리고 quiet 가 아니다', () => {
-    requestFilesSearch('/fs')
-    expect(read()).toMatchObject({ directory: '/fs', open: true, active: undefined, filesSearch: 1, quiet: false, focus: 1 })
-    expect(panelTakesFocus(read()!)).toBe(true)
-    requestFilesSearch('/fs')
-    expect(read()!.filesSearch).toBe(2)
-    expect(read()!.focus).toBe(2)
-  })
-
-  it('닫으면 seq 가 비워진다 — 다시 열 때(버튼·⌘B) 는 포커스 신호가 아니다, ⌘P 가 또 오면 다시 1 부터', () => {
-    requestFilesSearch('/fs2')
-    expect(read()!.filesSearch).toBe(1)
-    closeFilePreview()
-    expect(read()!.filesSearch).toBeUndefined()
-    revealPanel('/fs2')
-    expect(read()).toMatchObject({ open: true, filesSearch: undefined })
-    requestFilesSearch('/fs2')
-    expect(read()!.filesSearch).toBe(1)
-  })
-
-  it('"+"(openFilesTab) 과 파일·Git 탭은 seq 를 올리지 않는다 — Files 탭을 여는 것만은 ⌘P 가 아니다', () => {
-    openFilesTab('/fs3')
-    expect(read()).toMatchObject({ open: true, active: undefined })
-    expect(read()!.filesSearch).toBeUndefined()
-    openFilePreview('/fs3', 'a.ts')
-    expect(read()!.filesSearch).toBeUndefined()
   })
 })

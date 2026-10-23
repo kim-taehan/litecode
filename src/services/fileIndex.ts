@@ -28,16 +28,5 @@ export function projectFiles(directory: string, rg: string, now = Date.now()): P
   return files
 }
 
-/** 경로에 needle 이 든 것 — 이름에 든 것이 먼저, 그 안에서는 짧은 경로가 먼저. 대소문자 무시 */
-export function pathsContaining(files: readonly string[], needle: string, limit: number): string[] {
-  const lower = needle.toLowerCase()
-  const inName: string[] = []
-  const inPath: string[] = []
-  for (const file of files) {
-    const text = file.toLowerCase()
-    if (!text.includes(lower)) continue
-    ;(text.slice(text.lastIndexOf('/') + 1).includes(lower) ? inName : inPath).push(file)
-  }
-  const byLength = (a: string, b: string) => a.length - b.length || a.localeCompare(b)
-  return [...inName.sort(byLength), ...inPath.sort(byLength)].slice(0, limit)
-}
+/** 경로에 needle 이 든 것 — `@` 메뉴와 파일 퀵오픈(#624) 이 쓰는 공용 매칭: shared/fileMatch.ts 로 이사했다 */
+export { matchFiles as pathsContaining } from '../../shared/fileMatch.ts'
