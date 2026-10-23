@@ -218,3 +218,16 @@
 - 위치: 할 일 목록은 성공한 `todowrite` 줄의 `metadata.todos` 만이 정본(`src/services/turnProgress.ts:446-461` — "틀린 인자도 running 에 실린 뒤 error, 그때 엔진 목록은 안 바뀐다" 주석). 시스템 프롬프트의 `TODO_SYNC_RULE`(`instructions.ts:21`, #406)은 작은 모델이 지키지 않음(실측: 도구 134회 동안 0/7, #406) → dock 이 `renderer/todoView.ts` 기준 0/N 에 멈춤. 턴이 안 돌면 active 항복은 "멈춤" 표시로만 보여 `renderer/Todo.tsx:105-110`
 - 메커니즘: 턴 도는 중 `llm/tool-started`(running, callID 마다 한 번 — `llm/follow.ts:97-101`)로 실행 진입을 세고, `llm/tool-done`(error 없음)의 todowrite 에서 epoch 를 바꾼다. 재촉은 `ctx.llm.remind`(`llm/service.ts:130` — 도는 턴에만, 합성 user)
 - 판정: 코드에서 확인됨 — 모델이 todowrite 을 빼먹는 동안 앱 측 억제가 전무(시스템 프롬프트 1줄만이 전부)
+
+## 2026-10-23 #622 — ⌘P(파일 찾기)가 한국어(두벌식) 입력 체계에서 동작하지 않음
+
+- Where: 오른쪽 패널 — ⌘P 파일 찾기 (한국어(두벌식) 입력 체계 선택 상태)
+- What: "command + P 할때 포커스가 (패널의 파일 검색 칸에) 안 잡혀" (2026-10-23, 스크린샷 첨부) — 입력 체계를 영문(ABC)으로 바꾸면 됨
+- Expect: ⌘P · 전역 메타+문자 단축키가 어떤 입력 체계에서도 동작
+- Status: done (2026-10-23)
+- Fix: 2026-10-23 — 전역 메타+문자 단축키의 키 판정을 `event.key` 문자에서 `event.code` 물리 키로: `App.tsx` ⌘K·⌘N·⌘P·⌘B·⌘[·⌘] (KeyK·KeyN·KeyP·KeyB·BracketLeft·BracketRight) + `useTerminalKeys.ts` ⌘T·⌘[·⌘] (KeyT·BracketLeft·BracketRight). ⌘, 의 `event.code 'Comma'` (App.tsx:503-504 주석)와 같은 길 — ⌘F 는 'ㄹ' 특례(ChatFind.tsx:156)로 이미 두벌식 대응.
+
+### 조사
+- 위치: `renderer/App.tsx:463,477,492,523,550` (⌘K·⌘N·⌘P·⌘B·⌘[·⌘] — 전부 `event.key` 문자 판정) · `renderer/useTerminalKeys.ts:17,21,26` (⌘T·⌘[·⌘] — 같은 구조)
+- 메커니즘: 두벌식 입력 체계에서 물리 P 키의 `event.key` 가 `'p'` 대신 `'ㅍ'` 으로 오면 판정 미달로 핸들러가 `return` — ⌘P 요청 자체가 안 나감. ⌘, 콤마 물리 키가 `event.key='.'` 으로 오는 같은 문제(이미 `event.code` 로 대응)
+- 판정: 실측으로 확인 — 영문(ABC) 입력 체계에서 ⌘P 는 정상(검색 칸 포커스), 두벌식에서 미동작

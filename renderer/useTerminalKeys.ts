@@ -3,6 +3,7 @@ import { cycleTerminalTab, openTerminalTab } from './filePreviewStore.ts'
 
 // 터미널 탭 (이슈 #303) — ⌘T 로 새 터미널을 연다(열려 있는 것이 있어도), ⌘[·⌘] 로 이전·다음 터미널. Windows·Linux 는 Ctrl.
 // (옛 셸 서랍의 ⌘↓/⌘↑ — ⌘↑ 접기 단축키는 2026-10-13 딴 데 쓰려고 풀었다)
+// 키는 문자가 아니라 물리 키(event.code) 로 본다 — 한국어(두벌식) 입력 체계에서 event.key 가 한글로 오기 때문 (#622, App.tsx 전역 키와 같은 길)
 
 export function useTerminalKeys({ project, terminalOn }: { project: string | undefined; terminalOn: boolean }): void {
   useEffect(() => {
@@ -14,16 +15,16 @@ export function useTerminalKeys({ project, terminalOn }: { project: string | und
       if (document.querySelector('[aria-modal="true"], .branch-pop')) return
       const target = event.target instanceof HTMLElement ? event.target : undefined
       if (target?.matches('input, textarea, [contenteditable]') && !target.closest('.composer__input, .file-preview')) return
-      if (event.key.toLowerCase() === 't' && !event.shiftKey) {
+      if (event.code === 'KeyT' && !event.shiftKey) {
         void window.litecode.openTerminal(project).then(({ id }: { id: number }) => openTerminalTab(project, id)).catch(() => {})
         event.preventDefault()
         event.stopPropagation()
-      } else if (!event.shiftKey && event.key === '[') {
+      } else if (!event.shiftKey && event.code === 'BracketLeft') {
         if (cycleTerminalTab(project, -1)) {
           event.preventDefault()
           event.stopPropagation()
         }
-      } else if (!event.shiftKey && event.key === ']') {
+      } else if (!event.shiftKey && event.code === 'BracketRight') {
         if (cycleTerminalTab(project, 1)) {
           event.preventDefault()
           event.stopPropagation()
