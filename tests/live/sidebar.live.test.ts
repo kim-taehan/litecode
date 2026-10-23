@@ -183,16 +183,14 @@ describe('사이드바 — dsh 값', () => {
     })
   }
 
-  it('hover 카드는 800ms 머문 뒤에 뜬다 — 500ms 에는 아직 없다', async () => {
+  it('hover 카드는 호버하자마자 뜬다 — 800ms 지연 없음 (#612)', async () => {
     await setTheme('light')
     await away()
     await expect.poll(() => page.locator('.hover-card').count()).toBe(0)
     const started = Date.now()
     await idleRow().locator('.session-item__main').hover()
-    await page.waitForTimeout(500)
-    expect(await page.locator('.hover-card').count()).toBe(0)
-    await expect.poll(() => page.locator('.hover-card').count(), { timeout: 3_000, interval: 25 }).toBe(1)
-    expect(Date.now() - started).toBeGreaterThanOrEqual(800)
+    await expect.poll(() => page.locator('.hover-card').count(), { timeout: 1_000, interval: 25 }).toBe(1)
+    expect(Date.now() - started).toBeLessThan(700) // 옛 800ms 지연이 돌아오면 여기에서 잡힌다
     expect(await css(page.locator('.hover-card__name'), 'font-size', 'font-weight', 'line-height')).toEqual({
       'font-size': '14px',
       'font-weight': '400',

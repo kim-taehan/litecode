@@ -183,3 +183,17 @@
   - `renderer/ConversationView.tsx` — `RECENT_FIRST_LIMIT` 상수·`nearTop`·`loadEarlier()`·스크롤 리스너(`useEffect`)+`loadingRef`/`firstTurnRef`/`priorScrollTopRef`·스크롤 오프셋 보정 `useEffect`·`updateSession` prop·`applyHistory`/`useEffect`/`useRef` import 제거
   - `renderer/App.tsx` — `RECENT_FIRST_LIMIT` import 제거, 첫 로딩 `useEffect` 가 `loadConversation(id)` (전체) 로 바꾸고 `historyMore`/`historyOffset` 설정 제거, `ConversationView` 에 `updateSession` prop 제거
   - 테스트: 페이 관련 테스트 없음 (unit + live 모두 무변경 통과), typecheck clean
+
+## 2026-10-23 #612 — hover 카드(전체 제목) 이 800ms 뒤에 뜬다 — 느림
+
+- Where: 사이드바 대화 행 — 마우스를 올리면 뜨는 전체 제목 카드 (접힌 레일 아이콘도 같은 메커니즘)
+- What: "보면 토글이 뜨는데 속도가 너무 느려" (2026-10-23, 스크린샷 첨부) — 호버해도 카드가 바로 안 보이고 확연한 지연 뒤에 뜬다
+- Expect: 카드가 더 빨리 보이면 좋겠다 → "바로 나오면 좋겠어" (2026-10-23, 사용자 결정: 즉시 표시)
+- Status: done (2026-10-23)
+- Fix: 2026-10-23 — `renderer/hoverCard.tsx` useHoverCard의 800ms `setTimeout` 제거, 호버하자마자 카드 표시(타이머 ref·클리어 전체 삭제). live 테스트 `tests/live/sidebar.live.test.ts` 는 즉시 표시(700ms 미만)로 수정
+
+### 조사
+- 위치: `renderer/hoverCard.tsx:65-69` — `useHoverCard().enter()` 가 `setTimeout(setCard, 800)` (주석 "dsh HoverCard 열림 지연"). CSS `.hover-card`(`renderer/styles.css:1348-1373`) 에 transition·페이드 없음 — 순수 JS 타이머 지연
+- 사용처: `renderer/Sidebar.tsx:367-376` (세션 행 `sessionHover.enter(…, true)` — 항상 카드) · `renderer/Rail.tsx:33-38` (레일 아이콘 `tip()` 헬퍼, 항상)
+- 메커니즘: 호버 시 제목 글자 흐르기(marquee) 는 즉시 시작하지만, 전체 제목 카드는 800ms 뒤에 표시. 떠 나가면 즉시 사라짐
+- 판정: 코드에서 확인됨 — 고정 800ms 지연이 "느림" 현상의 직접 원인
