@@ -458,9 +458,10 @@ export function App() {
   switchingRef.current = switching
   const toggleSwitcherRef = useRef(toggleSwitcher)
   toggleSwitcherRef.current = toggleSwitcher
+  // 이하 전역 메타+문자 단축키는 키를 문자가 아니라 물리 키(event.code 'KeyK') 로 본다 — 한국어(두벌식) 입력 체계에서 물리 키가 event.key= 'ㅊ' 처럼 한글로 오기 때문 (⌘, 의 'Comma' 주석과 같은 문제, #622)
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.code !== 'KeyK') return
       event.preventDefault()
       if (!switchingRef.current) toggleSwitcherRef.current()
       else setCycle((count) => count + 1)
@@ -474,7 +475,7 @@ export function App() {
   startNewChatRef.current = startNewChat
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'n') return
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.code !== 'KeyN') return
       // 판(aria-modal) 이나 프로젝트 전환(빠른 열기) 이 열려 있으면 물러난다 (⌘↑/⌘↓ 과 같은 전역 키 규칙)
       if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
       event.preventDefault()
@@ -489,7 +490,7 @@ export function App() {
   projectPathRef.current = project?.path
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'p') return
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.code !== 'KeyP') return
       event.preventDefault()
       const dir = projectPathRef.current
       if (dir) requestFilesSearch(dir)
@@ -520,7 +521,7 @@ export function App() {
   panelDirectoryRef.current = project?.path
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'b') return
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.code !== 'KeyB') return
       if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
       const directory = panelDirectoryRef.current
       if (!directory) return
@@ -547,13 +548,13 @@ export function App() {
   }
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      if (event.isComposing || event.altKey || event.shiftKey || event.key !== '[' && event.key !== ']') return
+      if (event.isComposing || event.altKey || event.shiftKey || (event.code !== 'BracketLeft' && event.code !== 'BracketRight')) return
       if (navigator.platform.startsWith('Mac') ? !event.metaKey : !event.ctrlKey) return
       if (document.querySelector('[aria-modal="true"], .project-open__panel')) return
       const { history, current } = convHistoryRef.current
       if (history.length < 2) return
       const index = current ? history.findIndex((entry) => entry.id === current) : -1
-      const dir = event.key === ']' ? 1 : -1
+      const dir = event.code === 'BracketRight' ? 1 : -1
       const nextIndex = index < 0 ? 0 : index + dir
       if (nextIndex < 0) {
         event.preventDefault()
