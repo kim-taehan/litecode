@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pinnedProjects } from '../../renderer/ProjectQuickOpen.tsx'
+import { groupLabelAt, pinnedProjects, type Row } from '../../renderer/ProjectQuickOpen.tsx'
 import type { Project } from '../../shared/ipc.ts'
 
 // #377 — 빠른 열기가 열려 있는 동안 행 순서는 열렸을 때(initial) 그대로.
@@ -36,5 +36,25 @@ describe('pinnedProjects — 열렸을 때 순서 고정', () => {
   it('needle 로 거른다 (이름은 live 기준)', () => {
     const live = [project('/a', 'alpha', true), project('/b', 'beta'), project('/c', 'gamma')]
     expect(pinnedProjects(initial, live, 'be').map((p) => p.path)).toEqual(['/b'])
+  })
+})
+
+// #630 — 즐겨찾기가 있으면 '즐겨찾기'·'최근' 머리글로 나눈다
+describe('groupLabelAt — 묶음 머리글', () => {
+  const rowsOf = (...projects: Project[]): Row[] => [...projects.map((p): Row => ({ kind: 'project', project: p })), { kind: 'folder' }]
+
+  it('각 묶음의 첫 행에만 머리글, 폴더 열기 행엔 없다', () => {
+    const rows = rowsOf(project('/a', 'alpha', true), project('/b', 'beta', true), project('/c', 'gamma'), project('/d', 'delta'))
+    expect(rows.map((_, index) => groupLabelAt(rows, index))).toEqual(['favorites', undefined, 'recent', undefined, undefined])
+  })
+
+  it('즐겨찾기가 없으면 머리글 없음', () => {
+    const rows = rowsOf(project('/b', 'beta'), project('/c', 'gamma'))
+    expect(rows.map((_, index) => groupLabelAt(rows, index))).toEqual([undefined, undefined, undefined])
+  })
+
+  it('즐겨찾기만 있으면 즐겨찾기 머리글 하나', () => {
+    const rows = rowsOf(project('/a', 'alpha', true))
+    expect(rows.map((_, index) => groupLabelAt(rows, index))).toEqual(['favorites', undefined])
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
 import type { ConversationStatus, Project } from '../shared/ipc.ts'
 import { nextProjectInCycle, startProjectCycle, type ProjectCycle } from './projectCycle.ts'
 import { useT } from './settingsStore.ts'
@@ -31,7 +31,7 @@ interface ProjectQuickOpenProps {
   cycle: number
 }
 
-type Row = { kind: 'project'; project: Project } | { kind: 'folder' }
+export type Row = { kind: 'project'; project: Project } | { kind: 'folder' }
 
 /** 열려 있는 동안 행 **순서는 열렸을 때 목록(initial) 그대로** (#377) — open() 이 연 프로젝트를 최근 목록
  * 맨 앞으로 올리는데 패널은 그 재렬서에 말려서 움직이지 않는다. live(지금 projects)에서 사라진 프로젝트는
@@ -44,6 +44,16 @@ export function pinnedProjects(initial: Project[], live: Project[], needle: stri
     .filter((project) => project.name.toLowerCase().includes(needle))
 }
 
+/** 그 행 앞에 붙일 묶음 머리글 (#630) — 즐겨찾기 묶음의 첫 행엔 '즐겨찾기', 나머지 묶음의 첫 행엔 '최근'.
+ *  즐겨찾기가 하나도 없으면 머리글 없이 한 목록으로 둔다 */
+export function groupLabelAt(rows: Row[], index: number): 'favorites' | 'recent' | undefined {
+  const row = rows[index]
+  if (row?.kind !== 'project' || !rows.some((other) => other.kind === 'project' && other.project.favorite)) return undefined
+  const before = rows[index - 1]
+  if (before?.kind === 'project' && before.project.favorite === row.project.favorite) return undefined
+  return row.project.favorite ? 'favorites' : 'recent'
+}
+
 /** 빠른 열기 (이슈 #305) — VS Code 파일 열기 스타일. 전환 카드 우측 바로 옆(사이드바 옆, 2026-10-13 피드백 #1):
  *  버튼 rect 로 좌표를 정하고(인라인 top/left) — 사이드바 폭·접힘(레일) 모두 버튼 기준으로 자동으로 따라간다.
  *  별도 검색칸 없이 타이핑한 즉시 목록이 거르고,
@@ -52,8 +62,9 @@ export function pinnedProjects(initial: Project[], live: Project[], needle: stri
  *  뒷 화면은 안 바뀌고, **Enter(=행 선택) 로 고른 프로젝트를 열고 패널을 닫아 확정**. 반복하면 계속 순환
  *  (순환 규칙 + 스냅샷 이유는 projectCycle.ts).
  *  열려 있는 동안 목록 순서는 열렸을 때 순서 그대로 고정(#377) — 이동하는 것은 강조(✓·선택 행)뿐.
- *  즐겨찾기/최근 그룹 라벨은 없애고 즐겨찾기가 ★ 표시와 함께 먼저 보인다. 행 hover 액션(✎·★·×)과
- *  맨 아래 "폴더 열기" 행은 이전 팝오버와 같다. 바깥 클릭은 그냥 닫는다.
+ *  즐겨찾기가 ★ 표시와 함께 먼저 보이고, 즐겨찾기가 있으면 '즐겨찾기'·'최근' 머리글로 나눈다(#630).
+ *  행 hover 액션(✎·★·×)은 이전 팝오버와 같다. 맨 아래 "폴더 열기" 행은 목록 스크롤 밖에 고정(#630).
+ *  바깥 클릭은 그냥 닫는다.
  *  (이전 팝오버와 마찬가지로 "창 포커스를 잃으면 닫기" 는 없다 — 같은 머신의 다른 창이 포커스를
  *  가져가면 실물 테스트 도중 닫혀 실패했다, 2026-09-30.) */
 export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy, error, onPick, onOpenFolder, onToggleFavorite, onRemove, onRename, onClose, switchButton, cycle }: ProjectQuickOpenProps) {
@@ -92,7 +103,7 @@ export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy,
     }
   }, [onClose])
 
-  // 즐겨찾기가 항상 먼저 — 그룹 라벨 없이 (이슈 #305). 맨 아래 "폴더 열기" 행.
+  // 즐겨찾기가 항상 먼저 (이슈 #305), 머리글은 groupLabelAt (#630). 맨 아래 "폴더 열기" 행.
   // 열려 있는 동안 **순서는 열렸을 때 목록 그대로 고정** (#377): open() 이 연 프로젝트를 최근 목록 맨 앞으로
   // 올리므로 live 목록으로 그리면 행이 매번 도약한다. 움직이는 것은 강조(✓·선택 행)뿐.
   // 즐겨찾기·이름·삭제는 live 데이터 — ★ 토글·× 빼기는 행에 그대로 반영된다.
@@ -190,95 +201,86 @@ export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy,
       <div className="project-open__list">
         {needle && rows.length === 1 && <div className="project-open__empty">{t('project.noMatch')}</div>}
         {rows.map((row, index) =>
-          row.kind === 'folder' ? (
-            <button
-              type="button"
-              key="folder"
-              className={`project-open__open${index === active ? ' project-open__open--selected' : ''}`}
-              disabled={busy}
-              onMouseEnter={() => select(index)}
-              onClick={() => onOpenFolder()}
-            >
-              {t('project.openFolder')}
-            </button>
-          ) : (
-            <div
-              key={row.project.path}
-              data-hover-row
-              className={`project-item${index === active ? ' project-item--selected' : ''}${row.project.path === current ? ' project-item--active' : ''}`}
-            >
-              {editing === row.project.path ? (
-                <input
-                  className="project-item__rename"
-                  aria-label={t('project.nameLabel')}
-                  defaultValue={row.project.name}
-                  autoFocus
-                  onFocus={(event) => event.currentTarget.select()}
-                  onKeyDown={(event) => {
-                    if (event.nativeEvent.isComposing || event.keyCode === 229) return
-                    if (event.key === 'Enter') event.currentTarget.blur()
-                    if (event.key === 'Escape') {
-                      event.stopPropagation() // 패널까지 닫지 않는다
+          row.kind === 'folder' ? null : (
+            <Fragment key={row.project.path}>
+              {groupLabelAt(rows, index) && <div className="project-open__group">{t(groupLabelAt(rows, index) === 'favorites' ? 'project.favorites' : 'project.recent')}</div>}
+              <div
+                data-hover-row
+                className={`project-item${index === active ? ' project-item--selected' : ''}${row.project.path === current ? ' project-item--active' : ''}`}
+              >
+                {editing === row.project.path ? (
+                  <input
+                    className="project-item__rename"
+                    aria-label={t('project.nameLabel')}
+                    defaultValue={row.project.name}
+                    autoFocus
+                    onFocus={(event) => event.currentTarget.select()}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing || event.keyCode === 229) return
+                      if (event.key === 'Enter') event.currentTarget.blur()
+                      if (event.key === 'Escape') {
+                        event.stopPropagation() // 패널까지 닫지 않는다
+                        setEditing(undefined)
+                      }
+                    }}
+                    onBlur={(event) => {
+                      if (editing !== row.project.path) return
                       setEditing(undefined)
-                    }
-                  }}
-                  onBlur={(event) => {
-                    if (editing !== row.project.path) return
-                    setEditing(undefined)
-                    void onRename(row.project, event.currentTarget.value).then(() => searchRef.current?.focus())
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="project-item__main"
-                  disabled={busy}
-                  onMouseEnter={() => select(index)}
-                  onClick={() => onPick(row.project)}
-                >
-                  <Badge project={row.project} />
-                  <span className="project-switch__text">
-                    <span className="project-item__name">{row.project.name}</span>
-                    <span className="project-switch__path marquee">{row.project.displayPath}</span>
+                      void onRename(row.project, event.currentTarget.value).then(() => searchRef.current?.focus())
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="project-item__main"
+                    disabled={busy}
+                    onMouseEnter={() => select(index)}
+                    onClick={() => onPick(row.project)}
+                  >
+                    <Badge project={row.project} />
+                    <span className="project-switch__text">
+                      <span className="project-item__name">{row.project.name}</span>
+                      <span className="project-switch__path marquee">{row.project.displayPath}</span>
+                    </span>
+                    {/* 실행 중은 점 대신 점 + 숫자, 그 밖의 상태(답 필요·안 본 끝남)는 점 그대로 */}
+                    {statusOf(row.project.path) && statusOf(row.project.path) !== 'running' && <StatusDot status={statusOf(row.project.path)!} />}
+                    <RunningCount count={runningOf(row.project.path)} label={t('sidebar.running', { count: runningOf(row.project.path) })} />
+                    {row.project.path === current && <CheckIcon />}
+                  </button>
+                )}
+                {row.project.favorite && (
+                  <span className="project-item__marker" aria-hidden="true">
+                    ★
                   </span>
-                  {/* 실행 중은 점 대신 점 + 숫자, 그 밖의 상태(답 필요·안 본 끝남)는 점 그대로 */}
-                  {statusOf(row.project.path) && statusOf(row.project.path) !== 'running' && <StatusDot status={statusOf(row.project.path)!} />}
-                  <RunningCount count={runningOf(row.project.path)} label={t('sidebar.running', { count: runningOf(row.project.path) })} />
-                  {row.project.path === current && <CheckIcon />}
-                </button>
-              )}
-              {row.project.favorite && (
-                <span className="project-item__marker" aria-hidden="true">
-                  ★
+                )}
+                <span className="project-item__actions">
+                  <button type="button" className="project-item__action" aria-label={t('project.rename')} title={t('project.renameTitle')} disabled={busy} onClick={() => setEditing(row.project.path)}>
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    className="project-item__action"
+                    aria-label={row.project.favorite ? t('project.unfavorite') : t('project.favorite')}
+                    title={row.project.favorite ? t('project.unfavorite') : t('project.favorite')}
+                    disabled={busy}
+                    onClick={() => onToggleFavorite(row.project)}
+                  >
+                    {row.project.favorite ? '★' : '☆'}
+                  </button>
+                  <button
+                    type="button"
+                    className="project-item__action"
+                    aria-label={t('project.remove')}
+                    title={t('project.removeTitle')}
+                    disabled={busy}
+                    // 뺀 행의 포커스가 사라지므로 탐색칸으로 돌려 키보드를 이어 쓰게 한다
+                    onClick={() => void onRemove(row.project).then(() => searchRef.current?.focus())}
+                  >
+                    ×
+                  </button>
                 </span>
-              )}
-              <span className="project-item__actions">
-                <button type="button" className="project-item__action" aria-label={t('project.rename')} title={t('project.renameTitle')} disabled={busy} onClick={() => setEditing(row.project.path)}>
-                  ✎
-                </button>
-                <button
-                  type="button"
-                  className="project-item__action"
-                  aria-label={row.project.favorite ? t('project.unfavorite') : t('project.favorite')}
-                  title={row.project.favorite ? t('project.unfavorite') : t('project.favorite')}
-                  disabled={busy}
-                  onClick={() => onToggleFavorite(row.project)}
-                >
-                  {row.project.favorite ? '★' : '☆'}
-                </button>
-                <button
-                  type="button"
-                  className="project-item__action"
-                  aria-label={t('project.remove')}
-                  title={t('project.removeTitle')}
-                  disabled={busy}
-                  // 뺀 행의 포커스가 사라지므로 탐색칸으로 돌려 키보드를 이어 쓰게 한다
-                  onClick={() => void onRemove(row.project).then(() => searchRef.current?.focus())}
-                >
-                  ×
-                </button>
-              </span>
-            </div>
+              </div>
+            </Fragment>
           ),
         )}
         {error && (
@@ -287,6 +289,16 @@ export function ProjectQuickOpen({ projects, current, statusOf, runningOf, busy,
           </div>
         )}
       </div>
+      {/* 폴더 열기는 목록 스크롤 밖 — 늘 보인다 (#630). 키보드 순서는 rows 의 마지막 행 그대로 */}
+      <button
+        type="button"
+        className={`project-open__open${active === rows.length - 1 ? ' project-open__open--selected' : ''}`}
+        disabled={busy}
+        onMouseEnter={() => select(rows.length - 1)}
+        onClick={() => onOpenFolder()}
+      >
+        {t('project.openFolder')}
+      </button>
     </div>
   )
 }
