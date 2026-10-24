@@ -74,7 +74,7 @@ Electron 렌더러 (React)          Electron 메인 프로세스
 - `ctx.llm` 은 `model`·`agent` 를 **매 턴 명시**한다(안 주면 외부 provider 로 샌다). 구독을 먼저 걸고 보낸다. 턴 끝 = 이 턴 user 뒤의 `session.idle`
 - 진짜 API 키는 opencode 에 주지 않는다 — 메인의 키 프록시가 붙인다. opencode env 는 프로젝트 코드에 샌다
 - 프로젝트 폴더(와 상위 폴더)의 opencode 플러그인 파일은 엔진 안에서 실행된다 → `ctx.llm` 의 `engineFolder` 문에서 거절(#101). `ctx.llm` 에 폴더를 받는 메서드를 더하면 이 문을 지나게 한다
-- 설정 변경은 엔진을 **다시 띄워야** 적용되고, 재시작하면 도는 턴이 끊긴다
+- 설정 변경은 엔진을 **다시 띄워야** 적용되고, 재시작하면 도는 턴이 끊긴다 → 재시작은 `ctx.llm.reloadWhenIdle`(도는 턴이 끝난 뒤)로 (#632)
 - 권한 정본 목록(`GET /permission`)은 400 일 수 있다 → `permission.asked` 이벤트 폴백(#107). 승인에 `always` 를 보내지 않는다
 - 폐쇄망: 런타임 내려받기 0, 바깥 요청 0. 동봉한 것만 쓴다
 ## 지금 상태

@@ -1249,6 +1249,19 @@ describe("ctx.llm 도구 실행 전 판정 ('llm/pre-tool')", () => {
     expect(engineRestarts).toBe(2)
   })
 
+  it("'engine/restart-wanted' (#632): ctx.llm 이 맡아 도는 턴이 끝난 뒤에 한 번만 다시 띄운다 — 설정 변경이 도는 턴을 끊지 않는다", async () => {
+    const { llm, ctx } = await start(await fakeOpencode('permission'))
+    const result = await llm.chat({ providerId: 'p', modelId: 'm', directory, prompt: 'hi', mode: 'build', onAttention: (requests) => {
+      if (!requests[0]) return
+      expect(ctx.bail('engine/restart-wanted')).toBe(true)
+      expect(ctx.bail('engine/restart-wanted')).toBe(true)
+      expect(engineRestarts).toBe(0) // 턴이 도는 중 — 아직
+      void llm.reply('ses_1', requests[0].id, 'once')
+    } })
+    expect(result.ok).toBe(true)
+    expect(engineRestarts).toBe(1)
+  })
+
   it("승인 카드에 싣는 MCP 도구 인자는 'llm/attention-input' 이 돌려준 것으로 바뀐다 (#145 — 비밀 가리기). 부른 대화 찾기는 원래 인자 그대로", async () => {
     const { llm, ctx } = await start(await fakeOpencode('mcpask'))
     const refs: unknown[] = []
