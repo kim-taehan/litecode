@@ -215,7 +215,7 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     레거시: 질문 = `state.input.questions[]`(pending 부터), 답 = completed 의 **`state.metadata.answers`**(질문 순서 `string[][]`, 보낸 그대로 — 직접 입력 표시는 없다),
     `state.output` 은 모델용 영어 문장이라 화면에 쓰지 않는다. 거절 = `status:"error"`, `error:"The user dismissed this question"`, metadata 없음, 뒤에 `session.idle`(5/5).
     멈춤 = `error:"Tool execution aborted"` + `metadata.interrupted`. SSE 의 완료 `message.part.updated` 가 `question.replied` 와 같은 순간에 answers 를 싣고 온다(6/6)
-    → 라이브·다시 열기를 같은 파트로 그린다(`turnProgress.ts` `replyItem`). 신규 세대 기록(`/api/session/:id/message`)은 답이 `state.structured.answers`, 거절 문구 "Tool execution interrupted".
+    → 라이브·다시 열기를 같은 파트로 그린다(`turnProgress.ts` `replyItem`). 신규 세대 기록(`/api/session/:id/message`)은 답이 `state.structured.answers`, 거절과 멈춤의 파트가 **같다**("Tool execution interrupted", 5/5 · 5/5) — 메시지로 가른다: 멈춤 = `finish:"tool-calls"` + `time.completed`, 거절 = 둘 다 없음 (`migrate.ts` `questionStopped`, 질문 도구에서만 잰 규칙).
     레거시 reply·reject 응답은 200 `true`. ⚠️ 대기 중 abort 하면 그 요청이 `GET /question` 목록에 남는다(5/5) — 이 턴 메시지로 거르는 `mine()` 이 막는다
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
