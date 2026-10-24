@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { precedingId, previousConversation, previousHistory, PREVIOUS_CONVERSATION_LIMIT, type PreviousMessage } from '../../src/services/migrate.ts'
 import { ascendingId } from '../../src/services/llm.ts'
@@ -61,13 +62,29 @@ describe('previousHistory (옛 기록 → 말풍선)', () => {
         },
       ],
     })
+    // 거절한 메시지는 finish·time.completed 가 없다 (§ 신규 세대 멈춤 실측 5/5)
     const rejected = assistant('msg_a3', '', {
+      time: { created: 30 },
       content: [{ type: 'tool', id: 'call_18', name: 'question', state: { status: 'error', input, content: [], structured: {}, error: { message: 'Tool execution interrupted' } }, time: { created: 30, ran: 31, completed: 40 } }],
     })
     const messages = previousHistory([user('msg_u1', 'db?'), replied, assistant('msg_a2', 'ok SQLite'), user('msg_u2', 'again'), rejected], modeOf)
     expect(messages[1]!.items![0]).toEqual({ kind: 'reply', id: 'msg_a1:call_17', questions: [{ question: 'Which DB?', answer: 'SQLite' }], askedAt: 11, at: 20 })
     expect(messages[3]!.items![0]).toEqual({ kind: 'reply', id: 'msg_a3:call_18', questions: [{ question: 'Which DB?' }], askedAt: 31, at: 40 })
     expect(messages[3]!.declined).toBe(true)
+  })
+
+  // § 신규 세대 멈춤 (실측 2026-10-24, 멈춤 5/5 · 거절 5/5): 파트는 둘 다 "Tool execution interrupted" — 가르는 것은 메시지. 멈춤 = finish "tool-calls" + time.completed,
+  // 거절 = 둘 다 없음. 원본 JSON(out-v2-abort1·out-v2-reject 의 메시지, asc 로 뒤집음)을 그대로 쓴다
+  it('질문 도구: 원본 기록의 멈춤은 도구 줄 + 중단됨(레거시와 같게), 거절은 답 없는 말풍선 + 거절함', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../fixtures/question-v2-history.json', import.meta.url), 'utf8')) as Record<'abort' | 'reject', PreviousMessage[]>
+    const aborted = previousHistory(fixture.abort, modeOf)
+    expect(aborted[1]!.items![0]).toMatchObject({ kind: 'tool', name: 'question', status: 'error', error: 'Tool execution interrupted' })
+    expect(aborted[1]).toMatchObject({ interrupted: true })
+    expect(aborted[1]!.declined).toBeUndefined()
+    const rejected = previousHistory(fixture.reject, modeOf)
+    expect(rejected[1]!.items![0]).toMatchObject({ kind: 'reply', questions: [{ question: 'Which DB?' }] })
+    expect(rejected[1]).toMatchObject({ declined: true })
+    expect(rejected[1]!.interrupted).toBeUndefined()
   })
 
   it('빈 기록(레거시로 만든 세션)은 빈 목록', () => {

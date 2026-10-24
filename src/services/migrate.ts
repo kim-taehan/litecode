@@ -30,6 +30,8 @@ export interface PreviousMessage {
   time?: { created?: number; completed?: number }
   content?: PreviousPart[]
   error?: { message?: string }
+  /** assistant: 끝난 까닭 (stop·tool-calls …). 거절한 질문의 메시지엔 없다 (§ 신규 세대 멈춤) */
+  finish?: string | null
 }
 
 interface PreviousPart {
@@ -41,8 +43,15 @@ interface PreviousPart {
   time?: { created?: number; ran?: number; completed?: number }
 }
 
-/** 신규 세대 question 파트의 거절 문구 — 레거시("The user dismissed this question")와 다르다 (이슈 #635 실측 out-v2-reject. 답 전에 멈춘 모양은 재지 않았다) */
-const QUESTION_DISMISSED = 'Tool execution interrupted'
+/** 신규 세대 question 파트의 오류 문구 — 거절과 답 전에 멈춤이 **같다** (이슈 #635 실측 out-v2-reject·out-v2-abort1~5, 레거시는 둘이 다른 문구).
+ *  가르는 것은 그 assistant 메시지: 멈춤은 finish "tool-calls" + time.completed, 거절은 둘 다 없다 (5/5 · 5/5). 질문 도구에서만 잰 규칙이다 */
+const QUESTION_INTERRUPTED = 'Tool execution interrupted'
+
+/** 질문 도구 오류로 끝났는데 메시지가 끝맺어졌다 — 답 전에 멈춘 것 (거절이 아니다) */
+function questionStopped(message: PreviousMessage): boolean {
+  const last = message.content?.at(-1)
+  return last?.type === 'tool' && last.name === 'question' && last.state?.status === 'error' && (!!message.finish || message.time?.completed !== undefined)
+}
 
 /** 옛 대화 글의 상한(글자 수) — 넘치면 **뒤에서부터** 이만큼만 넘긴다(최근 대화가 이어 쓰기에 중요하다). 1만 2천 자는 영어로 ~3천 토큰,
  *  한국어로 ~8천~1만 2천 토큰이다. 설정이 경고하는 가장 작은 컨텍스트(24000)에서 opencode 가 출력·요약 몫으로 비우는 20000 을 빼면 남는 자리가 작아,
@@ -83,14 +92,17 @@ export function previousHistory(raw: readonly PreviousMessage[], modeOf: (agent:
     const reply: HistoryMessage = previous?.role === 'assistant' ? previous : { role: 'assistant', text: '', items: [] }
     if (reply !== previous) messages.push(reply)
     reply.text += assistantText(message)
-    reply.items = [...(reply.items ?? []), ...context, ...previousItems(message.id ?? String(messages.length), message.content ?? [])]
+    reply.items = [...(reply.items ?? []), ...context, ...previousItems(message.id ?? String(messages.length), message.content ?? [], !!message.finish || message.time?.completed !== undefined)]
     context = []
     const completed = message.time?.completed
     if (completed !== undefined && sentAt !== undefined) reply.duration = completed - sentAt
     else delete reply.duration
     if (message.error) reply.error = message.error.message ? turnError(message.error.message) : tr('error.unknown')
     const last = message.content?.at(-1)
-    if (last?.type === 'tool' && last.state?.status === 'error') reply.declined = true
+    // 답 전에 멈춘 질문 — 레거시(MessageAbortedError)와 같게 "중단됨", 거절로 보지 않는다
+    const stopped = questionStopped(message)
+    if (stopped) Object.assign(reply, { error: tr('error.interrupted'), interrupted: true })
+    if (!stopped && last?.type === 'tool' && last.state?.status === 'error') reply.declined = true
     else delete reply.declined
   }
   const last = raw.filter((message) => message.type === 'user' || message.type === 'assistant').at(-1)
@@ -104,8 +116,8 @@ export function previousHistory(raw: readonly PreviousMessage[], modeOf: (agent:
   return messages
 }
 
-/** assistant 스텝 하나의 파트 → 진행 줄 (생각·글·도구). 끝난 기록이라 done */
-function previousItems(messageId: string, parts: readonly PreviousPart[]): TurnItem[] {
+/** assistant 스텝 하나의 파트 → 진행 줄 (생각·글·도구). 끝난 기록이라 done. ended: 그 메시지가 끝맺어졌다(finish·time.completed) — 질문 오류면 멈춤이다 */
+function previousItems(messageId: string, parts: readonly PreviousPart[], ended: boolean): TurnItem[] {
   const items: TurnItem[] = []
   parts.forEach((part, index) => {
     const id = `${messageId}:${part.id ?? index}`
@@ -115,7 +127,7 @@ function previousItems(messageId: string, parts: readonly PreviousPart[]): TurnI
       const state = part.state ?? {}
       const status = state.status === 'error' ? 'error' : state.status === 'completed' ? 'done' : state.status === 'pending' ? 'preparing' : 'running'
       // 질문에 답함 (이슈 #635) — 신규 세대는 답이 state.structured.answers, 시각은 파트의 time (레거시 metadata.answers·state.time 과 다르다)
-      if (part.name === 'question' && (status === 'done' || state.error?.message === QUESTION_DISMISSED)) {
+      if (part.name === 'question' && (status === 'done' || (!ended && state.error?.message === QUESTION_INTERRUPTED))) {
         items.push(replyItem(id, state.input, status === 'done' ? state.structured?.answers : undefined, part.time?.ran ?? part.time?.created, part.time?.completed))
         return
       }
