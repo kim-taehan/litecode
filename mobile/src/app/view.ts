@@ -151,9 +151,15 @@ export function turnLines(items: readonly TurnItem[]): TurnLine[] {
   })
 }
 
-/** 진행 줄의 글(text) 조각들 — 본문으로 그린다 */
-export function turnTexts(items: readonly TurnItem[]): { id: string; text: string }[] {
-  return items.flatMap((item) => (item.kind === 'text' && item.text.trim() ? [{ id: item.id, text: item.text }] : []))
+/** 본문 한 칸 — 글 조각, 또는 질문에 답한 내용(#635, 오른쪽 내 말풍선). answer 가 없으면 그 질문엔 답하지 않았다 */
+export type TurnBlock = { kind: 'text'; id: string; text: string } | { kind: 'reply'; id: string; questions: readonly { question: string; answer?: string }[] }
+
+/** 진행 줄의 본문 — 글(text) 조각과 답한 질문을 나타난 순서로. 질문 앞 글과 뒤 글 사이에 말풍선이 와서 한 본문으로 붙지 않는다 */
+export function turnBody(items: readonly TurnItem[]): TurnBlock[] {
+  return items.flatMap((item): TurnBlock[] => {
+    if (item.kind === 'reply') return [{ kind: 'reply', id: item.id, questions: item.questions }]
+    return item.kind === 'text' && item.text.trim() ? [{ kind: 'text', id: item.id, text: item.text }] : []
+  })
 }
 
 /** 도는 턴이 시작한 때 — 마지막 내 말의 시각 */

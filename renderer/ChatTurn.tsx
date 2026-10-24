@@ -246,7 +246,7 @@ function TurnBody({ items, text, failed = false, interrupted = false, declined =
 
 /** 질문에 답한 내용 — 오른쪽 내 말풍선 (이슈 #635 시안 Main·Cases): 질문마다 위 띠에 질문 인용(? 아이콘), 아래에 내 답. 답하지 않은 질문은
  *  답 자리에 흐린 "✕ 답하지 않음". 밑에 "질문에 답함 · 시각". 미니맵의 내 말(.user-turn)에는 세지 않는다 — 미니맵은 내가 보낸 메시지만 센다 */
-function ReplyBubble({ reply }: { reply: ReplyItem }) {
+export function ReplyBubble({ reply }: { reply: ReplyItem }) {
   const t = useT()
   const answered = reply.questions.some((entry) => entry.answer !== undefined)
   return (

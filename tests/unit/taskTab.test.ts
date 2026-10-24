@@ -65,6 +65,14 @@ describe('전문 표시 변환', () => {
     expect((blocks[1] as { head: string }).head.split('\n')).toHaveLength(RESULT_HEAD_LINES)
   })
 
+  // #635: 하위 작업이 물은 질문에 답한 내용(reply 줄)도 전체 기록에 — 대화 안 하위 작업 줄과 같은 말풍선으로
+  it('답한 질문은 그 자리에 말풍선 블록으로 남는다', () => {
+    const reply: TurnItem = { kind: 'reply', id: 'q1', questions: [{ question: 'Which DB?', answer: 'SQLite' }], askedAt: 1, at: 2 }
+    const blocks = transcript([{ kind: 'text', id: 'x1', text: '물어볼게요', done: true }, reply, { kind: 'text', id: 'x2', text: '만들었어요', done: true }])
+    expect(blocks.map((block) => block.kind)).toEqual(['text', 'reply', 'text'])
+    expect(blocks[1]).toEqual(reply)
+  })
+
   it('MCP 도구는 서버/도구, 입력 없고 결과가 짧으면 "전체 보기" 없음. JSON 이 아닌 입력은 그대로', () => {
     const [block] = transcript([{ kind: 'tool', id: 'm', name: 'x_y', status: 'error', mcp: { server: 'x', tool: 'y' }, result: 'ok\n', error: 'boom' }])
     expect(block).toMatchObject({ name: 'x/y', lines: 1, more: false, error: 'boom' })
