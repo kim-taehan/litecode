@@ -3,7 +3,7 @@ import type { HistoryMessage } from '../../shared/contract.ts'
 import { stopFeedback } from '../../shared/hooks.ts'
 import type { TurnItem } from '../../shared/ipc.ts'
 import { translate, type MessageKey } from '../../shared/i18n/index.ts'
-import { answerText, clockTime, formatDuration, formatTokens, interimSplit, interimText, looksLikePath, minimapTurns, minimapTurnDetails, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
+import { answerText, clockTime, formatDuration, formatTokens, interimSplit, interimText, looksLikePath, minimapTurns, minimapTurnDetails, replyPieces, splitTurn, thinkSummary, toolTitle, turnHeadText, upsertItem } from '../../renderer/turnView.ts'
 
 // 답 한 턴의 화면 모양 — 진행 줄 쌓기, 작업/답 가르기, 줄 글자
 
@@ -238,5 +238,31 @@ describe('formatTokens', () => {
   it('사용량 라벨은 한국어·영어에 있다', () => {
     expect(ko('chat.usage', { count: '95.4K' })).toBe('사용량 95.4K tok')
     expect(en('chat.usage', { count: '95.4K' })).toBe('Usage 95.4K tok')
+  })
+})
+
+// 이슈 #635: 답한 질문(reply 줄)은 오른쪽 내 말풍선 — 턴을 그 자리에서 가른다. 앞 조각은 끝난 턴처럼(머리·접힌 작업·질문 앞 글), 뒤 조각이 이어진다
+describe('replyPieces (질문에 답한 자리에서 턴 가르기)', () => {
+  const reply = (id: string, askedAt: number, at: number, answer?: string): TurnItem => ({ kind: 'reply', id, questions: [{ question: 'Which DB?', ...(answer !== undefined && { answer }) }], askedAt, at })
+
+  it('답 말풍선 앞뒤로 가르고, 조각마다 글·시작 시각·걸린 시간(앞 = 물은 때까지, 뒤 = 답한 때부터 턴 끝까지)', () => {
+    const items = [think('t1'), text('a', '물어볼게요'), reply('r1', 1004, 1010, 'SQLite'), tool('b'), text('c', '만들었어요')]
+    expect(replyPieces(items, '물어볼게요만들었어요', 1000, 1022)).toEqual([
+      { items: [think('t1'), text('a', '물어볼게요')], text: '물어볼게요', reply: items[2], from: 1000, duration: 4 },
+      { items: [tool('b'), text('c', '만들었어요')], text: '만들었어요', from: 1010, duration: 12 },
+    ])
+  })
+
+  it('답 말풍선이 없으면 한 조각 그대로. 도는 턴(끝 시각 없음)의 마지막 조각은 걸린 시간이 없다', () => {
+    expect(replyPieces([text('a')], 'x', 1000, 1005)).toEqual([{ items: [text('a')], text: 'x', from: 1000, duration: 5 }])
+    const pieces = replyPieces([reply('r1', 1001, 1003, 'A'), text('c', 'go', false)], '', 1000, undefined)
+    expect(pieces[1]).toEqual({ items: [text('c', 'go', false)], text: '', from: 1003 })
+  })
+
+  it('거절로 끝난 턴: 마지막 조각은 빈 글 — 앞 조각의 글(질문 앞 글)을 두 번 그리지 않는다. 연달아 물은 질문은 빈 조각 사이로', () => {
+    const declined = replyPieces([text('a', '물어볼게요'), reply('r1', 1004, 1006)], '물어볼게요', 1000, 1006)
+    expect(declined.map((piece) => piece.text)).toEqual(['물어볼게요', ''])
+    const twice = replyPieces([reply('r1', 1001, 1002, 'A'), reply('r2', 1003, 1004, 'B'), text('c', 'done')], 'done', 1000, 1005)
+    expect(twice.map((piece) => [piece.items.length, piece.reply?.id, piece.text])).toEqual([[0, 'r1', ''], [0, 'r2', ''], [1, undefined, 'done']])
   })
 })

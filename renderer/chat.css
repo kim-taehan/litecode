@@ -41,6 +41,51 @@
 }
 .user-turn__copy:hover { color: var(--text); background: var(--fill-hover); }
 
+/* 질문에 답한 내용 (이슈 #635 시안 Main·Cases) — 내 말풍선과 같은 바탕, 질문마다 위 띠(질문 인용)·아래 답. 미니맵이 세는 .user-turn 은 쓰지 않는다 */
+.reply-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.bubble--reply {
+  padding: 0;
+  overflow: hidden;
+}
+
+.bubble-reply__question {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 16px;
+  background: var(--fill-active); /* 말풍선 바탕 위에 한 겹 — 라이트·다크 같은 규칙 */
+  color: var(--text-secondary);
+  font-size: var(--chat-font-size-secondary);
+  line-height: 1.5;
+}
+
+.bubble-reply__answer {
+  padding: 8px 16px 10px;
+}
+
+.bubble-reply__answer--none {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: var(--chat-font-size-secondary);
+}
+
+.bubble-reply__icon {
+  flex: none;
+}
+
+.bubble-reply__icon--question {
+  margin-top: 2px;
+  color: var(--warn); /* 질문 카드와 같은 색 */
+}
+
 /* 답 행동 줄 — 답 아래 왼쪽, 내 말의 복사와 같은 24px 버튼. 그 턴에 마우스를 올리거나 포커스가 들어올 때만 보인다
    (dsh MessageIconActions — hover 가 없는 기기에선 늘 보인다) */
 .turn__meta {

@@ -43,8 +43,10 @@ export type TranscriptBlock =
       more: boolean
       error?: string
     }
+  /** 질문에 답한 내용 (#635) — 대화와 같은 말풍선 */
+  | Extract<TurnItem, { kind: 'reply' }>
 
-/** 진행 줄 → 전체 기록 블록 (나타난 순서). 생각·응답 글·도구만 — 압축·재시도·훅 같은 줄은 작업 탭에 그리지 않는다. 빈 생각·글은 뺀다 */
+/** 진행 줄 → 전체 기록 블록 (나타난 순서). 생각·응답 글·도구·답한 질문만 — 압축·재시도·훅 같은 줄은 작업 탭에 그리지 않는다. 빈 생각·글은 뺀다 */
 export function transcript(items: readonly TurnItem[]): TranscriptBlock[] {
   const blocks: TranscriptBlock[] = []
   for (const item of items) {
@@ -53,6 +55,8 @@ export function transcript(items: readonly TurnItem[]): TranscriptBlock[] {
       if (text) blocks.push({ kind: 'think', id: item.id, ...fold(text) })
     } else if (item.kind === 'text') {
       if (item.text.trim()) blocks.push({ kind: 'text', id: item.id, text: item.text })
+    } else if (item.kind === 'reply') {
+      blocks.push(item)
     } else if (item.kind === 'tool') {
       const result = item.result ? item.result.replace(/\n+$/, '') : undefined
       const resultLines = result ? result.split('\n') : []

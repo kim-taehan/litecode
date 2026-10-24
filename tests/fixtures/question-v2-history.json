@@ -1,0 +1,219 @@
+{
+ "abort": [
+  {
+   "id": "msg_16d31bc5d001pTDxuu6Q543iV0",
+   "type": "user",
+   "text": "[call:question {\"questions\":[{\"question\":\"Which DB?\",\"header\":\"DB\",\"options\":[{\"label\":\"Postgres\",\"description\":\"pg\"},{\"label\":\"SQLite\",\"description\":\"file\"}]}]}]",
+   "time": {
+    "created": 1792833338462
+   }
+  },
+  {
+   "id": "msg_16d31be75001hra4GIf6KpU1Qt",
+   "type": "assistant",
+   "agent": "build",
+   "time": {
+    "created": 1792833338997,
+    "completed": 1792833339209
+   },
+   "content": [
+    {
+     "type": "tool",
+     "id": "call_1",
+     "name": "question",
+     "provider": {
+      "executed": false
+     },
+     "state": {
+      "status": "error",
+      "input": {
+       "questions": [
+        {
+         "question": "Which DB?",
+         "header": "DB",
+         "options": [
+          {
+           "label": "Postgres",
+           "description": "pg"
+          },
+          {
+           "label": "SQLite",
+           "description": "file"
+          }
+         ]
+        }
+       ]
+      },
+      "content": [],
+      "structured": {},
+      "error": {
+       "type": "unknown",
+       "message": "Tool execution interrupted"
+      }
+     },
+     "time": {
+      "created": 1792833338999,
+      "ran": 1792833339003,
+      "completed": 1792833339093
+     }
+    }
+   ],
+   "finish": "tool-calls"
+  }
+ ],
+ "reject": [
+  {
+   "id": "msg_16d3246f6001Hd6f57wcKzabTl",
+   "type": "user",
+   "text": "[call:question {\"questions\":[{\"question\":\"Which DB?\",\"header\":\"DB\",\"options\":[{\"label\":\"Postgres\",\"description\":\"pg\"},{\"label\":\"SQLite\",\"description\":\"file\"}]}]}]",
+   "time": {
+    "created": 1792833373942
+   }
+  },
+  {
+   "id": "msg_16d3247ae001zpMO53OeH6t3zr",
+   "type": "assistant",
+   "agent": "build",
+   "time": {
+    "created": 1792833374126
+   },
+   "content": [
+    {
+     "type": "tool",
+     "id": "call_10",
+     "name": "question",
+     "provider": {
+      "executed": false
+     },
+     "state": {
+      "status": "error",
+      "input": {
+       "questions": [
+        {
+         "question": "Which DB?",
+         "header": "DB",
+         "options": [
+          {
+           "label": "Postgres",
+           "description": "pg"
+          },
+          {
+           "label": "SQLite",
+           "description": "file"
+          }
+         ]
+        }
+       ]
+      },
+      "content": [],
+      "structured": {},
+      "error": {
+       "type": "unknown",
+       "message": "Tool execution interrupted"
+      }
+     },
+     "time": {
+      "created": 1792833374127,
+      "ran": 1792833374129,
+      "completed": 1792833374149
+     }
+    }
+   ]
+  }
+ ],
+ "reply": [
+  {
+   "id": "msg_16d1c5c9b001DvyTF551AFt3vD",
+   "type": "user",
+   "text": "[call:question {\"questions\":[{\"question\":\"Which DB?\",\"header\":\"DB\",\"options\":[{\"label\":\"Postgres\",\"description\":\"pg\"},{\"label\":\"SQLite\",\"description\":\"file\"}]}]}]",
+   "time": {
+    "created": 1792831937691
+   }
+  },
+  {
+   "id": "msg_16d1c5da4001MRCj1rBOz2DKP1",
+   "type": "assistant",
+   "agent": "build",
+   "time": {
+    "created": 1792831937956,
+    "completed": 1792831938167
+   },
+   "content": [
+    {
+     "type": "tool",
+     "id": "call_17",
+     "name": "question",
+     "provider": {
+      "executed": false
+     },
+     "state": {
+      "status": "completed",
+      "input": {
+       "questions": [
+        {
+         "question": "Which DB?",
+         "header": "DB",
+         "options": [
+          {
+           "label": "Postgres",
+           "description": "pg"
+          },
+          {
+           "label": "SQLite",
+           "description": "file"
+          }
+         ]
+        }
+       ]
+      },
+      "content": [
+       {
+        "type": "text",
+        "text": "User has answered your questions: \"Which DB?\"=\"SQLite\". You can now continue with the user's answers in mind."
+       }
+      ],
+      "outputPaths": [],
+      "structured": {
+       "answers": [
+        [
+         "SQLite"
+        ]
+       ]
+      }
+     },
+     "time": {
+      "created": 1792831937957,
+      "ran": 1792831937961,
+      "completed": 1792831938164
+     }
+    }
+   ],
+   "finish": "tool-calls"
+  },
+  {
+   "id": "msg_16d1c5e7d001sjhwR1rXsS73c3",
+   "type": "system",
+   "text": "Skills provide specialized instructions and workflows for specific tasks.\nUse the skill tool to load a skill when a task matches its description.\n<available_skills>\n  <skill>\n    <name>customize-opencode</name>\n    <description>Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, commands, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself.</description>\n  </skill>\n</available_skills>",
+   "time": {
+    "created": 1792831938173
+   }
+  },
+  {
+   "id": "msg_16d1c5f05001GGgRgBYtuwuyo3",
+   "type": "assistant",
+   "agent": "build",
+   "time": {
+    "created": 1792831938309,
+    "completed": 1792831938314
+   },
+   "content": [
+    {
+     "type": "text",
+     "id": "text-0",
+     "text": "echo: <system-update>\nSkills provide specialized instructions and workflows for specific tasks.\nUse the skill tool to load a skill when a task matches its description.\n&lt;available_skills&gt;\n  &lt;skill&gt;\n    &lt;name&gt;customize-opencode&lt;/name&gt;\n    &lt;description&gt;Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, commands, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself.&lt;/description&gt;\n  &lt;/skill&gt;\n&lt;/available_skills&gt;\n</system-update>"
+    }
+   ],
+   "finish": "stop"
+  }
+ ]
+}

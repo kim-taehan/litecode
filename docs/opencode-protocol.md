@@ -211,6 +211,12 @@ opencode 의 동작에 기대는 코드를 고치기 전에 해당 묶음을 읽
     검사 안 되는 문자열. **호출마다 목록 전체를 보내고 통째로 교체된다.** 끝난 파트의 `state.metadata.todos` 가 그 시점 목록, 같은 내용이 `todo.updated {sessionID, todos}` 로 오고
     `GET /session/{id}/todo?directory=` 가 맨 배열로 준다(재시작·자동 요약 뒤에도 남는다). 틀린 인자는 `running`(input 실림) 뒤 `error` 이고 목록은 안 바뀐다 → 화면은 `completed` 파트만 본다.
     네 모드 모두 도구가 있고 묻지 않는다, 하위 에이전트엔 없다. `todoread` 없음 — 자동 요약 뒤엔 모델이 목록을 모를 수 있다. 턴이 끝나도 `in_progress` 는 그대로 남는다
+  - **질문 도구의 기록** (#635, 실측 2026-10-24, `_workspace/01_probe_question_history.md`): 답은 별도 user 메시지가 아니라 assistant 메시지의 `tool:"question"` 파트 하나에 남는다.
+    레거시: 질문 = `state.input.questions[]`(pending 부터), 답 = completed 의 **`state.metadata.answers`**(질문 순서 `string[][]`, 보낸 그대로 — 직접 입력 표시는 없다),
+    `state.output` 은 모델용 영어 문장이라 화면에 쓰지 않는다. 거절 = `status:"error"`, `error:"The user dismissed this question"`, metadata 없음, 뒤에 `session.idle`(5/5).
+    멈춤 = `error:"Tool execution aborted"` + `metadata.interrupted`. SSE 의 완료 `message.part.updated` 가 `question.replied` 와 같은 순간에 answers 를 싣고 온다(6/6)
+    → 라이브·다시 열기를 같은 파트로 그린다(`turnProgress.ts` `replyItem`). 신규 세대 기록(`/api/session/:id/message`)은 답이 `state.structured.answers`, 거절과 멈춤의 파트가 **같다**("Tool execution interrupted", 5/5 · 5/5) — 메시지로 가른다: 멈춤 = `finish:"tool-calls"` + `time.completed`, 거절 = 둘 다 없음 (`migrate.ts` `questionStopped`, 질문 도구에서만 잰 규칙).
+    레거시 reply·reject 응답은 200 `true`. ⚠️ 대기 중 abort 하면 그 요청이 `GET /question` 목록에 남는다(5/5) — 이 턴 메시지로 거르는 `mine()` 이 막는다
 - **아직 안 한 것**: 우리 `ctx.providers` 의 provider/model id 를 opencode 자신의
   provider/model id 로 매핑하는 설정 화면. 지금은 두 id 가 같다고 보고 그대로 넘긴다 — 그래서 우리 provider
   id 가 opencode.json 에 없으면 "모델 없음" 오류가 난다.

@@ -11,7 +11,7 @@ import { StatusBanner } from '../StatusBanner.tsx'
 import { S } from '../strings.ts'
 import { C, MONO } from '../theme.ts'
 import type { QuestionView } from '../view.ts'
-import { attentionTitle, chatRows, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, SHELL_COLLAPSE_LINES, shellCardView, turnHead, turnLines, turnStartedAt, turnTexts, userMessageView } from '../view.ts'
+import { attentionTitle, chatRows, composerBottomMargin, outcomeLabel, questionView, runningSubtasks, SHELL_COLLAPSE_LINES, shellCardView, turnHead, turnBody, turnLines, turnStartedAt, userMessageView, type TurnBlock } from '../view.ts'
 import { useVoiceInput } from '../voiceInput.ts'
 
 // 3 대화 (시안 Chat). 리듀서의 ConversationView 하나를 그린다: 끝난 말풍선(messages, 사이사이 데스크탑 `!` 카드 — 읽기 전용) → 도는 턴(progress) → 승인 카드(attention) → 대기(queue).
@@ -291,12 +291,35 @@ function Turn({ head, items, initiallyOpen = false, error }: { head: string; ite
           ))}
         </View>
       )}
-      {turnTexts(items).map((text) => (
-        <Text key={text.id} style={styles.answer} selectable>
-          {text.text}
-        </Text>
-      ))}
+      {turnBody(items).map((block) =>
+        block.kind === 'reply' ? (
+          <ReplyBubble key={block.id} block={block} />
+        ) : (
+          <Text key={block.id} style={styles.answer} selectable>
+            {block.text}
+          </Text>
+        ),
+      )}
       {error !== undefined && <Text style={styles.error}>{error}</Text>}
+    </View>
+  )
+}
+
+/** 질문에 답한 내용 (#635) — 내 말처럼 오른쪽 말풍선: 질문마다 흐린 질문 글 + 내 답(답하지 않았으면 흐린 "✕ 답하지 않음"), 밑에 "질문에 답함" */
+function ReplyBubble({ block }: { block: Extract<TurnBlock, { kind: 'reply' }> }) {
+  return (
+    <View style={styles.userTurn}>
+      <View style={styles.bubble}>
+        {block.questions.map((entry, index) => (
+          <View key={index} style={index > 0 ? styles.replyNext : undefined}>
+            <Text style={styles.replyQuestion}>{entry.question}</Text>
+            <Text style={entry.answer !== undefined ? styles.bubbleText : styles.replyNone} selectable>
+              {entry.answer ?? S.replyNone}
+            </Text>
+          </View>
+        ))}
+      </View>
+      <Text style={styles.userMeta}>{block.questions.some((entry) => entry.answer !== undefined) ? S.replied : S.replyDeclined}</Text>
     </View>
   )
 }
@@ -410,6 +433,9 @@ const styles = StyleSheet.create({
   hookReason: { fontSize: 13, color: C.text2 },
   bubble: { maxWidth: 290, backgroundColor: C.surface2, borderRadius: 16, paddingVertical: 10, paddingHorizontal: 14 },
   bubbleText: { fontSize: 15, lineHeight: 22, color: C.text },
+  replyQuestion: { fontSize: 13, lineHeight: 19, color: C.sub, marginBottom: 2 },
+  replyNone: { fontSize: 14, lineHeight: 22, color: C.faint },
+  replyNext: { marginTop: 8 },
   turn: { gap: 8 },
   turnHead: { alignSelf: 'flex-start', minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 6, paddingRight: 10 },
   turnHeadText: { fontSize: 13, color: C.sub },

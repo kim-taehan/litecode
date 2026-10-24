@@ -123,6 +123,10 @@ export const S = {
   answerOnDesktop: '이 질문은 폰에서 답할 수 없습니다. 데스크탑에서 답해 주세요.',
   hookFollowUp: '턴 끝 훅이 이어서 보냄',
   unanswered: '답 없음',
+  // 질문에 답한 내용 (#635 — 데스크탑 chat.replied·replyDeclined·replyNone)
+  replied: '질문에 답함',
+  replyDeclined: '질문에 답하지 않음',
+  replyNone: '✕ 답하지 않음',
   omittedMessages: (count: number) => `앞의 메시지 ${count}개는 생략했습니다 (전체는 데스크탑에서)`,
   delegatedFrom: (title: string) => `다른 대화에서 온 지시 · ${title}`,
   delegatedFromProject: (project: string, title: string) => `다른 프로젝트에서 온 지시 · ${project} · ${title}`,

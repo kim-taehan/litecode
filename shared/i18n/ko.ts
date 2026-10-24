@@ -142,6 +142,10 @@ export const ko = {
   'chat.copyAnswer': '답 복사',
   // 도는 턴에 끼워 넣었지만 답을 못 받은 말 (이슈 #250 — 승인 거절·중지로 턴이 끝났다. 맥락에는 남아 있다)
   'chat.unanswered': '답 없음',
+  // 질문에 답한 내용 — 오른쪽 내 말풍선 (이슈 #635)
+  'chat.replied': '질문에 답함',
+  'chat.replyDeclined': '질문에 답하지 않음',
+  'chat.replyNone': '답하지 않음',
   // 그리기 오류 (ErrorBoundary) — 흰 화면 대신
   'crash.title': '문제가 생겼습니다',
   'crash.hint': '화면을 그리다 오류가 났습니다. 다시 불러오면 대화는 그대로 이어집니다.',

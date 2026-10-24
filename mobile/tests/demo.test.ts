@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppSession } from '../src/app/session.ts'
-import { ago, rowView, runningSubtasks, statusBanner, turnHead, turnLines, turnStartedAt, turnTexts } from '../src/app/view.ts'
+import { ago, rowView, runningSubtasks, statusBanner, turnHead, turnBody, turnLines, turnStartedAt } from '../src/app/view.ts'
 import { createDemoSession, DEMO_CHAT, DEMO_PROJECT, DEMO_RECONNECT_MS, DEMO_STEP_MS } from './demoSession.ts'
 
 // 견본 세션이 리듀서 상태를 기대대로 만드는지 — 화면은 이 상태를 그리기만 한다 (화면 렌더 테스트는 없다).
@@ -42,7 +42,7 @@ describe('견본의 처음 모습 (시안)', () => {
     expect(view.running).toBe(true)
     expect(turnHead('진행 중', Date.now() - turnStartedAt(view)!, view.progress)).toBe('진행 중 · 18초 · 생각 1 · 도구 3')
     expect(turnLines(view.progress).map((line) => line.text)).toEqual(['생각 · 테스트 단계를 빌드 앞에 둔다', 'read scripts/deploy.sh', 'edit scripts/deploy.sh +4 −1'])
-    expect(turnTexts(view.progress).map((text) => text.text)).toEqual(['스크립트를 고쳤습니다. 바뀐 순서가 맞는지 테스트를 한 번 돌려 확인하겠습니다.'])
+    expect(turnBody(view.progress).map((block) => (block.kind === 'text' ? block.text : block.id))).toEqual(['스크립트를 고쳤습니다. 바뀐 순서가 맞는지 테스트를 한 번 돌려 확인하겠습니다.'])
     expect(view.attention).toMatchObject([{ kind: 'permission', action: 'bash', resources: ['npm test -- --run'] }])
     expect(view.queue).toEqual(['그리고 README 도 맞춰 줘'])
     expect(runningSubtasks(view.progress)).toBe(2)
@@ -105,7 +105,7 @@ describe('견본의 살아 있는 동작', () => {
     expect(chat('c_tests').running).toBe(true)
 
     await steps(3)
-    expect(turnTexts(chat('c_tests').progress)).toMatchObject([{ text: 'echo' }])
+    expect(turnBody(chat('c_tests').progress)).toMatchObject([{ text: 'echo' }])
     await steps(2)
     expect(chat('c_tests').running).toBe(false)
     expect(chat('c_tests').messages.at(-1)).toMatchObject({ role: 'assistant', text: 'echo: 안녕' })

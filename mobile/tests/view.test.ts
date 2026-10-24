@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ShellCard } from '../../shared/contract.ts'
 import type { RemoteConversation } from '../../shared/remote.ts'
-import { ago, attentionTitle, chatRows, composerBottomMargin, initials, outcomeLabel, questionView, rowView, shellCardView, statusBanner, turnHead, turnLines, userMessageView } from '../src/app/view.ts'
+import { ago, attentionTitle, chatRows, composerBottomMargin, initials, outcomeLabel, questionView, rowView, shellCardView, statusBanner, turnBody, turnHead, turnLines, userMessageView } from '../src/app/view.ts'
 
 const NOW = 1_800_000_000_000
 const conversation: RemoteConversation = { id: 'c', project: '/p', title: '제목', updatedAt: NOW }
@@ -44,6 +44,23 @@ describe('view — 상태를 화면 글로', () => {
         { kind: 'tool', id: 'd', name: 'jira_search', status: 'done', summary: 'PAY-12', mcp: { server: 'jira', tool: 'search' } },
       ]),
     ).toEqual([{ id: 'd', text: 'jira/search PAY-12', mono: true }])
+  })
+
+  // #635: 답한 질문(reply 줄)은 모바일에서도 보인다 — 본문 사이에 말풍선 칸으로, 질문 앞 글과 뒤 글이 한 덩어리로 붙지 않게
+  it('turnBody: 글과 답한 질문을 나타난 순서로 — 빈 글·생각·도구는 빠진다', () => {
+    expect(
+      turnBody([
+        { kind: 'text', id: 'a', text: '물어볼게요', done: true },
+        { kind: 'tool', id: 'b', name: 'bash', status: 'done' },
+        { kind: 'reply', id: 'r', questions: [{ question: 'Which DB?', answer: 'SQLite' }, { question: 'Tests?' }], askedAt: 1, at: 2 },
+        { kind: 'text', id: 'c', text: '  ', done: true },
+        { kind: 'text', id: 'd', text: '만들었어요', done: true },
+      ]),
+    ).toEqual([
+      { kind: 'text', id: 'a', text: '물어볼게요' },
+      { kind: 'reply', id: 'r', questions: [{ question: 'Which DB?', answer: 'SQLite' }, { question: 'Tests?' }] },
+      { kind: 'text', id: 'd', text: '만들었어요' },
+    ])
   })
 
   it('outcomeLabel: 거절 · 중단 · 실패 · 완료', () => {

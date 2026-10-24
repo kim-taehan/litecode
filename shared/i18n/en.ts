@@ -136,6 +136,10 @@ export const en = {
   'chat.messageCopied': 'Copied',
   'chat.copyAnswer': 'Copy response',
   'chat.unanswered': 'No reply',
+  // Answered question — my bubble on the right (issue #635)
+  'chat.replied': 'Answered a question',
+  'chat.replyDeclined': 'Declined a question',
+  'chat.replyNone': 'Not answered',
   'crash.title': 'Something went wrong',
   'crash.hint': 'The screen hit an error while rendering. Reloading keeps your conversations.',
   'crash.sectionTitle': 'This area could not be displayed',

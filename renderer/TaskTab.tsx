@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import { ReplyBubble } from './ChatTurn.tsx'
 import { Markdown } from './Markdown.tsx'
 import { compactTokens, elapsed, lastLine } from './jobsView.ts'
 import { useT } from './settingsStore.ts'
@@ -154,6 +155,7 @@ function Block({ block, directory }: { block: TranscriptBlock; directory: string
       </div>
     )
   }
+  if (block.kind === 'reply') return <ReplyBubble reply={block} />
   if (block.kind === 'text') {
     return (
       <div className="task-tab__text">
