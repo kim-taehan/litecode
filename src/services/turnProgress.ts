@@ -28,7 +28,7 @@ import path from 'node:path'
 import { toolDiffs } from './toolDiffs.ts'
 import { insideOf } from './projectPath.ts'
 import { skillSource } from '../../shared/skills.ts'
-import type { TurnItem, Subtask, McpToolRef, TodoItem, PresentedFile } from '../../shared/contract.ts'
+import type { TurnItem, Subtask, McpToolRef, TodoItem, PresentedFile, QuestionReply } from '../../shared/contract.ts'
 
 // 화면에 실리는 타입의 정의는 shared/contract.ts 에 있다 (모바일 앱과 같이 쓴다 — 이슈 #42). 여기서는 다시 내보내기만 한다
 export type { TurnItem, Subtask, ToolSkill, McpToolRef } from '../../shared/contract.ts'
@@ -408,6 +408,9 @@ function partItem(part: EnginePart, done: boolean, root: string, mcp: McpToolRes
     }
     return item
   }
+  if (part.tool === 'question' && (status === 'done' || state.error === QUESTION_DISMISSED)) {
+    return replyItem(id, state.input, status === 'done' ? state.metadata?.['answers'] : undefined, state.time?.start, state.time?.end)
+  }
   const item: Extract<TurnItem, { kind: 'tool' }> = { kind: 'tool', id, name: part.tool ?? '', status }
   const ref = mcp(item.name)
   if (ref) item.mcp = ref
@@ -441,6 +444,26 @@ function partItem(part: EnginePart, done: boolean, root: string, mcp: McpToolRes
     item.summary = skillName
   }
   return item
+}
+
+// 질문에 답함 (question 도구, 이슈 #635 실측 2026-10-24 opencode 1.18.18 — _workspace/01_probe_question_history.md):
+// - 답은 별도 user 메시지가 아니라 이 파트 하나에 있다. 질문 = state.input.questions[], 답 = completed 의 state.metadata.answers (질문 순서 string[][],
+//   보낸 그대로 — 직접 입력 표시는 없다). state.output 은 모델용 영어 문장이라 화면에 쓰지 않는다
+// - SSE 의 완료 part.updated 가 question.replied 와 같은 순간에 answers 를 싣고 온다 (6/6) → 실시간·다시 열기가 같은 파트에서 그린다
+// - 거절 = error "The user dismissed this question"(metadata 없음). 답 전에 멈춤 = error "Tool execution aborted" — 답하지 않았으니 말풍선이 아니다(도구 줄)
+// - answers 가 질문보다 짧거나 빈 배열일 수 있다(F·G — 앱은 막지만 기록은 그런 모양을 받는다) → 그 질문은 답 없음
+const QUESTION_DISMISSED = 'The user dismissed this question'
+
+/** 끝난(답한·거절한) question 파트 → 말풍선 줄. answers 가 배열이 아니면(거절) 모든 질문이 답 없음. 신규 세대 기록(migrate.ts)도 쓴다 */
+export function replyItem(id: string, input: unknown, answers: unknown, askedAt?: number, at?: number): TurnItem {
+  const asked = input && typeof input === 'object' ? (input as { questions?: unknown }).questions : undefined
+  const questions = (Array.isArray(asked) ? asked : []).map((entry: unknown, index): QuestionReply => {
+    const { question } = (entry && typeof entry === 'object' ? entry : {}) as { question?: unknown }
+    const picked = Array.isArray(answers) ? answers[index] : undefined
+    const labels = Array.isArray(picked) ? picked.filter((label): label is string => typeof label === 'string' && label !== '') : []
+    return { question: typeof question === 'string' ? question : '', ...(labels.length > 0 && { answer: labels.join(', ') }) }
+  })
+  return { kind: 'reply', id, questions, ...(askedAt !== undefined && { askedAt }), ...(at !== undefined && { at }) }
 }
 
 // 할 일 목록 (todowrite, 이슈 #83 실측 2026-10-05 opencode 1.18.18 — _workspace/01ae_todo.md):

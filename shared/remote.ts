@@ -266,6 +266,8 @@ export function snapshotItem(item: TurnItem): TurnItem {
       return item.reason === undefined ? item : { ...item, reason: clipTo(item.reason, SNAPSHOT_DETAIL_MAX) }
     case 'compaction':
       return item
+    case 'reply':
+      return { ...item, questions: item.questions.map((entry) => ({ ...entry, question: clipTo(entry.question, SNAPSHOT_DETAIL_MAX), ...(entry.answer !== undefined && { answer: clipTo(entry.answer, SNAPSHOT_DETAIL_MAX) }) })) }
   }
 }
 

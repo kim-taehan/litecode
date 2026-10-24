@@ -11,7 +11,7 @@
 // 주입과 표시 쓰기 사이에 앱이 꺼질 때 둘이 어긋난다(두 번 넣거나 영영 안 넣는다).
 
 import { randomInt } from 'node:crypto'
-import { toolSummary, type TurnItem } from './turnProgress.ts'
+import { replyItem, toolSummary, type TurnItem } from './turnProgress.ts'
 import type { HistoryMessage } from './llm.ts'
 import type { Mode } from '../../shared/modes.ts'
 import { turnError } from './contextOverflow.ts'
@@ -37,8 +37,12 @@ interface PreviousPart {
   id?: string
   text?: string
   name?: string
-  state?: { status?: string; input?: unknown; content?: { text?: string }[]; error?: { message?: string } }
+  state?: { status?: string; input?: unknown; content?: { text?: string }[]; structured?: { answers?: unknown }; error?: { message?: string } }
+  time?: { created?: number; ran?: number; completed?: number }
 }
+
+/** 신규 세대 question 파트의 거절 문구 — 레거시("The user dismissed this question")와 다르다 (이슈 #635 실측 out-v2-reject. 답 전에 멈춘 모양은 재지 않았다) */
+const QUESTION_DISMISSED = 'Tool execution interrupted'
 
 /** 옛 대화 글의 상한(글자 수) — 넘치면 **뒤에서부터** 이만큼만 넘긴다(최근 대화가 이어 쓰기에 중요하다). 1만 2천 자는 영어로 ~3천 토큰,
  *  한국어로 ~8천~1만 2천 토큰이다. 설정이 경고하는 가장 작은 컨텍스트(24000)에서 opencode 가 출력·요약 몫으로 비우는 20000 을 빼면 남는 자리가 작아,
@@ -110,6 +114,11 @@ function previousItems(messageId: string, parts: readonly PreviousPart[]): TurnI
     else if (part.type === 'tool') {
       const state = part.state ?? {}
       const status = state.status === 'error' ? 'error' : state.status === 'completed' ? 'done' : state.status === 'pending' ? 'preparing' : 'running'
+      // 질문에 답함 (이슈 #635) — 신규 세대는 답이 state.structured.answers, 시각은 파트의 time (레거시 metadata.answers·state.time 과 다르다)
+      if (part.name === 'question' && (status === 'done' || state.error?.message === QUESTION_DISMISSED)) {
+        items.push(replyItem(id, state.input, status === 'done' ? state.structured?.answers : undefined, part.time?.ran ?? part.time?.created, part.time?.completed))
+        return
+      }
       const item: TurnItem = { kind: 'tool', id, name: part.name ?? '', status }
       if (state.input !== undefined && state.input !== '') {
         item.input = JSON.stringify(state.input)

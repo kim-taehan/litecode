@@ -420,3 +420,70 @@ describe('결과물 선언 (litecode_present, 이슈 #91)', () => {
     })
   })
 })
+
+// 이슈 #635 실측 (2026-10-24, opencode 1.18.18 — _workspace/01_probe_question_history.md): 질문과 답은 assistant 메시지의 tool:"question" 파트 하나에 있다.
+// 질문 = state.input.questions[], 답 = completed 의 state.metadata.answers (질문 순서 string[][]), 거절 = error "The user dismissed this question",
+// 답 전에 멈춤 = error "Tool execution aborted" + metadata.interrupted. 아래 파트는 out-A·D·E·F·G·P 에서 그대로 뗐다
+describe('질문에 답함 (question 도구, 이슈 #635)', () => {
+  const Q1 = { question: 'Which DB?', header: 'DB', options: [{ label: 'Postgres', description: 'pg' }, { label: 'SQLite', description: 'file' }] }
+  const QM = { question: 'Which features?', header: 'Features', multiple: true, options: [{ label: 'Auth', description: 'a' }, { label: 'Billing', description: 'b' }, { label: 'Search', description: 'c' }] }
+  const question = (state: Record<string, unknown>) => ({ type: 'tool', id: 'prt_q', messageID: 'm', callID: 'call_1', tool: 'question', state })
+  const time = { start: 1792831791572, end: 1792831792281 }
+
+  it('답한 질문(A) → 말풍선 데이터: 질문 글과 답, 물은 때·답한 때. 영어 output 은 싣지 않는다', () => {
+    const part = question({
+      status: 'completed',
+      input: { questions: [Q1] },
+      output: 'User has answered your questions: "Which DB?"="SQLite". You can now continue with the user\'s answers in mind.',
+      title: 'Asked 1 question',
+      metadata: { answers: [['SQLite']], truncated: false },
+      time,
+    })
+    expect(messageItems([part])).toEqual([{ kind: 'reply', id: 'm:prt_q', questions: [{ question: 'Which DB?', answer: 'SQLite' }], askedAt: time.start, at: time.end }])
+  })
+
+  it('질문 여러 개(D)는 질문 순서대로, 여러 개 고른 답은 ", " 로 잇고 직접 입력 글(B)은 그대로', () => {
+    const part = question({ status: 'completed', input: { questions: [Q1, QM] }, metadata: { answers: [['MariaDB please'], ['Auth', 'Search']] }, time })
+    expect(messageItems([part])[0]).toMatchObject({
+      kind: 'reply',
+      questions: [
+        { question: 'Which DB?', answer: 'MariaDB please' },
+        { question: 'Which features?', answer: 'Auth, Search' },
+      ],
+    })
+  })
+
+  it('답이 질문보다 짧거나(F) 빈 배열(G)이면 그 질문은 답 없음 — 던지지 않는다', () => {
+    expect(messageItems([question({ status: 'completed', input: { questions: [Q1, QM] }, metadata: { answers: [['Postgres']] }, time })])[0]).toMatchObject({
+      questions: [{ question: 'Which DB?', answer: 'Postgres' }, { question: 'Which features?' }],
+    })
+    const empty = messageItems([question({ status: 'completed', input: { questions: [Q1] }, metadata: { answers: [[]] }, time })])[0]
+    expect(empty).toMatchObject({ kind: 'reply', questions: [{ question: 'Which DB?' }] })
+    expect((empty as { questions: object[] }).questions[0]).not.toHaveProperty('answer')
+  })
+
+  it('거절(E) → 같은 말풍선, 모든 질문이 답 없음', () => {
+    const part = question({ status: 'error', input: { questions: [Q1] }, error: 'The user dismissed this question', time })
+    expect(messageItems([part])).toEqual([{ kind: 'reply', id: 'm:prt_q', questions: [{ question: 'Which DB?' }], askedAt: time.start, at: time.end }])
+  })
+
+  it('답 전에 멈춤(abort)·답을 기다리는 중(running) 은 말풍선이 아니다 — 사용자가 답하지 않았다. 지금처럼 도구 줄', () => {
+    const aborted = question({ status: 'error', input: { questions: [Q1] }, error: 'Tool execution aborted', metadata: { interrupted: true }, time })
+    expect(messageItems([aborted])[0]).toMatchObject({ kind: 'tool', name: 'question', status: 'error', error: 'Tool execution aborted' })
+    const waiting = question({ status: 'running', input: { questions: [Q1] }, time: { start: time.start } })
+    expect(messageItems([waiting])[0]).toMatchObject({ kind: 'tool', name: 'question', status: 'running' })
+  })
+
+  it('실시간: running 줄이 답이 실린 completed 파트로 같은 id 의 말풍선이 된다 (다시 열기와 같은 데이터)', () => {
+    const tracker = new TurnTracker()
+    const live = (state: Record<string, unknown>) => updated({ type: 'tool', id: 'prt_q', tool: 'question', callID: 'call_1', state })
+    expect(tracker.observe(...live({ status: 'running', input: { questions: [Q1] }, time: { start: 1 } }))).toMatchObject({ kind: 'tool', name: 'question', status: 'running' })
+    expect(tracker.observe(...live({ status: 'completed', input: { questions: [Q1] }, metadata: { answers: [['SQLite']] }, time: { start: 1, end: 2 } }))).toEqual({
+      kind: 'reply',
+      id: `${A}:prt_q`,
+      questions: [{ question: 'Which DB?', answer: 'SQLite' }],
+      askedAt: 1,
+      at: 2,
+    })
+  })
+})

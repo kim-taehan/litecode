@@ -45,6 +45,15 @@ export type TurnItem =
    *  "고친 파일" 카드에만 합친다(도구 diff 가 있는 파일은 도구 쪽). diffs 가 비어도 온다 — 스냅숏을 떴다는 뜻.
    *  truncated: 상한(바뀐 파일 수·턴 전부터 더러운 파일 수)에 걸려 일부만 실었다. 엔진 기록에는 없다 — 도는 턴과 방금 끝난 턴에만 보인다 */
   | { kind: 'changes'; id: string; diffs: FileDiff[]; truncated?: true }
+  /** AI 의 질문에 사용자가 답했다(또는 거절했다) — 화면은 도구 줄이 아니라 오른쪽 내 말풍선, 턴을 그 자리에서 가른다 (이슈 #635).
+   *  questions 는 질문 순서. askedAt·at 은 엔진 시각(ms) — 물은 때와 답한(거절한) 때. 답하기 전·답 전에 멈춘 질문은 이 줄이 아니라 도구 줄이다 */
+  | { kind: 'reply'; id: string; questions: QuestionReply[]; askedAt?: number; at?: number }
+
+/** 질문 하나와 내 답 — answer 가 없으면 그 질문엔 답하지 않았다(거절). 여러 개 고른 답은 ", " 로 이은 글 */
+export interface QuestionReply {
+  question: string
+  answer?: string
+}
 
 export interface Subtask {
   kind: 'subtask'

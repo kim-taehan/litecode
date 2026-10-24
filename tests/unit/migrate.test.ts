@@ -47,6 +47,29 @@ describe('previousHistory (옛 기록 → 말풍선)', () => {
     expect(previousHistory([user('u', 'a'), assistant('a', '', { error: { message: 'boom' } })], modeOf)[1]!.error).toBe('boom')
   })
 
+  // 이슈 #635 실측 (out-v2-reply·out-v2-reject): 신규 세대 기록은 답이 state.structured.answers, 거절 문구가 "Tool execution interrupted", 시각은 파트의 time
+  it('질문 도구: 답(structured.answers)은 말풍선 데이터로, 거절은 답 없는 말풍선 — 거절로 끝난 턴은 그대로 거절함', () => {
+    const input = { questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'Postgres', description: 'pg' }, { label: 'SQLite', description: 'file' }] }] }
+    const replied = assistant('msg_a1', '', {
+      content: [
+        {
+          type: 'tool',
+          id: 'call_17',
+          name: 'question',
+          state: { status: 'completed', input, content: [{ text: 'User has answered your questions: "Which DB?"="SQLite". …' }], structured: { answers: [['SQLite']] } },
+          time: { created: 10, ran: 11, completed: 20 },
+        },
+      ],
+    })
+    const rejected = assistant('msg_a3', '', {
+      content: [{ type: 'tool', id: 'call_18', name: 'question', state: { status: 'error', input, content: [], structured: {}, error: { message: 'Tool execution interrupted' } }, time: { created: 30, ran: 31, completed: 40 } }],
+    })
+    const messages = previousHistory([user('msg_u1', 'db?'), replied, assistant('msg_a2', 'ok SQLite'), user('msg_u2', 'again'), rejected], modeOf)
+    expect(messages[1]!.items![0]).toEqual({ kind: 'reply', id: 'msg_a1:call_17', questions: [{ question: 'Which DB?', answer: 'SQLite' }], askedAt: 11, at: 20 })
+    expect(messages[3]!.items![0]).toEqual({ kind: 'reply', id: 'msg_a3:call_18', questions: [{ question: 'Which DB?' }], askedAt: 31, at: 40 })
+    expect(messages[3]!.declined).toBe(true)
+  })
+
   it('빈 기록(레거시로 만든 세션)은 빈 목록', () => {
     expect(previousHistory([], modeOf)).toEqual([])
   })

@@ -19,6 +19,42 @@ export function splitTurn(items: readonly TurnItem[]): { work: TurnItem[]; answe
   return { work: [...items.slice(0, cut), ...items.slice(end)], answer: items.slice(cut, end) }
 }
 
+export type ReplyItem = Extract<TurnItem, { kind: 'reply' }>
+
+/** 질문에 답한 자리에서 가른 턴 조각 (이슈 #635). reply 는 이 조각 뒤에 오는 내 답 말풍선 — 마지막 조각에는 없다.
+ *  text 는 이 조각의 답 글(fallback), from 은 이 조각이 시작한 시각, duration 은 걸린 시간(끝을 모르면 없다) */
+export interface TurnPiece {
+  items: TurnItem[]
+  text: string
+  reply?: ReplyItem
+  from?: number
+  duration?: number
+}
+
+/** 턴을 답 말풍선(reply 줄) 자리에서 가른다. 앞 조각은 물은 때까지, 뒤 조각은 답한 때부터 턴 끝(endedAt)까지.
+ *  마지막 조각의 글은 턴 글(text)에서 앞 조각들의 글을 뗀 것 — 거절로 끝난 턴이 질문 앞 글을 답으로 두 번 그리지 않게 */
+export function replyPieces(items: readonly TurnItem[], text: string, startedAt: number | undefined, endedAt: number | undefined): TurnPiece[] {
+  const pieces: TurnPiece[] = []
+  let current: TurnItem[] = []
+  let from = startedAt
+  let earlier = ''
+  const span = (start: number | undefined, end: number | undefined) => (start !== undefined && end !== undefined ? { duration: end - start } : {})
+  for (const item of items) {
+    if (item.kind !== 'reply') {
+      current.push(item)
+      continue
+    }
+    const own = current.map((entry) => (entry.kind === 'text' ? entry.text : '')).join('')
+    pieces.push({ items: current, text: own, reply: item, ...(from !== undefined && { from }), ...span(from, item.askedAt) })
+    earlier += own
+    current = []
+    from = item.at
+  }
+  const rest = pieces.length > 0 && text.startsWith(earlier) ? text.slice(earlier.length) : text
+  pieces.push({ items: current, text: rest, ...(from !== undefined && { from }), ...span(from, endedAt) })
+  return pieces
+}
+
 /** 끝나기 전의 잠정 상태: work(접는 작업: think·tool) / interim(진행 중 흘리는 잠정답) / answer(엔진이 준 최종 답).
  *  deepagents harness 의 `Text | Reasoning | ToolCall | ToolResult` 이벤트 구조와 동일:
  *  진행 중엔 Text/Reasoning (잠정답) 을 흘리고 ToolCall/ToolResult 는 work.

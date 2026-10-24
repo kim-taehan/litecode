@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Attachment, Attention, AttentionAnswer, AttentionTarget, Subtask, TurnItem } from '../shared/ipc.ts'
 import { AttachmentChips } from './Attachments.tsx'
 import { AttentionCard } from './Attention.tsx'
@@ -7,7 +7,7 @@ import { CompactionMark } from './Compaction.tsx'
 import { takeCompactions } from './compaction.ts'
 import { CheckIcon, CopyIcon, Markdown } from './Markdown.tsx'
 import { useT } from './settingsStore.ts'
-import { answerText, clockTime, formatDuration, formatTokens, interimSplit, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText } from './turnView.ts'
+import { answerText, clockTime, formatDuration, formatTokens, interimSplit, replyPieces, skillInstructions, splitTurn, thinkSummary, toolTitle, turnHeadText, type ReplyItem } from './turnView.ts'
 import { runningPhase } from './jobsView.ts'
 import { SKILL_ICON_PATH, SkillBadge } from './SkillBadge.tsx'
 import type { MessageOrigin } from '../shared/contract.ts'
@@ -123,7 +123,35 @@ interface AssistantTurnProps {
 
 const NO_ATTENTION: readonly Attention[] = []
 
-export const AssistantTurn = memo(function AssistantTurn({ items, text, failed = false, interrupted = false, declined = false, duration, tokens, finishedAt, running = false, startedAt, directory, attention = NO_ATTENTION, onAnswer }: AssistantTurnProps) {
+/** 답 한 턴. 질문에 답한 자리(reply 줄)가 있으면 그 자리에서 갈라 — 앞 조각은 끝난 턴처럼(머리·접힌 작업·질문 앞 글), 그 뒤에 오른쪽 내 답 말풍선,
+ *  이어서 다음 조각 (이슈 #635 시안 Main). 고친 파일·결과물 카드와 턴 끝 사실(토큰·시각·실패)은 마지막 조각에만 — 턴 전체의 것이다 */
+export const AssistantTurn = memo(function AssistantTurn(props: AssistantTurnProps) {
+  const { items, text, failed = false, running = false, duration, startedAt } = props
+  const pieces = useMemo(
+    () => replyPieces(items, text, startedAt, running || duration === undefined || startedAt === undefined ? undefined : startedAt + duration),
+    [items, text, startedAt, running, duration],
+  )
+  if (pieces.length === 1) return <TurnBody {...props} />
+  return (
+    <>
+      {pieces.map((piece) =>
+        piece.reply ? (
+          <Fragment key={piece.reply.id}>
+            {piece.items.length > 0 && <TurnBody items={piece.items} text={piece.text} duration={piece.duration} directory={props.directory} cardItems={NO_ITEMS} />}
+            <ReplyBubble reply={piece.reply} />
+          </Fragment>
+        ) : (
+          <TurnBody key="last" {...props} items={piece.items} text={failed ? text : piece.text} duration={piece.duration} startedAt={piece.from} cardItems={items} />
+        ),
+      )}
+    </>
+  )
+})
+
+const NO_ITEMS: readonly TurnItem[] = []
+
+/** 조각 하나 — cardItems 는 고친 파일·결과물 카드를 모을 줄 (기본 items, 질문 앞 조각은 빈 목록) */
+function TurnBody({ items, text, failed = false, interrupted = false, declined = false, duration, tokens, finishedAt, running = false, startedAt, directory, attention = NO_ATTENTION, onAnswer, cardItems = items }: AssistantTurnProps & { cardItems?: readonly TurnItem[] }) {
   // 자동 요약 줄 — 진행 중엔 작업 줄 사이 그 자리에, 끝나면 머리 위 구분선으로 (다시 열어도 같다). 재시도 줄은 진행 중에만 뜻이 있다.
   // 명령으로 바뀐 파일 줄(changes, 이슈 #213)은 작업 줄이 아니다 — 아래 고친 파일 카드에만 합친다
   const { compactions, rest } = takeCompactions(items.filter((item) => item.kind !== 'changes' && (running || item.kind !== 'retry')))
@@ -145,9 +173,9 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
   const source = failed ? text : answerText(answer, text).trim()
   const [copied, setCopied] = useCopied()
   // 끝난 턴(완료·실패·중단)이 고친 파일 — 도는 중에는 없다 (이슈 #82)
-  const changes = useMemo(() => (running ? undefined : changedFiles(items)), [running, items])
+  const changes = useMemo(() => (running ? undefined : changedFiles(cardItems)), [running, cardItems])
   // 끝난 턴에서 AI 가 결과물로 선언한 파일 — 도는 중에는 없다 (이슈 #91)
-  const presented = useMemo(() => (running ? undefined : presentedFiles(items)), [running, items])
+  const presented = useMemo(() => (running ? undefined : presentedFiles(cardItems)), [running, cardItems])
 
   return (
     <div className="turn" data-state={running ? 'running' : interrupted ? 'interrupted' : failed ? 'failed' : 'done'}>
@@ -214,7 +242,45 @@ export const AssistantTurn = memo(function AssistantTurn({ items, text, failed =
       {running && <RunningLine items={rest} startedAt={startedAt} />}
     </div>
   )
-})
+}
+
+/** 질문에 답한 내용 — 오른쪽 내 말풍선 (이슈 #635 시안 Main·Cases): 질문마다 위 띠에 질문 인용(? 아이콘), 아래에 내 답. 답하지 않은 질문은
+ *  답 자리에 흐린 "✕ 답하지 않음". 밑에 "질문에 답함 · 시각". 미니맵의 내 말(.user-turn)에는 세지 않는다 — 미니맵은 내가 보낸 메시지만 센다 */
+function ReplyBubble({ reply }: { reply: ReplyItem }) {
+  const t = useT()
+  const answered = reply.questions.some((entry) => entry.answer !== undefined)
+  return (
+    <div className="reply-turn" data-kind="reply">
+      <div className="bubble bubble--user bubble--reply">
+        {reply.questions.map((entry, index) => (
+          <Fragment key={index}>
+            <div className="bubble-reply__question">
+              <QuestionIcon />
+              <span>{entry.question}</span>
+            </div>
+            {entry.answer !== undefined ? (
+              <div className="bubble-reply__answer">{entry.answer}</div>
+            ) : (
+              <div className="bubble-reply__answer bubble-reply__answer--none">
+                <CrossIcon />
+                {t('chat.replyNone')}
+              </div>
+            )}
+          </Fragment>
+        ))}
+      </div>
+      <div className="user-turn__meta">
+        {answered ? t('chat.replied') : t('chat.replyDeclined')}
+        {reply.at !== undefined && (
+          <>
+            {' · '}
+            <time dateTime={new Date(reply.at).toISOString()}>{clockTime(reply.at)}</time>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /** 작업 줄 하나 — 생각·도구는 눌러 펼치고, 중간 글은 그대로 마크다운. turnRunning: 그 턴이 아직 도는 중 (끝난 턴의 하위 작업은 더 돌지 않는다) */
 export function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnItem, { kind: 'compaction' }>; directory: string; turnRunning: boolean }) {
@@ -223,6 +289,8 @@ export function WorkRow({ item, directory, turnRunning }: { item: Exclude<TurnIt
   const t = useT()
   const { peers, targets } = useDelegation()
   if (item.kind === 'subtask') return <SubtaskRow item={item} directory={directory} turnRunning={turnRunning} />
+  // 하위 작업 안에서 답한 질문 (이슈 #635) — 바깥 턴과 같은 말풍선
+  if (item.kind === 'reply') return <ReplyBubble reply={item} />
   // 다른 프로젝트에 지시 보내기·결과 읽기 (앱 MCP 의 세션 도구, 이슈 #55·#137) — "MCP · 서버 · 도구" 대신 받는 프로젝트·대화와 지금 상태
   const delegation = delegationLine(item, targets, peers)
   if (delegation) return <DelegationRow line={delegation} />
@@ -465,6 +533,25 @@ function Icon({ children }: { children: ReactNode }) {
   return (
     <svg className="turn-row__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {children}
+    </svg>
+  )
+}
+
+/** 답 말풍선의 질문 띠 아이콘 (시안 Main 의 ? 원) */
+function QuestionIcon() {
+  return (
+    <svg className="bubble-reply__icon bubble-reply__icon--question" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5V14" />
+      <path d="M12 17h.01" />
+    </svg>
+  )
+}
+
+function CrossIcon() {
+  return (
+    <svg className="bubble-reply__icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" />
     </svg>
   )
 }
