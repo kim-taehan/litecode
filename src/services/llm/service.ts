@@ -61,6 +61,11 @@ export class LlmService extends Service {
     const timeout = config.streamTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS
     this.streamDispatcher = new Agent({ bodyTimeout: timeout, headersTimeout: timeout })
     ctx.effect(() => () => void this.streamDispatcher.close().catch(() => {}))
+    // 설정 변경 재시작도 도는 턴이 다 끝난 뒤로 (#632) — 엔진만 알면 모든 프로젝트의 도는 턴을 끊는다
+    ctx.on('engine/restart-wanted', () => {
+      this.reloadWhenIdle()
+      return true
+    })
   }
 
   /** directory 는 새 세션의 작업 디렉터리(절대 경로). 이어가는 세션(sessionId)은 만들 때 정한 폴더를 따른다 — 이어갈 때도 그 세션의 폴더를 넘긴다
@@ -154,7 +159,7 @@ export class LlmService extends Service {
     this.ctx.engine.setGate(matchers)
   }
 
-  /** 엔진이 띄울 때만 읽는 것(스킬 목록 — 폴더별로 기억해 다시 띄워야 바뀐다)이 바뀌었다 — 엔진을 다시 띄운다 (이슈 #145: 대화로 만든 스킬).
+  /** 엔진이 띄울 때만 읽는 것(스킬 목록 — 폴더별로 기억해 다시 띄워야 바뀐다·설정 변경 #632)이 바뀌었다 — 엔진을 다시 띄운다 (이슈 #145: 대화로 만든 스킬).
    *  **도는 턴이 있으면 다 끝난 뒤로 미룬다**(재시작은 도는 턴을 끊는다 — 이 요청은 도는 턴 안의 도구가 한다) */
   reloadWhenIdle(): void {
     this.reloadWanted = true
@@ -164,7 +169,7 @@ export class LlmService extends Service {
   private reloadIfIdle(): void {
     if (this.turns > 0 || !this.reloadWanted) return
     this.reloadWanted = false
-    void this.ctx.engine.restart().catch((error: unknown) => console.error('[llm] 스킬 변경 후 엔진 재시작 실패', (error as Error).message))
+    void this.ctx.engine.restart().catch((error: unknown) => console.error('[llm] 스킬·설정 변경 후 엔진 재시작 실패', (error as Error).message))
   }
 
   /** 세션을 쓸 준비 — 매 턴 보내기 전에 그 폴더 카탈로그로 모델·주소를 보고, 모드를 주면 그 에이전트가 있는지 보고, 세션이 없으면 만든다.

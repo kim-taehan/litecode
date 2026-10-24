@@ -135,6 +135,7 @@ function handle(ctx, channel, listener) {       // 되돌릴 수 있게 건다
 | `settings` | `settings/changed` | 설정 변경 → 테마·기능 레지스트리·엔진이 듣는다 |
 | `providers` | `providers/changed` | provider 변경 → 엔진 설정 갱신 |
 | `features` | `features/changed` | 켜진 묶음을 다 올리고 내린 **뒤** — 엔진이 듣고 재시작 |
+| `engine` | `engine/restart-wanted` | 설정 변경으로 다시 띄워야 한다(bail) — `llm` 이 맡아 도는 턴이 다 끝난 뒤 다시 띄운다(#632). 아무도 안 맡으면 엔진이 바로 |
 | | `features/status` | 기능 상태(`FeatureStatuses` — 켜진 기능만)가 바뀌었다(#224) — 화면(설정 > 기능)이 `features:statuses-changed` 로 받는다 |
 | `extensions` | `extensions/changed` | 확장 목록(`ExtensionSummary[]`)이 바뀌었다 — 설치·업그레이드·삭제·켜기/끄기·상태. 같은 값이면 다시 내지 않는다. 화면이 `extensions:changed` 로 받는다 |
 | `git` | `git/changed` | 그 폴더의 저장소가 바뀌었을 수 있다(화면·AI 의 작업 뒤) — 화면이 `git:changed` 로 받아 다시 읽는다 |

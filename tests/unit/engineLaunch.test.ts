@@ -186,3 +186,31 @@ describe('EngineService — 뜨는 중에 온 설정 변경', () => {
     expect(await engine.connection()).toBe(conn)
   })
 })
+
+// #632 — 설정 변경 재시작은 'engine/restart-wanted' 를 먼저 묻는다. 맡는 쪽(ctx.llm)이 있으면 엔진은 스스로 다시 띄우지 않는다
+describe('EngineService — 설정 변경 재시작을 맡기기', () => {
+  it('맡는 쪽이 없으면 provider 저장에 바로 다시 띄운다', async () => {
+    const { engine } = await start(0)
+    await engine.connection()
+    ctx.emit('providers/changed')
+    for (let tries = 0; tries < 50 && serves() < 2; tries++) await wait(20)
+    expect(serves()).toBe(2)
+  })
+
+  it('맡는 쪽이 있으면 provider 저장·기능 스위치에 다시 띄우지 않고 그쪽에 넘긴다', async () => {
+    const { engine, features } = await start(0)
+    await engine.connection()
+    let asked = 0
+    ctx.on('engine/restart-wanted', () => {
+      asked++
+      return true
+    })
+    ctx.emit('providers/changed')
+    features.on.add('web')
+    ctx.emit('features/changed', ['skills', 'hooks', 'web'])
+    await wait(300)
+    expect(asked).toBe(2)
+    expect(serves()).toBe(1)
+  })
+})
+

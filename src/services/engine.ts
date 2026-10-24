@@ -42,6 +42,11 @@ declare module 'cordis' {
   interface Context {
     engine: EngineService
   }
+  interface Events {
+    /** 설정이 바뀌어 다시 띄워야 한다 (#632) — 재시작은 모든 프로젝트의 도는 턴을 끊는다. 맡는 쪽(ctx.llm — 도는 턴이 다 끝난 뒤 다시 띄운다)이
+     *  true 를 돌려주면 엔진은 스스로 다시 띄우지 않는다. 아무도 안 맡으면(엔진만 띄운 경우) 바로 다시 띄운다 */
+    'engine/restart-wanted'(): boolean | void
+  }
 }
 
 /** ctx.llm 이 opencode 에 닿는 데 필요한 전부 */
@@ -280,21 +285,26 @@ export class EngineService extends Service {
   ) {
     super(ctx, 'engine')
     reapStale(opts.pidFile)
-    // 재시작이 실패해도 다음 대화가 다시 띄워 본다 — 다만 조용히 묻히지 않게 사유는 남긴다(키는 안 싣는다: 오류는 프로세스·포트 사유뿐)
-    ctx.on('providers/changed', () => void this.restart().catch((error: unknown) => console.error('[engine] 설정 변경 후 재시작 실패', (error as Error).message)))
-    // 웹 도구 켜기/끄기 (이슈 #14) — 설정은 재시작해야 먹는다. 떠 있는 서버와 값이 다르면 다시 띄운다(진행 중 턴은 중단됨).
+    // 설정 변경 재시작은 'engine/restart-wanted' 를 먼저 묻는다 (#632) — ctx.llm 이 맡으면 도는 턴이 다 끝난 뒤에 다시 띄운다(그 사이의 턴은 옛 설정으로 돈다)
+    ctx.on('providers/changed', () => this.restartWanted('설정 변경'))
+    // 웹 도구 켜기/끄기 (이슈 #14) — 설정은 재시작해야 먹는다. 떠 있는 서버와 값이 다르면 다시 띄운다.
     // 안 떠 있으면 다음 기동이 읽는다(launch). features 는 inject 하지 않는다 — 기능 레지스트리 없이 띄운 엔진(서비스 실물 테스트)은 꺼짐으로 돈다
     ctx.on('features/changed', () => {
       // 훅 기능(이슈 #102)을 끄면 도구 실행 전 게이트도 걷는다 — 판정할 쪽이 없는데 묻기만 하게 두지 않는다
-      if (!this.outdated()) return
-      void this.restart().catch((error: unknown) => console.error('[engine] 웹 도구·스킬·훅 변경 후 재시작 실패', (error as Error).message))
+      if (this.outdated()) this.restartWanted('웹 도구·스킬·훅 변경')
     })
     // 스킬 (이슈 #7) — 설정 > 기능의 스킬(위 features/changed)과 "Claude Code 스킬 함께 쓰기"(settings) 도 같은 길로 다시 띄운다
     ctx.on('settings/changed', () => {
-      if (!this.outdated()) return
-      void this.restart().catch((error: unknown) => console.error('[engine] 스킬 설정 변경 후 재시작 실패', (error as Error).message))
+      if (this.outdated()) this.restartWanted('스킬 설정 변경')
     })
     ctx.effect(() => () => this.stop())
+  }
+
+  /** 맡는 쪽(ctx.llm)이 있으면 넘기고, 없으면 바로 다시 띄운다.
+   *  재시작이 실패해도 다음 대화가 다시 띄워 본다 — 다만 조용히 묻히지 않게 사유는 남긴다(키는 안 싣는다: 오류는 프로세스·포트 사유뿐) */
+  private restartWanted(reason: string): void {
+    if (this.ctx.bail('engine/restart-wanted')) return
+    void this.restart().catch((error: unknown) => console.error(`[engine] ${reason} 후 재시작 실패`, (error as Error).message))
   }
 
   /** 지금 설정의 스킬 — 기능 레지스트리·설정 없이 띄운 엔진(서비스 실물 테스트)은 켬·Claude 꺼짐 */
